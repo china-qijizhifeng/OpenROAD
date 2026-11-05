@@ -32,6 +32,14 @@ class FFT
   // do FFT
   void doFFT();
 
+  // Write directly into resident bin columns. Density is copied only to the
+  // destructive DCT scratch buffer; fields are never copied through Bin
+  // objects.
+  void solveColumns(const std::vector<float>& density,
+                    std::vector<float>& phi,
+                    std::vector<float>& field_x,
+                    std::vector<float>& field_y);
+
   // returning func
   std::pair<float, float> getElectroField(int x, int y) const;
   float getElectroPhi(int x, int y) const;

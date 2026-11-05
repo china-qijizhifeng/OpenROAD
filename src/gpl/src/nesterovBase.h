@@ -23,9 +23,11 @@
 
 #include "boost/random/mersenne_twister.hpp"
 #include "boost/unordered/unordered_flat_map.hpp"
+#include "densitySoa.h"
 #include "gpl/Replace.h"
 #include "hpwlBackend.h"
 #include "odb/db.h"
+#include "placementColumns.h"
 #include "placerBase.h"
 #include "point.h"
 #include "routeBase.h"
@@ -68,31 +70,38 @@ enum class SumGradSlot : int;     // gpu/nesterovDeviceContext.h
 class GCell
 {
  public:
-  enum class GCellChange : uint8_t
-  {
-    kNone,
-    kRoutability,
-    kTimingDriven,
-    kNewInstance,
-    kDownsize,
-    kUpsize,
-    kResizeNoChange
-  };
+  using NumericStore = GCellColumns::Store;
+  using GCellChange = CellAreaChange;
 
   // instance cells
-  GCell(Instance* inst);
-  GCell(const std::vector<Instance*>& insts);
+  GCell(Instance* inst,
+        std::shared_ptr<NumericStore> storage
+        = std::make_shared<NumericStore>());
+  GCell(const std::vector<Instance*>& insts,
+        std::shared_ptr<NumericStore> storage
+        = std::make_shared<NumericStore>());
 
   // filler cells
-  GCell(int cx, int cy, int dx, int dy);
+  GCell(int cx,
+        int cy,
+        int dx,
+        int dy,
+        std::shared_ptr<NumericStore> storage
+        = std::make_shared<NumericStore>());
 
-  const std::vector<Instance*>& insts() const { return insts_; }
-  const std::vector<GPin*>& gPins() const { return gPins_; }
+  const std::vector<Instance*>& insts() const
+  {
+    return data_.get<GCellColumns::insts>();
+  }
+  const std::vector<GPin*>& gPins() const
+  {
+    return data_.get<GCellColumns::gPins>();
+  }
 
   std::string getName() const;
 
   void addGPin(GPin* gPin);
-  void clearGPins() { gPins_.clear(); }
+  void clearGPins() { data_.get<GCellColumns::gPins>().clear(); }
 
   void updateLocations();
 
@@ -123,8 +132,11 @@ class GCell
   // void setLocation(int x, int y);
   void setSize(int dx, int dy, GCellChange change = GCellChange::kNone);
   int64_t getInflationArea() const;
-  void setAreaChangeType(GCellChange change) { change_ = change; }
-  GCellChange changeType() const { return change_; }
+  void setAreaChangeType(GCellChange change)
+  {
+    data_.get<GCellColumns::change>() = change;
+  }
+  GCellChange changeType() const { return data_.get<GCellColumns::change>(); }
   void setAllLocations(int lx, int ly, int ux, int uy);
 
   void setDensityLocation(int dLx, int dLy);
@@ -135,9 +147,12 @@ class GCell
   void setGradientX(float gradientX);
   void setGradientY(float gradientY);
 
-  float getGradientX() const { return gradientX_; }
-  float getGradientY() const { return gradientY_; }
-  float getDensityScale() const { return densityScale_; }
+  float getGradientX() const { return data_.get<GCellColumns::gradientX>(); }
+  float getGradientY() const { return data_.get<GCellColumns::gradientY>(); }
+  float getDensityScale() const
+  {
+    return data_.get<GCellColumns::densityScale>();
+  }
 
   bool isInstance() const;
   bool isFiller() const;
@@ -148,114 +163,111 @@ class GCell
   void print(utl::Logger* logger, bool print_only_name) const;
   void writeAttributesToCSV(std::ostream& out) const;
 
+  const SoaRow<NumericStore>& numericRow() const { return data_; }
+
  private:
-  std::vector<Instance*> insts_;
-  std::vector<GPin*> gPins_;
-  int lx_ = 0;
-  int ly_ = 0;
-  int ux_ = 0;
-  int uy_ = 0;
-
-  int dLx_ = 0;
-  int dLy_ = 0;
-  int dUx_ = 0;
-  int dUy_ = 0;
-
-  float densityScale_ = 0;
-  float gradientX_ = 0;
-  float gradientY_ = 0;
-
-  GCellChange change_ = GCellChange::kNone;
+  SoaRow<NumericStore> data_;
 };
 
 inline int GCell::lx() const
 {
-  return lx_;
+  return data_.get<GCellColumns::lx>();
 }
 inline int GCell::ly() const
 {
-  return ly_;
+  return data_.get<GCellColumns::ly>();
 }
 
 inline int GCell::ux() const
 {
-  return ux_;
+  return data_.get<GCellColumns::ux>();
 }
 
 inline int GCell::uy() const
 {
-  return uy_;
+  return data_.get<GCellColumns::uy>();
 }
 
 inline int GCell::cx() const
 {
-  return (lx_ + ux_) / 2;
+  return (data_.get<GCellColumns::lx>() + data_.get<GCellColumns::ux>()) / 2;
 }
 
 inline int GCell::cy() const
 {
-  return (ly_ + uy_) / 2;
+  return (data_.get<GCellColumns::ly>() + data_.get<GCellColumns::uy>()) / 2;
 }
 
 inline int GCell::dx() const
 {
-  return ux_ - lx_;
+  return data_.get<GCellColumns::ux>() - data_.get<GCellColumns::lx>();
 }
 
 inline int GCell::dy() const
 {
-  return uy_ - ly_;
+  return data_.get<GCellColumns::uy>() - data_.get<GCellColumns::ly>();
 }
 
 inline int GCell::dLx() const
 {
-  return dLx_;
+  return data_.get<GCellColumns::dLx>();
 }
 
 inline int GCell::dLy() const
 {
-  return dLy_;
+  return data_.get<GCellColumns::dLy>();
 }
 
 inline int GCell::dUx() const
 {
-  return dUx_;
+  return data_.get<GCellColumns::dUx>();
 }
 
 inline int GCell::dUy() const
 {
-  return dUy_;
+  return data_.get<GCellColumns::dUy>();
 }
 
 inline int GCell::dCx() const
 {
-  return (dUx_ + dLx_) / 2;
+  return (data_.get<GCellColumns::dUx>() + data_.get<GCellColumns::dLx>()) / 2;
 }
 
 inline int GCell::dCy() const
 {
-  return (dUy_ + dLy_) / 2;
+  return (data_.get<GCellColumns::dUy>() + data_.get<GCellColumns::dLy>()) / 2;
 }
 
 inline int GCell::dDx() const
 {
-  return dUx_ - dLx_;
+  return data_.get<GCellColumns::dUx>() - data_.get<GCellColumns::dLx>();
 }
 
 inline int GCell::dDy() const
 {
-  return dUy_ - dLy_;
+  return data_.get<GCellColumns::dUy>() - data_.get<GCellColumns::dLy>();
 }
 
 class GNet
 {
  public:
-  GNet(Net* net);
-  GNet(const std::vector<Net*>& nets);
+  using NumericStore = GNetColumns::Store;
+  GNet(Net* net,
+       std::shared_ptr<NumericStore> storage
+       = std::make_shared<NumericStore>());
+  GNet(const std::vector<Net*>& nets,
+       std::shared_ptr<NumericStore> storage
+       = std::make_shared<NumericStore>());
 
   Net* getPbNet() const;
-  const std::vector<Net*>& getPbNets() const { return nets_; }
-  const std::vector<GPin*>& getGPins() const { return gPins_; }
+  const std::vector<Net*>& getPbNets() const
+  {
+    return data_.get<GNetColumns::nets>();
+  }
+  const std::vector<GPin*>& getGPins() const
+  {
+    return data_.get<GNetColumns::gPins>();
+  }
 
   int lx() const;
   int ly() const;
@@ -268,13 +280,21 @@ class GNet
 
   float getTotalWeight() const
   {
-    return (timingWeight_ + powerWeight_) * customWeight_;
+    return (data_.get<GNetColumns::timingWeight>()
+            + data_.get<GNetColumns::powerWeight>())
+           * data_.get<GNetColumns::customWeight>();
   }
-  float getTimingWeight() const { return timingWeight_; }
-  float getCustomWeight() const { return customWeight_; }
+  float getTimingWeight() const
+  {
+    return data_.get<GNetColumns::timingWeight>();
+  }
+  float getCustomWeight() const
+  {
+    return data_.get<GNetColumns::customWeight>();
+  }
 
   void addGPin(GPin* gPin);
-  void clearGPins() { gPins_.clear(); }
+  void clearGPins() { data_.get<GNetColumns::gPins>().clear(); }
   void updateBox();
   // GPU path writes the device-computed bbox back so lx()/ly()/ux()/uy() stay
   // consistent with updateBox() without re-walking pins on the host. Caller
@@ -314,17 +334,10 @@ class GNet
 
   void print(utl::Logger* log) const;
 
- private:
-  std::vector<GPin*> gPins_;
-  std::vector<Net*> nets_;
-  int lx_ = 0;
-  int ly_ = 0;
-  int ux_ = 0;
-  int uy_ = 0;
+  const SoaRow<NumericStore>& numericRow() const { return data_; }
 
-  float timingWeight_ = 1;
-  float customWeight_ = 1;
-  float powerWeight_ = 0;
+ private:
+  SoaRow<NumericStore> data_;
 
   //
   // weighted average WL model stor for better indexing
@@ -343,11 +356,6 @@ class GNet
   // waExpMaxSumX_ : store sigma {exp(-x_i/gamma)}
   // waXExpMaxSumX_: store sigma {x_i*exp(-x_i/gamma)}
   //
-  float waExpMinSumX_ = 0;
-  float waXExpMinSumX_ = 0;
-
-  float waExpMaxSumX_ = 0;
-  float waXExpMaxSumX_ = 0;
 
   //
   // Y forces.
@@ -357,140 +365,141 @@ class GNet
   // waExpMaxSumY_ : store sigma {exp(-y_i/gamma)}
   // waYExpMaxSumY_: store sigma {y_i*exp(-y_i/gamma)}
   //
-  float waExpMinSumY_ = 0;
-  float waYExpMinSumY_ = 0;
-
-  float waExpMaxSumY_ = 0;
-  float waYExpMaxSumY_ = 0;
-
-  bool isDontCare_ = false;
 };
 
 inline int GNet::lx() const
 {
-  return lx_;
+  return data_.get<GNetColumns::lx>();
 }
 
 inline int GNet::ly() const
 {
-  return ly_;
+  return data_.get<GNetColumns::ly>();
 }
 
 inline int GNet::ux() const
 {
-  return ux_;
+  return data_.get<GNetColumns::ux>();
 }
 
 inline int GNet::uy() const
 {
-  return uy_;
+  return data_.get<GNetColumns::uy>();
 }
 
 // eight add functions
 inline void GNet::addWaExpMinSumX(float waExpMinSumX)
 {
-  waExpMinSumX_ += waExpMinSumX;
+  data_.get<GNetColumns::waExpMinSumX>() += waExpMinSumX;
 }
 
 inline void GNet::addWaXExpMinSumX(float waXExpMinSumX)
 {
-  waXExpMinSumX_ += waXExpMinSumX;
+  data_.get<GNetColumns::waXExpMinSumX>() += waXExpMinSumX;
 }
 
 inline void GNet::addWaExpMinSumY(float waExpMinSumY)
 {
-  waExpMinSumY_ += waExpMinSumY;
+  data_.get<GNetColumns::waExpMinSumY>() += waExpMinSumY;
 }
 
 inline void GNet::addWaYExpMinSumY(float waYExpMinSumY)
 {
-  waYExpMinSumY_ += waYExpMinSumY;
+  data_.get<GNetColumns::waYExpMinSumY>() += waYExpMinSumY;
 }
 
 inline void GNet::addWaExpMaxSumX(float waExpMaxSumX)
 {
-  waExpMaxSumX_ += waExpMaxSumX;
+  data_.get<GNetColumns::waExpMaxSumX>() += waExpMaxSumX;
 }
 
 inline void GNet::addWaXExpMaxSumX(float waXExpMaxSumX)
 {
-  waXExpMaxSumX_ += waXExpMaxSumX;
+  data_.get<GNetColumns::waXExpMaxSumX>() += waXExpMaxSumX;
 }
 
 inline void GNet::addWaExpMaxSumY(float waExpMaxSumY)
 {
-  waExpMaxSumY_ += waExpMaxSumY;
+  data_.get<GNetColumns::waExpMaxSumY>() += waExpMaxSumY;
 }
 
 inline void GNet::addWaYExpMaxSumY(float waYExpMaxSumY)
 {
-  waYExpMaxSumY_ += waYExpMaxSumY;
+  data_.get<GNetColumns::waYExpMaxSumY>() += waYExpMaxSumY;
 }
 
 inline float GNet::waExpMinSumX() const
 {
-  return waExpMinSumX_;
+  return data_.get<GNetColumns::waExpMinSumX>();
 }
 
 inline float GNet::waXExpMinSumX() const
 {
-  return waXExpMinSumX_;
+  return data_.get<GNetColumns::waXExpMinSumX>();
 }
 
 inline float GNet::waExpMinSumY() const
 {
-  return waExpMinSumY_;
+  return data_.get<GNetColumns::waExpMinSumY>();
 }
 
 inline float GNet::waYExpMinSumY() const
 {
-  return waYExpMinSumY_;
+  return data_.get<GNetColumns::waYExpMinSumY>();
 }
 
 inline float GNet::waExpMaxSumX() const
 {
-  return waExpMaxSumX_;
+  return data_.get<GNetColumns::waExpMaxSumX>();
 }
 
 inline float GNet::waXExpMaxSumX() const
 {
-  return waXExpMaxSumX_;
+  return data_.get<GNetColumns::waXExpMaxSumX>();
 }
 
 inline float GNet::waExpMaxSumY() const
 {
-  return waExpMaxSumY_;
+  return data_.get<GNetColumns::waExpMaxSumY>();
 }
 
 inline float GNet::waYExpMaxSumY() const
 {
-  return waYExpMaxSumY_;
+  return data_.get<GNetColumns::waYExpMaxSumY>();
 }
 
 class GPin
 {
  public:
-  GPin(Pin* pin);
-  GPin(const std::vector<Pin*>& pins);
+  using NumericStore = GPinColumns::Store;
+  GPin(Pin* pin,
+       std::shared_ptr<NumericStore> storage
+       = std::make_shared<NumericStore>());
+  GPin(const std::vector<Pin*>& pins,
+       std::shared_ptr<NumericStore> storage
+       = std::make_shared<NumericStore>());
 
   Pin* getPbPin() const;
-  const std::vector<Pin*>& getPbPins() const { return pins_; }
+  const std::vector<Pin*>& getPbPins() const
+  {
+    return data_.get<GPinColumns::pins>();
+  }
 
-  GCell* getGCell() const { return gCell_; }
-  GNet* getGNet() const { return gNet_; }
+  GCell* getGCell() const { return data_.get<GPinColumns::gCell>(); }
+  GNet* getGNet() const { return data_.get<GPinColumns::gNet>(); }
 
   void setGCell(GCell* gCell);
   void setGNet(GNet* gNet);
 
-  int cx() const { return cx_; }
-  int cy() const { return cy_; }
+  int cx() const { return data_.get<GPinColumns::cx>(); }
+  int cy() const { return data_.get<GPinColumns::cy>(); }
 
   // Offset from the owning GCell's center. The absolute pin center
   // (cx_/cy_) is recomputed by updateLocation() as gCell->cx() + offsetCx_.
   // Exposed for GPU paths that maintain pin coordinates device-side from
   // inst centers + per-pin offsets (gpu/deviceState.cpp).
-  int offsetCx() const { return offsetCx_; }
-  int offsetCy() const { return offsetCy_; }
+  int offsetCx() const { return data_.get<GPinColumns::offsetCx>(); }
+  int offsetCy() const { return data_.get<GPinColumns::offsetCy>(); }
 
   // clear WA(Weighted Average) variables.
   void clearWaVars();
@@ -500,15 +509,15 @@ class GPin
   void setMinExpSumX(float minExpSumX);
   void setMinExpSumY(float minExpSumY);
 
-  float maxExpSumX() const { return maxExpSumX_; }
-  float maxExpSumY() const { return maxExpSumY_; }
-  float minExpSumX() const { return minExpSumX_; }
-  float minExpSumY() const { return minExpSumY_; }
+  float maxExpSumX() const { return data_.get<GPinColumns::maxExpSumX>(); }
+  float maxExpSumY() const { return data_.get<GPinColumns::maxExpSumY>(); }
+  float minExpSumX() const { return data_.get<GPinColumns::minExpSumX>(); }
+  float minExpSumY() const { return data_.get<GPinColumns::minExpSumY>(); }
 
-  bool hasMaxExpSumX() const { return hasMaxExpSumX_; }
-  bool hasMaxExpSumY() const { return hasMaxExpSumY_; }
-  bool hasMinExpSumX() const { return hasMinExpSumX_; }
-  bool hasMinExpSumY() const { return hasMinExpSumY_; }
+  bool hasMaxExpSumX() const { return data_.get<GPinColumns::hasMaxExpSumX>(); }
+  bool hasMaxExpSumY() const { return data_.get<GPinColumns::hasMaxExpSumY>(); }
+  bool hasMinExpSumX() const { return data_.get<GPinColumns::hasMinExpSumX>(); }
+  bool hasMinExpSumY() const { return data_.get<GPinColumns::hasMinExpSumY>(); }
 
   void setCenterLocation(int cx, int cy);
   void updateLocation(const GCell* gCell);
@@ -517,15 +526,10 @@ class GPin
   void print(utl::Logger* log) const;
   void updateCoordi();
 
- private:
-  GCell* gCell_ = nullptr;
-  GNet* gNet_ = nullptr;
-  std::vector<Pin*> pins_;
+  const SoaRow<NumericStore>& numericRow() const { return data_; }
 
-  int offsetCx_ = 0;
-  int offsetCy_ = 0;
-  int cx_ = 0;
-  int cy_ = 0;
+ private:
+  SoaRow<NumericStore> data_;
 
   // weighted average WL vals stor for better indexing
   // Please check the equation (4) in the ePlace-MS paper.
@@ -534,36 +538,34 @@ class GPin
   // minExpSum_: holds exp(-x_i/gamma)
   // the x_i is equal to cx_ variable.
   //
-  float maxExpSumX_ = 0;
-  float maxExpSumY_ = 0;
-
-  float minExpSumX_ = 0;
-  float minExpSumY_ = 0;
 
   // flag variables
   //
   // check whether
   // this pin is considered in a WA models.
-  bool hasMaxExpSumX_ = false;
-  bool hasMaxExpSumY_ = false;
-
-  bool hasMinExpSumX_ = false;
-  bool hasMinExpSumY_ = false;
 };
 
 class Bin
 {
  public:
-  Bin() = default;
-  Bin(int x, int y, int lx, int ly, int ux, int uy, float targetDensity);
+  using NumericStore = BinColumns::Store;
+  Bin() : data_(std::make_shared<NumericStore>()) {}
+  Bin(int x,
+      int y,
+      int lx,
+      int ly,
+      int ux,
+      int uy,
+      float targetDensity,
+      std::shared_ptr<NumericStore> storage = std::make_shared<NumericStore>());
 
-  int x() const { return x_; };
-  int y() const { return y_; };
+  int x() const { return data_.get<BinColumns::x>(); };
+  int y() const { return data_.get<BinColumns::y>(); };
 
-  int lx() const { return lx_; };
-  int ly() const { return ly_; };
-  int ux() const { return ux_; };
-  int uy() const { return uy_; };
+  int lx() const { return data_.get<BinColumns::lx>(); };
+  int ly() const { return data_.get<BinColumns::ly>(); };
+  int ux() const { return data_.get<BinColumns::ux>(); };
+  int uy() const { return data_.get<BinColumns::uy>(); };
   int cx() const;
   int cy() const;
   int dx() const;
@@ -597,106 +599,104 @@ class Bin
   void atomicAddInstPlacedAreaUnscaled(int64_t area);
 
   int64_t getBinArea() const;
-  int64_t getNonPlaceArea() const { return nonPlaceArea_; }
-  int64_t instPlacedArea() const { return instPlacedArea_; }
-  int64_t getNonPlaceAreaUnscaled() const { return nonPlaceAreaUnscaled_; }
-  int64_t getInstPlacedAreaUnscaled() const { return instPlacedAreaUnscaled_; }
+  int64_t getNonPlaceArea() const
+  {
+    return data_.get<BinColumns::nonPlaceArea>();
+  }
+  int64_t instPlacedArea() const
+  {
+    return data_.get<BinColumns::instPlacedArea>();
+  }
+  int64_t getNonPlaceAreaUnscaled() const
+  {
+    return data_.get<BinColumns::nonPlaceAreaUnscaled>();
+  }
+  int64_t getInstPlacedAreaUnscaled() const
+  {
+    return data_.get<BinColumns::instPlacedAreaUnscaled>();
+  }
 
-  int64_t getFillerArea() const { return fillerArea_; }
+  int64_t getFillerArea() const { return data_.get<BinColumns::fillerArea>(); }
+
+  const SoaRow<NumericStore>& numericRow() const { return data_; }
 
  private:
+  SoaRow<NumericStore> data_;
   // index
-  int x_ = 0;
-  int y_ = 0;
 
   // coordinate
-  int lx_ = 0;
-  int ly_ = 0;
-  int ux_ = 0;
-  int uy_ = 0;
 
-  int64_t nonPlaceArea_ = 0;
-  int64_t instPlacedArea_ = 0;
-
-  int64_t instPlacedAreaUnscaled_ = 0;
-  int64_t nonPlaceAreaUnscaled_ = 0;
-  int64_t fillerArea_ = 0;
-
-  float density_ = 0;
-  float targetDensity_ = 0;  // will enable bin-wise density screening
-  float electroPhi_ = 0;
-  float electroFieldX_ = 0;
-  float electroFieldY_ = 0;
+  // will enable bin-wise density screening
 };
 
 inline int Bin::cx() const
 {
-  return (ux_ + lx_) / 2;
+  return (data_.get<BinColumns::ux>() + data_.get<BinColumns::lx>()) / 2;
 }
 
 inline int Bin::cy() const
 {
-  return (uy_ + ly_) / 2;
+  return (data_.get<BinColumns::uy>() + data_.get<BinColumns::ly>()) / 2;
 }
 
 inline int Bin::dx() const
 {
-  return (ux_ - lx_);
+  return (data_.get<BinColumns::ux>() - data_.get<BinColumns::lx>());
 }
 
 inline int Bin::dy() const
 {
-  return (uy_ - ly_);
+  return (data_.get<BinColumns::uy>() - data_.get<BinColumns::ly>());
 }
 
 inline void Bin::setNonPlaceArea(int64_t area)
 {
-  nonPlaceArea_ = area;
+  data_.get<BinColumns::nonPlaceArea>() = area;
 }
 
 inline void Bin::setNonPlaceAreaUnscaled(int64_t area)
 {
-  nonPlaceAreaUnscaled_ = area;
+  data_.get<BinColumns::nonPlaceAreaUnscaled>() = area;
 }
 
 inline void Bin::setInstPlacedArea(int64_t area)
 {
-  instPlacedArea_ = area;
+  data_.get<BinColumns::instPlacedArea>() = area;
 }
 
 inline void Bin::setInstPlacedAreaUnscaled(int64_t area)
 {
-  instPlacedAreaUnscaled_ = area;
+  data_.get<BinColumns::instPlacedAreaUnscaled>() = area;
 }
 
 inline void Bin::setFillerArea(int64_t area)
 {
-  fillerArea_ = area;
+  data_.get<BinColumns::fillerArea>() = area;
 }
 
 inline void Bin::addNonPlaceArea(int64_t area)
 {
-  nonPlaceArea_ += area;
+  data_.get<BinColumns::nonPlaceArea>() += area;
 }
 
 inline void Bin::addInstPlacedArea(int64_t area)
 {
-  instPlacedArea_ += area;
+  data_.get<BinColumns::instPlacedArea>() += area;
 }
 
 inline void Bin::addNonPlaceAreaUnscaled(int64_t area)
 {
-  nonPlaceAreaUnscaled_ += area;
+  data_.get<BinColumns::nonPlaceAreaUnscaled>() += area;
 }
 
 inline void Bin::addInstPlacedAreaUnscaled(int64_t area)
 {
-  instPlacedAreaUnscaled_ += area;
+  data_.get<BinColumns::instPlacedAreaUnscaled>() += area;
 }
 
 inline void Bin::addFillerArea(int64_t area)
 {
-  fillerArea_ += area;
+  data_.get<BinColumns::fillerArea>() += area;
 }
 
 // For the threaded density scatter. The accumulators are integers and each
@@ -709,13 +709,13 @@ inline void Bin::addFillerArea(int64_t area)
 // non-atomic add.
 inline void Bin::atomicAddInstPlacedAreaUnscaled(int64_t area)
 {
-  std::atomic_ref<int64_t> ref(instPlacedAreaUnscaled_);
+  std::atomic_ref<int64_t> ref(data_.get<BinColumns::instPlacedAreaUnscaled>());
   ref.fetch_add(area, std::memory_order_relaxed);
 }
 
 inline void Bin::atomicAddFillerArea(int64_t area)
 {
-  std::atomic_ref<int64_t> ref(fillerArea_);
+  std::atomic_ref<int64_t> ref(data_.get<BinColumns::fillerArea>());
   ref.fetch_add(area, std::memory_order_relaxed);
 }
 
@@ -778,11 +778,20 @@ class BinGrid
 
   std::vector<Bin>& getBins();
   const std::vector<Bin>& getBinsConst() const { return bins_; };
+  Bin::NumericStore& numericBins() { return *bin_columns_; }
+  const Bin::NumericStore& numericBins() const { return *bin_columns_; }
+
+  DensityGridView densityView() const;
 
   void updateBinsNonPlaceArea();
 
  private:
+  std::shared_ptr<Bin::NumericStore> bin_columns_
+      = std::make_shared<Bin::NumericStore>();
   std::vector<Bin> bins_;
+  // Reused integer grids avoid atomics and preserve per-contribution
+  // truncation.
+  std::vector<int64_t> scatter_scratch_;
   std::shared_ptr<PlacerBase> pb_;
   utl::Logger* log_ = nullptr;
   int lx_ = 0;
@@ -932,7 +941,7 @@ class NesterovBaseCommon
   // parallel to `gCells` (typically nb_gcells_, a per-NesterovBase view
   // into nbc gCellStor_). Defined in wirelengthGradient.cpp.
   void getAllWireLengthGradientsWA(const std::vector<GCellHandle>& gCells,
-                                   std::vector<FloatPoint>& out);
+                                   PointColumns& out);
 
   // GPU path: run the per-inst gradient gather on device only (no host
   // copy) so the NB-level device scatter can consume it. No-op on the CPU
@@ -951,6 +960,7 @@ class NesterovBaseCommon
   FloatPoint getWireLengthPreconditioner(const GCell* gCell) const;
 
   int64_t getHpwl();
+  int64_t getHpwlColumns();
 
   // Refreshes host GNet boxes from the HPWL backend's last computeHpwl —
   // no-op on the CPU backend (always fresh). See hpwlBackend.h contract.
@@ -1016,17 +1026,31 @@ class NesterovBaseCommon
   NesterovBaseVars& getNbVars() { return nbVars_; }
 
  private:
+  void rebuildSoaTopology();
+  void updateWireLengthForceWA_soa(float coef_x, float coef_y);
+  FloatPoint getWireLengthGradientWA_soa(const GCell* cell,
+                                         float coef_x,
+                                         float coef_y) const;
+  std::vector<size_t> net_rows_, net_pin_offsets_, net_pin_rows_;
+  std::vector<size_t> cell_pin_offsets_, cell_pin_rows_, pin_net_rows_;
+
   NesterovBaseVars nbVars_;
   std::shared_ptr<PlacerBaseCommon> pbc_;
   utl::Logger* log_ = nullptr;
 
+  std::shared_ptr<GCell::NumericStore> cell_columns_
+      = std::make_shared<GCell::NumericStore>();
+  std::shared_ptr<GPin::NumericStore> pin_columns_
+      = std::make_shared<GPin::NumericStore>();
+  std::shared_ptr<GNet::NumericStore> net_columns_
+      = std::make_shared<GNet::NumericStore>();
   std::vector<GCell> gCellStor_;
   std::vector<GNet> gNetStor_;
   std::vector<GPin> gPinStor_;
 
   std::vector<GCell*> nbc_gcells_;
   // For usage in routability mode, parallel to nbc_gcells_
-  std::vector<odb::Rect> minRcCellSize_;
+  std::vector<int> min_rc_width_, min_rc_height_;
   std::vector<GNet*> gNets_;
   std::vector<GPin*> gPins_;
 
@@ -1107,9 +1131,9 @@ class NesterovBase
   float getDensityGradSum() const { return densityGradSum_; }
 
   // update gCells with cx, cy
-  void updateGCellCenterLocation(const std::vector<FloatPoint>& coordis);
+  void updateGCellCenterLocation(const PointColumns& coordis);
 
-  void updateGCellDensityCenterLocation(const std::vector<FloatPoint>& coordis);
+  void updateGCellDensityCenterLocation(const PointColumns& coordis);
 
   int getBinCntX() const;
   int getBinCntY() const;
@@ -1196,7 +1220,7 @@ class NesterovBase
   // bin-overlap computation — a serial hotspot on the GPU path. Instance
   // entries (NesterovBaseCommon-backed) are left untouched.
   void fillFillerDensityGradients(const std::vector<GCellHandle>& gCells,
-                                  std::vector<FloatPoint>& out) const;
+                                  PointColumns& out) const;
 
   // update electrostatic field within Bin
   void updateDensityFieldBin();
@@ -1213,9 +1237,9 @@ class NesterovBase
     nbVars_.isMaxPhiCoefChanged = maxPhiCoefChanged;
   }
 
-  void updateGradients(std::vector<FloatPoint>& sumGrads,
-                       std::vector<FloatPoint>& wireLengthGrads,
-                       std::vector<FloatPoint>& densityGrads,
+  void updateGradients(PointColumns& sumGrads,
+                       PointColumns& wireLengthGrads,
+                       PointColumns& densityGrads,
                        float wlCoeffX,
                        float wlCoeffY);
 
@@ -1225,10 +1249,10 @@ class NesterovBase
 
   void updateInitialPrevSLPCoordi();
 
-  float getStepLength(const std::vector<FloatPoint>& prevSLPCoordi_,
-                      const std::vector<FloatPoint>& prevSLPSumGrads_,
-                      const std::vector<FloatPoint>& curSLPCoordi_,
-                      const std::vector<FloatPoint>& curSLPSumGrads_);
+  float getStepLength(const PointColumns& prevSLPCoordi_,
+                      const PointColumns& prevSLPSumGrads_,
+                      const PointColumns& curSLPCoordi_,
+                      const PointColumns& curSLPSumGrads_);
 
   void updateNextIter(int iter);
   void setTrueReprintIterHeader() { reprint_iter_header_ = true; }
@@ -1405,6 +1429,8 @@ class NesterovBase
   int64_t stdInstsArea_ = 0;
   int64_t macroInstsArea_ = 0;
 
+  std::shared_ptr<GCell::NumericStore> filler_columns_
+      = std::make_shared<GCell::NumericStore>();
   std::vector<GCell> fillerStor_;
   std::vector<GCellHandle> nb_gcells_;
 
@@ -1416,31 +1442,55 @@ class NesterovBase
   // deleted dbInst whose memory odb reuses cannot appear twice.
   std::unordered_set<odb::dbInst*> new_instances_;
 
-  struct RemovedFillerState
+  struct RemovedFillerColumns
   {
-    GCell gcell;
-    FloatPoint curSLPCoordi;
-    FloatPoint curSLPWireLengthGrads;
-    FloatPoint curSLPDensityGrads;
-    FloatPoint curSLPSumGrads;
-    FloatPoint nextSLPCoordi;
-    FloatPoint nextSLPWireLengthGrads;
-    FloatPoint nextSLPDensityGrads;
-    FloatPoint nextSLPSumGrads;
-    FloatPoint prevSLPCoordi;
-    FloatPoint prevSLPWireLengthGrads;
-    FloatPoint prevSLPDensityGrads;
-    FloatPoint prevSLPSumGrads;
-    FloatPoint curCoordi;
-    FloatPoint nextCoordi;
-    FloatPoint initCoordi;
-    FloatPoint snapshotCoordi;
-    FloatPoint snapshotSLPCoordi;
-    FloatPoint snapshotSLPSumGrads;
-    FloatPoint snapshotPrevSLPSumGrads;
+    std::vector<GCell> gcells;
+    PointColumns curSLPCoordi;
+    PointColumns curSLPWireLengthGrads;
+    PointColumns curSLPDensityGrads;
+    PointColumns curSLPSumGrads;
+    PointColumns nextSLPCoordi;
+    PointColumns nextSLPWireLengthGrads;
+    PointColumns nextSLPDensityGrads;
+    PointColumns nextSLPSumGrads;
+    PointColumns prevSLPCoordi;
+    PointColumns prevSLPWireLengthGrads;
+    PointColumns prevSLPDensityGrads;
+    PointColumns prevSLPSumGrads;
+    PointColumns curCoordi;
+    PointColumns nextCoordi;
+    PointColumns initCoordi;
+    PointColumns snapshotCoordi;
+    PointColumns snapshotSLPCoordi;
+    PointColumns snapshotSLPSumGrads;
+    PointColumns snapshotPrevSLPSumGrads;
+    size_t size() const { return gcells.size(); }
+    bool empty() const { return gcells.empty(); }
+    void clear()
+    {
+      gcells.clear();
+      curSLPCoordi.resize(0);
+      curSLPWireLengthGrads.resize(0);
+      curSLPDensityGrads.resize(0);
+      curSLPSumGrads.resize(0);
+      nextSLPCoordi.resize(0);
+      nextSLPWireLengthGrads.resize(0);
+      nextSLPDensityGrads.resize(0);
+      nextSLPSumGrads.resize(0);
+      prevSLPCoordi.resize(0);
+      prevSLPWireLengthGrads.resize(0);
+      prevSLPDensityGrads.resize(0);
+      prevSLPSumGrads.resize(0);
+      curCoordi.resize(0);
+      nextCoordi.resize(0);
+      initCoordi.resize(0);
+      snapshotCoordi.resize(0);
+      snapshotSLPCoordi.resize(0);
+      snapshotSLPSumGrads.resize(0);
+      snapshotPrevSLPSumGrads.resize(0);
+    }
   };
-
-  std::vector<RemovedFillerState> removed_fillers_;
+  RemovedFillerColumns removed_fillers_;
 
   float sumPhi_ = 0;
   float phiCoef_ = 0;
@@ -1467,42 +1517,40 @@ class NesterovBase
   // SLP is Step Length Prediction.
   //
   // y_st, y_dst, y_wdst, w_pdst
-  std::vector<FloatPoint> curSLPCoordi_;
-  std::vector<FloatPoint> curSLPWireLengthGrads_;
-  std::vector<FloatPoint> curSLPDensityGrads_;
-  std::vector<FloatPoint> curSLPSumGrads_;
+  PointColumns curSLPCoordi_;
+  PointColumns curSLPWireLengthGrads_;
+  PointColumns curSLPDensityGrads_;
+  PointColumns curSLPSumGrads_;
 
   // y0_st, y0_dst, y0_wdst, y0_pdst
-  std::vector<FloatPoint> nextSLPCoordi_;
-  std::vector<FloatPoint> nextSLPWireLengthGrads_;
-  std::vector<FloatPoint> nextSLPDensityGrads_;
-  std::vector<FloatPoint> nextSLPSumGrads_;
+  PointColumns nextSLPCoordi_;
+  PointColumns nextSLPWireLengthGrads_;
+  PointColumns nextSLPDensityGrads_;
+  PointColumns nextSLPSumGrads_;
 
   // z_st, z_dst, z_wdst, z_pdst
-  std::vector<FloatPoint> prevSLPCoordi_;
-  std::vector<FloatPoint> prevSLPWireLengthGrads_;
-  std::vector<FloatPoint> prevSLPDensityGrads_;
-  std::vector<FloatPoint> prevSLPSumGrads_;
+  PointColumns prevSLPCoordi_;
+  PointColumns prevSLPWireLengthGrads_;
+  PointColumns prevSLPDensityGrads_;
+  PointColumns prevSLPSumGrads_;
 
   // x_st and x0_st
-  std::vector<FloatPoint> curCoordi_;
-  std::vector<FloatPoint> nextCoordi_;
+  PointColumns curCoordi_;
+  PointColumns nextCoordi_;
 
   // save initial coordinates -- needed for RD
-  std::vector<FloatPoint> initCoordi_;
+  PointColumns initCoordi_;
 
   // Snapshot data for routability, parallel vectors
-  std::vector<FloatPoint> snapshotCoordi_;
-  std::vector<FloatPoint> snapshotSLPCoordi_;
-  std::vector<FloatPoint> snapshotSLPSumGrads_;
-  std::vector<FloatPoint> snapshotPrevSLPSumGrads_;
+  PointColumns snapshotCoordi_;
+  PointColumns snapshotSLPCoordi_;
+  PointColumns snapshotSLPSumGrads_;
+  PointColumns snapshotPrevSLPSumGrads_;
   float snapshotDensityPenalty_ = 0;
   float snapshotStepLength_ = 0;
 
   // For destroying elements in parallel vectors
-  void swapAndPop(std::vector<FloatPoint>& vec,
-                  size_t remove_index,
-                  size_t last_index);
+  void swapAndPop(PointColumns& vec, size_t remove_index, size_t last_index);
   void swapAndPopParallelVectors(size_t remove_index, size_t last_index);
   void appendParallelVectors();
   // Point whichever storage owns nb_gcells_[nb_index] back at nb_index.

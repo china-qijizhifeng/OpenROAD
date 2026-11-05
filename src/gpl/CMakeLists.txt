@@ -30,6 +30,9 @@ add_library(gpl_lib
   src/initialPlace.cpp
   src/nesterovPlace.cpp
   src/placerBase.cpp
+  src/soaStorage.h
+  src/placementColumns.h
+  src/densitySoa.h
   src/nesterovBase.cpp
   src/ioPinBase.cpp
   src/fft.cpp
@@ -37,6 +40,8 @@ add_library(gpl_lib
   src/fftsg2d.cpp
   src/hpwl.cpp
   src/wirelengthGradient.cpp
+  src/wirelengthSoa.cpp
+  src/wirelengthSoa.h
   src/densityGradient.cpp
   src/routeBase.cpp
   src/timingBase.cpp

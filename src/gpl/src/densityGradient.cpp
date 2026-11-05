@@ -29,7 +29,7 @@ class CpuDensityGradientBackend : public DensityGradientBackend
   explicit CpuDensityGradientBackend(NesterovBase* nb) : nb_(nb) {}
 
   void getCellGradients(const std::vector<GCellHandle>& gCells,
-                        std::vector<FloatPoint>& out) override
+                        PointColumns& out) override
   {
 #pragma omp parallel for num_threads( \
         static_cast<int>(nb_->getNbc()->getNumThreads()))

@@ -280,6 +280,18 @@ void FFT::doFFT()
   backend_->solve(density, phi, field_x, field_y);
 }
 
+void FFT::solveColumns(const std::vector<float>& density,
+                       std::vector<float>& phi,
+                       std::vector<float>& field_x,
+                       std::vector<float>& field_y)
+{
+  bin_density_ = density;
+  backend_->solve({bin_density_.data(), bin_cnt_x_, bin_cnt_y_},
+                  {phi.data(), bin_cnt_x_, bin_cnt_y_},
+                  {field_x.data(), bin_cnt_x_, bin_cnt_y_},
+                  {field_y.data(), bin_cnt_x_, bin_cnt_y_});
+}
+
 const char* FFT::getBackendName() const
 {
   return backend_->name();

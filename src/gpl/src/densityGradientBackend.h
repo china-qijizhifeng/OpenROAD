@@ -35,7 +35,8 @@ class DensityGradientBackend
   DensityGradientBackend& operator=(DensityGradientBackend&&) = delete;
 
   virtual void getCellGradients(const std::vector<GCellHandle>& gCells,
-                                std::vector<FloatPoint>& out) = 0;
+                                PointColumns& out)
+      = 0;
 
   virtual FloatPoint getCellGradient(const GCell* gCell) = 0;
 

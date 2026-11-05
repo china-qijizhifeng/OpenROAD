@@ -61,6 +61,9 @@ cc_library(
         "src/gpu/wirelengthOp.h",
         "src/hpwlBackend.h",
         "src/nesterovBase.h",
+        "src/soaStorage.h",
+        "src/placementColumns.h",
+        "src/densitySoa.h",
         "src/placerBase.h",
         "src/point.h",
         "src/routeBase.h",
@@ -135,6 +138,8 @@ cc_library(
         "src/solver.h",
         "src/timingBase.cpp",
         "src/wirelengthGradient.cpp",
+        "src/wirelengthSoa.cpp",
+        "src/wirelengthSoa.h",
         "src/wirelengthGradientBackend.h",
     ] + select({
         "//:gpu_cuda": [
@@ -161,6 +166,9 @@ cc_library(
         "src/ioPinBase.h",
         "src/mbff.h",
         "src/nesterovBase.h",
+        "src/soaStorage.h",
+        "src/placementColumns.h",
+        "src/densitySoa.h",
         "src/nesterovPlace.h",
         "src/placerBase.h",
         "src/point.h",
@@ -318,4 +326,29 @@ python_wrap_library(
     name = "py_wrap",
     includes = ["src"],
     deps = [":gpl"],
+)
+
+cc_library(
+    name = "soa_storage",
+    hdrs = ["src/soaStorage.h"],
+    includes = ["src"],
+)
+
+cc_library(
+    name = "density_soa",
+    hdrs = ["src/densitySoa.h"],
+    includes = ["src"],
+)
+
+cc_library(
+    name = "point_columns",
+    hdrs = ["src/point.h"],
+    includes = ["src"],
+)
+
+cc_library(
+    name = "placement_columns",
+    hdrs = ["src/placementColumns.h"],
+    includes = ["src"],
+    deps = [":soa_storage"],
 )

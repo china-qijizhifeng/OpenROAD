@@ -38,7 +38,7 @@ class GpuWirelengthGradientBackend : public WirelengthGradientBackend
 
   void updateForce(float wlCoefX, float wlCoefY) override;
   void getCellGradients(const std::vector<GCellHandle>& gCells,
-                        std::vector<FloatPoint>& out) override;
+                        PointColumns& out) override;
   FloatPoint getCellGradient(const GCell* gCell) override;
   void prepareDeviceGradients() override;
 
