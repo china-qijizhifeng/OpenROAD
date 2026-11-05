@@ -1,0 +1,71 @@
+{
+  "runs": [
+    {
+      "placement_ms": 44040.239,
+      "wns_ns": 3.8813953150141347,
+      "tns_ns": 0.0,
+      "area_um2": 23367.834,
+      "hpwl_um": 440574.9175,
+      "placement_hash": "bc141af641d8db860dde7e3cee05047e037fb9b43171f0e8ee4b49d2ee903f92",
+      "legal": true,
+      "timers": [],
+      "categories_ms": {},
+      "rudy_ms": 0,
+      "iterations": [
+        "Nesterov Region: Top-level",
+        "Nesterov Global Placement.",
+        "Nesterov momentum.",
+        "Nesterov momentum."
+      ],
+      "binary": "baseline",
+      "threads": 8,
+      "repetition": 0,
+      "max_rss_kb": 520368,
+      "user_seconds": 226.842089,
+      "system_seconds": 0.635736
+    },
+    {
+      "placement_ms": 42338.451,
+      "wns_ns": 3.8813953150141347,
+      "tns_ns": 0.0,
+      "area_um2": 23367.834,
+      "hpwl_um": 440574.9175,
+      "placement_hash": "bc141af641d8db860dde7e3cee05047e037fb9b43171f0e8ee4b49d2ee903f92",
+      "legal": true,
+      "timers": [],
+      "categories_ms": {},
+      "rudy_ms": 0,
+      "iterations": [
+        "Nesterov Region: Top-level",
+        "Nesterov Global Placement.",
+        "Nesterov momentum.",
+        "Nesterov momentum."
+      ],
+      "binary": "soa-final-openroad",
+      "threads": 8,
+      "repetition": 0,
+      "max_rss_kb": 554184,
+      "user_seconds": 199.864407,
+      "system_seconds": 0.94607
+    }
+  ],
+  "summary": {
+    "baseline-8": {
+      "median_ms": 44040.239,
+      "min_ms": 44040.239,
+      "max_ms": 44040.239,
+      "samples": 1
+    },
+    "soa-final-openroad-8": {
+      "median_ms": 42338.451,
+      "min_ms": 42338.451,
+      "max_ms": 42338.451,
+      "samples": 1
+    }
+  },
+  "binary_sha256": {
+    "baseline": "d3e694dc50bde8d8c848fe153ff7d64e55ce6a96d9d9b4548cc6484ab07f1c0f",
+    "soa-final-openroad": "dc13bc53c11cf6443b6c1efa618e8a4108e022905099bb03b274e151c584f167"
+  },
+  "complete": true
+}

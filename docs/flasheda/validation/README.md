@@ -15,6 +15,8 @@ upstream OpenROAD GPL tests. Standalone portable C++ tests are registered under
 - `benchmark-resident.py`: alternating-order AES baseline/candidate measurements,
   three samples each at 1 and 8 threads, with exact coordinate/QoR checks.
 
+- `measure-memory.py` / `measure-resources.py`: separate 8-thread runs with child-process peak RSS and CPU time.
+
 The final source receipt includes SHA-256 hashes of every modified production
 file and binary. Earlier timing/RUDY experimental overlays are removed from the
 final candidate before acceptance. No source changes are made to OpenSTA.

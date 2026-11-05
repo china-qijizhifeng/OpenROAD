@@ -103,3 +103,5 @@ core and silently cap requested GPL parallelism to one. Those earlier requested
 placement thread cap. This is an existing runtime/configuration interaction,
 not a SoA kernel limitation. Setting more threads can lose on small designs because startup,
 barriers and private-grid reduction remain real work.
+
+Measured results and exact comparison coverage: [验收报告](validation/RESULTS.md).
