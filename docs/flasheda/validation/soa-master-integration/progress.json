@@ -1,0 +1,40 @@
+{
+  "production_commit": "8bc1c3e674f49b93ae2bf8d04cbb8954c76a81b9",
+  "candidate_test_only_fix": "268276e3d1",
+  "native_master_commit": "a6e7f507a1e24b12f3b2689ca7b159d36f825876",
+  "toolchain": "Bazel 9.2.0; hermetic LLVM 0.8.24; explicit --config=opt (O3/ThinLTO); project Werror unchanged",
+  "standalone_soa": "6/6 pass after test-only Wself-assign-overloaded fix",
+  "formal_binary_sha256": {
+    "baseline": "9eedbe284a9330f4269c1c1c557ae869f2d9c8472ae0610b3f7dc0f98b6b3fc4",
+    "candidate": "bf95389f331b53e91cc3942d3c32a38aa2dcdfcaa57a6d520e43ca7e944a2edd"
+  },
+  "baseline_build_seconds": 665.249,
+  "candidate_interrupted_remote_cache_seconds": 2269.383,
+  "candidate_recovered_local_cache_seconds": 812.036,
+  "remote_cache_failure": "Actual candidate java.log DownloadTimeoutException; CAS partial files stagnant; no source/config semantic changes during recovery",
+  "formal_differential_cases": [
+    "gcd",
+    "aes_cipher_top",
+    "incremental02",
+    "incremental03",
+    "place_ios_td",
+    "place_ios_rd"
+  ],
+  "formal_threads": [
+    1,
+    8
+  ],
+  "formal_runs": 24,
+  "formal_exact": true,
+  "debug_consistency_candidate_runs": 8,
+  "debug_consistency_exact": true,
+  "extra_timing_repetitions": 0,
+  "large_differential": "8/8 passed; 2 designs x2 binaries x1/8T; once only",
+  "cpu_units": "3/3 passed; gpl_fft_unittest, overflow_test, wirelength_gradient_test",
+  "profile": "pending independent attribution; does not block functional acceptance",
+  "perf_hardware_and_software_events": "unavailable: actual worker EACCES13 for cpu-clock/task-clock/cycles/instructions",
+  "current_job": "job-322eb2b469a6-20261106185948",
+  "evidence_complete": false,
+  "large_exact": true,
+  "functional_acceptance_complete": true
+}

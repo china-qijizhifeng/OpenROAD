@@ -1,0 +1,105 @@
+INFO: Invocation ID: 664d12ae-32d5-43e7-8d22-a8890568b5cc
+Computing main repo mapping: 
+Loading: 
+Loading: 0 packages loaded
+Analyzing: 3 targets (1 packages loaded, 0 targets configured)
+Analyzing: 3 targets (1 packages loaded, 0 targets configured)
+
+Analyzing: 3 targets (2 packages loaded, 41932 targets configured, 1 aspect application)
+
+Analyzing: 3 targets (2 packages loaded, 56090 targets configured, 137 aspect applications)
+
+Analyzing: 3 targets (2 packages loaded, 56296 targets configured, 137 aspect applications)
+
+Analyzing: 3 targets (2 packages loaded, 56296 targets configured, 137 aspect applications)
+
+Analyzing: 3 targets (3 packages loaded, 56374 targets configured, 137 aspect applications)
+
+INFO: Analyzed 3 targets (3 packages loaded, 56379 targets configured, 137 aspect applications).
+[5,560 / 10,716] [Prepa] BazelWorkspaceStatusAction stable-status.txt; 7s
+[7,994 / 10,796] LTO Backend Compile shared.nonlto/bazel-out/k8-opt/bin/src/ant/_objs/ant/AntennaChecker.pic.o; 0s processwrapper-sandbox, disk-cache ... (15 actions, 14 running)
+[8,085 / 11,085] LTO Backend Compile shared.nonlto/bazel-out/k8-opt/bin/src/ant/_objs/ant/Polygon.pic.o; 1s processwrapper-sandbox, disk-cache ... (14 actions, 13 running)
+[8,391 / 11,292] LTO Backend Compile shared.nonlto/bazel-out/k8-opt/bin/src/dbSta/_objs/dbNetwork/dbNetwork.pic.o; 2s processwrapper-sandbox, disk-cache ... (15 actions, 14 running)
+[8,523 / 11,356] LTO Backend Compile shared.nonlto/bazel-out/k8-opt/bin/src/sta/_objs/opensta_lib/LibertyParse.pic.o; 1s processwrapper-sandbox, disk-cache ... (16 actions, 14 running)
+[8,665 / 11,427] LTO Backend Compile shared.nonlto/bazel-out/k8-opt/bin/src/sta/_objs/opensta_lib/SpefParse.pic.o; 0s processwrapper-sandbox, disk-cache ... (16 actions, 15 running)
+[8,787 / 11,485] LTO Backend Compile shared.nonlto/bazel-out/k8-opt/bin/src/dbSta/_objs/dbSta/dbSta.pic.o; 1s processwrapper-sandbox, disk-cache ... (16 actions, 15 running)
+[9,024 / 11,649] LTO Backend Compile shared.nonlto/bazel-out/k8-opt/bin/src/dbSta/_objs/dbSta/dbSta.pic.o; 2s processwrapper-sandbox, disk-cache ... (14 actions, 13 running)
+[9,120 / 11,706] LTO Backend Compile shared.nonlto/bazel-out/k8-opt/bin/src/dbSta/_objs/dbSta/dbSta.pic.o; 3s processwrapper-sandbox, disk-cache ... (16 actions, 14 running)
+[9,206 / 11,750] LTO Backend Compile shared.nonlto/bazel-out/k8-opt/bin/src/dbSta/_objs/dbSta/dbSta.pic.o; 4s processwrapper-sandbox, disk-cache ... (16 actions, 14 running)
+[9,304 / 11,792] LTO Backend Compile shared.nonlto/bazel-out/k8-opt/bin/src/sta/_objs/opensta_lib/WriteSpice.pic.o; 1s processwrapper-sandbox, disk-cache ... (16 actions, 15 running)
+[9,350 / 11,810] LTO Backend Compile shared.nonlto/bazel-out/k8-opt/bin/external/boost.asio+/_objs/boost.asio/boost.asio.src.pic.o; 1s processwrapper-sandbox, disk-cache ... (16 actions, 15 running)
+[9,426 / 11,843] LTO Backend Compile shared.nonlto/bazel-out/k8-opt/bin/external/scip+/_objs/scip/cons_linear.pic.o; 2s processwrapper-sandbox, disk-cache ... (16 actions, 14 running)
+[9,542 / 11,896] LTO Backend Compile shared.nonlto/bazel-out/k8-opt/bin/src/grt/_objs/cugr/CUGR.pic.o; 2s processwrapper-sandbox, disk-cache ... (16 actions, 15 running)
+[9,645 / 11,940] LTO Backend Compile shared.nonlto/bazel-out/k8-opt/bin/src/sta/_objs/opensta_lib/Report.pic.o; 0s processwrapper-sandbox, disk-cache ... (15 actions, 13 running)
+[9,750 / 11,981] LTO Backend Compile shared.nonlto/bazel-out/k8-opt/bin/external/scip+/_objs/scip/lp.pic.o; 1s processwrapper-sandbox, disk-cache ... (16 actions, 13 running)
+[9,836 / 12,017] LTO Backend Compile shared.nonlto/bazel-out/k8-opt/bin/external/scip+/_objs/scip/misc.pic.o; 2s processwrapper-sandbox, disk-cache ... (16 actions, 15 running)
+[9,948 / 12,067] LTO Backend Compile shared.nonlto/bazel-out/k8-opt/bin/external/scip+/_objs/scip/misc.pic.o; 3s processwrapper-sandbox, disk-cache ... (16 actions running)
+[10,034 / 12,102] LTO Backend Compile shared.nonlto/bazel-out/k8-opt/bin/external/scip+/_objs/scip/misc.pic.o; 4s processwrapper-sandbox, disk-cache ... (16 actions, 15 running)
+[10,141 / 12,155] LTO Backend Compile shared.nonlto/bazel-out/k8-opt/bin/external/scip+/_objs/scip/misc.pic.o; 5s processwrapper-sandbox, disk-cache ... (16 actions, 15 running)
+[10,237 / 12,193] LTO Backend Compile shared.nonlto/bazel-out/k8-opt/bin/external/scip+/_objs/scip/misc.pic.o; 6s processwrapper-sandbox, disk-cache ... (16 actions, 15 running)
+[10,337 / 12,237] LTO Backend Compile shared.nonlto/bazel-out/k8-opt/bin/external/scip+/_objs/scip/misc.pic.o; 7s processwrapper-sandbox, disk-cache ... (16 actions, 15 running)
+[10,391 / 12,252] LTO Backend Compile shared.nonlto/bazel-out/k8-opt/bin/external/scip+/_objs/scip/misc.pic.o; 8s processwrapper-sandbox, disk-cache ... (16 actions, 15 running)
+[10,437 / 12,264] LTO Backend Compile shared.nonlto/bazel-out/k8-opt/bin/external/scip+/_objs/scip/misc.pic.o; 9s processwrapper-sandbox, disk-cache ... (16 actions, 15 running)
+[10,495 / 12,290] LTO Backend Compile shared.nonlto/bazel-out/k8-opt/bin/external/scip+/_objs/scip/misc.pic.o; 10s processwrapper-sandbox, disk-cache ... (16 actions, 15 running)
+[10,543 / 12,308] LTO Backend Compile shared.nonlto/bazel-out/k8-opt/bin/external/scip+/_objs/scip/misc.pic.o; 11s processwrapper-sandbox, disk-cache ... (16 actions running)
+[10,625 / 12,340] LTO Backend Compile shared.nonlto/bazel-out/k8-opt/bin/src/sta/_objs/opensta_lib/PrimaDelayCalc.pic.o; 3s processwrapper-sandbox, disk-cache ... (15 actions, 14 running)
+[10,762 / 12,439] LTO Backend Compile shared.nonlto/bazel-out/k8-opt/bin/src/sta/_objs/opensta_lib/PrimaDelayCalc.pic.o; 4s processwrapper-sandbox, disk-cache ... (16 actions, 15 running)
+[10,800 / 12,454] LTO Backend Compile shared.nonlto/bazel-out/k8-opt/bin/src/sta/_objs/opensta_lib/PrimaDelayCalc.pic.o; 5s processwrapper-sandbox, disk-cache ... (16 actions, 15 running)
+[10,847 / 12,473] LTO Backend Compile shared.nonlto/bazel-out/k8-opt/bin/external/or-tools+/ortools/sat/_objs/cp_model_solver/cp_model_solver.pic.o; 2s processwrapper-sandbox, disk-cache ... (16 actions, 15 running)
+[10,888 / 12,482] LTO Backend Compile shared.nonlto/bazel-out/k8-opt/bin/external/or-tools+/ortools/sat/_objs/cp_model_solver/cp_model_solver.pic.o; 3s processwrapper-sandbox, disk-cache ... (16 actions running)
+[10,950 / 12,509] LTO Backend Compile shared.nonlto/bazel-out/k8-opt/bin/external/or-tools+/ortools/sat/_objs/cp_model_presolve/cp_model_presolve.pic.o; 4s processwrapper-sandbox, disk-cache ... (16 actions, 15 running)
+[11,008 / 12,538] LTO Backend Compile shared.nonlto/bazel-out/k8-opt/bin/external/or-tools+/ortools/sat/_objs/cp_model_presolve/cp_model_presolve.pic.o; 5s processwrapper-sandbox, disk-cache ... (15 actions, 14 running)
+[11,052 / 12,556] LTO Backend Compile shared.nonlto/bazel-out/k8-opt/bin/external/or-tools+/ortools/sat/_objs/cp_model_presolve/cp_model_presolve.pic.o; 6s processwrapper-sandbox, disk-cache ... (16 actions, 15 running)
+[11,102 / 12,577] LTO Backend Compile shared.nonlto/bazel-out/k8-opt/bin/external/or-tools+/ortools/sat/_objs/cp_model_presolve/cp_model_presolve.pic.o; 7s processwrapper-sandbox, disk-cache ... (16 actions, 15 running)
+[11,139 / 12,593] LTO Backend Compile shared.nonlto/bazel-out/k8-opt/bin/external/or-tools+/ortools/sat/_objs/cp_model_presolve/cp_model_presolve.pic.o; 8s processwrapper-sandbox, disk-cache ... (16 actions, 15 running)
+[11,189 / 12,611] LTO Backend Compile shared.nonlto/bazel-out/k8-opt/bin/external/or-tools+/ortools/sat/_objs/cp_model_presolve/cp_model_presolve.pic.o; 9s processwrapper-sandbox, disk-cache ... (16 actions, 15 running)
+[11,253 / 12,646] LTO Backend Compile shared.nonlto/bazel-out/k8-opt/bin/external/or-tools+/ortools/sat/_objs/cp_model_presolve/cp_model_presolve.pic.o; 10s processwrapper-sandbox, disk-cache ... (16 actions, 15 running)
+[11,295 / 12,663] LTO Backend Compile shared.nonlto/bazel-out/k8-opt/bin/external/or-tools+/ortools/sat/_objs/cp_model_presolve/cp_model_presolve.pic.o; 11s processwrapper-sandbox, disk-cache ... (16 actions, 15 running)
+[11,337 / 12,680] LTO Backend Compile shared.nonlto/bazel-out/k8-opt/bin/external/or-tools+/ortools/sat/_objs/sat_inprocessing/sat_inprocessing.pic.o; 3s processwrapper-sandbox, disk-cache ... (16 actions, 15 running)
+[11,381 / 12,701] LTO Backend Compile shared.nonlto/bazel-out/k8-opt/bin/src/sta/_objs/opensta_lib/LibertyParser.pic.o; 1s processwrapper-sandbox, disk-cache ... (16 actions, 15 running)
+[11,426 / 12,716] LTO Backend Compile shared.nonlto/bazel-out/k8-opt/bin/external/or-tools+/ortools/sat/_objs/precedences/precedences.pic.o; 2s processwrapper-sandbox, disk-cache ... (16 actions, 15 running)
+[11,537 / 12,779] LTO Backend Compile shared.nonlto/bazel-out/k8-opt/bin/external/or-tools+/ortools/sat/_objs/clause/clause.pic.o; 2s processwrapper-sandbox, disk-cache ... (16 actions, 15 running)
+[11,617 / 12,825] LTO Backend Compile shared.nonlto/bazel-out/k8-opt/bin/external/or-tools+/ortools/sat/_objs/synchronization/synchronization.pic.o; 2s processwrapper-sandbox, disk-cache ... (15 actions, 14 running)
+[11,699 / 12,862] LTO Backend Compile shared.nonlto/bazel-out/k8-opt/bin/external/protobuf+/src/google/protobuf/json/_objs/parser/parser.pic.o; 1s processwrapper-sandbox, disk-cache ... (16 actions, 15 running)
+[11,766 / 12,888] LTO Backend Compile shared.nonlto/bazel-out/k8-opt/bin/external/protobuf+/src/google/protobuf/_objs/protobuf/descriptor.pic.o; 1s processwrapper-sandbox, disk-cache ... (16 actions, 15 running)
+[11,874 / 12,948] LTO Backend Compile shared.nonlto/bazel-out/k8-opt/bin/external/protobuf+/src/google/protobuf/_objs/protobuf/descriptor.pic.o; 2s processwrapper-sandbox, disk-cache ... (16 actions, 15 running)
+[12,011 / 13,031] LTO Backend Compile shared.nonlto/bazel-out/k8-opt/bin/external/protobuf+/src/google/protobuf/_objs/protobuf/descriptor.pic.o; 3s processwrapper-sandbox, disk-cache ... (15 actions running)
+[12,108 / 13,074] LTO Backend Compile shared.nonlto/bazel-out/k8-opt/bin/external/protobuf+/src/google/protobuf/_objs/protobuf/descriptor.pic.o; 4s processwrapper-sandbox, disk-cache ... (16 actions, 15 running)
+[12,172 / 13,099] LTO Backend Compile shared.nonlto/bazel-out/k8-opt/bin/src/odb/src/db/_objs/db/dbBlock.pic.o; 1s processwrapper-sandbox, disk-cache ... (16 actions, 15 running)
+[12,241 / 13,122] LTO Backend Compile shared.nonlto/bazel-out/k8-opt/bin/src/odb/src/db/_objs/db/dbBlock.pic.o; 2s processwrapper-sandbox, disk-cache ... (15 actions, 14 running)
+[12,286 / 13,122] LTO Backend Compile shared.nonlto/bazel-out/k8-opt/bin/src/odb/src/db/_objs/db/dbBlock.pic.o; 3s processwrapper-sandbox, disk-cache ... (16 actions, 15 running)
+[12,322 / 13,125] LTO Backend Compile shared.nonlto/bazel-out/k8-opt/bin/src/odb/src/db/_objs/db/dbBlock.pic.o; 4s processwrapper-sandbox, disk-cache ... (16 actions running)
+[12,355 / 13,127] LTO Backend Compile shared.nonlto/bazel-out/k8-opt/bin/src/odb/src/db/_objs/db/dbBlock.pic.o; 5s processwrapper-sandbox, disk-cache ... (16 actions, 15 running)
+[12,383 / 13,127] LTO Backend Compile shared.nonlto/bazel-out/k8-opt/bin/src/odb/src/db/_objs/db/dbBlock.pic.o; 6s processwrapper-sandbox, disk-cache ... (16 actions running)
+[12,427 / 13,128] LTO Backend Compile shared.nonlto/bazel-out/k8-opt/bin/src/odb/src/db/_objs/db/dbBlock.pic.o; 7s processwrapper-sandbox, disk-cache ... (15 actions, 14 running)
+[12,482 / 13,129] LTO Backend Compile shared.nonlto/bazel-out/k8-opt/bin/src/odb/src/db/_objs/db/dbBlock.pic.o; 8s processwrapper-sandbox, disk-cache ... (16 actions, 14 running)
+[12,527 / 13,129] LTO Backend Compile shared.nonlto/bazel-out/k8-opt/bin/external/scip+/_objs/scip/lpi_spx2.pic.o; 5s processwrapper-sandbox, disk-cache ... (16 actions, 15 running)
+[12,559 / 13,129] LTO Backend Compile shared.nonlto/bazel-out/k8-opt/bin/external/scip+/_objs/scip/lpi_spx2.pic.o; 6s processwrapper-sandbox, disk-cache ... (16 actions, 15 running)
+[12,572 / 13,129] LTO Backend Compile shared.nonlto/bazel-out/k8-opt/bin/external/scip+/_objs/scip/lpi_spx2.pic.o; 7s processwrapper-sandbox, disk-cache ... (16 actions, 15 running)
+[12,593 / 13,129] LTO Backend Compile shared.nonlto/bazel-out/k8-opt/bin/external/scip+/_objs/scip/lpi_spx2.pic.o; 8s processwrapper-sandbox, disk-cache ... (16 actions running)
+[12,612 / 13,129] LTO Backend Compile shared.nonlto/bazel-out/k8-opt/bin/external/scip+/_objs/scip/lpi_spx2.pic.o; 9s processwrapper-sandbox, disk-cache ... (16 actions, 15 running)
+[12,648 / 13,129] LTO Backend Compile shared.nonlto/bazel-out/k8-opt/bin/external/scip+/_objs/scip/lpi_spx2.pic.o; 10s processwrapper-sandbox, disk-cache ... (16 actions, 15 running)
+[12,691 / 13,129] LTO Backend Compile shared.nonlto/bazel-out/k8-opt/bin/external/scip+/_objs/scip/lpi_spx2.pic.o; 11s processwrapper-sandbox, disk-cache ... (16 actions, 15 running)
+[12,746 / 13,129] LTO Backend Compile shared.nonlto/bazel-out/k8-opt/bin/external/scip+/_objs/scip/lpi_spx2.pic.o; 12s processwrapper-sandbox, disk-cache ... (16 actions running)
+[12,805 / 13,129] LTO Backend Compile shared.nonlto/bazel-out/k8-opt/bin/external/scip+/_objs/scip/lpi_spx2.pic.o; 13s processwrapper-sandbox, disk-cache ... (16 actions, 14 running)
+[12,898 / 13,129] LTO Backend Compile shared.nonlto/bazel-out/k8-opt/bin/external/scip+/_objs/scip/lpi_spx2.pic.o; 14s processwrapper-sandbox, disk-cache ... (16 actions, 15 running)
+[12,996 / 13,129] LTO Backend Compile shared.nonlto/bazel-out/k8-opt/bin/external/scip+/_objs/scip/lpi_spx2.pic.o; 15s processwrapper-sandbox, disk-cache ... (16 actions, 15 running)
+[13,081 / 13,129] LTO Backend Compile shared.nonlto/bazel-out/k8-opt/bin/external/scip+/_objs/scip/lpi_spx2.pic.o; 16s processwrapper-sandbox, disk-cache ... (16 actions, 15 running)
+[13,109 / 13,129] LTO Backend Compile shared.nonlto/bazel-out/k8-opt/bin/external/scip+/_objs/scip/lpi_spx2.pic.o; 18s processwrapper-sandbox, disk-cache ... (10 actions running)
+[13,116 / 13,129] LTO Backend Compile shared.nonlto/bazel-out/k8-opt/bin/external/scip+/_objs/scip/lpi_spx2.pic.o; 20s processwrapper-sandbox, disk-cache ... (5 actions, 4 running)
+[13,117 / 13,129] LTO Backend Compile shared.nonlto/bazel-out/k8-opt/bin/external/scip+/_objs/scip/lpi_spx2.pic.o; 21s processwrapper-sandbox, disk-cache ... (4 actions running)
+[13,119 / 13,129] LTO Backend Compile shared.nonlto/bazel-out/k8-opt/bin/external/scip+/_objs/scip/lpi_spx2.pic.o; 23s processwrapper-sandbox, disk-cache ... (3 actions, 2 running)
+[13,122 / 13,129] LTO Backend Compile shared.nonlto/bazel-out/k8-opt/bin/external/scip+/_objs/scip/lpi_spx2.pic.o; 24s processwrapper-sandbox, disk-cache
+[13,122 / 13,129] LTO Backend Compile shared.nonlto/bazel-out/k8-opt/bin/external/scip+/_objs/scip/lpi_spx2.pic.o; 34s processwrapper-sandbox, disk-cache
+[13,123 / 13,129] [Prepa] Linking src/gpl/test/overflow_test
+[13,129 / 13,132] 1 / 3 tests; Testing //src/gpl/test:gpl_fft_unittest; 0s processwrapper-sandbox, disk-cache ... (3 actions running)
+INFO: Found 3 test targets...
+INFO: Elapsed time: 104.197s, Critical Path: 43.14s
+INFO: 2284 processes: 10848 action cache hit, 41 disk cache hit, 18 internal, 2225 processwrapper-sandbox.
+INFO: Build completed successfully, 2284 total actions
+//src/gpl/test:gpl_fft_unittest                                          PASSED in 0.1s
+//src/gpl/test:overflow_test                                             PASSED in 0.1s
+//src/gpl/test:wirelength_gradient_test                                  PASSED in 0.1s
+
+Executed 3 out of 3 tests: 3 tests pass.
+There were tests whose specified size is too big. Use the --test_verbose_timeout_warnings command line option to see which ones these are.
