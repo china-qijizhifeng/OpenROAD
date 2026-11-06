@@ -1,0 +1,340 @@
+{
+  "production_commit": "8bc1c3e674",
+  "candidate_test_only_fix_commit": "268276e3d1",
+  "production_source": "/tmp/soa-master-source/candidate",
+  "profile_source": "/tmp/soa-master-source/candidate-profile",
+  "startup_args": [
+    "--nosystem_rc",
+    "--nohome_rc",
+    "--output_user_root=/tmp/soa-master-bazel"
+  ],
+  "profile_build_args": [
+    "--config=opt",
+    "--remote_cache=",
+    "--jobs=16",
+    "--local_resources=memory=48000",
+    "--disk_cache=/tmp/soa-master-cache/actions",
+    "--repository_cache=/tmp/soa-master-cache/repos"
+  ],
+  "profile_mode": "temporary phase/embedded OMPT overlay with same O3+ThinLTO as formal binaries; no sampling flags required",
+  "environment": {
+    "BAZELISK_HOME": "/tmp/soa-master-cache/bazelisk"
+  },
+  "commands": [
+    {
+      "command": [
+        "/gpfs/users/linlizhi/flasheda-soa-merge-local-20261106/tools/bazelisk",
+        "--nosystem_rc",
+        "--nohome_rc",
+        "--output_user_root=/tmp/soa-master-bazel",
+        "version"
+      ],
+      "exit": 0,
+      "output_file": "bazel-version.txt"
+    },
+    {
+      "command": [
+        "/gpfs/users/linlizhi/flasheda-soa-merge-local-20261106/tools/bazelisk",
+        "--nosystem_rc",
+        "--nohome_rc",
+        "--output_user_root=/tmp/soa-master-bazel",
+        "info"
+      ],
+      "exit": 0,
+      "output_file": "bazel-profile-info.txt"
+    }
+  ],
+  "hermetic_compilers": [
+    {
+      "path": "/tmp/soa-master-bazel/5d2167424f0280237a9e1fd53dd5f44c/execroot/_main/external/llvm++llvm_toolchain_minimal+llvm-toolchain-minimal-linux-amd64/bin/clang++",
+      "realpath": "/tmp/soa-master-cache/repos/contents/ff74b7e0ddc87852787257bcadd93d0949a496014daadc43ab700d0b700bf128/b75eb5e2-39f8-4510-bdcb-d2b7ebf7d641/bin/llvm",
+      "sha256": "2667f50297ef526c2a594fae811614d83e55a14ac2ac3ac4414b100b7d0d9642",
+      "version": "clang version 23.1.2\nTarget: x86_64-unknown-linux-gnu\nThread model: posix\nInstalledDir: /tmp/soa-master-cache/repos/contents/ff74b7e0ddc87852787257bcadd93d0949a496014daadc43ab700d0b700bf128/b75eb5e2-39f8-4510-bdcb-d2b7ebf7d641/bin\n"
+    }
+  ],
+  "bazel_binaries": [
+    {
+      "path": "/tmp/soa-master-cache/bazelisk/downloads/sha256/7668a95db1250f12c40407251e4e203b4ec8bf39bc495d2f485b2d8c99048694/bin/bazel",
+      "sha256": "7668a95db1250f12c40407251e4e203b4ec8bf39bc495d2f485b2d8c99048694"
+    }
+  ],
+  "executables": {
+    "formal_candidate": {
+      "path": "/gpfs/users/linlizhi/flasheda-soa-merge-local-20261106/source/candidate/bazel-bin/openroad",
+      "realpath": "/tmp/soa-master-bazel/62f7c714e74acd4db20038e3683243cc/execroot/_main/bazel-out/k8-opt/bin/openroad_unstamped",
+      "sha256": "bf95389f331b53e91cc3942d3c32a38aa2dcdfcaa57a6d520e43ca7e944a2edd",
+      "elf": [
+        {
+          "command": [
+            "/usr/bin/file",
+            "/gpfs/users/linlizhi/flasheda-soa-merge-local-20261106/source/candidate/bazel-bin/openroad"
+          ],
+          "exit": 0,
+          "output_file": "formal_candidate-file-default.txt"
+        },
+        {
+          "command": [
+            "/usr/bin/ldd",
+            "/gpfs/users/linlizhi/flasheda-soa-merge-local-20261106/source/candidate/bazel-bin/openroad"
+          ],
+          "exit": 0,
+          "output_file": "formal_candidate-ldd-default.txt"
+        },
+        {
+          "command": [
+            "/usr/bin/readelf",
+            "-h",
+            "/gpfs/users/linlizhi/flasheda-soa-merge-local-20261106/source/candidate/bazel-bin/openroad"
+          ],
+          "exit": 0,
+          "output_file": "formal_candidate-readelf--h.txt"
+        },
+        {
+          "command": [
+            "/usr/bin/readelf",
+            "-l",
+            "/gpfs/users/linlizhi/flasheda-soa-merge-local-20261106/source/candidate/bazel-bin/openroad"
+          ],
+          "exit": 0,
+          "output_file": "formal_candidate-readelf--l.txt"
+        }
+      ],
+      ".runfiles": {
+        "path": "/gpfs/users/linlizhi/flasheda-soa-merge-local-20261106/source/candidate/bazel-bin/openroad.runfiles",
+        "realpath": "/tmp/soa-master-bazel/62f7c714e74acd4db20038e3683243cc/execroot/_main/bazel-out/k8-opt/bin/openroad.runfiles",
+        "top_level": [
+          "MANIFEST",
+          "_main",
+          "_repo_mapping"
+        ]
+      },
+      ".runfiles_manifest": {
+        "path": "/gpfs/users/linlizhi/flasheda-soa-merge-local-20261106/source/candidate/bazel-bin/openroad.runfiles_manifest",
+        "sha256": "9450d7881048d047f404d8f4b909a27356433b8f97db14044a2dc14412bc1323",
+        "bytes": 242
+      },
+      ".repo_mapping": {
+        "path": "/gpfs/users/linlizhi/flasheda-soa-merge-local-20261106/source/candidate/bazel-bin/openroad.repo_mapping",
+        "sha256": "98db554bda0534f608047103dca495194b916ba5a347912651ae0e08788dbcbf",
+        "bytes": 16
+      }
+    },
+    "formal_master": {
+      "path": "/gpfs/users/linlizhi/flasheda-soa-merge-local-20261106/source/baseline/bazel-bin/openroad",
+      "realpath": "/tmp/soa-master-bazel/0ec8af8b08932d920eb380bf9d3d42c9/execroot/_main/bazel-out/k8-opt/bin/openroad_unstamped",
+      "sha256": "9eedbe284a9330f4269c1c1c557ae869f2d9c8472ae0610b3f7dc0f98b6b3fc4",
+      "elf": [
+        {
+          "command": [
+            "/usr/bin/file",
+            "/gpfs/users/linlizhi/flasheda-soa-merge-local-20261106/source/baseline/bazel-bin/openroad"
+          ],
+          "exit": 0,
+          "output_file": "formal_master-file-default.txt"
+        },
+        {
+          "command": [
+            "/usr/bin/ldd",
+            "/gpfs/users/linlizhi/flasheda-soa-merge-local-20261106/source/baseline/bazel-bin/openroad"
+          ],
+          "exit": 0,
+          "output_file": "formal_master-ldd-default.txt"
+        },
+        {
+          "command": [
+            "/usr/bin/readelf",
+            "-h",
+            "/gpfs/users/linlizhi/flasheda-soa-merge-local-20261106/source/baseline/bazel-bin/openroad"
+          ],
+          "exit": 0,
+          "output_file": "formal_master-readelf--h.txt"
+        },
+        {
+          "command": [
+            "/usr/bin/readelf",
+            "-l",
+            "/gpfs/users/linlizhi/flasheda-soa-merge-local-20261106/source/baseline/bazel-bin/openroad"
+          ],
+          "exit": 0,
+          "output_file": "formal_master-readelf--l.txt"
+        }
+      ],
+      ".runfiles": {
+        "path": "/gpfs/users/linlizhi/flasheda-soa-merge-local-20261106/source/baseline/bazel-bin/openroad.runfiles",
+        "realpath": "/tmp/soa-master-bazel/0ec8af8b08932d920eb380bf9d3d42c9/execroot/_main/bazel-out/k8-opt/bin/openroad.runfiles",
+        "top_level": [
+          "MANIFEST",
+          "_main",
+          "_repo_mapping"
+        ]
+      },
+      ".runfiles_manifest": {
+        "path": "/gpfs/users/linlizhi/flasheda-soa-merge-local-20261106/source/baseline/bazel-bin/openroad.runfiles_manifest",
+        "sha256": "896014954389920e3c244cbca80510c26cefe2d8ea386563dbffe3a3fb600d59",
+        "bytes": 242
+      },
+      ".repo_mapping": {
+        "path": "/gpfs/users/linlizhi/flasheda-soa-merge-local-20261106/source/baseline/bazel-bin/openroad.repo_mapping",
+        "sha256": "98db554bda0534f608047103dca495194b916ba5a347912651ae0e08788dbcbf",
+        "bytes": 16
+      }
+    },
+    "profile_candidate_overlay": {
+      "path": "/tmp/soa-master-source/candidate-profile/bazel-bin/openroad",
+      "realpath": "/tmp/soa-master-bazel/5d2167424f0280237a9e1fd53dd5f44c/execroot/_main/bazel-out/k8-opt/bin/openroad_unstamped",
+      "sha256": "eac4a2b0413e00db6a8d1fdba97c6defaab0097a4d44c7b8340788836c15e8c1",
+      "elf": [
+        {
+          "command": [
+            "/usr/bin/file",
+            "/tmp/soa-master-source/candidate-profile/bazel-bin/openroad"
+          ],
+          "exit": 0,
+          "output_file": "profile_candidate_overlay-file-default.txt"
+        },
+        {
+          "command": [
+            "/usr/bin/ldd",
+            "/tmp/soa-master-source/candidate-profile/bazel-bin/openroad"
+          ],
+          "exit": 0,
+          "output_file": "profile_candidate_overlay-ldd-default.txt"
+        },
+        {
+          "command": [
+            "/usr/bin/readelf",
+            "-h",
+            "/tmp/soa-master-source/candidate-profile/bazel-bin/openroad"
+          ],
+          "exit": 0,
+          "output_file": "profile_candidate_overlay-readelf--h.txt"
+        },
+        {
+          "command": [
+            "/usr/bin/readelf",
+            "-l",
+            "/tmp/soa-master-source/candidate-profile/bazel-bin/openroad"
+          ],
+          "exit": 0,
+          "output_file": "profile_candidate_overlay-readelf--l.txt"
+        }
+      ],
+      ".runfiles": {
+        "path": "/tmp/soa-master-source/candidate-profile/bazel-bin/openroad.runfiles",
+        "realpath": "/tmp/soa-master-bazel/5d2167424f0280237a9e1fd53dd5f44c/execroot/_main/bazel-out/k8-opt/bin/openroad.runfiles",
+        "top_level": [
+          "MANIFEST",
+          "_main",
+          "_repo_mapping"
+        ]
+      },
+      ".runfiles_manifest": {
+        "path": "/tmp/soa-master-source/candidate-profile/bazel-bin/openroad.runfiles_manifest",
+        "sha256": "2ef59a7c3542f7166811d5b28d519f7ff6760f2c3a0c51bd67d504fafe71baa7",
+        "bytes": 242
+      },
+      ".repo_mapping": {
+        "path": "/tmp/soa-master-source/candidate-profile/bazel-bin/openroad.repo_mapping",
+        "sha256": "98db554bda0534f608047103dca495194b916ba5a347912651ae0e08788dbcbf",
+        "bytes": 16
+      }
+    },
+    "profile_master_overlay": {
+      "path": "/tmp/soa-master-source/baseline-profile/bazel-bin/openroad",
+      "realpath": "/tmp/soa-master-bazel/a1ebe58c29644a9aede4c2e382770d17/execroot/_main/bazel-out/k8-opt/bin/openroad_unstamped",
+      "sha256": "22228aebad6a44413ec8eb93828cd6a2ff3660b40e78ef15fa3f72e63d882aef",
+      "elf": [
+        {
+          "command": [
+            "/usr/bin/file",
+            "/tmp/soa-master-source/baseline-profile/bazel-bin/openroad"
+          ],
+          "exit": 0,
+          "output_file": "profile_master_overlay-file-default.txt"
+        },
+        {
+          "command": [
+            "/usr/bin/ldd",
+            "/tmp/soa-master-source/baseline-profile/bazel-bin/openroad"
+          ],
+          "exit": 0,
+          "output_file": "profile_master_overlay-ldd-default.txt"
+        },
+        {
+          "command": [
+            "/usr/bin/readelf",
+            "-h",
+            "/tmp/soa-master-source/baseline-profile/bazel-bin/openroad"
+          ],
+          "exit": 0,
+          "output_file": "profile_master_overlay-readelf--h.txt"
+        },
+        {
+          "command": [
+            "/usr/bin/readelf",
+            "-l",
+            "/tmp/soa-master-source/baseline-profile/bazel-bin/openroad"
+          ],
+          "exit": 0,
+          "output_file": "profile_master_overlay-readelf--l.txt"
+        }
+      ],
+      ".runfiles": {
+        "path": "/tmp/soa-master-source/baseline-profile/bazel-bin/openroad.runfiles",
+        "realpath": "/tmp/soa-master-bazel/a1ebe58c29644a9aede4c2e382770d17/execroot/_main/bazel-out/k8-opt/bin/openroad.runfiles",
+        "top_level": [
+          "MANIFEST",
+          "_main",
+          "_repo_mapping"
+        ]
+      },
+      ".runfiles_manifest": {
+        "path": "/tmp/soa-master-source/baseline-profile/bazel-bin/openroad.runfiles_manifest",
+        "sha256": "48a0cab28f938e3bcecebd15c21e00a96c0887d0f18dc4380b0e2449bc680e2d",
+        "bytes": 242
+      },
+      ".repo_mapping": {
+        "path": "/tmp/soa-master-source/baseline-profile/bazel-bin/openroad.repo_mapping",
+        "sha256": "98db554bda0534f608047103dca495194b916ba5a347912651ae0e08788dbcbf",
+        "bytes": 16
+      }
+    }
+  },
+  "libomp_artifacts": [],
+  "openmp_configuration": [
+    {
+      "path": "/tmp/soa-master-bazel/5d2167424f0280237a9e1fd53dd5f44c/execroot/_main/external/openmp+/BUILD.bazel",
+      "sha256": "2c9acd67612d9dbb63672fc99b6dcb8dd68fb6d20cce77beab2ef54e0bff9199",
+      "lines": [
+        "    \"LIBOMP_OMPT_SUPPORT\": 1,",
+        "    \"LIBOMP_OMPT_OPTIONAL\": 1,"
+      ]
+    },
+    {
+      "path": "/tmp/soa-master-bazel/5d2167424f0280237a9e1fd53dd5f44c/execroot/_main/bazel-out/k8-opt/bin/external/openmp+/runtime/src/include/kmp_config.h",
+      "sha256": "6a51e4f62008da81aff11f818763e04db6483b5cd1d9c51d5c44bce0d36ec7b7",
+      "lines": [
+        "#define LIBOMP_OMPT_SUPPORT 1",
+        "#define OMPT_SUPPORT LIBOMP_OMPT_SUPPORT",
+        "#define LIBOMP_OMPT_OPTIONAL 1",
+        "#define OMPT_OPTIONAL LIBOMP_OMPT_OPTIONAL"
+      ]
+    }
+  ],
+  "frozen_build_inputs": {
+    "MODULE.bazel": "b7f15cd0ed8da9b7722f7af12c8d58228a120274c378dc1715f540c39b10bfa8",
+    "MODULE.bazel.lock": "9bb06d23d0928dca7547de582fb01c50a572306f95898306240a7dd8f62c8a37",
+    ".bazelrc": "71cf6f0e586c01e4587b64348be65da7e73ef797c3e854c25a5a4b7f0c24194b",
+    ".bazelversion": "1b9487d55bea47fea50d226cc9c53bc548877ad2a318bac8fbc8b320f429e5c5"
+  },
+  "profiler_tool_sha256": {
+    "omp-tools.h.upstream": "4876d0addcf2783953a6d0aeed8efc495ff0476b6a5784ca6e43bdd1c62df5be",
+    "ompt-general.cpp.upstream": "d0e7879de57f0f9474dd7310622a3b80c8af34096eca5f52c2faada52c5fbdc3",
+    "omptTool.inc": "b781838e5c2d605379b8cc2d98bd34975ab703c6453038d5ea693b4ef62f9d13",
+    "phaseTimer.h": "df87f53d7157689b7dbc709b8b1fb29e588509550ef85447f3135af3f3098f59",
+    "make-overlay.py": "c83f67663b72ae0c6457598e890c14f83d9e58eb3ae6457aa794785f326842ad",
+    "run-phase.py": "22935acc3d33931d9b7e5ce7916bbdeeaf8fefe5ca93f2a29e1f40895f3323ae",
+    "frozen-code-sha256.json": "ad6bbb696795e3f15888abe5ea5b0935bd3b3d97c5c538e77789cd48fc937e27"
+  },
+  "ompt_support_evidence": "Runtime initialization, callback registration results and callback-pair counts are in profile/results/summary.json; compile config alone is not treated as measurement."
+}

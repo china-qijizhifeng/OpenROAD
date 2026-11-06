@@ -1,0 +1,41 @@
+design,role,threads,event,value,unit,event_runtime_ns,percent_running,metric,metric_unit
+aes_cipher_top,baseline,4,cycles:u,413930162974,,117445733551,100.00,,
+aes_cipher_top,baseline,4,instructions:u,443051497808,,117445733551,100.00,1.07,insn per cycle
+aes_cipher_top,baseline,4,cache-references:u,20378453929,,117445733551,100.00,,
+aes_cipher_top,baseline,4,cache-misses:u,3273017163,,117445733551,100.00,16.06,of all cache refs
+aes_cipher_top,baseline,4,branches:u,52396210615,,117445733551,100.00,,
+aes_cipher_top,baseline,4,branch-misses:u,804436,,117445733551,100.00,0.00,of all branches
+aes_cipher_top,baseline,4,task-clock,116443.85,msec,116443851005,100.00,2.065,CPUs utilized
+aes_cipher_top,baseline,4,context-switches,94881,,116443851005,100.00,814.822,/sec
+aes_cipher_top,baseline,4,cpu-migrations,89,,116443851005,100.00,0.764,/sec
+aes_cipher_top,baseline,4,page-faults,129934,,116443851005,100.00,1.116,K/sec
+aes_cipher_top,candidate,4,cycles:u,205809608000,,64871268985,100.00,,
+aes_cipher_top,candidate,4,instructions:u,376368725238,,64871268985,100.00,1.83,insn per cycle
+aes_cipher_top,candidate,4,cache-references:u,13519085846,,64871268985,100.00,,
+aes_cipher_top,candidate,4,cache-misses:u,623306665,,64871268985,100.00,4.61,of all cache refs
+aes_cipher_top,candidate,4,branches:u,43192079665,,64871268985,100.00,,
+aes_cipher_top,candidate,4,branch-misses:u,0,,64871268985,100.00,,
+aes_cipher_top,candidate,4,task-clock,62728.86,msec,62728856074,100.00,1.866,CPUs utilized
+aes_cipher_top,candidate,4,context-switches,212496,,62728856074,100.00,3.388,K/sec
+aes_cipher_top,candidate,4,cpu-migrations,82,,62728856074,100.00,1.307,/sec
+aes_cipher_top,candidate,4,page-faults,140026,,62728856074,100.00,2.232,K/sec
+large02,baseline,4,cycles:u,977744000047,,274118163386,100.00,,
+large02,baseline,4,instructions:u,1126783563728,,274118163386,100.00,1.15,insn per cycle
+large02,baseline,4,cache-references:u,56179050162,,274118163386,100.00,,
+large02,baseline,4,cache-misses:u,5212036891,,274118163386,100.00,9.28,of all cache refs
+large02,baseline,4,branches:u,134787975866,,274118163386,100.00,,
+large02,baseline,4,branch-misses:u,2477711,,274118163386,100.00,0.00,of all branches
+large02,baseline,4,task-clock,273494.98,msec,273494977096,100.00,2.046,CPUs utilized
+large02,baseline,4,context-switches,58941,,273494977096,100.00,215.510,/sec
+large02,baseline,4,cpu-migrations,162,,273494977096,100.00,0.592,/sec
+large02,baseline,4,page-faults,774370,,273494977096,100.00,2.831,K/sec
+large02,candidate,4,cycles:u,733232758495,,208973219915,100.00,,
+large02,candidate,4,instructions:u,1025052123304,,208973219915,100.00,1.40,insn per cycle
+large02,candidate,4,cache-references:u,56448832289,,208973219915,100.00,,
+large02,candidate,4,cache-misses:u,5772216182,,208973219915,100.00,10.23,of all cache refs
+large02,candidate,4,branches:u,120061852005,,208973219915,100.00,,
+large02,candidate,4,branch-misses:u,0,,208973219915,100.00,,
+large02,candidate,4,task-clock,208025.02,msec,208025021060,100.00,2.192,CPUs utilized
+large02,candidate,4,context-switches,103958,,208025021060,100.00,499.738,/sec
+large02,candidate,4,cpu-migrations,92,,208025021060,100.00,0.442,/sec
+large02,candidate,4,page-faults,872897,,208025021060,100.00,4.196,K/sec

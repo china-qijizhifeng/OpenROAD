@@ -1,0 +1,118 @@
+{
+  "scope": "Northjob-partial",
+  "complete": false,
+  "recorded_at_utc": "2026-11-06T13:22:35.411186+00:00",
+  "job_alias": "flasheda-soa-merge-local-20261106",
+  "job_identity": "job-322eb2b469a6-20261106185948",
+  "completed_runs": [
+    {
+      "config": "aes_cipher_top-baseline-t1",
+      "state_hash": "6c33ed1d27b8f051ea72c295bcca6b090eaf99400951021eca3bc19f3455ea03",
+      "rows": 39320,
+      "seconds_profiled": 74.72801950573921,
+      "root_ms": 66555.98456699999,
+      "iteration_attempts": 1125,
+      "profile_output_exact": true,
+      "profile_algorithm_trace_exact": true,
+      "ompt_measured": false,
+      "result_sha256": "2ded6433f5e7f033cb7fb44144ff2dfecbc614fc0b0c2fc6d1863ea874517b9a"
+    },
+    {
+      "config": "aes_cipher_top-baseline-t8",
+      "state_hash": "6c33ed1d27b8f051ea72c295bcca6b090eaf99400951021eca3bc19f3455ea03",
+      "rows": 39320,
+      "seconds_profiled": 55.766026213765144,
+      "root_ms": 47760.080049000004,
+      "iteration_attempts": 1125,
+      "profile_output_exact": true,
+      "profile_algorithm_trace_exact": true,
+      "ompt_measured": true,
+      "result_sha256": "b307a346097e3adabfc26ecc3e7a971fe09e8726f746d45aa956ef5ed2f474cc"
+    },
+    {
+      "config": "aes_cipher_top-candidate-t1",
+      "state_hash": "6c33ed1d27b8f051ea72c295bcca6b090eaf99400951021eca3bc19f3455ea03",
+      "rows": 39320,
+      "seconds_profiled": 57.91213712096214,
+      "root_ms": 53652.977293,
+      "iteration_attempts": 1125,
+      "profile_output_exact": true,
+      "profile_algorithm_trace_exact": true,
+      "ompt_measured": false,
+      "result_sha256": "2880919a9bffa8091445ce73e5246ef95719ead8c060575d9787871f2938b06d"
+    },
+    {
+      "config": "aes_cipher_top-candidate-t8",
+      "state_hash": "6c33ed1d27b8f051ea72c295bcca6b090eaf99400951021eca3bc19f3455ea03",
+      "rows": 39320,
+      "seconds_profiled": 37.93745830655098,
+      "root_ms": 33707.365347,
+      "iteration_attempts": 1125,
+      "profile_output_exact": true,
+      "profile_algorithm_trace_exact": true,
+      "ompt_measured": true,
+      "result_sha256": "6dbff6a149079cca220e764dbea47726c6c53efd864949c02e3a90aba64d00f7"
+    },
+    {
+      "config": "large01-baseline-t1",
+      "state_hash": "0666a95a2af56610691e28c4f2fa43fa8dbd1a7938ad763865b4ed270db45d3c",
+      "rows": 566905,
+      "seconds_profiled": 209.11009460687637,
+      "root_ms": 186801.352395,
+      "iteration_attempts": 573,
+      "profile_output_exact": true,
+      "profile_algorithm_trace_exact": true,
+      "ompt_measured": false,
+      "result_sha256": "dff391f43556d9a15b9d3d29081eed598c07bcb70a968203c129acc832577725"
+    },
+    {
+      "config": "large01-baseline-t8",
+      "state_hash": "0666a95a2af56610691e28c4f2fa43fa8dbd1a7938ad763865b4ed270db45d3c",
+      "rows": 566905,
+      "seconds_profiled": 111.20520532131195,
+      "root_ms": 89158.31877900001,
+      "iteration_attempts": 573,
+      "profile_output_exact": true,
+      "profile_algorithm_trace_exact": true,
+      "ompt_measured": true,
+      "result_sha256": "f7036b9af443fc16815e5e6894df16d3979e666f7e157a0006139610ec8871bb"
+    },
+    {
+      "config": "large02-baseline-t1",
+      "state_hash": "ad56039bdda8119ea7ee39d2f453f555bf89e9a55fdfc42b2d547e3dc6b584d3",
+      "rows": 719776,
+      "seconds_profiled": 248.64673602581024,
+      "root_ms": 217939.666478,
+      "iteration_attempts": 532,
+      "profile_output_exact": true,
+      "profile_algorithm_trace_exact": true,
+      "ompt_measured": false,
+      "result_sha256": "3b5564427f31aa6f2d676bf81072f44e35a9130ec6ade19e500fbfc9e5f418bc"
+    },
+    {
+      "config": "large02-baseline-t8",
+      "state_hash": "ad56039bdda8119ea7ee39d2f453f555bf89e9a55fdfc42b2d547e3dc6b584d3",
+      "rows": 719776,
+      "seconds_profiled": 138.01150184869766,
+      "root_ms": 108200.149879,
+      "iteration_attempts": 532,
+      "profile_output_exact": true,
+      "profile_algorithm_trace_exact": true,
+      "ompt_measured": true,
+      "result_sha256": "66aa6eb6f46c5415416f925d4360e11992c18fdcefb54221b0edb3ccb6c3a682"
+    }
+  ],
+  "completed_run_count": 8,
+  "incomplete_run": "large01-candidate-t1",
+  "not_started": [
+    "large01-candidate-t8",
+    "large02-candidate-t1",
+    "large02-candidate-t8"
+  ],
+  "reason": "User requested new E2B parallel same-sandbox master/candidate profile pairs; no more Northjob profile configurations scheduled",
+  "comparison_scope": "AES paired phase attribution can be analyzed on Northjob. Never combine Northjob absolute seconds with E2B seconds. Single profile repetitions are attribution only, not a median performance benchmark.",
+  "ompt_units": "thread-time; never subtract from wall-time",
+  "single_thread_ompt": "Runtime initialized and callbacks registered; no wait callbacks at T1. Not a measured zero.",
+  "hardware_counters": "unavailable: actual worker perf_event_open returned EACCES; perf_event_paranoid=4",
+  "functional_acceptance": "separate frozen acceptance-receipt.json and acceptance-evidence.tar.gz"
+}

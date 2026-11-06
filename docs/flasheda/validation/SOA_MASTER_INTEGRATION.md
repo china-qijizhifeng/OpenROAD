@@ -43,7 +43,16 @@ large01/02 为 LEF/DEF 布局验证，比较面积与 HPWL，不声称时序或�
 - 候选：`bf95389f331b53e91cc3942d3c32a38aa2dcdfcaa57a6d520e43ca7e944a2edd`
 
 紧凑回执与源码/输入/运行来源见 [整合验证目录](soa-master-integration/)。
-独立 profile 在通过上述门禁后继续进行；此版本未做 GPU 执行验收。
+独立 profile 在通过上述门禁后执行。按用户要求转至 HK SWEEnvMaker 0820 的
+三个 E2B 沙箱并行，实际 4 物理核，采用有效的 1/4 线程；12 次 phase/OMPT 和
+8 次独立 perf 均精确一致。四份 record 零丢样，事件计数和资源指纹完整保留。
+结论见 [剩余瓶颈分析](SOA_NEXT_DIAGNOSIS.md)，
+证据见 [E2B profile](soa-e2b-profile/README.md)。
+该集成版本未做 GPU 执行验收。
+
+Northjob 的部分 profile 独立归档，没有与 E2B 绝对耗时混合。
+本次创建的两个 Northjob 作业（含被替换的准备作业）和四个 E2B 沙箱均已清理；
+回执位于本目录的 `soa-master-integration/` 及 E2B 的 `experiment.json`。
 
 ## 首次构建暴露的问题
 

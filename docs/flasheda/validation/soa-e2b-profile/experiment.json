@@ -1,0 +1,560 @@
+{
+  "date": "2026-11-06",
+  "status": "complete",
+  "ssh_host": "hk-linlizhi-jumpserver",
+  "hk_task_directory": "/root/openroad-soa-e2b-profile-20261106",
+  "template": {
+    "sdk_version": "2.37.1",
+    "template": {
+      "templateID": "vshaqeiaoi96u3cp66t3",
+      "aliases": [
+        "flasheda-r5-cpu8-t16-20261030"
+      ],
+      "cpuCount": 8,
+      "memoryMB": 16384,
+      "buildStatus": "ready"
+    },
+    "credential_selection": "E2B_API_KEY_0820 client option; no value retained"
+  },
+  "source": {
+    "baseline_commit": "a6e7f507a1",
+    "production_commit": "8bc1c3e674",
+    "candidate_test_only_fix": "268276e3d1"
+  },
+  "input_bundle": {
+    "path": "build/soa/merge-master-local/e2b-migration.tar.gz",
+    "bytes": 296960279,
+    "sha256": "5164fc811c4e8fb47f265015286927e3590915d52339249b6138cb0a82a2e53d"
+  },
+  "binary_fingerprints": {
+    "binaries/baseline": {
+      "sha256": "9eedbe284a9330f4269c1c1c557ae869f2d9c8472ae0610b3f7dc0f98b6b3fc4",
+      "bytes": 124296512
+    },
+    "binaries/baseline-profile": {
+      "sha256": "22228aebad6a44413ec8eb93828cd6a2ff3660b40e78ef15fa3f72e63d882aef",
+      "bytes": 124305680
+    },
+    "binaries/candidate": {
+      "sha256": "bf95389f331b53e91cc3942d3c32a38aa2dcdfcaa57a6d520e43ca7e944a2edd",
+      "bytes": 124405560
+    },
+    "binaries/candidate-profile": {
+      "sha256": "eac4a2b0413e00db6a8d1fdba97c6defaab0097a4d44c7b8340788836c15e8c1",
+      "bytes": 124411144
+    }
+  },
+  "input_fingerprints": {
+    "source/src/gpl/test/design/nangate45/aes_cipher_top/aes_cipher_top.def": {
+      "sha256": "3059a37a7f52f380756f1aee050a423f93e534ad7f861acdbaed02cbe749073b",
+      "bytes": 1860295
+    },
+    "source/src/gpl/test/design/nangate45/aes_cipher_top/aes_cipher_top.sdc": {
+      "sha256": "e32ff9a25524efb49115dd336a2b36cea463b83451899d57dccc4258e6787148",
+      "bytes": 23570
+    },
+    "source/src/gpl/test/large01.def": {
+      "sha256": "7ad5056dac79e08cd4a29c19ef9c9aa2fc4d212c13bec00f543530230ebe6b25",
+      "bytes": 43964635
+    },
+    "source/src/gpl/test/large02.def": {
+      "sha256": "125d2f7bdd1ddd23c36bb86c0f1717750708e341ea73a343f3d494743e1c0de2",
+      "bytes": 64632121
+    },
+    "source/src/gpl/test/nangate45.lef": {
+      "sha256": "c686d55d135cdf5b7fb6f98334fce74983884135da59217c9e53ddcb799c925b",
+      "bytes": 367251
+    },
+    "source/test/Nangate45/Nangate45.lef": {
+      "sha256": "caa4e9b45e081f93720ce2c4d581497321ddc6fbcb1ffe1b384e324bbd5d43a7",
+      "bytes": 275414
+    },
+    "source/test/Nangate45/Nangate45.rc": {
+      "sha256": "0ece6b835601a7b2cab08a2ef638befd6f6f70c86f1ad2a683489713e5717e09",
+      "bytes": 788
+    },
+    "source/test/Nangate45/Nangate45_typ.lib": {
+      "sha256": "2efd0b32eb580e4e60e72fc0575bb3bc69aac907c91d908442e4ae6d7fe55895",
+      "bytes": 6691483
+    }
+  },
+  "inherited_build": {
+    "receipt": "docs/flasheda/validation/soa-e2b-profile/inherited-toolchain.json",
+    "receipt_sha256": "00cb0617e7ab0f1e29923662e1061b631910381666bb274ad13b134074e8d344",
+    "original_archive": "build/soa/merge-master-local/northjob-partial-profile-evidence.tar.gz",
+    "original_archive_sha256": "535dee6da02c7ca1c28eac7246a1068c2b7710b4fe58edd07befca12fa75cc99",
+    "compiler": [
+      {
+        "path": "/tmp/soa-master-bazel/5d2167424f0280237a9e1fd53dd5f44c/execroot/_main/external/llvm++llvm_toolchain_minimal+llvm-toolchain-minimal-linux-amd64/bin/clang++",
+        "realpath": "/tmp/soa-master-cache/repos/contents/ff74b7e0ddc87852787257bcadd93d0949a496014daadc43ab700d0b700bf128/b75eb5e2-39f8-4510-bdcb-d2b7ebf7d641/bin/llvm",
+        "sha256": "2667f50297ef526c2a594fae811614d83e55a14ac2ac3ac4414b100b7d0d9642",
+        "version": "clang version 23.1.2\nTarget: x86_64-unknown-linux-gnu\nThread model: posix\nInstalledDir: /tmp/soa-master-cache/repos/contents/ff74b7e0ddc87852787257bcadd93d0949a496014daadc43ab700d0b700bf128/b75eb5e2-39f8-4510-bdcb-d2b7ebf7d641/bin\n"
+      }
+    ],
+    "bazel_binary": [
+      {
+        "path": "/tmp/soa-master-cache/bazelisk/downloads/sha256/7668a95db1250f12c40407251e4e203b4ec8bf39bc495d2f485b2d8c99048694/bin/bazel",
+        "sha256": "7668a95db1250f12c40407251e4e203b4ec8bf39bc495d2f485b2d8c99048694"
+      }
+    ],
+    "profile_build_args": [
+      "--config=opt",
+      "--remote_cache=",
+      "--jobs=16",
+      "--local_resources=memory=48000",
+      "--disk_cache=/tmp/soa-master-cache/actions",
+      "--repository_cache=/tmp/soa-master-cache/repos"
+    ],
+    "openmp_configuration": [
+      {
+        "path": "/tmp/soa-master-bazel/5d2167424f0280237a9e1fd53dd5f44c/execroot/_main/external/openmp+/BUILD.bazel",
+        "sha256": "2c9acd67612d9dbb63672fc99b6dcb8dd68fb6d20cce77beab2ef54e0bff9199",
+        "lines": [
+          "    \"LIBOMP_OMPT_SUPPORT\": 1,",
+          "    \"LIBOMP_OMPT_OPTIONAL\": 1,"
+        ]
+      },
+      {
+        "path": "/tmp/soa-master-bazel/5d2167424f0280237a9e1fd53dd5f44c/execroot/_main/bazel-out/k8-opt/bin/external/openmp+/runtime/src/include/kmp_config.h",
+        "sha256": "6a51e4f62008da81aff11f818763e04db6483b5cd1d9c51d5c44bce0d36ec7b7",
+        "lines": [
+          "#define LIBOMP_OMPT_SUPPORT 1",
+          "#define OMPT_SUPPORT LIBOMP_OMPT_SUPPORT",
+          "#define LIBOMP_OMPT_OPTIONAL 1",
+          "#define OMPT_OPTIONAL LIBOMP_OMPT_OPTIONAL"
+        ]
+      }
+    ]
+  },
+  "sandbox_resources": {
+    "aes": {
+      "runtime": {
+        "exit_code": 0,
+        "stdout": "Python 3.12.3\nLinux e2b.local 6.1.158 #2 SMP PREEMPT_DYNAMIC Tue Feb 10 19:26:22 UTC 2026 x86_64 x86_64 x86_64 GNU/Linux\nArchitecture:                            x86_64\nCPU op-mode(s):                          32-bit, 64-bit\nAddress sizes:                           52 bits physical, 57 bits virtual\nByte Order:                              Little Endian\nCPU(s):                                  8\nOn-line CPU(s) list:                     0-7\nVendor ID:                               AuthenticAMD\nModel name:                              AMD EPYC\nCPU family:                              25\nModel:                                   17\nThread(s) per core:                      2\nCore(s) per socket:                      4\nSocket(s):                               1\nStepping:                                1\nBogoMIPS:                                5192.18\nFlags:                                   fpu vme de pse tsc msr pae mce cx8 apic sep mtrr pge mca cmov pat pse36 clflush mmx fxsr sse sse2 ht syscall nx mmxext fxsr_opt pdpe1gb rdtscp lm constant_tsc rep_good nopl nonstop_tsc cpuid tsc_known_freq pni pclmulqdq ssse3 fma cx16 pcid sse4_1 sse4_2 x2apic movbe popcnt tsc_deadline_timer aes xsave avx f16c rdrand hypervisor lahf_lm cmp_legacy svm cr8_legacy abm sse4a misalignsse 3dnowprefetch osvw topoext perfctr_core invpcid_single ssbd perfmon_v2 ibrs ibpb stibp ibrs_enhanced vmmcall fsgsbase tsc_adjust bmi1 avx2 smep bmi2 erms invpcid avx512f avx512dq rdseed adx smap avx512ifma clflushopt clwb avx512cd sha_ni avx512bw avx512vl xsaveopt xsavec xgetbv1 xsaves avx512_bf16 clzero xsaveerptr wbnoinvd arat npt lbrv nrip_save tsc_scale vmcb_clean flushbyasid pausefilter pfthreshold v_vmsave_vmload vgif avx512vbmi umip pku ospke avx512_vbmi2 gfni vaes vpclmulqdq avx512_vnni avx512_bitalg avx512_vpopcntdq rdpid fsrm flush_l1d\nVirtualization:                          AMD-V\nHypervisor vendor:                       KVM\nVirtualization type:                     full\nL1d cache:                               128 KiB (4 instances)\nL1i cache:                               128 KiB (4 instances)\nL2 cache:                                4 MiB (4 instances)\nL3 cache:                                32 MiB (1 instance)\nNUMA node(s):                            1\nNUMA node0 CPU(s):                       0-7\nVulnerability Gather data sampling:      Not affected\nVulnerability Indirect target selection: Not affected\nVulnerability Itlb multihit:             Not affected\nVulnerability L1tf:                      Not affected\nVulnerability Mds:                       Not affected\nVulnerability Meltdown:                  Not affected\nVulnerability Mmio stale data:           Not affected\nVulnerability Reg file data sampling:    Not affected\nVulnerability Retbleed:                  Not affected\nVulnerability Spec rstack overflow:      Mitigation; safe RET\nVulnerability Spec store bypass:         Mitigation; Speculative Store Bypass disabled via prctl\nVulnerability Spectre v1:                Mitigation; usercopy/swapgs barriers and __user pointer sanitization\nVulnerability Spectre v2:                Mitigation; Enhanced / Automatic IBRS; IBPB conditional; STIBP always-on; PBRSB-eIBRS Not affected; BHI Not affected\nVulnerability Srbds:                     Not affected\nVulnerability Tsa:                       Not affected\nVulnerability Tsx async abort:           Not affected\nVulnerability Vmscape:                   Not affected\n               total        used        free      shared  buff/cache   available\nMem:     16795004928   379498496 15535042560     1163264  1159081984 16415506432\nSwap:              0           0           0\nFilesystem       1B-blocks       Used   Available Use% Mounted on\n/dev/root      64484253696 1324429312 62874611712   3% /\n9eedbe284a9330f4269c1c1c557ae869f2d9c8472ae0610b3f7dc0f98b6b3fc4  binaries/baseline\n22228aebad6a44413ec8eb93828cd6a2ff3660b40e78ef15fa3f72e63d882aef  binaries/baseline-profile\nbf95389f331b53e91cc3942d3c32a38aa2dcdfcaa57a6d520e43ca7e944a2edd  binaries/candidate\neac4a2b0413e00db6a8d1fdba97c6defaab0097a4d44c7b8340788836c15e8c1  binaries/candidate-profile\n\tlinux-vdso.so.1 (0x00007ffff2eac000)\n\tlibpthread.so.0 => /lib/x86_64-linux-gnu/libpthread.so.0 (0x00007f9708921000)\n\tlibdl.so.2 => /lib/x86_64-linux-gnu/libdl.so.2 (0x00007f970891c000)\n\tlibm.so.6 => /lib/x86_64-linux-gnu/libm.so.6 (0x00007f9708833000)\n\tlibc.so.6 => /lib/x86_64-linux-gnu/libc.so.6 (0x00007f9708600000)\n\t/lib64/ld-linux-x86-64.so.2 (0x00007f970892b000)\n\tlinux-vdso.so.1 (0x00007ffd5cd8f000)\n\tlibpthread.so.0 => /lib/x86_64-linux-gnu/libpthread.so.0 (0x00007f787960a000)\n\tlibdl.so.2 => /lib/x86_64-linux-gnu/libdl.so.2 (0x00007f7879605000)\n\tlibm.so.6 => /lib/x86_64-linux-gnu/libm.so.6 (0x00007f787951c000)\n\tlibc.so.6 => /lib/x86_64-linux-gnu/libc.so.6 (0x00007f7879200000)\n\t/lib64/ld-linux-x86-64.so.2 (0x00007f7879614000)\nbazel-nostamp \nbazel-nostamp \n/workspace/openroad-soa-profile/chunks/00000: OK\n/workspace/openroad-soa-profile/chunks/00001: OK\n/workspace/openroad-soa-profile/chunks/00002: OK\n/workspace/openroad-soa-profile/chunks/00003: OK\n/workspace/openroad-soa-profile/chunks/00004: OK\n/workspace/openroad-soa-profile/chunks/00005: OK\n/workspace/openroad-soa-profile/chunks/00006: OK\n/workspace/openroad-soa-profile/chunks/00007: OK\n/workspace/openroad-soa-profile/chunks/00008: OK\n/workspace/openroad-soa-profile/chunks/00009: OK\n/workspace/openroad-soa-profile/chunks/00010: OK\n/workspace/openroad-soa-profile/chunks/00011: OK\n/workspace/openroad-soa-profile/chunks/00012: OK\n/workspace/openroad-soa-profile/chunks/00013: OK\n/workspace/openroad-soa-profile/chunks/00014: OK\n/workspace/openroad-soa-profile/chunks/00015: OK\n/workspace/openroad-soa-profile/chunks/00016: OK\n/workspace/openroad-soa-profile/chunks/00017: OK\n/workspace/openroad-soa-profile/chunks/00018: OK\n/workspace/openroad-soa-profile/chunks/00019: OK\n/workspace/openroad-soa-profile/chunks/00020: OK\n/workspace/openroad-soa-profile/chunks/00021: OK\n/workspace/openroad-soa-profile/chunks/00022: OK\n/workspace/openroad-soa-profile/chunks/00023: OK\n/workspace/openroad-soa-profile/chunks/00024: OK\n/workspace/openroad-soa-profile/chunks/00025: OK\n/workspace/openroad-soa-profile/chunks/00026: OK\n/workspace/openroad-soa-profile/chunks/00027: OK\n/workspace/openroad-soa-profile/chunks/00028: OK\n/workspace/openroad-soa-profile/chunks/00029: OK\n/workspace/openroad-soa-profile/chunks/00030: OK\n/workspace/openroad-soa-profile/chunks/00031: OK\n/workspace/openroad-soa-profile/chunks/00032: OK\n/workspace/openroad-soa-profile/chunks/00033: OK\n/workspace/openroad-soa-profile/chunks/00034: OK\n/workspace/openroad-soa-profile/chunks/00035: OK\n/workspace/openroad-soa-profile/chunks/00036: OK\n/workspace/openroad-soa-profile/chunks/00037: OK\n/workspace/openroad-soa-profile/chunks/00038: OK\n/workspace/openroad-soa-profile/chunks/00039: OK\n/workspace/openroad-soa-profile/chunks/00040: OK\n/workspace/openroad-soa-profile/chunks/00041: OK\n/workspace/openroad-soa-profile/chunks/00042: OK\n/workspace/openroad-soa-profile/chunks/00043: OK\n/workspace/openroad-soa-profile/chunks/00044: OK\n/workspace/openroad-soa-profile/chunks/00045: OK\n/workspace/openroad-soa-profile/chunks/00046: OK\n/workspace/openroad-soa-profile/chunks/00047: OK\n/workspace/openroad-soa-profile/chunks/00048: OK\n/workspace/openroad-soa-profile/chunks/00049: OK\n/workspace/openroad-soa-profile/chunks/00050: OK\n/workspace/openroad-soa-profile/chunks/00051: OK\n/workspace/openroad-soa-profile/chunks/00052: OK\n/workspace/openroad-soa-profile/chunks/00053: OK\n/workspace/openroad-soa-profile/chunks/00054: OK\n/workspace/openroad-soa-profile/chunks/00055: OK\n/workspace/openroad-soa-profile/chunks/00056: OK\n/workspace/openroad-soa-profile/chunks/00057: OK\n/workspace/openroad-soa-profile/chunks/00058: OK\n/workspace/openroad-soa-profile/chunks/00059: OK\n/workspace/openroad-soa-profile/chunks/00060: OK\n/workspace/openroad-soa-profile/chunks/00061: OK\n/workspace/openroad-soa-profile/chunks/00062: OK\n/workspace/openroad-soa-profile/chunks/00063: OK\n/workspace/openroad-soa-profile/chunks/00064: OK\n/workspace/openroad-soa-profile/chunks/00065: OK\n/workspace/openroad-soa-profile/chunks/00066: OK\n/workspace/openroad-soa-profile/chunks/00067: OK\n/workspace/openroad-soa-profile/chunks/00068: OK\n/workspace/openroad-soa-profile/chunks/00069: OK\n/workspace/openroad-soa-profile/chunks/00070: OK\n/workspace/openroad-soa-profile/chunks/00071: OK\n/workspace/openroad-soa-profile/chunks/00072: OK\n/workspace/openroad-soa-profile/chunks/00073: OK\n/workspace/openroad-soa-profile/chunks/00074: OK\n/workspace/openroad-soa-profile/chunks/00075: OK\n/workspace/openroad-soa-profile/chunks/00076: OK\n/workspace/openroad-soa-profile/chunks/00077: OK\n/workspace/openroad-soa-profile/chunks/00078: OK\n/workspace/openroad-soa-profile/chunks/00079: OK\n/workspace/openroad-soa-profile/chunks/00080: OK\n/workspace/openroad-soa-profile/chunks/00081: OK\n/workspace/openroad-soa-profile/chunks/00082: OK\n/workspace/openroad-soa-profile/chunks/00083: OK\n/workspace/openroad-soa-profile/chunks/00084: OK\n/workspace/openroad-soa-profile/chunks/00085: OK\n/workspace/openroad-soa-profile/chunks/00086: OK\n/workspace/openroad-soa-profile/chunks/00087: OK\n/workspace/openroad-soa-profile/chunks/00088: OK\n/workspace/openroad-soa-profile/chunks/00089: OK\n/workspace/openroad-soa-profile/chunks/00090: OK\n/workspace/openroad-soa-profile/chunks/00091: OK\n/workspace/openroad-soa-profile/chunks/00092: OK\n/workspace/openroad-soa-profile/chunks/00093: OK\n/workspace/openroad-soa-profile/chunks/00094: OK\n/workspace/openroad-soa-profile/chunks/00095: OK\n/workspace/openroad-soa-profile/chunks/00096: OK\n/workspace/openroad-soa-profile/chunks/00097: OK\n/workspace/openroad-soa-profile/chunks/00098: OK\n/workspace/openroad-soa-profile/chunks/00099: OK\n/workspace/openroad-soa-profile/chunks/00100: OK\n/workspace/openroad-soa-profile/chunks/00101: OK\n/workspace/openroad-soa-profile/chunks/00102: OK\n/workspace/openroad-soa-profile/chunks/00103: OK\n/workspace/openroad-soa-profile/chunks/00104: OK\n/workspace/openroad-soa-profile/chunks/00105: OK\n/workspace/openroad-soa-profile/chunks/00106: OK\n/workspace/openroad-soa-profile/chunks/00107: OK\n/workspace/openroad-soa-profile/chunks/00108: OK\n/workspace/openroad-soa-profile/chunks/00109: OK\n/workspace/openroad-soa-profile/chunks/00110: OK\n/workspace/openroad-soa-profile/chunks/00111: OK\n/workspace/openroad-soa-profile/chunks/00112: OK\n/workspace/openroad-soa-profile/chunks/00113: OK\n/workspace/openroad-soa-profile/chunks/00114: OK\n/workspace/openroad-soa-profile/chunks/00115: OK\n/workspace/openroad-soa-profile/chunks/00116: OK\n/workspace/openroad-soa-profile/chunks/00117: OK\n/workspace/openroad-soa-profile/chunks/00118: OK\n/workspace/openroad-soa-profile/chunks/00119: OK\n/workspace/openroad-soa-profile/chunks/00120: OK\n/workspace/openroad-soa-profile/chunks/00121: OK\n/workspace/openroad-soa-profile/chunks/00122: OK\n/workspace/openroad-soa-profile/chunks/00123: OK\n/workspace/openroad-soa-profile/chunks/00124: OK\n/workspace/openroad-soa-profile/chunks/00125: OK\n/workspace/openroad-soa-profile/chunks/00126: OK\n/workspace/openroad-soa-profile/chunks/00127: OK\n/workspace/openroad-soa-profile/chunks/00128: OK\n/workspace/openroad-soa-profile/chunks/00129: OK\n/workspace/openroad-soa-profile/chunks/00130: OK\n/workspace/openroad-soa-profile/chunks/00131: OK\n/workspace/openroad-soa-profile/chunks/00132: OK\n/workspace/openroad-soa-profile/chunks/00133: OK\n/workspace/openroad-soa-profile/chunks/00134: OK\n/workspace/openroad-soa-profile/chunks/00135: OK\n/workspace/openroad-soa-profile/chunks/00136: OK\n/workspace/openroad-soa-profile/chunks/00137: OK\n/workspace/openroad-soa-profile/chunks/00138: OK\n/workspace/openroad-soa-profile/chunks/00139: OK\n/workspace/openroad-soa-profile/chunks/00140: OK\n/workspace/openroad-soa-profile/chunks/00141: OK\n",
+        "stderr": ""
+      },
+      "probe": {
+        "platform": "Linux-6.1.158-x86_64-with-glibc2.39",
+        "machine": "x86_64",
+        "uid": 0,
+        "affinity": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7
+        ],
+        "/proc/sys/kernel/perf_event_paranoid": "2",
+        "/proc/sys/kernel/kptr_restrict": "1",
+        "process_security": [
+          "CapInh:\t0000000000000000",
+          "CapPrm:\t000001ffffffffff",
+          "CapEff:\t000001ffffffffff",
+          "CapBnd:\t000001ffffffffff",
+          "CapAmb:\t0000000000000000",
+          "NoNewPrivs:\t0",
+          "Seccomp:\t0",
+          "Seccomp_filters:\t0"
+        ],
+        "perf_event_open": {
+          "cpu-clock": {
+            "opened": true,
+            "errno": 0,
+            "error": null
+          },
+          "task-clock": {
+            "opened": true,
+            "errno": 0,
+            "error": null
+          },
+          "cycles": {
+            "opened": true,
+            "errno": 0,
+            "error": null
+          },
+          "instructions": {
+            "opened": true,
+            "errno": 0,
+            "error": null
+          }
+        },
+        "perf_binary": null,
+        "cc": null,
+        "clang": null,
+        "gcc": null,
+        "readelf": null,
+        "nm": null,
+        "addr2line": null,
+        "llvm-symbolizer": null,
+        "ldconfig": "/usr/sbin/ldconfig",
+        "unwind_libraries": [],
+        "unwind_docs": []
+      },
+      "upload_chunks": 142,
+      "input_verification_policy": "Each chunk passed sha256sum -c (142 OK rows preserved); concatenated bundle expected SHA checked before extraction by prepare command. Original successful whole-bundle command output was not separately persisted because the subsequent optional perf availability command exited nonzero; extraction was conditional on full-bundle check."
+    },
+    "large01": {
+      "runtime": {
+        "exit_code": 0,
+        "stdout": "Python 3.12.3\nLinux e2b.local 6.1.158 #2 SMP PREEMPT_DYNAMIC Tue Feb 10 19:26:22 UTC 2026 x86_64 x86_64 x86_64 GNU/Linux\nArchitecture:                            x86_64\nCPU op-mode(s):                          32-bit, 64-bit\nAddress sizes:                           52 bits physical, 57 bits virtual\nByte Order:                              Little Endian\nCPU(s):                                  8\nOn-line CPU(s) list:                     0-7\nVendor ID:                               AuthenticAMD\nModel name:                              AMD EPYC\nCPU family:                              25\nModel:                                   17\nThread(s) per core:                      2\nCore(s) per socket:                      4\nSocket(s):                               1\nStepping:                                1\nBogoMIPS:                                5192.18\nFlags:                                   fpu vme de pse tsc msr pae mce cx8 apic sep mtrr pge mca cmov pat pse36 clflush mmx fxsr sse sse2 ht syscall nx mmxext fxsr_opt pdpe1gb rdtscp lm constant_tsc rep_good nopl nonstop_tsc cpuid tsc_known_freq pni pclmulqdq ssse3 fma cx16 pcid sse4_1 sse4_2 x2apic movbe popcnt tsc_deadline_timer aes xsave avx f16c rdrand hypervisor lahf_lm cmp_legacy svm cr8_legacy abm sse4a misalignsse 3dnowprefetch osvw topoext perfctr_core invpcid_single ssbd perfmon_v2 ibrs ibpb stibp ibrs_enhanced vmmcall fsgsbase tsc_adjust bmi1 avx2 smep bmi2 erms invpcid avx512f avx512dq rdseed adx smap avx512ifma clflushopt clwb avx512cd sha_ni avx512bw avx512vl xsaveopt xsavec xgetbv1 xsaves avx512_bf16 clzero xsaveerptr wbnoinvd arat npt lbrv nrip_save tsc_scale vmcb_clean flushbyasid pausefilter pfthreshold v_vmsave_vmload vgif avx512vbmi umip pku ospke avx512_vbmi2 gfni vaes vpclmulqdq avx512_vnni avx512_bitalg avx512_vpopcntdq rdpid fsrm flush_l1d\nVirtualization:                          AMD-V\nHypervisor vendor:                       KVM\nVirtualization type:                     full\nL1d cache:                               128 KiB (4 instances)\nL1i cache:                               128 KiB (4 instances)\nL2 cache:                                4 MiB (4 instances)\nL3 cache:                                32 MiB (1 instance)\nNUMA node(s):                            1\nNUMA node0 CPU(s):                       0-7\nVulnerability Gather data sampling:      Not affected\nVulnerability Indirect target selection: Not affected\nVulnerability Itlb multihit:             Not affected\nVulnerability L1tf:                      Not affected\nVulnerability Mds:                       Not affected\nVulnerability Meltdown:                  Not affected\nVulnerability Mmio stale data:           Not affected\nVulnerability Reg file data sampling:    Not affected\nVulnerability Retbleed:                  Not affected\nVulnerability Spec rstack overflow:      Mitigation; safe RET\nVulnerability Spec store bypass:         Mitigation; Speculative Store Bypass disabled via prctl\nVulnerability Spectre v1:                Mitigation; usercopy/swapgs barriers and __user pointer sanitization\nVulnerability Spectre v2:                Mitigation; Enhanced / Automatic IBRS; IBPB conditional; STIBP always-on; PBRSB-eIBRS Not affected; BHI Not affected\nVulnerability Srbds:                     Not affected\nVulnerability Tsa:                       Not affected\nVulnerability Tsx async abort:           Not affected\nVulnerability Vmscape:                   Not affected\n               total        used        free      shared  buff/cache   available\nMem:     16795004928   369221632 15545384960     1163264  1158987776 16425783296\nSwap:              0           0           0\nFilesystem       1B-blocks       Used   Available Use% Mounted on\n/dev/root      64484253696 1324429312 62874611712   3% /\n9eedbe284a9330f4269c1c1c557ae869f2d9c8472ae0610b3f7dc0f98b6b3fc4  binaries/baseline\n22228aebad6a44413ec8eb93828cd6a2ff3660b40e78ef15fa3f72e63d882aef  binaries/baseline-profile\nbf95389f331b53e91cc3942d3c32a38aa2dcdfcaa57a6d520e43ca7e944a2edd  binaries/candidate\neac4a2b0413e00db6a8d1fdba97c6defaab0097a4d44c7b8340788836c15e8c1  binaries/candidate-profile\n\tlinux-vdso.so.1 (0x00007ffec8364000)\n\tlibpthread.so.0 => /lib/x86_64-linux-gnu/libpthread.so.0 (0x00007f4ae2ecf000)\n\tlibdl.so.2 => /lib/x86_64-linux-gnu/libdl.so.2 (0x00007f4ae2eca000)\n\tlibm.so.6 => /lib/x86_64-linux-gnu/libm.so.6 (0x00007f4ae2de1000)\n\tlibc.so.6 => /lib/x86_64-linux-gnu/libc.so.6 (0x00007f4ae2a00000)\n\t/lib64/ld-linux-x86-64.so.2 (0x00007f4ae2ed9000)\n\tlinux-vdso.so.1 (0x00007fff455f3000)\n\tlibpthread.so.0 => /lib/x86_64-linux-gnu/libpthread.so.0 (0x00007fbe8d763000)\n\tlibdl.so.2 => /lib/x86_64-linux-gnu/libdl.so.2 (0x00007fbe8d75e000)\n\tlibm.so.6 => /lib/x86_64-linux-gnu/libm.so.6 (0x00007fbe8d675000)\n\tlibc.so.6 => /lib/x86_64-linux-gnu/libc.so.6 (0x00007fbe8d400000)\n\t/lib64/ld-linux-x86-64.so.2 (0x00007fbe8d76d000)\nbazel-nostamp \nbazel-nostamp \n/workspace/openroad-soa-profile/chunks/00000: OK\n/workspace/openroad-soa-profile/chunks/00001: OK\n/workspace/openroad-soa-profile/chunks/00002: OK\n/workspace/openroad-soa-profile/chunks/00003: OK\n/workspace/openroad-soa-profile/chunks/00004: OK\n/workspace/openroad-soa-profile/chunks/00005: OK\n/workspace/openroad-soa-profile/chunks/00006: OK\n/workspace/openroad-soa-profile/chunks/00007: OK\n/workspace/openroad-soa-profile/chunks/00008: OK\n/workspace/openroad-soa-profile/chunks/00009: OK\n/workspace/openroad-soa-profile/chunks/00010: OK\n/workspace/openroad-soa-profile/chunks/00011: OK\n/workspace/openroad-soa-profile/chunks/00012: OK\n/workspace/openroad-soa-profile/chunks/00013: OK\n/workspace/openroad-soa-profile/chunks/00014: OK\n/workspace/openroad-soa-profile/chunks/00015: OK\n/workspace/openroad-soa-profile/chunks/00016: OK\n/workspace/openroad-soa-profile/chunks/00017: OK\n/workspace/openroad-soa-profile/chunks/00018: OK\n/workspace/openroad-soa-profile/chunks/00019: OK\n/workspace/openroad-soa-profile/chunks/00020: OK\n/workspace/openroad-soa-profile/chunks/00021: OK\n/workspace/openroad-soa-profile/chunks/00022: OK\n/workspace/openroad-soa-profile/chunks/00023: OK\n/workspace/openroad-soa-profile/chunks/00024: OK\n/workspace/openroad-soa-profile/chunks/00025: OK\n/workspace/openroad-soa-profile/chunks/00026: OK\n/workspace/openroad-soa-profile/chunks/00027: OK\n/workspace/openroad-soa-profile/chunks/00028: OK\n/workspace/openroad-soa-profile/chunks/00029: OK\n/workspace/openroad-soa-profile/chunks/00030: OK\n/workspace/openroad-soa-profile/chunks/00031: OK\n/workspace/openroad-soa-profile/chunks/00032: OK\n/workspace/openroad-soa-profile/chunks/00033: OK\n/workspace/openroad-soa-profile/chunks/00034: OK\n/workspace/openroad-soa-profile/chunks/00035: OK\n/workspace/openroad-soa-profile/chunks/00036: OK\n/workspace/openroad-soa-profile/chunks/00037: OK\n/workspace/openroad-soa-profile/chunks/00038: OK\n/workspace/openroad-soa-profile/chunks/00039: OK\n/workspace/openroad-soa-profile/chunks/00040: OK\n/workspace/openroad-soa-profile/chunks/00041: OK\n/workspace/openroad-soa-profile/chunks/00042: OK\n/workspace/openroad-soa-profile/chunks/00043: OK\n/workspace/openroad-soa-profile/chunks/00044: OK\n/workspace/openroad-soa-profile/chunks/00045: OK\n/workspace/openroad-soa-profile/chunks/00046: OK\n/workspace/openroad-soa-profile/chunks/00047: OK\n/workspace/openroad-soa-profile/chunks/00048: OK\n/workspace/openroad-soa-profile/chunks/00049: OK\n/workspace/openroad-soa-profile/chunks/00050: OK\n/workspace/openroad-soa-profile/chunks/00051: OK\n/workspace/openroad-soa-profile/chunks/00052: OK\n/workspace/openroad-soa-profile/chunks/00053: OK\n/workspace/openroad-soa-profile/chunks/00054: OK\n/workspace/openroad-soa-profile/chunks/00055: OK\n/workspace/openroad-soa-profile/chunks/00056: OK\n/workspace/openroad-soa-profile/chunks/00057: OK\n/workspace/openroad-soa-profile/chunks/00058: OK\n/workspace/openroad-soa-profile/chunks/00059: OK\n/workspace/openroad-soa-profile/chunks/00060: OK\n/workspace/openroad-soa-profile/chunks/00061: OK\n/workspace/openroad-soa-profile/chunks/00062: OK\n/workspace/openroad-soa-profile/chunks/00063: OK\n/workspace/openroad-soa-profile/chunks/00064: OK\n/workspace/openroad-soa-profile/chunks/00065: OK\n/workspace/openroad-soa-profile/chunks/00066: OK\n/workspace/openroad-soa-profile/chunks/00067: OK\n/workspace/openroad-soa-profile/chunks/00068: OK\n/workspace/openroad-soa-profile/chunks/00069: OK\n/workspace/openroad-soa-profile/chunks/00070: OK\n/workspace/openroad-soa-profile/chunks/00071: OK\n/workspace/openroad-soa-profile/chunks/00072: OK\n/workspace/openroad-soa-profile/chunks/00073: OK\n/workspace/openroad-soa-profile/chunks/00074: OK\n/workspace/openroad-soa-profile/chunks/00075: OK\n/workspace/openroad-soa-profile/chunks/00076: OK\n/workspace/openroad-soa-profile/chunks/00077: OK\n/workspace/openroad-soa-profile/chunks/00078: OK\n/workspace/openroad-soa-profile/chunks/00079: OK\n/workspace/openroad-soa-profile/chunks/00080: OK\n/workspace/openroad-soa-profile/chunks/00081: OK\n/workspace/openroad-soa-profile/chunks/00082: OK\n/workspace/openroad-soa-profile/chunks/00083: OK\n/workspace/openroad-soa-profile/chunks/00084: OK\n/workspace/openroad-soa-profile/chunks/00085: OK\n/workspace/openroad-soa-profile/chunks/00086: OK\n/workspace/openroad-soa-profile/chunks/00087: OK\n/workspace/openroad-soa-profile/chunks/00088: OK\n/workspace/openroad-soa-profile/chunks/00089: OK\n/workspace/openroad-soa-profile/chunks/00090: OK\n/workspace/openroad-soa-profile/chunks/00091: OK\n/workspace/openroad-soa-profile/chunks/00092: OK\n/workspace/openroad-soa-profile/chunks/00093: OK\n/workspace/openroad-soa-profile/chunks/00094: OK\n/workspace/openroad-soa-profile/chunks/00095: OK\n/workspace/openroad-soa-profile/chunks/00096: OK\n/workspace/openroad-soa-profile/chunks/00097: OK\n/workspace/openroad-soa-profile/chunks/00098: OK\n/workspace/openroad-soa-profile/chunks/00099: OK\n/workspace/openroad-soa-profile/chunks/00100: OK\n/workspace/openroad-soa-profile/chunks/00101: OK\n/workspace/openroad-soa-profile/chunks/00102: OK\n/workspace/openroad-soa-profile/chunks/00103: OK\n/workspace/openroad-soa-profile/chunks/00104: OK\n/workspace/openroad-soa-profile/chunks/00105: OK\n/workspace/openroad-soa-profile/chunks/00106: OK\n/workspace/openroad-soa-profile/chunks/00107: OK\n/workspace/openroad-soa-profile/chunks/00108: OK\n/workspace/openroad-soa-profile/chunks/00109: OK\n/workspace/openroad-soa-profile/chunks/00110: OK\n/workspace/openroad-soa-profile/chunks/00111: OK\n/workspace/openroad-soa-profile/chunks/00112: OK\n/workspace/openroad-soa-profile/chunks/00113: OK\n/workspace/openroad-soa-profile/chunks/00114: OK\n/workspace/openroad-soa-profile/chunks/00115: OK\n/workspace/openroad-soa-profile/chunks/00116: OK\n/workspace/openroad-soa-profile/chunks/00117: OK\n/workspace/openroad-soa-profile/chunks/00118: OK\n/workspace/openroad-soa-profile/chunks/00119: OK\n/workspace/openroad-soa-profile/chunks/00120: OK\n/workspace/openroad-soa-profile/chunks/00121: OK\n/workspace/openroad-soa-profile/chunks/00122: OK\n/workspace/openroad-soa-profile/chunks/00123: OK\n/workspace/openroad-soa-profile/chunks/00124: OK\n/workspace/openroad-soa-profile/chunks/00125: OK\n/workspace/openroad-soa-profile/chunks/00126: OK\n/workspace/openroad-soa-profile/chunks/00127: OK\n/workspace/openroad-soa-profile/chunks/00128: OK\n/workspace/openroad-soa-profile/chunks/00129: OK\n/workspace/openroad-soa-profile/chunks/00130: OK\n/workspace/openroad-soa-profile/chunks/00131: OK\n/workspace/openroad-soa-profile/chunks/00132: OK\n/workspace/openroad-soa-profile/chunks/00133: OK\n/workspace/openroad-soa-profile/chunks/00134: OK\n/workspace/openroad-soa-profile/chunks/00135: OK\n/workspace/openroad-soa-profile/chunks/00136: OK\n/workspace/openroad-soa-profile/chunks/00137: OK\n/workspace/openroad-soa-profile/chunks/00138: OK\n/workspace/openroad-soa-profile/chunks/00139: OK\n/workspace/openroad-soa-profile/chunks/00140: OK\n/workspace/openroad-soa-profile/chunks/00141: OK\n",
+        "stderr": ""
+      },
+      "probe": {
+        "platform": "Linux-6.1.158-x86_64-with-glibc2.39",
+        "machine": "x86_64",
+        "uid": 0,
+        "affinity": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7
+        ],
+        "/proc/sys/kernel/perf_event_paranoid": "2",
+        "/proc/sys/kernel/kptr_restrict": "1",
+        "process_security": [
+          "CapInh:\t0000000000000000",
+          "CapPrm:\t000001ffffffffff",
+          "CapEff:\t000001ffffffffff",
+          "CapBnd:\t000001ffffffffff",
+          "CapAmb:\t0000000000000000",
+          "NoNewPrivs:\t0",
+          "Seccomp:\t0",
+          "Seccomp_filters:\t0"
+        ],
+        "perf_event_open": {
+          "cpu-clock": {
+            "opened": true,
+            "errno": 0,
+            "error": null
+          },
+          "task-clock": {
+            "opened": true,
+            "errno": 0,
+            "error": null
+          },
+          "cycles": {
+            "opened": true,
+            "errno": 0,
+            "error": null
+          },
+          "instructions": {
+            "opened": true,
+            "errno": 0,
+            "error": null
+          }
+        },
+        "perf_binary": null,
+        "cc": null,
+        "clang": null,
+        "gcc": null,
+        "readelf": null,
+        "nm": null,
+        "addr2line": null,
+        "llvm-symbolizer": null,
+        "ldconfig": "/usr/sbin/ldconfig",
+        "unwind_libraries": [],
+        "unwind_docs": []
+      },
+      "upload_chunks": 142,
+      "input_verification_policy": "Each chunk passed sha256sum -c (142 OK rows preserved); concatenated bundle expected SHA checked before extraction by prepare command. Original successful whole-bundle command output was not separately persisted because the subsequent optional perf availability command exited nonzero; extraction was conditional on full-bundle check."
+    },
+    "large02": {
+      "runtime": {
+        "exit_code": 0,
+        "stdout": "Python 3.12.3\nLinux e2b.local 6.1.158 #2 SMP PREEMPT_DYNAMIC Tue Feb 10 19:26:22 UTC 2026 x86_64 x86_64 x86_64 GNU/Linux\nArchitecture:                            x86_64\nCPU op-mode(s):                          32-bit, 64-bit\nAddress sizes:                           52 bits physical, 57 bits virtual\nByte Order:                              Little Endian\nCPU(s):                                  8\nOn-line CPU(s) list:                     0-7\nVendor ID:                               AuthenticAMD\nModel name:                              AMD EPYC\nCPU family:                              25\nModel:                                   17\nThread(s) per core:                      2\nCore(s) per socket:                      4\nSocket(s):                               1\nStepping:                                1\nBogoMIPS:                                5192.18\nFlags:                                   fpu vme de pse tsc msr pae mce cx8 apic sep mtrr pge mca cmov pat pse36 clflush mmx fxsr sse sse2 ht syscall nx mmxext fxsr_opt pdpe1gb rdtscp lm constant_tsc rep_good nopl nonstop_tsc cpuid tsc_known_freq pni pclmulqdq ssse3 fma cx16 pcid sse4_1 sse4_2 x2apic movbe popcnt tsc_deadline_timer aes xsave avx f16c rdrand hypervisor lahf_lm cmp_legacy svm cr8_legacy abm sse4a misalignsse 3dnowprefetch osvw topoext perfctr_core invpcid_single ssbd perfmon_v2 ibrs ibpb stibp ibrs_enhanced vmmcall fsgsbase tsc_adjust bmi1 avx2 smep bmi2 erms invpcid avx512f avx512dq rdseed adx smap avx512ifma clflushopt clwb avx512cd sha_ni avx512bw avx512vl xsaveopt xsavec xgetbv1 xsaves avx512_bf16 clzero xsaveerptr wbnoinvd arat npt lbrv nrip_save tsc_scale vmcb_clean flushbyasid pausefilter pfthreshold v_vmsave_vmload vgif avx512vbmi umip pku ospke avx512_vbmi2 gfni vaes vpclmulqdq avx512_vnni avx512_bitalg avx512_vpopcntdq rdpid fsrm flush_l1d\nVirtualization:                          AMD-V\nHypervisor vendor:                       KVM\nVirtualization type:                     full\nL1d cache:                               128 KiB (4 instances)\nL1i cache:                               128 KiB (4 instances)\nL2 cache:                                4 MiB (4 instances)\nL3 cache:                                32 MiB (1 instance)\nNUMA node(s):                            1\nNUMA node0 CPU(s):                       0-7\nVulnerability Gather data sampling:      Not affected\nVulnerability Indirect target selection: Not affected\nVulnerability Itlb multihit:             Not affected\nVulnerability L1tf:                      Not affected\nVulnerability Mds:                       Not affected\nVulnerability Meltdown:                  Not affected\nVulnerability Mmio stale data:           Not affected\nVulnerability Reg file data sampling:    Not affected\nVulnerability Retbleed:                  Not affected\nVulnerability Spec rstack overflow:      Mitigation; safe RET\nVulnerability Spec store bypass:         Mitigation; Speculative Store Bypass disabled via prctl\nVulnerability Spectre v1:                Mitigation; usercopy/swapgs barriers and __user pointer sanitization\nVulnerability Spectre v2:                Mitigation; Enhanced / Automatic IBRS; IBPB conditional; STIBP always-on; PBRSB-eIBRS Not affected; BHI Not affected\nVulnerability Srbds:                     Not affected\nVulnerability Tsa:                       Not affected\nVulnerability Tsx async abort:           Not affected\nVulnerability Vmscape:                   Not affected\n               total        used        free      shared  buff/cache   available\nMem:     16795004928   384925696 15529140224     1163264  1159585792 16410079232\nSwap:              0           0           0\nFilesystem       1B-blocks       Used   Available Use% Mounted on\n/dev/root      64484253696 1324818432 62874222592   3% /\n9eedbe284a9330f4269c1c1c557ae869f2d9c8472ae0610b3f7dc0f98b6b3fc4  binaries/baseline\n22228aebad6a44413ec8eb93828cd6a2ff3660b40e78ef15fa3f72e63d882aef  binaries/baseline-profile\nbf95389f331b53e91cc3942d3c32a38aa2dcdfcaa57a6d520e43ca7e944a2edd  binaries/candidate\neac4a2b0413e00db6a8d1fdba97c6defaab0097a4d44c7b8340788836c15e8c1  binaries/candidate-profile\n\tlinux-vdso.so.1 (0x00007ffcd37d7000)\n\tlibpthread.so.0 => /lib/x86_64-linux-gnu/libpthread.so.0 (0x00007f0e6c1f5000)\n\tlibdl.so.2 => /lib/x86_64-linux-gnu/libdl.so.2 (0x00007f0e6c1f0000)\n\tlibm.so.6 => /lib/x86_64-linux-gnu/libm.so.6 (0x00007f0e6c107000)\n\tlibc.so.6 => /lib/x86_64-linux-gnu/libc.so.6 (0x00007f0e6be00000)\n\t/lib64/ld-linux-x86-64.so.2 (0x00007f0e6c1ff000)\n\tlinux-vdso.so.1 (0x00007fff78fc9000)\n\tlibpthread.so.0 => /lib/x86_64-linux-gnu/libpthread.so.0 (0x00007f5d4b747000)\n\tlibdl.so.2 => /lib/x86_64-linux-gnu/libdl.so.2 (0x00007f5d4b742000)\n\tlibm.so.6 => /lib/x86_64-linux-gnu/libm.so.6 (0x00007f5d4b659000)\n\tlibc.so.6 => /lib/x86_64-linux-gnu/libc.so.6 (0x00007f5d4b400000)\n\t/lib64/ld-linux-x86-64.so.2 (0x00007f5d4b751000)\nbazel-nostamp \nbazel-nostamp \n/workspace/openroad-soa-profile/chunks/00000: OK\n/workspace/openroad-soa-profile/chunks/00001: OK\n/workspace/openroad-soa-profile/chunks/00002: OK\n/workspace/openroad-soa-profile/chunks/00003: OK\n/workspace/openroad-soa-profile/chunks/00004: OK\n/workspace/openroad-soa-profile/chunks/00005: OK\n/workspace/openroad-soa-profile/chunks/00006: OK\n/workspace/openroad-soa-profile/chunks/00007: OK\n/workspace/openroad-soa-profile/chunks/00008: OK\n/workspace/openroad-soa-profile/chunks/00009: OK\n/workspace/openroad-soa-profile/chunks/00010: OK\n/workspace/openroad-soa-profile/chunks/00011: OK\n/workspace/openroad-soa-profile/chunks/00012: OK\n/workspace/openroad-soa-profile/chunks/00013: OK\n/workspace/openroad-soa-profile/chunks/00014: OK\n/workspace/openroad-soa-profile/chunks/00015: OK\n/workspace/openroad-soa-profile/chunks/00016: OK\n/workspace/openroad-soa-profile/chunks/00017: OK\n/workspace/openroad-soa-profile/chunks/00018: OK\n/workspace/openroad-soa-profile/chunks/00019: OK\n/workspace/openroad-soa-profile/chunks/00020: OK\n/workspace/openroad-soa-profile/chunks/00021: OK\n/workspace/openroad-soa-profile/chunks/00022: OK\n/workspace/openroad-soa-profile/chunks/00023: OK\n/workspace/openroad-soa-profile/chunks/00024: OK\n/workspace/openroad-soa-profile/chunks/00025: OK\n/workspace/openroad-soa-profile/chunks/00026: OK\n/workspace/openroad-soa-profile/chunks/00027: OK\n/workspace/openroad-soa-profile/chunks/00028: OK\n/workspace/openroad-soa-profile/chunks/00029: OK\n/workspace/openroad-soa-profile/chunks/00030: OK\n/workspace/openroad-soa-profile/chunks/00031: OK\n/workspace/openroad-soa-profile/chunks/00032: OK\n/workspace/openroad-soa-profile/chunks/00033: OK\n/workspace/openroad-soa-profile/chunks/00034: OK\n/workspace/openroad-soa-profile/chunks/00035: OK\n/workspace/openroad-soa-profile/chunks/00036: OK\n/workspace/openroad-soa-profile/chunks/00037: OK\n/workspace/openroad-soa-profile/chunks/00038: OK\n/workspace/openroad-soa-profile/chunks/00039: OK\n/workspace/openroad-soa-profile/chunks/00040: OK\n/workspace/openroad-soa-profile/chunks/00041: OK\n/workspace/openroad-soa-profile/chunks/00042: OK\n/workspace/openroad-soa-profile/chunks/00043: OK\n/workspace/openroad-soa-profile/chunks/00044: OK\n/workspace/openroad-soa-profile/chunks/00045: OK\n/workspace/openroad-soa-profile/chunks/00046: OK\n/workspace/openroad-soa-profile/chunks/00047: OK\n/workspace/openroad-soa-profile/chunks/00048: OK\n/workspace/openroad-soa-profile/chunks/00049: OK\n/workspace/openroad-soa-profile/chunks/00050: OK\n/workspace/openroad-soa-profile/chunks/00051: OK\n/workspace/openroad-soa-profile/chunks/00052: OK\n/workspace/openroad-soa-profile/chunks/00053: OK\n/workspace/openroad-soa-profile/chunks/00054: OK\n/workspace/openroad-soa-profile/chunks/00055: OK\n/workspace/openroad-soa-profile/chunks/00056: OK\n/workspace/openroad-soa-profile/chunks/00057: OK\n/workspace/openroad-soa-profile/chunks/00058: OK\n/workspace/openroad-soa-profile/chunks/00059: OK\n/workspace/openroad-soa-profile/chunks/00060: OK\n/workspace/openroad-soa-profile/chunks/00061: OK\n/workspace/openroad-soa-profile/chunks/00062: OK\n/workspace/openroad-soa-profile/chunks/00063: OK\n/workspace/openroad-soa-profile/chunks/00064: OK\n/workspace/openroad-soa-profile/chunks/00065: OK\n/workspace/openroad-soa-profile/chunks/00066: OK\n/workspace/openroad-soa-profile/chunks/00067: OK\n/workspace/openroad-soa-profile/chunks/00068: OK\n/workspace/openroad-soa-profile/chunks/00069: OK\n/workspace/openroad-soa-profile/chunks/00070: OK\n/workspace/openroad-soa-profile/chunks/00071: OK\n/workspace/openroad-soa-profile/chunks/00072: OK\n/workspace/openroad-soa-profile/chunks/00073: OK\n/workspace/openroad-soa-profile/chunks/00074: OK\n/workspace/openroad-soa-profile/chunks/00075: OK\n/workspace/openroad-soa-profile/chunks/00076: OK\n/workspace/openroad-soa-profile/chunks/00077: OK\n/workspace/openroad-soa-profile/chunks/00078: OK\n/workspace/openroad-soa-profile/chunks/00079: OK\n/workspace/openroad-soa-profile/chunks/00080: OK\n/workspace/openroad-soa-profile/chunks/00081: OK\n/workspace/openroad-soa-profile/chunks/00082: OK\n/workspace/openroad-soa-profile/chunks/00083: OK\n/workspace/openroad-soa-profile/chunks/00084: OK\n/workspace/openroad-soa-profile/chunks/00085: OK\n/workspace/openroad-soa-profile/chunks/00086: OK\n/workspace/openroad-soa-profile/chunks/00087: OK\n/workspace/openroad-soa-profile/chunks/00088: OK\n/workspace/openroad-soa-profile/chunks/00089: OK\n/workspace/openroad-soa-profile/chunks/00090: OK\n/workspace/openroad-soa-profile/chunks/00091: OK\n/workspace/openroad-soa-profile/chunks/00092: OK\n/workspace/openroad-soa-profile/chunks/00093: OK\n/workspace/openroad-soa-profile/chunks/00094: OK\n/workspace/openroad-soa-profile/chunks/00095: OK\n/workspace/openroad-soa-profile/chunks/00096: OK\n/workspace/openroad-soa-profile/chunks/00097: OK\n/workspace/openroad-soa-profile/chunks/00098: OK\n/workspace/openroad-soa-profile/chunks/00099: OK\n/workspace/openroad-soa-profile/chunks/00100: OK\n/workspace/openroad-soa-profile/chunks/00101: OK\n/workspace/openroad-soa-profile/chunks/00102: OK\n/workspace/openroad-soa-profile/chunks/00103: OK\n/workspace/openroad-soa-profile/chunks/00104: OK\n/workspace/openroad-soa-profile/chunks/00105: OK\n/workspace/openroad-soa-profile/chunks/00106: OK\n/workspace/openroad-soa-profile/chunks/00107: OK\n/workspace/openroad-soa-profile/chunks/00108: OK\n/workspace/openroad-soa-profile/chunks/00109: OK\n/workspace/openroad-soa-profile/chunks/00110: OK\n/workspace/openroad-soa-profile/chunks/00111: OK\n/workspace/openroad-soa-profile/chunks/00112: OK\n/workspace/openroad-soa-profile/chunks/00113: OK\n/workspace/openroad-soa-profile/chunks/00114: OK\n/workspace/openroad-soa-profile/chunks/00115: OK\n/workspace/openroad-soa-profile/chunks/00116: OK\n/workspace/openroad-soa-profile/chunks/00117: OK\n/workspace/openroad-soa-profile/chunks/00118: OK\n/workspace/openroad-soa-profile/chunks/00119: OK\n/workspace/openroad-soa-profile/chunks/00120: OK\n/workspace/openroad-soa-profile/chunks/00121: OK\n/workspace/openroad-soa-profile/chunks/00122: OK\n/workspace/openroad-soa-profile/chunks/00123: OK\n/workspace/openroad-soa-profile/chunks/00124: OK\n/workspace/openroad-soa-profile/chunks/00125: OK\n/workspace/openroad-soa-profile/chunks/00126: OK\n/workspace/openroad-soa-profile/chunks/00127: OK\n/workspace/openroad-soa-profile/chunks/00128: OK\n/workspace/openroad-soa-profile/chunks/00129: OK\n/workspace/openroad-soa-profile/chunks/00130: OK\n/workspace/openroad-soa-profile/chunks/00131: OK\n/workspace/openroad-soa-profile/chunks/00132: OK\n/workspace/openroad-soa-profile/chunks/00133: OK\n/workspace/openroad-soa-profile/chunks/00134: OK\n/workspace/openroad-soa-profile/chunks/00135: OK\n/workspace/openroad-soa-profile/chunks/00136: OK\n/workspace/openroad-soa-profile/chunks/00137: OK\n/workspace/openroad-soa-profile/chunks/00138: OK\n/workspace/openroad-soa-profile/chunks/00139: OK\n/workspace/openroad-soa-profile/chunks/00140: OK\n/workspace/openroad-soa-profile/chunks/00141: OK\n",
+        "stderr": ""
+      },
+      "probe": {
+        "platform": "Linux-6.1.158-x86_64-with-glibc2.39",
+        "machine": "x86_64",
+        "uid": 0,
+        "affinity": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7
+        ],
+        "/proc/sys/kernel/perf_event_paranoid": "2",
+        "/proc/sys/kernel/kptr_restrict": "1",
+        "process_security": [
+          "CapInh:\t0000000000000000",
+          "CapPrm:\t000001ffffffffff",
+          "CapEff:\t000001ffffffffff",
+          "CapBnd:\t000001ffffffffff",
+          "CapAmb:\t0000000000000000",
+          "NoNewPrivs:\t0",
+          "Seccomp:\t0",
+          "Seccomp_filters:\t0"
+        ],
+        "perf_event_open": {
+          "cpu-clock": {
+            "opened": true,
+            "errno": 0,
+            "error": null
+          },
+          "task-clock": {
+            "opened": true,
+            "errno": 0,
+            "error": null
+          },
+          "cycles": {
+            "opened": true,
+            "errno": 0,
+            "error": null
+          },
+          "instructions": {
+            "opened": true,
+            "errno": 0,
+            "error": null
+          }
+        },
+        "perf_binary": null,
+        "cc": null,
+        "clang": null,
+        "gcc": null,
+        "readelf": null,
+        "nm": null,
+        "addr2line": null,
+        "llvm-symbolizer": null,
+        "ldconfig": "/usr/sbin/ldconfig",
+        "unwind_libraries": [],
+        "unwind_docs": []
+      },
+      "upload_chunks": 142,
+      "input_verification_policy": "Each chunk passed sha256sum -c (142 OK rows preserved); concatenated bundle expected SHA checked before extraction by prepare command. Original successful whole-bundle command output was not separately persisted because the subsequent optional perf availability command exited nonzero; extraction was conditional on full-bundle check."
+    }
+  },
+  "sandbox_state": {
+    "aes": {
+      "sandbox_id": "i8l6mpej79szspfox6xd9",
+      "template_id": "vshaqeiaoi96u3cp66t3",
+      "lease_seconds": 7200
+    },
+    "large01": {
+      "sandbox_id": "if04g7n2pcdnj99mzruyz",
+      "template_id": "vshaqeiaoi96u3cp66t3",
+      "lease_seconds": 7200
+    },
+    "large02": {
+      "sandbox_id": "imn5gqf9pcjakahiyddq7",
+      "template_id": "vshaqeiaoi96u3cp66t3",
+      "lease_seconds": 7200
+    }
+  },
+  "perf_tools_state": {
+    "sandbox_id": "idi1te4zwu8zu0uv967me",
+    "template_id": "vshaqeiaoi96u3cp66t3",
+    "lease_seconds": 3600,
+    "created_epoch": 1793972216.802621
+  },
+  "perf_runtime": {
+    "perf_sha256": "33e79195472e04482d1d0ba0eba19ae61d637732a440239083e1e0d469532a3c",
+    "version": "6.8.12",
+    "archive": {
+      "path": "build/soa/e2b-profile/perf-runtime.tar.gz",
+      "bytes": 12020611,
+      "sha256": "6321e45d514749d9eb5ab5d582dfcb0e983a66b00c6e6a47227d6803d9a1fbdf"
+    },
+    "runtime_files": {
+      "perf": "33e79195472e04482d1d0ba0eba19ae61d637732a440239083e1e0d469532a3c",
+      "lib/libm.so.6": "fce00b6f25f459cf4ae0b7fae4257909a1a8a86f9149e7c029a5d617baf1ccd0",
+      "lib/libz.so.1": "f61677c7bdb7c2aa2a243ea781bfd16afcb361cede7b4ef76127a9d8eb9a5242",
+      "lib/libelf.so.1": "248c989360783cdc52f3659921de852c2efcc2097253ce58e34443f856412814",
+      "lib/libdw.so.1": "989dc9873f358a5af7d18d6100cf5fd66531d7990dc47d69068b3c6c96588867",
+      "lib/libunwind-x86_64.so.8": "70a88c376a1aced719ca7bdcd5cdd6c5d3bdce44b99f5ab2037fdad096bbf03d",
+      "lib/libunwind.so.8": "28e77a498f2f17f8cb883c91303f9901343ea0d8e34959d138dd462fcc9b201f",
+      "lib/liblzma.so.5": "26b37d25f7ca2a2d348de8ecabacda12e921cd933b21fa069a179760db77219d",
+      "lib/libcrypto.so.3": "6866ed711dab8927e1bf82bf1cd30e828bdfc34f3cc1e83b1c9eb01ce6c37d9a",
+      "lib/libslang.so.2": "af564bc54e7c7bc51c21de935846ac6fe5bd551c22ab5af72927ff5e31aaaac4",
+      "lib/libpython3.12.so.1.0": "1021f236227334ded6d1bbbc4bb6f5d933f793d8397c969896cfbdf03ce96223",
+      "lib/libstdc++.so.6": "1fd75fe70354a416d75aef22bcae68c47bd25d20e2d0568c30b1a9838cf62f11",
+      "lib/libzstd.so.1": "0a2128bc10841fb29e76d08d945864dfb0b6a66da5df6df5d8299197439e54bb",
+      "lib/libcap.so.2": "6ac6abc86ac891c6e13486470e26f1d939f47fda9e6b5d5508a7f5ec881adc84",
+      "lib/libnuma.so.1": "02d7582c5d391e460e56aa67a414360e3183b968206645b9123f9dc7bff5d009",
+      "lib/libtraceevent.so.1": "aaea15e052e86192f90a64fe03779c74ec5b41c59622c6e121d7c89d0d20e63c",
+      "lib/libc.so.6": "3a15d66867d83762c7f2f1e37359cb8f6c5743edb369c65285cb0b1c4f7498bf",
+      "lib/libbz2.so.1.0": "cc08c9f50a8009ffd6391e0116a100369b11ca9238fa52392c019e6645b122a1",
+      "lib/libexpat.so.1": "286682ecbc5e59a638963b1a4e6351e65eb32fcf4bdcb9cb7569b6a61fe06a8d",
+      "lib/libgcc_s.so.1": "d93224d2b0dab4247598be683adca02f5cf00586f99c187579cd7e92058fb7cb",
+      "lib/ld-linux-x86-64.so.2": "c20a2dc8917c755f02b94049356320fe1f62ac7d9f8994731f807d9df39302da"
+    },
+    "smoke_all_exit_zero": true,
+    "smoke_evidence_archive": {
+      "path": "build/soa/e2b-profile/tools-evidence.tar.gz",
+      "bytes": 14981,
+      "sha256": "d0ef112fa182c0ed3442a6dd323149453778ee293fc9cc8fed49f608cd7f2200"
+    }
+  },
+  "validation": {
+    "phase_runs_exact": 12,
+    "perf_runs_exact": 8,
+    "archives": {
+      "aes": {
+        "sha256": "90e22569dfd74fe5e8e4892a834c94477b0891f3c2728ee70169a7750e944a46",
+        "bytes": 18912274
+      },
+      "large01": {
+        "sha256": "b6b3d44c748d856ebbd72a381494f3e0bbbc5a329c4cfb77046182d7b0a949be",
+        "bytes": 30392264
+      },
+      "large02": {
+        "sha256": "800cdc7e60ba123f988fc44dad873d796e77a85ec5abb4bc5b13ed0eba962cef",
+        "bytes": 85744632
+      }
+    },
+    "elf": {
+      "binaries/baseline": {
+        "sha256": "9eedbe284a9330f4269c1c1c557ae869f2d9c8472ae0610b3f7dc0f98b6b3fc4",
+        "bytes": 124296512
+      },
+      "binaries/baseline-profile": {
+        "sha256": "22228aebad6a44413ec8eb93828cd6a2ff3660b40e78ef15fa3f72e63d882aef",
+        "bytes": 124305680
+      },
+      "binaries/candidate": {
+        "sha256": "bf95389f331b53e91cc3942d3c32a38aa2dcdfcaa57a6d520e43ca7e944a2edd",
+        "bytes": 124405560
+      },
+      "binaries/candidate-profile": {
+        "sha256": "eac4a2b0413e00db6a8d1fdba97c6defaab0097a4d44c7b8340788836c15e8c1",
+        "bytes": 124411144
+      }
+    },
+    "perf_data": {
+      "aes/perf-results/record-baseline-t4/perf.data": "2c1d9a8f10a7b123975a95d8d5aa9f07270c51ae3971122ca5094e7168f9061c",
+      "aes/perf-results/record-candidate-t4/perf.data": "7e118dbc433d37b079692e808332b66d2665ecf95f33a02c01a62d93a06f41b8",
+      "large02/perf-results/record-baseline-t4/perf.data": "4b4db2cc506687006d888c3ff6be4e5baacd66b54b36d685ca62ac1f28a42902",
+      "large02/perf-results/record-candidate-t4/perf.data": "e7dccbd32d4dc39e6d6493b4b40250ba0af858781d71c1892bfa793209f20959"
+    },
+    "logs_verified": 20,
+    "input_bundle_sha256": "5164fc811c4e8fb47f265015286927e3590915d52339249b6138cb0a82a2e53d"
+  },
+  "artifacts": {
+    "aes": {
+      "path": "build/soa/e2b-profile/aes-evidence.tar.gz",
+      "bytes": 18912274,
+      "sha256": "90e22569dfd74fe5e8e4892a834c94477b0891f3c2728ee70169a7750e944a46"
+    },
+    "large01": {
+      "path": "build/soa/e2b-profile/large01-evidence.tar.gz",
+      "bytes": 30392264,
+      "sha256": "b6b3d44c748d856ebbd72a381494f3e0bbbc5a329c4cfb77046182d7b0a949be"
+    },
+    "large02": {
+      "path": "build/soa/e2b-profile/large02-evidence.tar.gz",
+      "bytes": 85744632,
+      "sha256": "800cdc7e60ba123f988fc44dad873d796e77a85ec5abb4bc5b13ed0eba962cef"
+    },
+    "tools": {
+      "path": "build/soa/e2b-profile/tools-evidence.tar.gz",
+      "bytes": 14981,
+      "sha256": "d0ef112fa182c0ed3442a6dd323149453778ee293fc9cc8fed49f608cd7f2200"
+    },
+    "control": {
+      "path": "build/soa/e2b-profile/control-evidence.tar.gz",
+      "bytes": 168433,
+      "sha256": "60c5206c1e3ac6129ccd64110c3140fcec5f9df90821fb6fa3231af6cf9620d0"
+    }
+  },
+  "cleanup": {
+    "aes": {
+      "sandbox_id": "i8l6mpej79szspfox6xd9",
+      "design": "aes",
+      "kill_return": true,
+      "killed_epoch": 1793973369.1467686,
+      "local_archive_verified": {
+        "remote": "/workspace/openroad-soa-profile/aes-evidence.tar.gz",
+        "bytes": 18912274,
+        "sha256": "90e22569dfd74fe5e8e4892a834c94477b0891f3c2728ee70169a7750e944a46",
+        "remote_sha256_match": true
+      },
+      "note": "Only this task-created sandbox was released after the evidence archive was downloaded and SHA-256 checked on the Mac workspace."
+    },
+    "large01": {
+      "sandbox_id": "if04g7n2pcdnj99mzruyz",
+      "design": "large01",
+      "kill_return": true,
+      "killed_epoch": 1793973243.2893984,
+      "local_archive_verified": {
+        "remote": "/workspace/openroad-soa-profile/large01-evidence.tar.gz",
+        "bytes": 30392264,
+        "sha256": "b6b3d44c748d856ebbd72a381494f3e0bbbc5a329c4cfb77046182d7b0a949be",
+        "remote_sha256_match": true
+      },
+      "note": "Only this task-created sandbox was released after the evidence archive was downloaded and SHA-256 checked on the Mac workspace."
+    },
+    "large02": {
+      "sandbox_id": "imn5gqf9pcjakahiyddq7",
+      "design": "large02",
+      "kill_return": true,
+      "killed_epoch": 1793973757.3091865,
+      "local_archive_verified": {
+        "remote": "/workspace/openroad-soa-profile/large02-evidence.tar.gz",
+        "bytes": 85744632,
+        "sha256": "800cdc7e60ba123f988fc44dad873d796e77a85ec5abb4bc5b13ed0eba962cef",
+        "remote_sha256_match": true
+      },
+      "note": "Only this task-created sandbox was released after the evidence archive was downloaded and SHA-256 checked on the Mac workspace."
+    },
+    "tools": {
+      "sandbox_id": "idi1te4zwu8zu0uv967me",
+      "design": "tools",
+      "kill_return": true,
+      "killed_epoch": 1793973243.2146742,
+      "local_archive_verified": {
+        "sha256": "d0ef112fa182c0ed3442a6dd323149453778ee293fc9cc8fed49f608cd7f2200",
+        "bytes": 14981,
+        "remote_sha256_match": true
+      },
+      "note": "Only this task-created sandbox was released after the evidence archive was downloaded and SHA-256 checked on the Mac workspace."
+    }
+  },
+  "credentials": {
+    "actual_key_values_checked": 2,
+    "credential_values_found": false,
+    "text_files_scanned": 206,
+    "method": "Compare actual client key bytes on HK; no values exported or printed. Sandbox credentials were never provisioned."
+  },
+  "method": {
+    "concurrency": "Three designs in independent sandboxes, native/candidate serial per design. Separate perf-tools install sandbox. perf started after all 12 phase runs completed.",
+    "threads": [
+      1,
+      4
+    ],
+    "formal_reference_threads": 1,
+    "perf_designs": [
+      "aes_cipher_top",
+      "large02"
+    ],
+    "perf_threads": 4,
+    "phase_runs": 12,
+    "perf_stat_runs": 4,
+    "perf_record_runs": 4,
+    "stat_repetitions_per_role": 1,
+    "stat_percent_running_all": 100.0,
+    "record_frequency_hz": 99,
+    "record_event": "cycles:u",
+    "callgraph": "DWARF user stack 8192 bytes",
+    "record_lost_all": 0,
+    "formal_elf_unchanged": true,
+    "ompt_wait_units": "Cumulative thread-time including idle/park; no subtraction from wall.",
+    "timing_scope": "phase attribution and single perf observations, not repeated formal benchmark or cross-host absolute comparison",
+    "known_limitations": [
+      "4 physical cores / 8 logical CPUs; effective placement maximum 4 threads",
+      "Guest PMU branch-misses reads zero for both candidates, retained but not used for conclusions",
+      "Some libc addresses lack symbols; preserve unknown self percentages",
+      "Perf self symbols describe whole process, not only GPL phase; sampled children percentages are not additive"
+    ]
+  }
+}

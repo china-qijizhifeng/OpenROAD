@@ -1,0 +1,3166 @@
+{
+  "production_commit": "8bc1c3e674",
+  "candidate_test_only_fix_commit": "268276e3d1",
+  "complete": true,
+  "method": "temporary phase timer + embedded OMPT",
+  "production_binary_sha256": {
+    "baseline": "9eedbe284a9330f4269c1c1c557ae869f2d9c8472ae0610b3f7dc0f98b6b3fc4",
+    "candidate": "bf95389f331b53e91cc3942d3c32a38aa2dcdfcaa57a6d520e43ca7e944a2edd"
+  },
+  "profile_binary_sha256": {
+    "baseline": "22228aebad6a44413ec8eb93828cd6a2ff3660b40e78ef15fa3f72e63d882aef",
+    "candidate": "eac4a2b0413e00db6a8d1fdba97c6defaab0097a4d44c7b8340788836c15e8c1"
+  },
+  "hardware_counters": "see sandbox runtime probe; no counter measurements included",
+  "platform": "HK E2B 0820, 8 logical CPUs, 4 physical cores",
+  "reference_policy": "E2B t1/t4 compare exact accepted Northjob t1 state and algorithm; formal absolute times are not mixed",
+  "timing_policy": "Attribution only; formal performance uses unchanged unsampled binaries",
+  "ompt_units": "thread_wait_ms sums waiting thread-time; never subtract from phase wall-time",
+  "ompt_phase_attribution": "Atomic current main-thread phase label sampled at each wait-begin callback; child wait intervals excluded from parent interval",
+  "runs": [
+    {
+      "role": "baseline",
+      "design": "large02",
+      "threads": 1,
+      "accepted_reference_threads": 1,
+      "state_hash": "ad56039bdda8119ea7ee39d2f453f555bf89e9a55fdfc42b2d547e3dc6b584d3",
+      "state_rows": 719776,
+      "quality": [
+        "LARGE_AREA 755282.794",
+        "LARGE_HPWL 4484987.9425"
+      ],
+      "seconds_profiled": 193.83237212099993,
+      "phase": {
+        "records": [
+          {
+            "name": "initial_placement",
+            "inclusive_ms": 31089.508534,
+            "exclusive_ms": 1232.157246,
+            "calls": 1
+          },
+          {
+            "name": "initial_solver",
+            "inclusive_ms": 29857.351288,
+            "exclusive_ms": 4018.429728,
+            "calls": 1
+          },
+          {
+            "name": "initial_update_pins",
+            "inclusive_ms": 231.642567,
+            "exclusive_ms": 231.642567,
+            "calls": 20
+          },
+          {
+            "name": "initial_create_matrix",
+            "inclusive_ms": 5539.782569,
+            "exclusive_ms": 5539.782569,
+            "calls": 20
+          },
+          {
+            "name": "initial_sparse_solve",
+            "inclusive_ms": 18997.748509,
+            "exclusive_ms": 18997.748509,
+            "calls": 20
+          },
+          {
+            "name": "initial_update_coordinates",
+            "inclusive_ms": 1069.747915,
+            "exclusive_ms": 1069.747915,
+            "calls": 20
+          },
+          {
+            "name": "nesterov",
+            "inclusive_ms": 141749.760859,
+            "exclusive_ms": 9545.68514,
+            "calls": 1
+          },
+          {
+            "name": "nesterov_init",
+            "inclusive_ms": 542.846878,
+            "exclusive_ms": 83.476323,
+            "calls": 1
+          },
+          {
+            "name": "coordinates_and_deposit",
+            "inclusive_ms": 26211.383718,
+            "exclusive_ms": 1.070862,
+            "calls": 538
+          },
+          {
+            "name": "density_center_pin_sync",
+            "inclusive_ms": 9605.212352,
+            "exclusive_ms": 9605.212352,
+            "calls": 538
+          },
+          {
+            "name": "density_deposit",
+            "inclusive_ms": 16605.100504,
+            "exclusive_ms": 478.168935,
+            "calls": 538
+          },
+          {
+            "name": "density_scatter",
+            "inclusive_ms": 15170.297178,
+            "exclusive_ms": 15170.297178,
+            "calls": 538
+          },
+          {
+            "name": "density_overflow",
+            "inclusive_ms": 956.634391,
+            "exclusive_ms": 956.634391,
+            "calls": 538
+          },
+          {
+            "name": "density_field",
+            "inclusive_ms": 5917.755616,
+            "exclusive_ms": 2013.938515,
+            "calls": 538
+          },
+          {
+            "name": "fft",
+            "inclusive_ms": 3903.817101,
+            "exclusive_ms": 3903.817101,
+            "calls": 538
+          },
+          {
+            "name": "wirelength_force",
+            "inclusive_ms": 14420.675452,
+            "exclusive_ms": 14420.675452,
+            "calls": 538
+          },
+          {
+            "name": "gradient_gather_combine",
+            "inclusive_ms": 83131.623469,
+            "exclusive_ms": 3.976119,
+            "calls": 538
+          },
+          {
+            "name": "wirelength_gather",
+            "inclusive_ms": 72953.729742,
+            "exclusive_ms": 72953.729742,
+            "calls": 538
+          },
+          {
+            "name": "density_gather",
+            "inclusive_ms": 8550.143259,
+            "exclusive_ms": 8550.143259,
+            "calls": 538
+          },
+          {
+            "name": "gradient_precondition",
+            "inclusive_ms": 1316.804928,
+            "exclusive_ms": 1316.804928,
+            "calls": 538
+          },
+          {
+            "name": "gradient_serial_sum",
+            "inclusive_ms": 306.969421,
+            "exclusive_ms": 306.969421,
+            "calls": 538
+          },
+          {
+            "name": "step_length",
+            "inclusive_ms": 611.910537,
+            "exclusive_ms": 0.63511,
+            "calls": 537
+          },
+          {
+            "name": "distance",
+            "inclusive_ms": 611.275427,
+            "exclusive_ms": 0.396159,
+            "calls": 1074
+          },
+          {
+            "name": "distance_serial_sum",
+            "inclusive_ms": 610.879268,
+            "exclusive_ms": 610.879268,
+            "calls": 1074
+          },
+          {
+            "name": "iteration_attempt",
+            "inclusive_ms": 131660.787877,
+            "exclusive_ms": 2.566819,
+            "calls": 532
+          },
+          {
+            "name": "nesterov_coordinates",
+            "inclusive_ms": 33840.867561,
+            "exclusive_ms": 1824.242821,
+            "calls": 536
+          },
+          {
+            "name": "timing_feedback",
+            "inclusive_ms": 0.201444,
+            "exclusive_ms": 0.201444,
+            "calls": 532
+          },
+          {
+            "name": "routability_snapshot",
+            "inclusive_ms": 0.126509,
+            "exclusive_ms": 0.126509,
+            "calls": 532
+          },
+          {
+            "name": "routability_feedback",
+            "inclusive_ms": 0.113011,
+            "exclusive_ms": 0.113011,
+            "calls": 532
+          }
+        ],
+        "totals": {
+          "initial_placement": {
+            "inclusive_ms": 31089.508534,
+            "exclusive_ms": 1232.157246,
+            "calls": 1,
+            "inclusive_seconds_per_call": 31.089508534,
+            "exclusive_seconds_per_call": 1.232157246
+          },
+          "initial_solver": {
+            "inclusive_ms": 29857.351288,
+            "exclusive_ms": 4018.429728,
+            "calls": 1,
+            "inclusive_seconds_per_call": 29.857351288,
+            "exclusive_seconds_per_call": 4.018429728
+          },
+          "initial_update_pins": {
+            "inclusive_ms": 231.642567,
+            "exclusive_ms": 231.642567,
+            "calls": 20,
+            "inclusive_seconds_per_call": 0.01158212835,
+            "exclusive_seconds_per_call": 0.01158212835
+          },
+          "initial_create_matrix": {
+            "inclusive_ms": 5539.782569,
+            "exclusive_ms": 5539.782569,
+            "calls": 20,
+            "inclusive_seconds_per_call": 0.27698912845,
+            "exclusive_seconds_per_call": 0.27698912845
+          },
+          "initial_sparse_solve": {
+            "inclusive_ms": 18997.748509,
+            "exclusive_ms": 18997.748509,
+            "calls": 20,
+            "inclusive_seconds_per_call": 0.94988742545,
+            "exclusive_seconds_per_call": 0.94988742545
+          },
+          "initial_update_coordinates": {
+            "inclusive_ms": 1069.747915,
+            "exclusive_ms": 1069.747915,
+            "calls": 20,
+            "inclusive_seconds_per_call": 0.05348739574999999,
+            "exclusive_seconds_per_call": 0.05348739574999999
+          },
+          "nesterov": {
+            "inclusive_ms": 141749.760859,
+            "exclusive_ms": 9545.68514,
+            "calls": 1,
+            "inclusive_seconds_per_call": 141.749760859,
+            "exclusive_seconds_per_call": 9.54568514
+          },
+          "nesterov_init": {
+            "inclusive_ms": 542.846878,
+            "exclusive_ms": 83.476323,
+            "calls": 1,
+            "inclusive_seconds_per_call": 0.542846878,
+            "exclusive_seconds_per_call": 0.08347632299999999
+          },
+          "coordinates_and_deposit": {
+            "inclusive_ms": 26211.383718,
+            "exclusive_ms": 1.070862,
+            "calls": 538,
+            "inclusive_seconds_per_call": 0.04872004408550186,
+            "exclusive_seconds_per_call": 1.990449814126394e-06
+          },
+          "density_center_pin_sync": {
+            "inclusive_ms": 9605.212352,
+            "exclusive_ms": 9605.212352,
+            "calls": 538,
+            "inclusive_seconds_per_call": 0.017853554557620818,
+            "exclusive_seconds_per_call": 0.017853554557620818
+          },
+          "density_deposit": {
+            "inclusive_ms": 16605.100504,
+            "exclusive_ms": 478.168935,
+            "calls": 538,
+            "inclusive_seconds_per_call": 0.03086449907806691,
+            "exclusive_seconds_per_call": 0.0008887898420074349
+          },
+          "density_scatter": {
+            "inclusive_ms": 15170.297178,
+            "exclusive_ms": 15170.297178,
+            "calls": 538,
+            "inclusive_seconds_per_call": 0.02819757839776952,
+            "exclusive_seconds_per_call": 0.02819757839776952
+          },
+          "density_overflow": {
+            "inclusive_ms": 956.634391,
+            "exclusive_ms": 956.634391,
+            "calls": 538,
+            "inclusive_seconds_per_call": 0.001778130838289963,
+            "exclusive_seconds_per_call": 0.001778130838289963
+          },
+          "density_field": {
+            "inclusive_ms": 5917.755616,
+            "exclusive_ms": 2013.938515,
+            "calls": 538,
+            "inclusive_seconds_per_call": 0.010999545754646841,
+            "exclusive_seconds_per_call": 0.0037433801394052045
+          },
+          "fft": {
+            "inclusive_ms": 3903.817101,
+            "exclusive_ms": 3903.817101,
+            "calls": 538,
+            "inclusive_seconds_per_call": 0.007256165615241636,
+            "exclusive_seconds_per_call": 0.007256165615241636
+          },
+          "wirelength_force": {
+            "inclusive_ms": 14420.675452,
+            "exclusive_ms": 14420.675452,
+            "calls": 538,
+            "inclusive_seconds_per_call": 0.026804229464684012,
+            "exclusive_seconds_per_call": 0.026804229464684012
+          },
+          "gradient_gather_combine": {
+            "inclusive_ms": 83131.623469,
+            "exclusive_ms": 3.976119,
+            "calls": 538,
+            "inclusive_seconds_per_call": 0.15451974622490705,
+            "exclusive_seconds_per_call": 7.390555762081785e-06
+          },
+          "wirelength_gather": {
+            "inclusive_ms": 72953.729742,
+            "exclusive_ms": 72953.729742,
+            "calls": 538,
+            "inclusive_seconds_per_call": 0.1356017281449814,
+            "exclusive_seconds_per_call": 0.1356017281449814
+          },
+          "density_gather": {
+            "inclusive_ms": 8550.143259,
+            "exclusive_ms": 8550.143259,
+            "calls": 538,
+            "inclusive_seconds_per_call": 0.01589245958921933,
+            "exclusive_seconds_per_call": 0.01589245958921933
+          },
+          "gradient_precondition": {
+            "inclusive_ms": 1316.804928,
+            "exclusive_ms": 1316.804928,
+            "calls": 538,
+            "inclusive_seconds_per_call": 0.002447592802973978,
+            "exclusive_seconds_per_call": 0.002447592802973978
+          },
+          "gradient_serial_sum": {
+            "inclusive_ms": 306.969421,
+            "exclusive_ms": 306.969421,
+            "calls": 538,
+            "inclusive_seconds_per_call": 0.0005705751319702603,
+            "exclusive_seconds_per_call": 0.0005705751319702603
+          },
+          "step_length": {
+            "inclusive_ms": 611.910537,
+            "exclusive_ms": 0.63511,
+            "calls": 537,
+            "inclusive_seconds_per_call": 0.0011394982067039106,
+            "exclusive_seconds_per_call": 1.1827001862197391e-06
+          },
+          "distance": {
+            "inclusive_ms": 611.275427,
+            "exclusive_ms": 0.396159,
+            "calls": 1074,
+            "inclusive_seconds_per_call": 0.0005691577532588454,
+            "exclusive_seconds_per_call": 3.688631284916201e-07
+          },
+          "distance_serial_sum": {
+            "inclusive_ms": 610.879268,
+            "exclusive_ms": 610.879268,
+            "calls": 1074,
+            "inclusive_seconds_per_call": 0.0005687888901303538,
+            "exclusive_seconds_per_call": 0.0005687888901303538
+          },
+          "iteration_attempt": {
+            "inclusive_ms": 131660.787877,
+            "exclusive_ms": 2.566819,
+            "calls": 532,
+            "inclusive_seconds_per_call": 0.2474826839793233,
+            "exclusive_seconds_per_call": 4.8248477443609025e-06
+          },
+          "nesterov_coordinates": {
+            "inclusive_ms": 33840.867561,
+            "exclusive_ms": 1824.242821,
+            "calls": 536,
+            "inclusive_seconds_per_call": 0.06313594694216418,
+            "exclusive_seconds_per_call": 0.0034034380988805972
+          },
+          "timing_feedback": {
+            "inclusive_ms": 0.201444,
+            "exclusive_ms": 0.201444,
+            "calls": 532,
+            "inclusive_seconds_per_call": 3.7865413533834587e-07,
+            "exclusive_seconds_per_call": 3.7865413533834587e-07
+          },
+          "routability_snapshot": {
+            "inclusive_ms": 0.126509,
+            "exclusive_ms": 0.126509,
+            "calls": 532,
+            "inclusive_seconds_per_call": 2.3779887218045114e-07,
+            "exclusive_seconds_per_call": 2.3779887218045114e-07
+          },
+          "routability_feedback": {
+            "inclusive_ms": 0.113011,
+            "exclusive_ms": 0.113011,
+            "calls": 532,
+            "inclusive_seconds_per_call": 2.124266917293233e-07,
+            "exclusive_seconds_per_call": 2.124266917293233e-07
+          }
+        },
+        "root_ms": 172839.269393,
+        "exclusive_sum_ms": 172839.269393,
+        "iteration_attempts": 532
+      },
+      "process_resource": "\tCommand being timed: \"/workspace/openroad-soa-profile/payload/binaries/baseline-profile -no_init -exit /workspace/openroad-soa-profile/results/large02-baseline-t1/run.tcl\"\n\tUser time (seconds): 190.21\n\tSystem time (seconds): 3.56\n\tPercent of CPU this job got: 99%\n\tElapsed (wall clock) time (h:mm:ss or m:ss): 3:13.81\n\tAverage shared text size (kbytes): 0\n\tAverage unshared data size (kbytes): 0\n\tAverage stack size (kbytes): 0\n\tAverage total size (kbytes): 0\n\tMaximum resident set size (kbytes): 1164148\n\tAverage resident set size (kbytes): 0\n\tMajor (requiring I/O) page faults: 0\n\tMinor (reclaiming a frame) page faults: 775215\n\tVoluntary context switches: 30\n\tInvoluntary context switches: 145\n\tSwaps: 0\n\tFile system inputs: 0\n\tFile system outputs: 123832\n\tSocket messages sent: 0\n\tSocket messages received: 0\n\tSignals delivered: 0\n\tPage size (bytes): 4096\n\tExit status: 0\n",
+      "ompt": {
+        "measured": false,
+        "initialization": [
+          {
+            "initialized": true,
+            "wait_registration": 5,
+            "thread_registration": 5,
+            "parallel_registration": 5
+          }
+        ],
+        "finalization": [
+          {
+            "wait_registration": 5,
+            "callback_pairs": 0,
+            "threads": 1,
+            "parallel_regions": 6985,
+            "invalid_pairs": 0
+          }
+        ],
+        "waits": [],
+        "units": "thread-time, not wall-time"
+      },
+      "algorithm": {
+        "trace": [
+          "[InitialPlace]  Iter: 1 conjugate gradient residual: 0.00150776 HPWL: 13849076190",
+          "[InitialPlace]  Iter: 2 conjugate gradient residual: 0.00110863 HPWL: 8606878342",
+          "[InitialPlace]  Iter: 3 conjugate gradient residual: 0.00079658 HPWL: 6656092677",
+          "[InitialPlace]  Iter: 4 conjugate gradient residual: 0.00058435 HPWL: 5759527515",
+          "[InitialPlace]  Iter: 5 conjugate gradient residual: 0.00045318 HPWL: 5206488561",
+          "[InitialPlace]  Iter: 6 conjugate gradient residual: 0.00469546 HPWL: 4909238640",
+          "[InitialPlace]  Iter: 7 conjugate gradient residual: 0.00048761 HPWL: 5773107742",
+          "[InitialPlace]  Iter: 8 conjugate gradient residual: 0.00037699 HPWL: 5416132472",
+          "[InitialPlace]  Iter: 9 conjugate gradient residual: 0.00036960 HPWL: 5180108899",
+          "[InitialPlace]  Iter: 10 conjugate gradient residual: 0.00029812 HPWL: 5029457993",
+          "[InitialPlace]  Iter: 11 conjugate gradient residual: 0.00025661 HPWL: 4942406006",
+          "[InitialPlace]  Iter: 12 conjugate gradient residual: 0.00021503 HPWL: 4873580463",
+          "[InitialPlace]  Iter: 13 conjugate gradient residual: 0.00026283 HPWL: 4828264037",
+          "[InitialPlace]  Iter: 14 conjugate gradient residual: 0.00018511 HPWL: 4789396266",
+          "[InitialPlace]  Iter: 15 conjugate gradient residual: 0.00021359 HPWL: 4750109274",
+          "[InitialPlace]  Iter: 16 conjugate gradient residual: 0.00017947 HPWL: 4714811616",
+          "[InitialPlace]  Iter: 17 conjugate gradient residual: 0.00013618 HPWL: 4678807487",
+          "[InitialPlace]  Iter: 18 conjugate gradient residual: 0.00015029 HPWL: 4647848857",
+          "[InitialPlace]  Iter: 19 conjugate gradient residual: 0.00012558 HPWL: 4617452504",
+          "[InitialPlace]  Iter: 20 conjugate gradient residual: 0.00015879 HPWL: 4586204966",
+          "        0 |   0.9968 |  8.096159e+05 |   +0.00% |  6.65e-17 |      ",
+          "       10 |   0.9892 |  1.219801e+06 |  +50.66% |  9.87e-17 |      ",
+          "       20 |   0.9844 |  1.295418e+06 |   +6.20% |  1.58e-16 |      ",
+          "       30 |   0.9814 |  1.307253e+06 |   +0.91% |  2.56e-16 |      ",
+          "       40 |   0.9804 |  1.290270e+06 |   -1.30% |  4.17e-16 |      ",
+          "       50 |   0.9801 |  1.287615e+06 |   -0.21% |  6.77e-16 |      ",
+          "       60 |   0.9799 |  1.292521e+06 |   +0.38% |  1.10e-15 |      ",
+          "       70 |   0.9797 |  1.293069e+06 |   +0.04% |  1.78e-15 |      ",
+          "       80 |   0.9796 |  1.292190e+06 |   -0.07% |  2.90e-15 |      ",
+          "       90 |   0.9795 |  1.290323e+06 |   -0.14% |  4.71e-15 |      ",
+          "      100 |   0.9796 |  1.285461e+06 |   -0.38% |  7.66e-15 |      ",
+          "      110 |   0.9797 |  1.278238e+06 |   -0.56% |  1.25e-14 |      ",
+          "      120 |   0.9798 |  1.270291e+06 |   -0.62% |  2.03e-14 |      ",
+          "      130 |   0.9799 |  1.263193e+06 |   -0.56% |  3.31e-14 |      ",
+          "      140 |   0.9799 |  1.259137e+06 |   -0.32% |  5.39e-14 |      ",
+          "      150 |   0.9796 |  1.260550e+06 |   +0.11% |  8.78e-14 |      ",
+          "      160 |   0.9792 |  1.267151e+06 |   +0.52% |  1.43e-13 |      ",
+          "      170 |   0.9785 |  1.276799e+06 |   +0.76% |  2.32e-13 |      ",
+          "      180 |   0.9777 |  1.291007e+06 |   +1.11% |  3.77e-13 |      ",
+          "      190 |   0.9764 |  1.314993e+06 |   +1.86% |  6.11e-13 |      ",
+          "      200 |   0.9745 |  1.359133e+06 |   +3.36% |  9.86e-13 |      ",
+          "      210 |   0.9714 |  1.438788e+06 |   +5.86% |  1.58e-12 |      ",
+          "      220 |   0.9664 |  1.574648e+06 |   +9.44% |  2.50e-12 |      ",
+          "      230 |   0.9581 |  1.780508e+06 |  +13.07% |  3.90e-12 |      ",
+          "      240 |   0.9466 |  2.049283e+06 |  +15.10% |  6.00e-12 |      ",
+          "      250 |   0.9327 |  2.365380e+06 |  +15.42% |  9.12e-12 |      ",
+          "      260 |   0.9167 |  2.704549e+06 |  +14.34% |  1.38e-11 |      ",
+          "      270 |   0.8975 |  3.077477e+06 |  +13.79% |  2.08e-11 |      ",
+          "      280 |   0.8755 |  3.499017e+06 |  +13.70% |  3.09e-11 |      ",
+          "      290 |   0.8503 |  3.910006e+06 |  +11.75% |  4.59e-11 |      ",
+          "      300 |   0.8224 |  4.175475e+06 |   +6.79% |  7.00e-11 |      ",
+          "      310 |   0.7891 |  4.265666e+06 |   +2.16% |  1.11e-10 |      ",
+          "      320 |   0.7514 |  4.407599e+06 |   +3.33% |  1.73e-10 |      ",
+          "      330 |   0.7144 |  4.758960e+06 |   +7.97% |  2.62e-10 |      ",
+          "      340 |   0.6805 |  5.424786e+06 |  +13.99% |  3.70e-10 |      ",
+          "      350 |   0.6523 |  5.323783e+06 |   -1.86% |  5.82e-10 |      ",
+          "      360 |   0.6020 |  5.322043e+06 |   -0.03% |  9.06e-10 |      ",
+          "      370 |   0.5716 |  5.738349e+06 |   +7.82% |  1.32e-09 |      ",
+          "      380 |   0.5335 |  5.084070e+06 |  -11.40% |  2.14e-09 |      ",
+          "      390 |   0.4728 |  5.315076e+06 |   +4.54% |  3.29e-09 |      ",
+          "      400 |   0.4441 |  5.010036e+06 |   -5.74% |  5.29e-09 |      ",
+          "      410 |   0.3974 |  5.170438e+06 |   +3.20% |  8.09e-09 |      ",
+          "      420 |   0.3547 |  4.973543e+06 |   -3.81% |  1.30e-08 |      ",
+          "      430 |   0.3327 |  4.786912e+06 |   -3.75% |  1.95e-08 |      ",
+          "      440 |   0.3053 |  4.684245e+06 |   -2.14% |  2.84e-08 |      ",
+          "      450 |   0.2752 |  4.625782e+06 |   -1.25% |  4.17e-08 |      ",
+          "      460 |   0.2471 |  4.572072e+06 |   -1.16% |  6.14e-08 |      ",
+          "      470 |   0.2199 |  4.530462e+06 |   -0.91% |  9.05e-08 |      ",
+          "      480 |   0.1940 |  4.497685e+06 |   -0.72% |  1.33e-07 |      ",
+          "      490 |   0.1704 |  4.477522e+06 |   -0.45% |  1.96e-07 |      ",
+          "      500 |   0.1500 |  4.464245e+06 |   -0.30% |  2.89e-07 |      ",
+          "      510 |   0.1318 |  4.457634e+06 |   -0.15% |  4.26e-07 |      ",
+          "      520 |   0.1154 |  4.456453e+06 |   -0.03% |  6.28e-07 |      ",
+          "      530 |   0.1003 |  4.460431e+06 |   +0.09% |  9.24e-07 |      ",
+          "      531 |   0.0989 |  4.460886e+06 |          |  9.98e-07 |      ",
+          "[INFO GPL-1001] Global placement finished at iteration 531"
+        ],
+        "trace_sha256": "208dea591ee7d25a4d52c726e4811e294047ef224eb6d7bd79e2f6a94fecffff",
+        "final_iterations": [
+          "531"
+        ],
+        "routability_iterations": [],
+        "initial_iterations": [
+          "1",
+          "2",
+          "3",
+          "4",
+          "5",
+          "6",
+          "7",
+          "8",
+          "9",
+          "10",
+          "11",
+          "12",
+          "13",
+          "14",
+          "15",
+          "16",
+          "17",
+          "18",
+          "19",
+          "20"
+        ]
+      },
+      "formal_master_algorithm": {
+        "trace": [
+          "[InitialPlace]  Iter: 1 conjugate gradient residual: 0.00150776 HPWL: 13849076190",
+          "[InitialPlace]  Iter: 2 conjugate gradient residual: 0.00110863 HPWL: 8606878342",
+          "[InitialPlace]  Iter: 3 conjugate gradient residual: 0.00079658 HPWL: 6656092677",
+          "[InitialPlace]  Iter: 4 conjugate gradient residual: 0.00058435 HPWL: 5759527515",
+          "[InitialPlace]  Iter: 5 conjugate gradient residual: 0.00045318 HPWL: 5206488561",
+          "[InitialPlace]  Iter: 6 conjugate gradient residual: 0.00469546 HPWL: 4909238640",
+          "[InitialPlace]  Iter: 7 conjugate gradient residual: 0.00048761 HPWL: 5773107742",
+          "[InitialPlace]  Iter: 8 conjugate gradient residual: 0.00037699 HPWL: 5416132472",
+          "[InitialPlace]  Iter: 9 conjugate gradient residual: 0.00036960 HPWL: 5180108899",
+          "[InitialPlace]  Iter: 10 conjugate gradient residual: 0.00029812 HPWL: 5029457993",
+          "[InitialPlace]  Iter: 11 conjugate gradient residual: 0.00025661 HPWL: 4942406006",
+          "[InitialPlace]  Iter: 12 conjugate gradient residual: 0.00021503 HPWL: 4873580463",
+          "[InitialPlace]  Iter: 13 conjugate gradient residual: 0.00026283 HPWL: 4828264037",
+          "[InitialPlace]  Iter: 14 conjugate gradient residual: 0.00018511 HPWL: 4789396266",
+          "[InitialPlace]  Iter: 15 conjugate gradient residual: 0.00021359 HPWL: 4750109274",
+          "[InitialPlace]  Iter: 16 conjugate gradient residual: 0.00017947 HPWL: 4714811616",
+          "[InitialPlace]  Iter: 17 conjugate gradient residual: 0.00013618 HPWL: 4678807487",
+          "[InitialPlace]  Iter: 18 conjugate gradient residual: 0.00015029 HPWL: 4647848857",
+          "[InitialPlace]  Iter: 19 conjugate gradient residual: 0.00012558 HPWL: 4617452504",
+          "[InitialPlace]  Iter: 20 conjugate gradient residual: 0.00015879 HPWL: 4586204966",
+          "        0 |   0.9968 |  8.096159e+05 |   +0.00% |  6.65e-17 |      ",
+          "       10 |   0.9892 |  1.219801e+06 |  +50.66% |  9.87e-17 |      ",
+          "       20 |   0.9844 |  1.295418e+06 |   +6.20% |  1.58e-16 |      ",
+          "       30 |   0.9814 |  1.307253e+06 |   +0.91% |  2.56e-16 |      ",
+          "       40 |   0.9804 |  1.290270e+06 |   -1.30% |  4.17e-16 |      ",
+          "       50 |   0.9801 |  1.287615e+06 |   -0.21% |  6.77e-16 |      ",
+          "       60 |   0.9799 |  1.292521e+06 |   +0.38% |  1.10e-15 |      ",
+          "       70 |   0.9797 |  1.293069e+06 |   +0.04% |  1.78e-15 |      ",
+          "       80 |   0.9796 |  1.292190e+06 |   -0.07% |  2.90e-15 |      ",
+          "       90 |   0.9795 |  1.290323e+06 |   -0.14% |  4.71e-15 |      ",
+          "      100 |   0.9796 |  1.285461e+06 |   -0.38% |  7.66e-15 |      ",
+          "      110 |   0.9797 |  1.278238e+06 |   -0.56% |  1.25e-14 |      ",
+          "      120 |   0.9798 |  1.270291e+06 |   -0.62% |  2.03e-14 |      ",
+          "      130 |   0.9799 |  1.263193e+06 |   -0.56% |  3.31e-14 |      ",
+          "      140 |   0.9799 |  1.259137e+06 |   -0.32% |  5.39e-14 |      ",
+          "      150 |   0.9796 |  1.260550e+06 |   +0.11% |  8.78e-14 |      ",
+          "      160 |   0.9792 |  1.267151e+06 |   +0.52% |  1.43e-13 |      ",
+          "      170 |   0.9785 |  1.276799e+06 |   +0.76% |  2.32e-13 |      ",
+          "      180 |   0.9777 |  1.291007e+06 |   +1.11% |  3.77e-13 |      ",
+          "      190 |   0.9764 |  1.314993e+06 |   +1.86% |  6.11e-13 |      ",
+          "      200 |   0.9745 |  1.359133e+06 |   +3.36% |  9.86e-13 |      ",
+          "      210 |   0.9714 |  1.438788e+06 |   +5.86% |  1.58e-12 |      ",
+          "      220 |   0.9664 |  1.574648e+06 |   +9.44% |  2.50e-12 |      ",
+          "      230 |   0.9581 |  1.780508e+06 |  +13.07% |  3.90e-12 |      ",
+          "      240 |   0.9466 |  2.049283e+06 |  +15.10% |  6.00e-12 |      ",
+          "      250 |   0.9327 |  2.365380e+06 |  +15.42% |  9.12e-12 |      ",
+          "      260 |   0.9167 |  2.704549e+06 |  +14.34% |  1.38e-11 |      ",
+          "      270 |   0.8975 |  3.077477e+06 |  +13.79% |  2.08e-11 |      ",
+          "      280 |   0.8755 |  3.499017e+06 |  +13.70% |  3.09e-11 |      ",
+          "      290 |   0.8503 |  3.910006e+06 |  +11.75% |  4.59e-11 |      ",
+          "      300 |   0.8224 |  4.175475e+06 |   +6.79% |  7.00e-11 |      ",
+          "      310 |   0.7891 |  4.265666e+06 |   +2.16% |  1.11e-10 |      ",
+          "      320 |   0.7514 |  4.407599e+06 |   +3.33% |  1.73e-10 |      ",
+          "      330 |   0.7144 |  4.758960e+06 |   +7.97% |  2.62e-10 |      ",
+          "      340 |   0.6805 |  5.424786e+06 |  +13.99% |  3.70e-10 |      ",
+          "      350 |   0.6523 |  5.323783e+06 |   -1.86% |  5.82e-10 |      ",
+          "      360 |   0.6020 |  5.322043e+06 |   -0.03% |  9.06e-10 |      ",
+          "      370 |   0.5716 |  5.738349e+06 |   +7.82% |  1.32e-09 |      ",
+          "      380 |   0.5335 |  5.084070e+06 |  -11.40% |  2.14e-09 |      ",
+          "      390 |   0.4728 |  5.315076e+06 |   +4.54% |  3.29e-09 |      ",
+          "      400 |   0.4441 |  5.010036e+06 |   -5.74% |  5.29e-09 |      ",
+          "      410 |   0.3974 |  5.170438e+06 |   +3.20% |  8.09e-09 |      ",
+          "      420 |   0.3547 |  4.973543e+06 |   -3.81% |  1.30e-08 |      ",
+          "      430 |   0.3327 |  4.786912e+06 |   -3.75% |  1.95e-08 |      ",
+          "      440 |   0.3053 |  4.684245e+06 |   -2.14% |  2.84e-08 |      ",
+          "      450 |   0.2752 |  4.625782e+06 |   -1.25% |  4.17e-08 |      ",
+          "      460 |   0.2471 |  4.572072e+06 |   -1.16% |  6.14e-08 |      ",
+          "      470 |   0.2199 |  4.530462e+06 |   -0.91% |  9.05e-08 |      ",
+          "      480 |   0.1940 |  4.497685e+06 |   -0.72% |  1.33e-07 |      ",
+          "      490 |   0.1704 |  4.477522e+06 |   -0.45% |  1.96e-07 |      ",
+          "      500 |   0.1500 |  4.464245e+06 |   -0.30% |  2.89e-07 |      ",
+          "      510 |   0.1318 |  4.457634e+06 |   -0.15% |  4.26e-07 |      ",
+          "      520 |   0.1154 |  4.456453e+06 |   -0.03% |  6.28e-07 |      ",
+          "      530 |   0.1003 |  4.460431e+06 |   +0.09% |  9.24e-07 |      ",
+          "      531 |   0.0989 |  4.460886e+06 |          |  9.98e-07 |      ",
+          "[INFO GPL-1001] Global placement finished at iteration 531"
+        ],
+        "trace_sha256": "208dea591ee7d25a4d52c726e4811e294047ef224eb6d7bd79e2f6a94fecffff",
+        "final_iterations": [
+          "531"
+        ],
+        "routability_iterations": [],
+        "initial_iterations": [
+          "1",
+          "2",
+          "3",
+          "4",
+          "5",
+          "6",
+          "7",
+          "8",
+          "9",
+          "10",
+          "11",
+          "12",
+          "13",
+          "14",
+          "15",
+          "16",
+          "17",
+          "18",
+          "19",
+          "20"
+        ]
+      },
+      "formal_candidate_algorithm": {
+        "trace": [
+          "[InitialPlace]  Iter: 1 conjugate gradient residual: 0.00150776 HPWL: 13849076190",
+          "[InitialPlace]  Iter: 2 conjugate gradient residual: 0.00110863 HPWL: 8606878342",
+          "[InitialPlace]  Iter: 3 conjugate gradient residual: 0.00079658 HPWL: 6656092677",
+          "[InitialPlace]  Iter: 4 conjugate gradient residual: 0.00058435 HPWL: 5759527515",
+          "[InitialPlace]  Iter: 5 conjugate gradient residual: 0.00045318 HPWL: 5206488561",
+          "[InitialPlace]  Iter: 6 conjugate gradient residual: 0.00469546 HPWL: 4909238640",
+          "[InitialPlace]  Iter: 7 conjugate gradient residual: 0.00048761 HPWL: 5773107742",
+          "[InitialPlace]  Iter: 8 conjugate gradient residual: 0.00037699 HPWL: 5416132472",
+          "[InitialPlace]  Iter: 9 conjugate gradient residual: 0.00036960 HPWL: 5180108899",
+          "[InitialPlace]  Iter: 10 conjugate gradient residual: 0.00029812 HPWL: 5029457993",
+          "[InitialPlace]  Iter: 11 conjugate gradient residual: 0.00025661 HPWL: 4942406006",
+          "[InitialPlace]  Iter: 12 conjugate gradient residual: 0.00021503 HPWL: 4873580463",
+          "[InitialPlace]  Iter: 13 conjugate gradient residual: 0.00026283 HPWL: 4828264037",
+          "[InitialPlace]  Iter: 14 conjugate gradient residual: 0.00018511 HPWL: 4789396266",
+          "[InitialPlace]  Iter: 15 conjugate gradient residual: 0.00021359 HPWL: 4750109274",
+          "[InitialPlace]  Iter: 16 conjugate gradient residual: 0.00017947 HPWL: 4714811616",
+          "[InitialPlace]  Iter: 17 conjugate gradient residual: 0.00013618 HPWL: 4678807487",
+          "[InitialPlace]  Iter: 18 conjugate gradient residual: 0.00015029 HPWL: 4647848857",
+          "[InitialPlace]  Iter: 19 conjugate gradient residual: 0.00012558 HPWL: 4617452504",
+          "[InitialPlace]  Iter: 20 conjugate gradient residual: 0.00015879 HPWL: 4586204966",
+          "        0 |   0.9968 |  8.096159e+05 |   +0.00% |  6.65e-17 |      ",
+          "       10 |   0.9892 |  1.219801e+06 |  +50.66% |  9.87e-17 |      ",
+          "       20 |   0.9844 |  1.295418e+06 |   +6.20% |  1.58e-16 |      ",
+          "       30 |   0.9814 |  1.307253e+06 |   +0.91% |  2.56e-16 |      ",
+          "       40 |   0.9804 |  1.290270e+06 |   -1.30% |  4.17e-16 |      ",
+          "       50 |   0.9801 |  1.287615e+06 |   -0.21% |  6.77e-16 |      ",
+          "       60 |   0.9799 |  1.292521e+06 |   +0.38% |  1.10e-15 |      ",
+          "       70 |   0.9797 |  1.293069e+06 |   +0.04% |  1.78e-15 |      ",
+          "       80 |   0.9796 |  1.292190e+06 |   -0.07% |  2.90e-15 |      ",
+          "       90 |   0.9795 |  1.290323e+06 |   -0.14% |  4.71e-15 |      ",
+          "      100 |   0.9796 |  1.285461e+06 |   -0.38% |  7.66e-15 |      ",
+          "      110 |   0.9797 |  1.278238e+06 |   -0.56% |  1.25e-14 |      ",
+          "      120 |   0.9798 |  1.270291e+06 |   -0.62% |  2.03e-14 |      ",
+          "      130 |   0.9799 |  1.263193e+06 |   -0.56% |  3.31e-14 |      ",
+          "      140 |   0.9799 |  1.259137e+06 |   -0.32% |  5.39e-14 |      ",
+          "      150 |   0.9796 |  1.260550e+06 |   +0.11% |  8.78e-14 |      ",
+          "      160 |   0.9792 |  1.267151e+06 |   +0.52% |  1.43e-13 |      ",
+          "      170 |   0.9785 |  1.276799e+06 |   +0.76% |  2.32e-13 |      ",
+          "      180 |   0.9777 |  1.291007e+06 |   +1.11% |  3.77e-13 |      ",
+          "      190 |   0.9764 |  1.314993e+06 |   +1.86% |  6.11e-13 |      ",
+          "      200 |   0.9745 |  1.359133e+06 |   +3.36% |  9.86e-13 |      ",
+          "      210 |   0.9714 |  1.438788e+06 |   +5.86% |  1.58e-12 |      ",
+          "      220 |   0.9664 |  1.574648e+06 |   +9.44% |  2.50e-12 |      ",
+          "      230 |   0.9581 |  1.780508e+06 |  +13.07% |  3.90e-12 |      ",
+          "      240 |   0.9466 |  2.049283e+06 |  +15.10% |  6.00e-12 |      ",
+          "      250 |   0.9327 |  2.365380e+06 |  +15.42% |  9.12e-12 |      ",
+          "      260 |   0.9167 |  2.704549e+06 |  +14.34% |  1.38e-11 |      ",
+          "      270 |   0.8975 |  3.077477e+06 |  +13.79% |  2.08e-11 |      ",
+          "      280 |   0.8755 |  3.499017e+06 |  +13.70% |  3.09e-11 |      ",
+          "      290 |   0.8503 |  3.910006e+06 |  +11.75% |  4.59e-11 |      ",
+          "      300 |   0.8224 |  4.175475e+06 |   +6.79% |  7.00e-11 |      ",
+          "      310 |   0.7891 |  4.265666e+06 |   +2.16% |  1.11e-10 |      ",
+          "      320 |   0.7514 |  4.407599e+06 |   +3.33% |  1.73e-10 |      ",
+          "      330 |   0.7144 |  4.758960e+06 |   +7.97% |  2.62e-10 |      ",
+          "      340 |   0.6805 |  5.424786e+06 |  +13.99% |  3.70e-10 |      ",
+          "      350 |   0.6523 |  5.323783e+06 |   -1.86% |  5.82e-10 |      ",
+          "      360 |   0.6020 |  5.322043e+06 |   -0.03% |  9.06e-10 |      ",
+          "      370 |   0.5716 |  5.738349e+06 |   +7.82% |  1.32e-09 |      ",
+          "      380 |   0.5335 |  5.084070e+06 |  -11.40% |  2.14e-09 |      ",
+          "      390 |   0.4728 |  5.315076e+06 |   +4.54% |  3.29e-09 |      ",
+          "      400 |   0.4441 |  5.010036e+06 |   -5.74% |  5.29e-09 |      ",
+          "      410 |   0.3974 |  5.170438e+06 |   +3.20% |  8.09e-09 |      ",
+          "      420 |   0.3547 |  4.973543e+06 |   -3.81% |  1.30e-08 |      ",
+          "      430 |   0.3327 |  4.786912e+06 |   -3.75% |  1.95e-08 |      ",
+          "      440 |   0.3053 |  4.684245e+06 |   -2.14% |  2.84e-08 |      ",
+          "      450 |   0.2752 |  4.625782e+06 |   -1.25% |  4.17e-08 |      ",
+          "      460 |   0.2471 |  4.572072e+06 |   -1.16% |  6.14e-08 |      ",
+          "      470 |   0.2199 |  4.530462e+06 |   -0.91% |  9.05e-08 |      ",
+          "      480 |   0.1940 |  4.497685e+06 |   -0.72% |  1.33e-07 |      ",
+          "      490 |   0.1704 |  4.477522e+06 |   -0.45% |  1.96e-07 |      ",
+          "      500 |   0.1500 |  4.464245e+06 |   -0.30% |  2.89e-07 |      ",
+          "      510 |   0.1318 |  4.457634e+06 |   -0.15% |  4.26e-07 |      ",
+          "      520 |   0.1154 |  4.456453e+06 |   -0.03% |  6.28e-07 |      ",
+          "      530 |   0.1003 |  4.460431e+06 |   +0.09% |  9.24e-07 |      ",
+          "      531 |   0.0989 |  4.460886e+06 |          |  9.98e-07 |      ",
+          "[INFO GPL-1001] Global placement finished at iteration 531"
+        ],
+        "trace_sha256": "208dea591ee7d25a4d52c726e4811e294047ef224eb6d7bd79e2f6a94fecffff",
+        "final_iterations": [
+          "531"
+        ],
+        "routability_iterations": [],
+        "initial_iterations": [
+          "1",
+          "2",
+          "3",
+          "4",
+          "5",
+          "6",
+          "7",
+          "8",
+          "9",
+          "10",
+          "11",
+          "12",
+          "13",
+          "14",
+          "15",
+          "16",
+          "17",
+          "18",
+          "19",
+          "20"
+        ]
+      },
+      "formal_master_candidate_algorithm_exact": true,
+      "normalization": "calls and seconds/call reported for every phase; use accepted iteration/pass traces to distinguish algorithm work changes",
+      "profile_output_exact": true,
+      "profile_algorithm_trace_exact": true,
+      "log_sha256": "65ed420146d5e19b5abd2eda99d3689c6c15ee54455b9cf61ffe9a6855fc5da6",
+      "accepted_candidate_log_sha256": "20be7ce00aea25e1d90887350c9e685918e792e4a629b8055b13481fd6d405db",
+      "accepted_master_log_sha256": "facdc1dcbc89dee53bdd8182dff77747f6e95726c43f01b3c494657561cdfb21",
+      "tcl_sha256": "6ea2915048495d601782e87fc8e0255f4e9270cfa10318752d14b25320176227"
+    },
+    {
+      "role": "candidate",
+      "design": "large02",
+      "threads": 1,
+      "accepted_reference_threads": 1,
+      "state_hash": "ad56039bdda8119ea7ee39d2f453f555bf89e9a55fdfc42b2d547e3dc6b584d3",
+      "state_rows": 719776,
+      "quality": [
+        "LARGE_AREA 755282.794",
+        "LARGE_HPWL 4484987.9425"
+      ],
+      "seconds_profiled": 171.3791477090001,
+      "phase": {
+        "records": [
+          {
+            "name": "initial_placement",
+            "inclusive_ms": 33505.105379,
+            "exclusive_ms": 1360.809484,
+            "calls": 1
+          },
+          {
+            "name": "initial_solver",
+            "inclusive_ms": 32144.295895,
+            "exclusive_ms": 4476.578493,
+            "calls": 1
+          },
+          {
+            "name": "initial_update_pins",
+            "inclusive_ms": 311.099696,
+            "exclusive_ms": 311.099696,
+            "calls": 20
+          },
+          {
+            "name": "initial_create_matrix",
+            "inclusive_ms": 7164.06804,
+            "exclusive_ms": 7164.06804,
+            "calls": 20
+          },
+          {
+            "name": "initial_sparse_solve",
+            "inclusive_ms": 18584.460178,
+            "exclusive_ms": 18584.460178,
+            "calls": 20
+          },
+          {
+            "name": "initial_update_coordinates",
+            "inclusive_ms": 1608.089488,
+            "exclusive_ms": 1608.089488,
+            "calls": 20
+          },
+          {
+            "name": "nesterov",
+            "inclusive_ms": 116648.713985,
+            "exclusive_ms": 5823.378087,
+            "calls": 1
+          },
+          {
+            "name": "nesterov_init",
+            "inclusive_ms": 495.286936,
+            "exclusive_ms": 105.936584,
+            "calls": 1
+          },
+          {
+            "name": "coordinates_and_deposit",
+            "inclusive_ms": 13450.814151,
+            "exclusive_ms": 0.918761,
+            "calls": 538
+          },
+          {
+            "name": "density_center_pin_sync",
+            "inclusive_ms": 6277.287099,
+            "exclusive_ms": 6277.287099,
+            "calls": 538
+          },
+          {
+            "name": "density_deposit",
+            "inclusive_ms": 7172.608291,
+            "exclusive_ms": 79.922865,
+            "calls": 538
+          },
+          {
+            "name": "density_scatter",
+            "inclusive_ms": 5723.573585,
+            "exclusive_ms": 5723.573585,
+            "calls": 538
+          },
+          {
+            "name": "density_overflow",
+            "inclusive_ms": 1369.111841,
+            "exclusive_ms": 1369.111841,
+            "calls": 538
+          },
+          {
+            "name": "density_field",
+            "inclusive_ms": 6424.644156,
+            "exclusive_ms": 2724.556164,
+            "calls": 538
+          },
+          {
+            "name": "fft",
+            "inclusive_ms": 3700.087992,
+            "exclusive_ms": 3700.087992,
+            "calls": 538
+          },
+          {
+            "name": "wirelength_force",
+            "inclusive_ms": 14264.595671,
+            "exclusive_ms": 14264.595671,
+            "calls": 538
+          },
+          {
+            "name": "gradient_gather_combine",
+            "inclusive_ms": 72898.322866,
+            "exclusive_ms": 2.071853,
+            "calls": 538
+          },
+          {
+            "name": "wirelength_gather",
+            "inclusive_ms": 60960.007544,
+            "exclusive_ms": 60960.007544,
+            "calls": 538
+          },
+          {
+            "name": "density_gather_precondition",
+            "inclusive_ms": 11618.739781,
+            "exclusive_ms": 11618.739781,
+            "calls": 538
+          },
+          {
+            "name": "gradient_serial_sum",
+            "inclusive_ms": 317.503688,
+            "exclusive_ms": 317.503688,
+            "calls": 538
+          },
+          {
+            "name": "step_length",
+            "inclusive_ms": 867.897244,
+            "exclusive_ms": 0.38526,
+            "calls": 537
+          },
+          {
+            "name": "distance",
+            "inclusive_ms": 867.511984,
+            "exclusive_ms": 2.748018,
+            "calls": 1074
+          },
+          {
+            "name": "distance_parallel_squares",
+            "inclusive_ms": 260.069799,
+            "exclusive_ms": 260.069799,
+            "calls": 1074
+          },
+          {
+            "name": "distance_serial_sum",
+            "inclusive_ms": 604.694167,
+            "exclusive_ms": 604.694167,
+            "calls": 1074
+          },
+          {
+            "name": "iteration_attempt",
+            "inclusive_ms": 110329.68207,
+            "exclusive_ms": 2.35482,
+            "calls": 532
+          },
+          {
+            "name": "nesterov_coordinates",
+            "inclusive_ms": 22605.625901,
+            "exclusive_ms": 2810.403514,
+            "calls": 536
+          },
+          {
+            "name": "timing_feedback",
+            "inclusive_ms": 0.113016,
+            "exclusive_ms": 0.113016,
+            "calls": 532
+          },
+          {
+            "name": "routability_snapshot",
+            "inclusive_ms": 0.121811,
+            "exclusive_ms": 0.121811,
+            "calls": 532
+          },
+          {
+            "name": "routability_feedback",
+            "inclusive_ms": 0.132065,
+            "exclusive_ms": 0.132065,
+            "calls": 532
+          }
+        ],
+        "totals": {
+          "initial_placement": {
+            "inclusive_ms": 33505.105379,
+            "exclusive_ms": 1360.809484,
+            "calls": 1,
+            "inclusive_seconds_per_call": 33.505105379,
+            "exclusive_seconds_per_call": 1.360809484
+          },
+          "initial_solver": {
+            "inclusive_ms": 32144.295895,
+            "exclusive_ms": 4476.578493,
+            "calls": 1,
+            "inclusive_seconds_per_call": 32.144295895,
+            "exclusive_seconds_per_call": 4.476578493
+          },
+          "initial_update_pins": {
+            "inclusive_ms": 311.099696,
+            "exclusive_ms": 311.099696,
+            "calls": 20,
+            "inclusive_seconds_per_call": 0.0155549848,
+            "exclusive_seconds_per_call": 0.0155549848
+          },
+          "initial_create_matrix": {
+            "inclusive_ms": 7164.06804,
+            "exclusive_ms": 7164.06804,
+            "calls": 20,
+            "inclusive_seconds_per_call": 0.358203402,
+            "exclusive_seconds_per_call": 0.358203402
+          },
+          "initial_sparse_solve": {
+            "inclusive_ms": 18584.460178,
+            "exclusive_ms": 18584.460178,
+            "calls": 20,
+            "inclusive_seconds_per_call": 0.9292230089000001,
+            "exclusive_seconds_per_call": 0.9292230089000001
+          },
+          "initial_update_coordinates": {
+            "inclusive_ms": 1608.089488,
+            "exclusive_ms": 1608.089488,
+            "calls": 20,
+            "inclusive_seconds_per_call": 0.08040447440000001,
+            "exclusive_seconds_per_call": 0.08040447440000001
+          },
+          "nesterov": {
+            "inclusive_ms": 116648.713985,
+            "exclusive_ms": 5823.378087,
+            "calls": 1,
+            "inclusive_seconds_per_call": 116.648713985,
+            "exclusive_seconds_per_call": 5.823378087
+          },
+          "nesterov_init": {
+            "inclusive_ms": 495.286936,
+            "exclusive_ms": 105.936584,
+            "calls": 1,
+            "inclusive_seconds_per_call": 0.495286936,
+            "exclusive_seconds_per_call": 0.105936584
+          },
+          "coordinates_and_deposit": {
+            "inclusive_ms": 13450.814151,
+            "exclusive_ms": 0.918761,
+            "calls": 538,
+            "inclusive_seconds_per_call": 0.025001513291821563,
+            "exclusive_seconds_per_call": 1.7077342007434945e-06
+          },
+          "density_center_pin_sync": {
+            "inclusive_ms": 6277.287099,
+            "exclusive_ms": 6277.287099,
+            "calls": 538,
+            "inclusive_seconds_per_call": 0.0116678198866171,
+            "exclusive_seconds_per_call": 0.0116678198866171
+          },
+          "density_deposit": {
+            "inclusive_ms": 7172.608291,
+            "exclusive_ms": 79.922865,
+            "calls": 538,
+            "inclusive_seconds_per_call": 0.013331985671003717,
+            "exclusive_seconds_per_call": 0.00014855551115241635
+          },
+          "density_scatter": {
+            "inclusive_ms": 5723.573585,
+            "exclusive_ms": 5723.573585,
+            "calls": 538,
+            "inclusive_seconds_per_call": 0.010638612611524163,
+            "exclusive_seconds_per_call": 0.010638612611524163
+          },
+          "density_overflow": {
+            "inclusive_ms": 1369.111841,
+            "exclusive_ms": 1369.111841,
+            "calls": 538,
+            "inclusive_seconds_per_call": 0.0025448175483271376,
+            "exclusive_seconds_per_call": 0.0025448175483271376
+          },
+          "density_field": {
+            "inclusive_ms": 6424.644156,
+            "exclusive_ms": 2724.556164,
+            "calls": 538,
+            "inclusive_seconds_per_call": 0.011941717762081784,
+            "exclusive_seconds_per_call": 0.005064230788104089
+          },
+          "fft": {
+            "inclusive_ms": 3700.087992,
+            "exclusive_ms": 3700.087992,
+            "calls": 538,
+            "inclusive_seconds_per_call": 0.006877486973977696,
+            "exclusive_seconds_per_call": 0.006877486973977696
+          },
+          "wirelength_force": {
+            "inclusive_ms": 14264.595671,
+            "exclusive_ms": 14264.595671,
+            "calls": 538,
+            "inclusive_seconds_per_call": 0.026514118347583642,
+            "exclusive_seconds_per_call": 0.026514118347583642
+          },
+          "gradient_gather_combine": {
+            "inclusive_ms": 72898.322866,
+            "exclusive_ms": 2.071853,
+            "calls": 538,
+            "inclusive_seconds_per_call": 0.1354987413866171,
+            "exclusive_seconds_per_call": 3.851027881040892e-06
+          },
+          "wirelength_gather": {
+            "inclusive_ms": 60960.007544,
+            "exclusive_ms": 60960.007544,
+            "calls": 538,
+            "inclusive_seconds_per_call": 0.11330856420817843,
+            "exclusive_seconds_per_call": 0.11330856420817843
+          },
+          "density_gather_precondition": {
+            "inclusive_ms": 11618.739781,
+            "exclusive_ms": 11618.739781,
+            "calls": 538,
+            "inclusive_seconds_per_call": 0.021596170596654276,
+            "exclusive_seconds_per_call": 0.021596170596654276
+          },
+          "gradient_serial_sum": {
+            "inclusive_ms": 317.503688,
+            "exclusive_ms": 317.503688,
+            "calls": 538,
+            "inclusive_seconds_per_call": 0.0005901555539033457,
+            "exclusive_seconds_per_call": 0.0005901555539033457
+          },
+          "step_length": {
+            "inclusive_ms": 867.897244,
+            "exclusive_ms": 0.38526,
+            "calls": 537,
+            "inclusive_seconds_per_call": 0.0016161959851024208,
+            "exclusive_seconds_per_call": 7.174301675977653e-07
+          },
+          "distance": {
+            "inclusive_ms": 867.511984,
+            "exclusive_ms": 2.748018,
+            "calls": 1074,
+            "inclusive_seconds_per_call": 0.0008077392774674115,
+            "exclusive_seconds_per_call": 2.5586759776536313e-06
+          },
+          "distance_parallel_squares": {
+            "inclusive_ms": 260.069799,
+            "exclusive_ms": 260.069799,
+            "calls": 1074,
+            "inclusive_seconds_per_call": 0.0002421506508379888,
+            "exclusive_seconds_per_call": 0.0002421506508379888
+          },
+          "distance_serial_sum": {
+            "inclusive_ms": 604.694167,
+            "exclusive_ms": 604.694167,
+            "calls": 1074,
+            "inclusive_seconds_per_call": 0.000563029950651769,
+            "exclusive_seconds_per_call": 0.000563029950651769
+          },
+          "iteration_attempt": {
+            "inclusive_ms": 110329.68207,
+            "exclusive_ms": 2.35482,
+            "calls": 532,
+            "inclusive_seconds_per_call": 0.20738662043233083,
+            "exclusive_seconds_per_call": 4.426353383458647e-06
+          },
+          "nesterov_coordinates": {
+            "inclusive_ms": 22605.625901,
+            "exclusive_ms": 2810.403514,
+            "calls": 536,
+            "inclusive_seconds_per_call": 0.042174675188432834,
+            "exclusive_seconds_per_call": 0.005243290138059702
+          },
+          "timing_feedback": {
+            "inclusive_ms": 0.113016,
+            "exclusive_ms": 0.113016,
+            "calls": 532,
+            "inclusive_seconds_per_call": 2.1243609022556391e-07,
+            "exclusive_seconds_per_call": 2.1243609022556391e-07
+          },
+          "routability_snapshot": {
+            "inclusive_ms": 0.121811,
+            "exclusive_ms": 0.121811,
+            "calls": 532,
+            "inclusive_seconds_per_call": 2.2896804511278195e-07,
+            "exclusive_seconds_per_call": 2.2896804511278195e-07
+          },
+          "routability_feedback": {
+            "inclusive_ms": 0.132065,
+            "exclusive_ms": 0.132065,
+            "calls": 532,
+            "inclusive_seconds_per_call": 2.482424812030075e-07,
+            "exclusive_seconds_per_call": 2.482424812030075e-07
+          }
+        },
+        "root_ms": 150153.819364,
+        "exclusive_sum_ms": 150153.819364,
+        "iteration_attempts": 532
+      },
+      "process_resource": "\tCommand being timed: \"/workspace/openroad-soa-profile/payload/binaries/candidate-profile -no_init -exit /workspace/openroad-soa-profile/results/large02-candidate-t1/run.tcl\"\n\tUser time (seconds): 167.34\n\tSystem time (seconds): 3.98\n\tPercent of CPU this job got: 99%\n\tElapsed (wall clock) time (h:mm:ss or m:ss): 2:51.34\n\tAverage shared text size (kbytes): 0\n\tAverage unshared data size (kbytes): 0\n\tAverage stack size (kbytes): 0\n\tAverage total size (kbytes): 0\n\tMaximum resident set size (kbytes): 1446792\n\tAverage resident set size (kbytes): 0\n\tMajor (requiring I/O) page faults: 0\n\tMinor (reclaiming a frame) page faults: 946299\n\tVoluntary context switches: 30\n\tInvoluntary context switches: 134\n\tSwaps: 0\n\tFile system inputs: 0\n\tFile system outputs: 123768\n\tSocket messages sent: 0\n\tSocket messages received: 0\n\tSignals delivered: 0\n\tPage size (bytes): 4096\n\tExit status: 0\n",
+      "ompt": {
+        "measured": false,
+        "initialization": [
+          {
+            "initialized": true,
+            "wait_registration": 5,
+            "thread_registration": 5,
+            "parallel_registration": 5
+          }
+        ],
+        "finalization": [
+          {
+            "wait_registration": 5,
+            "callback_pairs": 0,
+            "threads": 1,
+            "parallel_regions": 9132,
+            "invalid_pairs": 0
+          }
+        ],
+        "waits": [],
+        "units": "thread-time, not wall-time"
+      },
+      "algorithm": {
+        "trace": [
+          "[InitialPlace]  Iter: 1 conjugate gradient residual: 0.00150776 HPWL: 13849076190",
+          "[InitialPlace]  Iter: 2 conjugate gradient residual: 0.00110863 HPWL: 8606878342",
+          "[InitialPlace]  Iter: 3 conjugate gradient residual: 0.00079658 HPWL: 6656092677",
+          "[InitialPlace]  Iter: 4 conjugate gradient residual: 0.00058435 HPWL: 5759527515",
+          "[InitialPlace]  Iter: 5 conjugate gradient residual: 0.00045318 HPWL: 5206488561",
+          "[InitialPlace]  Iter: 6 conjugate gradient residual: 0.00469546 HPWL: 4909238640",
+          "[InitialPlace]  Iter: 7 conjugate gradient residual: 0.00048761 HPWL: 5773107742",
+          "[InitialPlace]  Iter: 8 conjugate gradient residual: 0.00037699 HPWL: 5416132472",
+          "[InitialPlace]  Iter: 9 conjugate gradient residual: 0.00036960 HPWL: 5180108899",
+          "[InitialPlace]  Iter: 10 conjugate gradient residual: 0.00029812 HPWL: 5029457993",
+          "[InitialPlace]  Iter: 11 conjugate gradient residual: 0.00025661 HPWL: 4942406006",
+          "[InitialPlace]  Iter: 12 conjugate gradient residual: 0.00021503 HPWL: 4873580463",
+          "[InitialPlace]  Iter: 13 conjugate gradient residual: 0.00026283 HPWL: 4828264037",
+          "[InitialPlace]  Iter: 14 conjugate gradient residual: 0.00018511 HPWL: 4789396266",
+          "[InitialPlace]  Iter: 15 conjugate gradient residual: 0.00021359 HPWL: 4750109274",
+          "[InitialPlace]  Iter: 16 conjugate gradient residual: 0.00017947 HPWL: 4714811616",
+          "[InitialPlace]  Iter: 17 conjugate gradient residual: 0.00013618 HPWL: 4678807487",
+          "[InitialPlace]  Iter: 18 conjugate gradient residual: 0.00015029 HPWL: 4647848857",
+          "[InitialPlace]  Iter: 19 conjugate gradient residual: 0.00012558 HPWL: 4617452504",
+          "[InitialPlace]  Iter: 20 conjugate gradient residual: 0.00015879 HPWL: 4586204966",
+          "        0 |   0.9968 |  8.096159e+05 |   +0.00% |  6.65e-17 |      ",
+          "       10 |   0.9892 |  1.219801e+06 |  +50.66% |  9.87e-17 |      ",
+          "       20 |   0.9844 |  1.295418e+06 |   +6.20% |  1.58e-16 |      ",
+          "       30 |   0.9814 |  1.307253e+06 |   +0.91% |  2.56e-16 |      ",
+          "       40 |   0.9804 |  1.290270e+06 |   -1.30% |  4.17e-16 |      ",
+          "       50 |   0.9801 |  1.287615e+06 |   -0.21% |  6.77e-16 |      ",
+          "       60 |   0.9799 |  1.292521e+06 |   +0.38% |  1.10e-15 |      ",
+          "       70 |   0.9797 |  1.293069e+06 |   +0.04% |  1.78e-15 |      ",
+          "       80 |   0.9796 |  1.292190e+06 |   -0.07% |  2.90e-15 |      ",
+          "       90 |   0.9795 |  1.290323e+06 |   -0.14% |  4.71e-15 |      ",
+          "      100 |   0.9796 |  1.285461e+06 |   -0.38% |  7.66e-15 |      ",
+          "      110 |   0.9797 |  1.278238e+06 |   -0.56% |  1.25e-14 |      ",
+          "      120 |   0.9798 |  1.270291e+06 |   -0.62% |  2.03e-14 |      ",
+          "      130 |   0.9799 |  1.263193e+06 |   -0.56% |  3.31e-14 |      ",
+          "      140 |   0.9799 |  1.259137e+06 |   -0.32% |  5.39e-14 |      ",
+          "      150 |   0.9796 |  1.260550e+06 |   +0.11% |  8.78e-14 |      ",
+          "      160 |   0.9792 |  1.267151e+06 |   +0.52% |  1.43e-13 |      ",
+          "      170 |   0.9785 |  1.276799e+06 |   +0.76% |  2.32e-13 |      ",
+          "      180 |   0.9777 |  1.291007e+06 |   +1.11% |  3.77e-13 |      ",
+          "      190 |   0.9764 |  1.314993e+06 |   +1.86% |  6.11e-13 |      ",
+          "      200 |   0.9745 |  1.359133e+06 |   +3.36% |  9.86e-13 |      ",
+          "      210 |   0.9714 |  1.438788e+06 |   +5.86% |  1.58e-12 |      ",
+          "      220 |   0.9664 |  1.574648e+06 |   +9.44% |  2.50e-12 |      ",
+          "      230 |   0.9581 |  1.780508e+06 |  +13.07% |  3.90e-12 |      ",
+          "      240 |   0.9466 |  2.049283e+06 |  +15.10% |  6.00e-12 |      ",
+          "      250 |   0.9327 |  2.365380e+06 |  +15.42% |  9.12e-12 |      ",
+          "      260 |   0.9167 |  2.704549e+06 |  +14.34% |  1.38e-11 |      ",
+          "      270 |   0.8975 |  3.077477e+06 |  +13.79% |  2.08e-11 |      ",
+          "      280 |   0.8755 |  3.499017e+06 |  +13.70% |  3.09e-11 |      ",
+          "      290 |   0.8503 |  3.910006e+06 |  +11.75% |  4.59e-11 |      ",
+          "      300 |   0.8224 |  4.175475e+06 |   +6.79% |  7.00e-11 |      ",
+          "      310 |   0.7891 |  4.265666e+06 |   +2.16% |  1.11e-10 |      ",
+          "      320 |   0.7514 |  4.407599e+06 |   +3.33% |  1.73e-10 |      ",
+          "      330 |   0.7144 |  4.758960e+06 |   +7.97% |  2.62e-10 |      ",
+          "      340 |   0.6805 |  5.424786e+06 |  +13.99% |  3.70e-10 |      ",
+          "      350 |   0.6523 |  5.323783e+06 |   -1.86% |  5.82e-10 |      ",
+          "      360 |   0.6020 |  5.322043e+06 |   -0.03% |  9.06e-10 |      ",
+          "      370 |   0.5716 |  5.738349e+06 |   +7.82% |  1.32e-09 |      ",
+          "      380 |   0.5335 |  5.084070e+06 |  -11.40% |  2.14e-09 |      ",
+          "      390 |   0.4728 |  5.315076e+06 |   +4.54% |  3.29e-09 |      ",
+          "      400 |   0.4441 |  5.010036e+06 |   -5.74% |  5.29e-09 |      ",
+          "      410 |   0.3974 |  5.170438e+06 |   +3.20% |  8.09e-09 |      ",
+          "      420 |   0.3547 |  4.973543e+06 |   -3.81% |  1.30e-08 |      ",
+          "      430 |   0.3327 |  4.786912e+06 |   -3.75% |  1.95e-08 |      ",
+          "      440 |   0.3053 |  4.684245e+06 |   -2.14% |  2.84e-08 |      ",
+          "      450 |   0.2752 |  4.625782e+06 |   -1.25% |  4.17e-08 |      ",
+          "      460 |   0.2471 |  4.572072e+06 |   -1.16% |  6.14e-08 |      ",
+          "      470 |   0.2199 |  4.530462e+06 |   -0.91% |  9.05e-08 |      ",
+          "      480 |   0.1940 |  4.497685e+06 |   -0.72% |  1.33e-07 |      ",
+          "      490 |   0.1704 |  4.477522e+06 |   -0.45% |  1.96e-07 |      ",
+          "      500 |   0.1500 |  4.464245e+06 |   -0.30% |  2.89e-07 |      ",
+          "      510 |   0.1318 |  4.457634e+06 |   -0.15% |  4.26e-07 |      ",
+          "      520 |   0.1154 |  4.456453e+06 |   -0.03% |  6.28e-07 |      ",
+          "      530 |   0.1003 |  4.460431e+06 |   +0.09% |  9.24e-07 |      ",
+          "      531 |   0.0989 |  4.460886e+06 |          |  9.98e-07 |      ",
+          "[INFO GPL-1001] Global placement finished at iteration 531"
+        ],
+        "trace_sha256": "208dea591ee7d25a4d52c726e4811e294047ef224eb6d7bd79e2f6a94fecffff",
+        "final_iterations": [
+          "531"
+        ],
+        "routability_iterations": [],
+        "initial_iterations": [
+          "1",
+          "2",
+          "3",
+          "4",
+          "5",
+          "6",
+          "7",
+          "8",
+          "9",
+          "10",
+          "11",
+          "12",
+          "13",
+          "14",
+          "15",
+          "16",
+          "17",
+          "18",
+          "19",
+          "20"
+        ]
+      },
+      "formal_master_algorithm": {
+        "trace": [
+          "[InitialPlace]  Iter: 1 conjugate gradient residual: 0.00150776 HPWL: 13849076190",
+          "[InitialPlace]  Iter: 2 conjugate gradient residual: 0.00110863 HPWL: 8606878342",
+          "[InitialPlace]  Iter: 3 conjugate gradient residual: 0.00079658 HPWL: 6656092677",
+          "[InitialPlace]  Iter: 4 conjugate gradient residual: 0.00058435 HPWL: 5759527515",
+          "[InitialPlace]  Iter: 5 conjugate gradient residual: 0.00045318 HPWL: 5206488561",
+          "[InitialPlace]  Iter: 6 conjugate gradient residual: 0.00469546 HPWL: 4909238640",
+          "[InitialPlace]  Iter: 7 conjugate gradient residual: 0.00048761 HPWL: 5773107742",
+          "[InitialPlace]  Iter: 8 conjugate gradient residual: 0.00037699 HPWL: 5416132472",
+          "[InitialPlace]  Iter: 9 conjugate gradient residual: 0.00036960 HPWL: 5180108899",
+          "[InitialPlace]  Iter: 10 conjugate gradient residual: 0.00029812 HPWL: 5029457993",
+          "[InitialPlace]  Iter: 11 conjugate gradient residual: 0.00025661 HPWL: 4942406006",
+          "[InitialPlace]  Iter: 12 conjugate gradient residual: 0.00021503 HPWL: 4873580463",
+          "[InitialPlace]  Iter: 13 conjugate gradient residual: 0.00026283 HPWL: 4828264037",
+          "[InitialPlace]  Iter: 14 conjugate gradient residual: 0.00018511 HPWL: 4789396266",
+          "[InitialPlace]  Iter: 15 conjugate gradient residual: 0.00021359 HPWL: 4750109274",
+          "[InitialPlace]  Iter: 16 conjugate gradient residual: 0.00017947 HPWL: 4714811616",
+          "[InitialPlace]  Iter: 17 conjugate gradient residual: 0.00013618 HPWL: 4678807487",
+          "[InitialPlace]  Iter: 18 conjugate gradient residual: 0.00015029 HPWL: 4647848857",
+          "[InitialPlace]  Iter: 19 conjugate gradient residual: 0.00012558 HPWL: 4617452504",
+          "[InitialPlace]  Iter: 20 conjugate gradient residual: 0.00015879 HPWL: 4586204966",
+          "        0 |   0.9968 |  8.096159e+05 |   +0.00% |  6.65e-17 |      ",
+          "       10 |   0.9892 |  1.219801e+06 |  +50.66% |  9.87e-17 |      ",
+          "       20 |   0.9844 |  1.295418e+06 |   +6.20% |  1.58e-16 |      ",
+          "       30 |   0.9814 |  1.307253e+06 |   +0.91% |  2.56e-16 |      ",
+          "       40 |   0.9804 |  1.290270e+06 |   -1.30% |  4.17e-16 |      ",
+          "       50 |   0.9801 |  1.287615e+06 |   -0.21% |  6.77e-16 |      ",
+          "       60 |   0.9799 |  1.292521e+06 |   +0.38% |  1.10e-15 |      ",
+          "       70 |   0.9797 |  1.293069e+06 |   +0.04% |  1.78e-15 |      ",
+          "       80 |   0.9796 |  1.292190e+06 |   -0.07% |  2.90e-15 |      ",
+          "       90 |   0.9795 |  1.290323e+06 |   -0.14% |  4.71e-15 |      ",
+          "      100 |   0.9796 |  1.285461e+06 |   -0.38% |  7.66e-15 |      ",
+          "      110 |   0.9797 |  1.278238e+06 |   -0.56% |  1.25e-14 |      ",
+          "      120 |   0.9798 |  1.270291e+06 |   -0.62% |  2.03e-14 |      ",
+          "      130 |   0.9799 |  1.263193e+06 |   -0.56% |  3.31e-14 |      ",
+          "      140 |   0.9799 |  1.259137e+06 |   -0.32% |  5.39e-14 |      ",
+          "      150 |   0.9796 |  1.260550e+06 |   +0.11% |  8.78e-14 |      ",
+          "      160 |   0.9792 |  1.267151e+06 |   +0.52% |  1.43e-13 |      ",
+          "      170 |   0.9785 |  1.276799e+06 |   +0.76% |  2.32e-13 |      ",
+          "      180 |   0.9777 |  1.291007e+06 |   +1.11% |  3.77e-13 |      ",
+          "      190 |   0.9764 |  1.314993e+06 |   +1.86% |  6.11e-13 |      ",
+          "      200 |   0.9745 |  1.359133e+06 |   +3.36% |  9.86e-13 |      ",
+          "      210 |   0.9714 |  1.438788e+06 |   +5.86% |  1.58e-12 |      ",
+          "      220 |   0.9664 |  1.574648e+06 |   +9.44% |  2.50e-12 |      ",
+          "      230 |   0.9581 |  1.780508e+06 |  +13.07% |  3.90e-12 |      ",
+          "      240 |   0.9466 |  2.049283e+06 |  +15.10% |  6.00e-12 |      ",
+          "      250 |   0.9327 |  2.365380e+06 |  +15.42% |  9.12e-12 |      ",
+          "      260 |   0.9167 |  2.704549e+06 |  +14.34% |  1.38e-11 |      ",
+          "      270 |   0.8975 |  3.077477e+06 |  +13.79% |  2.08e-11 |      ",
+          "      280 |   0.8755 |  3.499017e+06 |  +13.70% |  3.09e-11 |      ",
+          "      290 |   0.8503 |  3.910006e+06 |  +11.75% |  4.59e-11 |      ",
+          "      300 |   0.8224 |  4.175475e+06 |   +6.79% |  7.00e-11 |      ",
+          "      310 |   0.7891 |  4.265666e+06 |   +2.16% |  1.11e-10 |      ",
+          "      320 |   0.7514 |  4.407599e+06 |   +3.33% |  1.73e-10 |      ",
+          "      330 |   0.7144 |  4.758960e+06 |   +7.97% |  2.62e-10 |      ",
+          "      340 |   0.6805 |  5.424786e+06 |  +13.99% |  3.70e-10 |      ",
+          "      350 |   0.6523 |  5.323783e+06 |   -1.86% |  5.82e-10 |      ",
+          "      360 |   0.6020 |  5.322043e+06 |   -0.03% |  9.06e-10 |      ",
+          "      370 |   0.5716 |  5.738349e+06 |   +7.82% |  1.32e-09 |      ",
+          "      380 |   0.5335 |  5.084070e+06 |  -11.40% |  2.14e-09 |      ",
+          "      390 |   0.4728 |  5.315076e+06 |   +4.54% |  3.29e-09 |      ",
+          "      400 |   0.4441 |  5.010036e+06 |   -5.74% |  5.29e-09 |      ",
+          "      410 |   0.3974 |  5.170438e+06 |   +3.20% |  8.09e-09 |      ",
+          "      420 |   0.3547 |  4.973543e+06 |   -3.81% |  1.30e-08 |      ",
+          "      430 |   0.3327 |  4.786912e+06 |   -3.75% |  1.95e-08 |      ",
+          "      440 |   0.3053 |  4.684245e+06 |   -2.14% |  2.84e-08 |      ",
+          "      450 |   0.2752 |  4.625782e+06 |   -1.25% |  4.17e-08 |      ",
+          "      460 |   0.2471 |  4.572072e+06 |   -1.16% |  6.14e-08 |      ",
+          "      470 |   0.2199 |  4.530462e+06 |   -0.91% |  9.05e-08 |      ",
+          "      480 |   0.1940 |  4.497685e+06 |   -0.72% |  1.33e-07 |      ",
+          "      490 |   0.1704 |  4.477522e+06 |   -0.45% |  1.96e-07 |      ",
+          "      500 |   0.1500 |  4.464245e+06 |   -0.30% |  2.89e-07 |      ",
+          "      510 |   0.1318 |  4.457634e+06 |   -0.15% |  4.26e-07 |      ",
+          "      520 |   0.1154 |  4.456453e+06 |   -0.03% |  6.28e-07 |      ",
+          "      530 |   0.1003 |  4.460431e+06 |   +0.09% |  9.24e-07 |      ",
+          "      531 |   0.0989 |  4.460886e+06 |          |  9.98e-07 |      ",
+          "[INFO GPL-1001] Global placement finished at iteration 531"
+        ],
+        "trace_sha256": "208dea591ee7d25a4d52c726e4811e294047ef224eb6d7bd79e2f6a94fecffff",
+        "final_iterations": [
+          "531"
+        ],
+        "routability_iterations": [],
+        "initial_iterations": [
+          "1",
+          "2",
+          "3",
+          "4",
+          "5",
+          "6",
+          "7",
+          "8",
+          "9",
+          "10",
+          "11",
+          "12",
+          "13",
+          "14",
+          "15",
+          "16",
+          "17",
+          "18",
+          "19",
+          "20"
+        ]
+      },
+      "formal_candidate_algorithm": {
+        "trace": [
+          "[InitialPlace]  Iter: 1 conjugate gradient residual: 0.00150776 HPWL: 13849076190",
+          "[InitialPlace]  Iter: 2 conjugate gradient residual: 0.00110863 HPWL: 8606878342",
+          "[InitialPlace]  Iter: 3 conjugate gradient residual: 0.00079658 HPWL: 6656092677",
+          "[InitialPlace]  Iter: 4 conjugate gradient residual: 0.00058435 HPWL: 5759527515",
+          "[InitialPlace]  Iter: 5 conjugate gradient residual: 0.00045318 HPWL: 5206488561",
+          "[InitialPlace]  Iter: 6 conjugate gradient residual: 0.00469546 HPWL: 4909238640",
+          "[InitialPlace]  Iter: 7 conjugate gradient residual: 0.00048761 HPWL: 5773107742",
+          "[InitialPlace]  Iter: 8 conjugate gradient residual: 0.00037699 HPWL: 5416132472",
+          "[InitialPlace]  Iter: 9 conjugate gradient residual: 0.00036960 HPWL: 5180108899",
+          "[InitialPlace]  Iter: 10 conjugate gradient residual: 0.00029812 HPWL: 5029457993",
+          "[InitialPlace]  Iter: 11 conjugate gradient residual: 0.00025661 HPWL: 4942406006",
+          "[InitialPlace]  Iter: 12 conjugate gradient residual: 0.00021503 HPWL: 4873580463",
+          "[InitialPlace]  Iter: 13 conjugate gradient residual: 0.00026283 HPWL: 4828264037",
+          "[InitialPlace]  Iter: 14 conjugate gradient residual: 0.00018511 HPWL: 4789396266",
+          "[InitialPlace]  Iter: 15 conjugate gradient residual: 0.00021359 HPWL: 4750109274",
+          "[InitialPlace]  Iter: 16 conjugate gradient residual: 0.00017947 HPWL: 4714811616",
+          "[InitialPlace]  Iter: 17 conjugate gradient residual: 0.00013618 HPWL: 4678807487",
+          "[InitialPlace]  Iter: 18 conjugate gradient residual: 0.00015029 HPWL: 4647848857",
+          "[InitialPlace]  Iter: 19 conjugate gradient residual: 0.00012558 HPWL: 4617452504",
+          "[InitialPlace]  Iter: 20 conjugate gradient residual: 0.00015879 HPWL: 4586204966",
+          "        0 |   0.9968 |  8.096159e+05 |   +0.00% |  6.65e-17 |      ",
+          "       10 |   0.9892 |  1.219801e+06 |  +50.66% |  9.87e-17 |      ",
+          "       20 |   0.9844 |  1.295418e+06 |   +6.20% |  1.58e-16 |      ",
+          "       30 |   0.9814 |  1.307253e+06 |   +0.91% |  2.56e-16 |      ",
+          "       40 |   0.9804 |  1.290270e+06 |   -1.30% |  4.17e-16 |      ",
+          "       50 |   0.9801 |  1.287615e+06 |   -0.21% |  6.77e-16 |      ",
+          "       60 |   0.9799 |  1.292521e+06 |   +0.38% |  1.10e-15 |      ",
+          "       70 |   0.9797 |  1.293069e+06 |   +0.04% |  1.78e-15 |      ",
+          "       80 |   0.9796 |  1.292190e+06 |   -0.07% |  2.90e-15 |      ",
+          "       90 |   0.9795 |  1.290323e+06 |   -0.14% |  4.71e-15 |      ",
+          "      100 |   0.9796 |  1.285461e+06 |   -0.38% |  7.66e-15 |      ",
+          "      110 |   0.9797 |  1.278238e+06 |   -0.56% |  1.25e-14 |      ",
+          "      120 |   0.9798 |  1.270291e+06 |   -0.62% |  2.03e-14 |      ",
+          "      130 |   0.9799 |  1.263193e+06 |   -0.56% |  3.31e-14 |      ",
+          "      140 |   0.9799 |  1.259137e+06 |   -0.32% |  5.39e-14 |      ",
+          "      150 |   0.9796 |  1.260550e+06 |   +0.11% |  8.78e-14 |      ",
+          "      160 |   0.9792 |  1.267151e+06 |   +0.52% |  1.43e-13 |      ",
+          "      170 |   0.9785 |  1.276799e+06 |   +0.76% |  2.32e-13 |      ",
+          "      180 |   0.9777 |  1.291007e+06 |   +1.11% |  3.77e-13 |      ",
+          "      190 |   0.9764 |  1.314993e+06 |   +1.86% |  6.11e-13 |      ",
+          "      200 |   0.9745 |  1.359133e+06 |   +3.36% |  9.86e-13 |      ",
+          "      210 |   0.9714 |  1.438788e+06 |   +5.86% |  1.58e-12 |      ",
+          "      220 |   0.9664 |  1.574648e+06 |   +9.44% |  2.50e-12 |      ",
+          "      230 |   0.9581 |  1.780508e+06 |  +13.07% |  3.90e-12 |      ",
+          "      240 |   0.9466 |  2.049283e+06 |  +15.10% |  6.00e-12 |      ",
+          "      250 |   0.9327 |  2.365380e+06 |  +15.42% |  9.12e-12 |      ",
+          "      260 |   0.9167 |  2.704549e+06 |  +14.34% |  1.38e-11 |      ",
+          "      270 |   0.8975 |  3.077477e+06 |  +13.79% |  2.08e-11 |      ",
+          "      280 |   0.8755 |  3.499017e+06 |  +13.70% |  3.09e-11 |      ",
+          "      290 |   0.8503 |  3.910006e+06 |  +11.75% |  4.59e-11 |      ",
+          "      300 |   0.8224 |  4.175475e+06 |   +6.79% |  7.00e-11 |      ",
+          "      310 |   0.7891 |  4.265666e+06 |   +2.16% |  1.11e-10 |      ",
+          "      320 |   0.7514 |  4.407599e+06 |   +3.33% |  1.73e-10 |      ",
+          "      330 |   0.7144 |  4.758960e+06 |   +7.97% |  2.62e-10 |      ",
+          "      340 |   0.6805 |  5.424786e+06 |  +13.99% |  3.70e-10 |      ",
+          "      350 |   0.6523 |  5.323783e+06 |   -1.86% |  5.82e-10 |      ",
+          "      360 |   0.6020 |  5.322043e+06 |   -0.03% |  9.06e-10 |      ",
+          "      370 |   0.5716 |  5.738349e+06 |   +7.82% |  1.32e-09 |      ",
+          "      380 |   0.5335 |  5.084070e+06 |  -11.40% |  2.14e-09 |      ",
+          "      390 |   0.4728 |  5.315076e+06 |   +4.54% |  3.29e-09 |      ",
+          "      400 |   0.4441 |  5.010036e+06 |   -5.74% |  5.29e-09 |      ",
+          "      410 |   0.3974 |  5.170438e+06 |   +3.20% |  8.09e-09 |      ",
+          "      420 |   0.3547 |  4.973543e+06 |   -3.81% |  1.30e-08 |      ",
+          "      430 |   0.3327 |  4.786912e+06 |   -3.75% |  1.95e-08 |      ",
+          "      440 |   0.3053 |  4.684245e+06 |   -2.14% |  2.84e-08 |      ",
+          "      450 |   0.2752 |  4.625782e+06 |   -1.25% |  4.17e-08 |      ",
+          "      460 |   0.2471 |  4.572072e+06 |   -1.16% |  6.14e-08 |      ",
+          "      470 |   0.2199 |  4.530462e+06 |   -0.91% |  9.05e-08 |      ",
+          "      480 |   0.1940 |  4.497685e+06 |   -0.72% |  1.33e-07 |      ",
+          "      490 |   0.1704 |  4.477522e+06 |   -0.45% |  1.96e-07 |      ",
+          "      500 |   0.1500 |  4.464245e+06 |   -0.30% |  2.89e-07 |      ",
+          "      510 |   0.1318 |  4.457634e+06 |   -0.15% |  4.26e-07 |      ",
+          "      520 |   0.1154 |  4.456453e+06 |   -0.03% |  6.28e-07 |      ",
+          "      530 |   0.1003 |  4.460431e+06 |   +0.09% |  9.24e-07 |      ",
+          "      531 |   0.0989 |  4.460886e+06 |          |  9.98e-07 |      ",
+          "[INFO GPL-1001] Global placement finished at iteration 531"
+        ],
+        "trace_sha256": "208dea591ee7d25a4d52c726e4811e294047ef224eb6d7bd79e2f6a94fecffff",
+        "final_iterations": [
+          "531"
+        ],
+        "routability_iterations": [],
+        "initial_iterations": [
+          "1",
+          "2",
+          "3",
+          "4",
+          "5",
+          "6",
+          "7",
+          "8",
+          "9",
+          "10",
+          "11",
+          "12",
+          "13",
+          "14",
+          "15",
+          "16",
+          "17",
+          "18",
+          "19",
+          "20"
+        ]
+      },
+      "formal_master_candidate_algorithm_exact": true,
+      "normalization": "calls and seconds/call reported for every phase; use accepted iteration/pass traces to distinguish algorithm work changes",
+      "profile_output_exact": true,
+      "profile_algorithm_trace_exact": true,
+      "log_sha256": "e1743ec9d1477e0f5c0c0ad401964db74aeff32e027adbda0a647e35e95cdf60",
+      "accepted_candidate_log_sha256": "20be7ce00aea25e1d90887350c9e685918e792e4a629b8055b13481fd6d405db",
+      "accepted_master_log_sha256": "facdc1dcbc89dee53bdd8182dff77747f6e95726c43f01b3c494657561cdfb21",
+      "tcl_sha256": "6ea2915048495d601782e87fc8e0255f4e9270cfa10318752d14b25320176227"
+    },
+    {
+      "role": "baseline",
+      "design": "large02",
+      "threads": 4,
+      "accepted_reference_threads": 1,
+      "state_hash": "ad56039bdda8119ea7ee39d2f453f555bf89e9a55fdfc42b2d547e3dc6b584d3",
+      "state_rows": 719776,
+      "quality": [
+        "LARGE_AREA 755282.794",
+        "LARGE_HPWL 4484987.9425"
+      ],
+      "seconds_profiled": 131.8914706129999,
+      "phase": {
+        "records": [
+          {
+            "name": "initial_placement",
+            "inclusive_ms": 27852.908944,
+            "exclusive_ms": 1151.555681,
+            "calls": 1
+          },
+          {
+            "name": "initial_solver",
+            "inclusive_ms": 26701.353263,
+            "exclusive_ms": 3994.376622,
+            "calls": 1
+          },
+          {
+            "name": "initial_update_pins",
+            "inclusive_ms": 231.453823,
+            "exclusive_ms": 231.453823,
+            "calls": 20
+          },
+          {
+            "name": "initial_create_matrix",
+            "inclusive_ms": 5388.695255,
+            "exclusive_ms": 5388.695255,
+            "calls": 20
+          },
+          {
+            "name": "initial_sparse_solve",
+            "inclusive_ms": 15987.55983,
+            "exclusive_ms": 15987.55983,
+            "calls": 20
+          },
+          {
+            "name": "initial_update_coordinates",
+            "inclusive_ms": 1099.267733,
+            "exclusive_ms": 1099.267733,
+            "calls": 20
+          },
+          {
+            "name": "nesterov",
+            "inclusive_ms": 82614.118191,
+            "exclusive_ms": 4769.382025,
+            "calls": 1
+          },
+          {
+            "name": "nesterov_init",
+            "inclusive_ms": 295.564879,
+            "exclusive_ms": 35.523889,
+            "calls": 1
+          },
+          {
+            "name": "coordinates_and_deposit",
+            "inclusive_ms": 36636.536481,
+            "exclusive_ms": 0.878559,
+            "calls": 538
+          },
+          {
+            "name": "density_center_pin_sync",
+            "inclusive_ms": 19904.892992,
+            "exclusive_ms": 19904.892992,
+            "calls": 538
+          },
+          {
+            "name": "density_deposit",
+            "inclusive_ms": 16730.76493,
+            "exclusive_ms": 765.356412,
+            "calls": 538
+          },
+          {
+            "name": "density_scatter",
+            "inclusive_ms": 10111.288464,
+            "exclusive_ms": 10111.288464,
+            "calls": 538
+          },
+          {
+            "name": "density_overflow",
+            "inclusive_ms": 5854.120054,
+            "exclusive_ms": 5854.120054,
+            "calls": 538
+          },
+          {
+            "name": "density_field",
+            "inclusive_ms": 4663.741317,
+            "exclusive_ms": 942.742821,
+            "calls": 538
+          },
+          {
+            "name": "fft",
+            "inclusive_ms": 3720.998496,
+            "exclusive_ms": 3720.998496,
+            "calls": 538
+          },
+          {
+            "name": "wirelength_force",
+            "inclusive_ms": 5956.37572,
+            "exclusive_ms": 5956.37572,
+            "calls": 538
+          },
+          {
+            "name": "gradient_gather_combine",
+            "inclusive_ms": 29327.899685,
+            "exclusive_ms": 2.791185,
+            "calls": 538
+          },
+          {
+            "name": "wirelength_gather",
+            "inclusive_ms": 25233.913819,
+            "exclusive_ms": 25233.913819,
+            "calls": 538
+          },
+          {
+            "name": "density_gather",
+            "inclusive_ms": 3373.869487,
+            "exclusive_ms": 3373.869487,
+            "calls": 538
+          },
+          {
+            "name": "gradient_precondition",
+            "inclusive_ms": 406.908678,
+            "exclusive_ms": 406.908678,
+            "calls": 538
+          },
+          {
+            "name": "gradient_serial_sum",
+            "inclusive_ms": 310.416516,
+            "exclusive_ms": 310.416516,
+            "calls": 538
+          },
+          {
+            "name": "step_length",
+            "inclusive_ms": 613.152249,
+            "exclusive_ms": 0.570878,
+            "calls": 537
+          },
+          {
+            "name": "distance",
+            "inclusive_ms": 612.581371,
+            "exclusive_ms": 0.362753,
+            "calls": 1074
+          },
+          {
+            "name": "distance_serial_sum",
+            "inclusive_ms": 612.218618,
+            "exclusive_ms": 612.218618,
+            "calls": 1074
+          },
+          {
+            "name": "iteration_attempt",
+            "inclusive_ms": 77548.687301,
+            "exclusive_ms": 2.155026,
+            "calls": 532
+          },
+          {
+            "name": "nesterov_coordinates",
+            "inclusive_ms": 41772.339364,
+            "exclusive_ms": 608.867813,
+            "calls": 536
+          },
+          {
+            "name": "timing_feedback",
+            "inclusive_ms": 0.231288,
+            "exclusive_ms": 0.231288,
+            "calls": 532
+          },
+          {
+            "name": "routability_snapshot",
+            "inclusive_ms": 0.13017,
+            "exclusive_ms": 0.13017,
+            "calls": 532
+          },
+          {
+            "name": "routability_feedback",
+            "inclusive_ms": 0.122528,
+            "exclusive_ms": 0.122528,
+            "calls": 532
+          }
+        ],
+        "totals": {
+          "initial_placement": {
+            "inclusive_ms": 27852.908944,
+            "exclusive_ms": 1151.555681,
+            "calls": 1,
+            "inclusive_seconds_per_call": 27.852908944,
+            "exclusive_seconds_per_call": 1.151555681
+          },
+          "initial_solver": {
+            "inclusive_ms": 26701.353263,
+            "exclusive_ms": 3994.376622,
+            "calls": 1,
+            "inclusive_seconds_per_call": 26.701353263,
+            "exclusive_seconds_per_call": 3.9943766220000003
+          },
+          "initial_update_pins": {
+            "inclusive_ms": 231.453823,
+            "exclusive_ms": 231.453823,
+            "calls": 20,
+            "inclusive_seconds_per_call": 0.01157269115,
+            "exclusive_seconds_per_call": 0.01157269115
+          },
+          "initial_create_matrix": {
+            "inclusive_ms": 5388.695255,
+            "exclusive_ms": 5388.695255,
+            "calls": 20,
+            "inclusive_seconds_per_call": 0.26943476275,
+            "exclusive_seconds_per_call": 0.26943476275
+          },
+          "initial_sparse_solve": {
+            "inclusive_ms": 15987.55983,
+            "exclusive_ms": 15987.55983,
+            "calls": 20,
+            "inclusive_seconds_per_call": 0.7993779915,
+            "exclusive_seconds_per_call": 0.7993779915
+          },
+          "initial_update_coordinates": {
+            "inclusive_ms": 1099.267733,
+            "exclusive_ms": 1099.267733,
+            "calls": 20,
+            "inclusive_seconds_per_call": 0.054963386649999994,
+            "exclusive_seconds_per_call": 0.054963386649999994
+          },
+          "nesterov": {
+            "inclusive_ms": 82614.118191,
+            "exclusive_ms": 4769.382025,
+            "calls": 1,
+            "inclusive_seconds_per_call": 82.614118191,
+            "exclusive_seconds_per_call": 4.769382025
+          },
+          "nesterov_init": {
+            "inclusive_ms": 295.564879,
+            "exclusive_ms": 35.523889,
+            "calls": 1,
+            "inclusive_seconds_per_call": 0.295564879,
+            "exclusive_seconds_per_call": 0.035523888999999996
+          },
+          "coordinates_and_deposit": {
+            "inclusive_ms": 36636.536481,
+            "exclusive_ms": 0.878559,
+            "calls": 538,
+            "inclusive_seconds_per_call": 0.06809765145167286,
+            "exclusive_seconds_per_call": 1.6330092936802973e-06
+          },
+          "density_center_pin_sync": {
+            "inclusive_ms": 19904.892992,
+            "exclusive_ms": 19904.892992,
+            "calls": 538,
+            "inclusive_seconds_per_call": 0.03699794236431227,
+            "exclusive_seconds_per_call": 0.03699794236431227
+          },
+          "density_deposit": {
+            "inclusive_ms": 16730.76493,
+            "exclusive_ms": 765.356412,
+            "calls": 538,
+            "inclusive_seconds_per_call": 0.031098076078066916,
+            "exclusive_seconds_per_call": 0.00142259556133829
+          },
+          "density_scatter": {
+            "inclusive_ms": 10111.288464,
+            "exclusive_ms": 10111.288464,
+            "calls": 538,
+            "inclusive_seconds_per_call": 0.01879421647583643,
+            "exclusive_seconds_per_call": 0.01879421647583643
+          },
+          "density_overflow": {
+            "inclusive_ms": 5854.120054,
+            "exclusive_ms": 5854.120054,
+            "calls": 538,
+            "inclusive_seconds_per_call": 0.010881264040892194,
+            "exclusive_seconds_per_call": 0.010881264040892194
+          },
+          "density_field": {
+            "inclusive_ms": 4663.741317,
+            "exclusive_ms": 942.742821,
+            "calls": 538,
+            "inclusive_seconds_per_call": 0.008668664157992565,
+            "exclusive_seconds_per_call": 0.0017523100762081786
+          },
+          "fft": {
+            "inclusive_ms": 3720.998496,
+            "exclusive_ms": 3720.998496,
+            "calls": 538,
+            "inclusive_seconds_per_call": 0.006916354081784387,
+            "exclusive_seconds_per_call": 0.006916354081784387
+          },
+          "wirelength_force": {
+            "inclusive_ms": 5956.37572,
+            "exclusive_ms": 5956.37572,
+            "calls": 538,
+            "inclusive_seconds_per_call": 0.01107133033457249,
+            "exclusive_seconds_per_call": 0.01107133033457249
+          },
+          "gradient_gather_combine": {
+            "inclusive_ms": 29327.899685,
+            "exclusive_ms": 2.791185,
+            "calls": 538,
+            "inclusive_seconds_per_call": 0.05451282469330855,
+            "exclusive_seconds_per_call": 5.188076208178439e-06
+          },
+          "wirelength_gather": {
+            "inclusive_ms": 25233.913819,
+            "exclusive_ms": 25233.913819,
+            "calls": 538,
+            "inclusive_seconds_per_call": 0.04690318553717472,
+            "exclusive_seconds_per_call": 0.04690318553717472
+          },
+          "density_gather": {
+            "inclusive_ms": 3373.869487,
+            "exclusive_ms": 3373.869487,
+            "calls": 538,
+            "inclusive_seconds_per_call": 0.006271132875464684,
+            "exclusive_seconds_per_call": 0.006271132875464684
+          },
+          "gradient_precondition": {
+            "inclusive_ms": 406.908678,
+            "exclusive_ms": 406.908678,
+            "calls": 538,
+            "inclusive_seconds_per_call": 0.0007563358327137546,
+            "exclusive_seconds_per_call": 0.0007563358327137546
+          },
+          "gradient_serial_sum": {
+            "inclusive_ms": 310.416516,
+            "exclusive_ms": 310.416516,
+            "calls": 538,
+            "inclusive_seconds_per_call": 0.0005769823717472119,
+            "exclusive_seconds_per_call": 0.0005769823717472119
+          },
+          "step_length": {
+            "inclusive_ms": 613.152249,
+            "exclusive_ms": 0.570878,
+            "calls": 537,
+            "inclusive_seconds_per_call": 0.0011418105195530725,
+            "exclusive_seconds_per_call": 1.0630875232774674e-06
+          },
+          "distance": {
+            "inclusive_ms": 612.581371,
+            "exclusive_ms": 0.362753,
+            "calls": 1074,
+            "inclusive_seconds_per_call": 0.0005703737160148975,
+            "exclusive_seconds_per_call": 3.3775884543761636e-07
+          },
+          "distance_serial_sum": {
+            "inclusive_ms": 612.218618,
+            "exclusive_ms": 612.218618,
+            "calls": 1074,
+            "inclusive_seconds_per_call": 0.00057003595716946,
+            "exclusive_seconds_per_call": 0.00057003595716946
+          },
+          "iteration_attempt": {
+            "inclusive_ms": 77548.687301,
+            "exclusive_ms": 2.155026,
+            "calls": 532,
+            "inclusive_seconds_per_call": 0.14576820921240602,
+            "exclusive_seconds_per_call": 4.050800751879699e-06
+          },
+          "nesterov_coordinates": {
+            "inclusive_ms": 41772.339364,
+            "exclusive_ms": 608.867813,
+            "calls": 536,
+            "inclusive_seconds_per_call": 0.07793346896268656,
+            "exclusive_seconds_per_call": 0.0011359474123134327
+          },
+          "timing_feedback": {
+            "inclusive_ms": 0.231288,
+            "exclusive_ms": 0.231288,
+            "calls": 532,
+            "inclusive_seconds_per_call": 4.3475187969924813e-07,
+            "exclusive_seconds_per_call": 4.3475187969924813e-07
+          },
+          "routability_snapshot": {
+            "inclusive_ms": 0.13017,
+            "exclusive_ms": 0.13017,
+            "calls": 532,
+            "inclusive_seconds_per_call": 2.446804511278196e-07,
+            "exclusive_seconds_per_call": 2.446804511278196e-07
+          },
+          "routability_feedback": {
+            "inclusive_ms": 0.122528,
+            "exclusive_ms": 0.122528,
+            "calls": 532,
+            "inclusive_seconds_per_call": 2.303157894736842e-07,
+            "exclusive_seconds_per_call": 2.303157894736842e-07
+          }
+        },
+        "root_ms": 110467.027135,
+        "exclusive_sum_ms": 110467.027135,
+        "iteration_attempts": 532
+      },
+      "process_resource": "\tCommand being timed: \"/workspace/openroad-soa-profile/payload/binaries/baseline-profile -no_init -exit /workspace/openroad-soa-profile/results/large02-baseline-t4/run.tcl\"\n\tUser time (seconds): 266.59\n\tSystem time (seconds): 3.81\n\tPercent of CPU this job got: 205%\n\tElapsed (wall clock) time (h:mm:ss or m:ss): 2:11.88\n\tAverage shared text size (kbytes): 0\n\tAverage unshared data size (kbytes): 0\n\tAverage stack size (kbytes): 0\n\tAverage total size (kbytes): 0\n\tMaximum resident set size (kbytes): 1162552\n\tAverage resident set size (kbytes): 0\n\tMajor (requiring I/O) page faults: 0\n\tMinor (reclaiming a frame) page faults: 791557\n\tVoluntary context switches: 61689\n\tInvoluntary context switches: 234\n\tSwaps: 0\n\tFile system inputs: 0\n\tFile system outputs: 123728\n\tSocket messages sent: 0\n\tSocket messages received: 0\n\tSignals delivered: 0\n\tPage size (bytes): 4096\n\tExit status: 0\n",
+      "ompt": {
+        "measured": true,
+        "initialization": [
+          {
+            "initialized": true,
+            "wait_registration": 5,
+            "thread_registration": 5,
+            "parallel_registration": 5
+          }
+        ],
+        "finalization": [
+          {
+            "wait_registration": 5,
+            "callback_pairs": 57944,
+            "threads": 4,
+            "parallel_regions": 15025,
+            "invalid_pairs": 0
+          }
+        ],
+        "waits": [
+          {
+            "phase": "nesterov",
+            "thread_wait_ms": 56382.388989,
+            "initial_thread_wait_ms": 286.358292,
+            "callback_pairs": 6412
+          },
+          {
+            "phase": "nesterov_init",
+            "thread_wait_ms": 203.151792,
+            "initial_thread_wait_ms": 2.23947,
+            "callback_pairs": 12
+          },
+          {
+            "phase": "wirelength_force",
+            "thread_wait_ms": 5461.700167,
+            "initial_thread_wait_ms": 778.657118,
+            "callback_pairs": 4304
+          },
+          {
+            "phase": "wirelength_gather",
+            "thread_wait_ms": 16130.393592,
+            "initial_thread_wait_ms": 1765.146225,
+            "callback_pairs": 2152
+          },
+          {
+            "phase": "density_field",
+            "thread_wait_ms": 12142.742447,
+            "initial_thread_wait_ms": 385.215473,
+            "callback_pairs": 4304
+          },
+          {
+            "phase": "density_gather",
+            "thread_wait_ms": 3495.524225,
+            "initial_thread_wait_ms": 1122.380382,
+            "callback_pairs": 2152
+          },
+          {
+            "phase": "initial_sparse_solve",
+            "thread_wait_ms": 64151.841707,
+            "initial_thread_wait_ms": 1811.563227,
+            "callback_pairs": 32160
+          },
+          {
+            "phase": "density_scatter",
+            "thread_wait_ms": 17736.765663,
+            "initial_thread_wait_ms": 26.318371,
+            "callback_pairs": 2152
+          },
+          {
+            "phase": "gradient_precondition",
+            "thread_wait_ms": 3027.254498,
+            "initial_thread_wait_ms": 61.936135,
+            "callback_pairs": 2152
+          },
+          {
+            "phase": "nesterov_coordinates",
+            "thread_wait_ms": 62208.775386,
+            "initial_thread_wait_ms": 75.054338,
+            "callback_pairs": 2144
+          }
+        ],
+        "units": "thread-time, not wall-time"
+      },
+      "algorithm": {
+        "trace": [
+          "[InitialPlace]  Iter: 1 conjugate gradient residual: 0.00150776 HPWL: 13849076190",
+          "[InitialPlace]  Iter: 2 conjugate gradient residual: 0.00110863 HPWL: 8606878342",
+          "[InitialPlace]  Iter: 3 conjugate gradient residual: 0.00079658 HPWL: 6656092677",
+          "[InitialPlace]  Iter: 4 conjugate gradient residual: 0.00058435 HPWL: 5759527515",
+          "[InitialPlace]  Iter: 5 conjugate gradient residual: 0.00045318 HPWL: 5206488561",
+          "[InitialPlace]  Iter: 6 conjugate gradient residual: 0.00469546 HPWL: 4909238640",
+          "[InitialPlace]  Iter: 7 conjugate gradient residual: 0.00048761 HPWL: 5773107742",
+          "[InitialPlace]  Iter: 8 conjugate gradient residual: 0.00037699 HPWL: 5416132472",
+          "[InitialPlace]  Iter: 9 conjugate gradient residual: 0.00036960 HPWL: 5180108899",
+          "[InitialPlace]  Iter: 10 conjugate gradient residual: 0.00029812 HPWL: 5029457993",
+          "[InitialPlace]  Iter: 11 conjugate gradient residual: 0.00025661 HPWL: 4942406006",
+          "[InitialPlace]  Iter: 12 conjugate gradient residual: 0.00021503 HPWL: 4873580463",
+          "[InitialPlace]  Iter: 13 conjugate gradient residual: 0.00026283 HPWL: 4828264037",
+          "[InitialPlace]  Iter: 14 conjugate gradient residual: 0.00018511 HPWL: 4789396266",
+          "[InitialPlace]  Iter: 15 conjugate gradient residual: 0.00021359 HPWL: 4750109274",
+          "[InitialPlace]  Iter: 16 conjugate gradient residual: 0.00017947 HPWL: 4714811616",
+          "[InitialPlace]  Iter: 17 conjugate gradient residual: 0.00013618 HPWL: 4678807487",
+          "[InitialPlace]  Iter: 18 conjugate gradient residual: 0.00015029 HPWL: 4647848857",
+          "[InitialPlace]  Iter: 19 conjugate gradient residual: 0.00012558 HPWL: 4617452504",
+          "[InitialPlace]  Iter: 20 conjugate gradient residual: 0.00015879 HPWL: 4586204966",
+          "        0 |   0.9968 |  8.096159e+05 |   +0.00% |  6.65e-17 |      ",
+          "       10 |   0.9892 |  1.219801e+06 |  +50.66% |  9.87e-17 |      ",
+          "       20 |   0.9844 |  1.295418e+06 |   +6.20% |  1.58e-16 |      ",
+          "       30 |   0.9814 |  1.307253e+06 |   +0.91% |  2.56e-16 |      ",
+          "       40 |   0.9804 |  1.290270e+06 |   -1.30% |  4.17e-16 |      ",
+          "       50 |   0.9801 |  1.287615e+06 |   -0.21% |  6.77e-16 |      ",
+          "       60 |   0.9799 |  1.292521e+06 |   +0.38% |  1.10e-15 |      ",
+          "       70 |   0.9797 |  1.293069e+06 |   +0.04% |  1.78e-15 |      ",
+          "       80 |   0.9796 |  1.292190e+06 |   -0.07% |  2.90e-15 |      ",
+          "       90 |   0.9795 |  1.290323e+06 |   -0.14% |  4.71e-15 |      ",
+          "      100 |   0.9796 |  1.285461e+06 |   -0.38% |  7.66e-15 |      ",
+          "      110 |   0.9797 |  1.278238e+06 |   -0.56% |  1.25e-14 |      ",
+          "      120 |   0.9798 |  1.270291e+06 |   -0.62% |  2.03e-14 |      ",
+          "      130 |   0.9799 |  1.263193e+06 |   -0.56% |  3.31e-14 |      ",
+          "      140 |   0.9799 |  1.259137e+06 |   -0.32% |  5.39e-14 |      ",
+          "      150 |   0.9796 |  1.260550e+06 |   +0.11% |  8.78e-14 |      ",
+          "      160 |   0.9792 |  1.267151e+06 |   +0.52% |  1.43e-13 |      ",
+          "      170 |   0.9785 |  1.276799e+06 |   +0.76% |  2.32e-13 |      ",
+          "      180 |   0.9777 |  1.291007e+06 |   +1.11% |  3.77e-13 |      ",
+          "      190 |   0.9764 |  1.314993e+06 |   +1.86% |  6.11e-13 |      ",
+          "      200 |   0.9745 |  1.359133e+06 |   +3.36% |  9.86e-13 |      ",
+          "      210 |   0.9714 |  1.438788e+06 |   +5.86% |  1.58e-12 |      ",
+          "      220 |   0.9664 |  1.574648e+06 |   +9.44% |  2.50e-12 |      ",
+          "      230 |   0.9581 |  1.780508e+06 |  +13.07% |  3.90e-12 |      ",
+          "      240 |   0.9466 |  2.049283e+06 |  +15.10% |  6.00e-12 |      ",
+          "      250 |   0.9327 |  2.365380e+06 |  +15.42% |  9.12e-12 |      ",
+          "      260 |   0.9167 |  2.704549e+06 |  +14.34% |  1.38e-11 |      ",
+          "      270 |   0.8975 |  3.077477e+06 |  +13.79% |  2.08e-11 |      ",
+          "      280 |   0.8755 |  3.499017e+06 |  +13.70% |  3.09e-11 |      ",
+          "      290 |   0.8503 |  3.910006e+06 |  +11.75% |  4.59e-11 |      ",
+          "      300 |   0.8224 |  4.175475e+06 |   +6.79% |  7.00e-11 |      ",
+          "      310 |   0.7891 |  4.265666e+06 |   +2.16% |  1.11e-10 |      ",
+          "      320 |   0.7514 |  4.407599e+06 |   +3.33% |  1.73e-10 |      ",
+          "      330 |   0.7144 |  4.758960e+06 |   +7.97% |  2.62e-10 |      ",
+          "      340 |   0.6805 |  5.424786e+06 |  +13.99% |  3.70e-10 |      ",
+          "      350 |   0.6523 |  5.323783e+06 |   -1.86% |  5.82e-10 |      ",
+          "      360 |   0.6020 |  5.322043e+06 |   -0.03% |  9.06e-10 |      ",
+          "      370 |   0.5716 |  5.738349e+06 |   +7.82% |  1.32e-09 |      ",
+          "      380 |   0.5335 |  5.084070e+06 |  -11.40% |  2.14e-09 |      ",
+          "      390 |   0.4728 |  5.315076e+06 |   +4.54% |  3.29e-09 |      ",
+          "      400 |   0.4441 |  5.010036e+06 |   -5.74% |  5.29e-09 |      ",
+          "      410 |   0.3974 |  5.170438e+06 |   +3.20% |  8.09e-09 |      ",
+          "      420 |   0.3547 |  4.973543e+06 |   -3.81% |  1.30e-08 |      ",
+          "      430 |   0.3327 |  4.786912e+06 |   -3.75% |  1.95e-08 |      ",
+          "      440 |   0.3053 |  4.684245e+06 |   -2.14% |  2.84e-08 |      ",
+          "      450 |   0.2752 |  4.625782e+06 |   -1.25% |  4.17e-08 |      ",
+          "      460 |   0.2471 |  4.572072e+06 |   -1.16% |  6.14e-08 |      ",
+          "      470 |   0.2199 |  4.530462e+06 |   -0.91% |  9.05e-08 |      ",
+          "      480 |   0.1940 |  4.497685e+06 |   -0.72% |  1.33e-07 |      ",
+          "      490 |   0.1704 |  4.477522e+06 |   -0.45% |  1.96e-07 |      ",
+          "      500 |   0.1500 |  4.464245e+06 |   -0.30% |  2.89e-07 |      ",
+          "      510 |   0.1318 |  4.457634e+06 |   -0.15% |  4.26e-07 |      ",
+          "      520 |   0.1154 |  4.456453e+06 |   -0.03% |  6.28e-07 |      ",
+          "      530 |   0.1003 |  4.460431e+06 |   +0.09% |  9.24e-07 |      ",
+          "      531 |   0.0989 |  4.460886e+06 |          |  9.98e-07 |      ",
+          "[INFO GPL-1001] Global placement finished at iteration 531"
+        ],
+        "trace_sha256": "208dea591ee7d25a4d52c726e4811e294047ef224eb6d7bd79e2f6a94fecffff",
+        "final_iterations": [
+          "531"
+        ],
+        "routability_iterations": [],
+        "initial_iterations": [
+          "1",
+          "2",
+          "3",
+          "4",
+          "5",
+          "6",
+          "7",
+          "8",
+          "9",
+          "10",
+          "11",
+          "12",
+          "13",
+          "14",
+          "15",
+          "16",
+          "17",
+          "18",
+          "19",
+          "20"
+        ]
+      },
+      "formal_master_algorithm": {
+        "trace": [
+          "[InitialPlace]  Iter: 1 conjugate gradient residual: 0.00150776 HPWL: 13849076190",
+          "[InitialPlace]  Iter: 2 conjugate gradient residual: 0.00110863 HPWL: 8606878342",
+          "[InitialPlace]  Iter: 3 conjugate gradient residual: 0.00079658 HPWL: 6656092677",
+          "[InitialPlace]  Iter: 4 conjugate gradient residual: 0.00058435 HPWL: 5759527515",
+          "[InitialPlace]  Iter: 5 conjugate gradient residual: 0.00045318 HPWL: 5206488561",
+          "[InitialPlace]  Iter: 6 conjugate gradient residual: 0.00469546 HPWL: 4909238640",
+          "[InitialPlace]  Iter: 7 conjugate gradient residual: 0.00048761 HPWL: 5773107742",
+          "[InitialPlace]  Iter: 8 conjugate gradient residual: 0.00037699 HPWL: 5416132472",
+          "[InitialPlace]  Iter: 9 conjugate gradient residual: 0.00036960 HPWL: 5180108899",
+          "[InitialPlace]  Iter: 10 conjugate gradient residual: 0.00029812 HPWL: 5029457993",
+          "[InitialPlace]  Iter: 11 conjugate gradient residual: 0.00025661 HPWL: 4942406006",
+          "[InitialPlace]  Iter: 12 conjugate gradient residual: 0.00021503 HPWL: 4873580463",
+          "[InitialPlace]  Iter: 13 conjugate gradient residual: 0.00026283 HPWL: 4828264037",
+          "[InitialPlace]  Iter: 14 conjugate gradient residual: 0.00018511 HPWL: 4789396266",
+          "[InitialPlace]  Iter: 15 conjugate gradient residual: 0.00021359 HPWL: 4750109274",
+          "[InitialPlace]  Iter: 16 conjugate gradient residual: 0.00017947 HPWL: 4714811616",
+          "[InitialPlace]  Iter: 17 conjugate gradient residual: 0.00013618 HPWL: 4678807487",
+          "[InitialPlace]  Iter: 18 conjugate gradient residual: 0.00015029 HPWL: 4647848857",
+          "[InitialPlace]  Iter: 19 conjugate gradient residual: 0.00012558 HPWL: 4617452504",
+          "[InitialPlace]  Iter: 20 conjugate gradient residual: 0.00015879 HPWL: 4586204966",
+          "        0 |   0.9968 |  8.096159e+05 |   +0.00% |  6.65e-17 |      ",
+          "       10 |   0.9892 |  1.219801e+06 |  +50.66% |  9.87e-17 |      ",
+          "       20 |   0.9844 |  1.295418e+06 |   +6.20% |  1.58e-16 |      ",
+          "       30 |   0.9814 |  1.307253e+06 |   +0.91% |  2.56e-16 |      ",
+          "       40 |   0.9804 |  1.290270e+06 |   -1.30% |  4.17e-16 |      ",
+          "       50 |   0.9801 |  1.287615e+06 |   -0.21% |  6.77e-16 |      ",
+          "       60 |   0.9799 |  1.292521e+06 |   +0.38% |  1.10e-15 |      ",
+          "       70 |   0.9797 |  1.293069e+06 |   +0.04% |  1.78e-15 |      ",
+          "       80 |   0.9796 |  1.292190e+06 |   -0.07% |  2.90e-15 |      ",
+          "       90 |   0.9795 |  1.290323e+06 |   -0.14% |  4.71e-15 |      ",
+          "      100 |   0.9796 |  1.285461e+06 |   -0.38% |  7.66e-15 |      ",
+          "      110 |   0.9797 |  1.278238e+06 |   -0.56% |  1.25e-14 |      ",
+          "      120 |   0.9798 |  1.270291e+06 |   -0.62% |  2.03e-14 |      ",
+          "      130 |   0.9799 |  1.263193e+06 |   -0.56% |  3.31e-14 |      ",
+          "      140 |   0.9799 |  1.259137e+06 |   -0.32% |  5.39e-14 |      ",
+          "      150 |   0.9796 |  1.260550e+06 |   +0.11% |  8.78e-14 |      ",
+          "      160 |   0.9792 |  1.267151e+06 |   +0.52% |  1.43e-13 |      ",
+          "      170 |   0.9785 |  1.276799e+06 |   +0.76% |  2.32e-13 |      ",
+          "      180 |   0.9777 |  1.291007e+06 |   +1.11% |  3.77e-13 |      ",
+          "      190 |   0.9764 |  1.314993e+06 |   +1.86% |  6.11e-13 |      ",
+          "      200 |   0.9745 |  1.359133e+06 |   +3.36% |  9.86e-13 |      ",
+          "      210 |   0.9714 |  1.438788e+06 |   +5.86% |  1.58e-12 |      ",
+          "      220 |   0.9664 |  1.574648e+06 |   +9.44% |  2.50e-12 |      ",
+          "      230 |   0.9581 |  1.780508e+06 |  +13.07% |  3.90e-12 |      ",
+          "      240 |   0.9466 |  2.049283e+06 |  +15.10% |  6.00e-12 |      ",
+          "      250 |   0.9327 |  2.365380e+06 |  +15.42% |  9.12e-12 |      ",
+          "      260 |   0.9167 |  2.704549e+06 |  +14.34% |  1.38e-11 |      ",
+          "      270 |   0.8975 |  3.077477e+06 |  +13.79% |  2.08e-11 |      ",
+          "      280 |   0.8755 |  3.499017e+06 |  +13.70% |  3.09e-11 |      ",
+          "      290 |   0.8503 |  3.910006e+06 |  +11.75% |  4.59e-11 |      ",
+          "      300 |   0.8224 |  4.175475e+06 |   +6.79% |  7.00e-11 |      ",
+          "      310 |   0.7891 |  4.265666e+06 |   +2.16% |  1.11e-10 |      ",
+          "      320 |   0.7514 |  4.407599e+06 |   +3.33% |  1.73e-10 |      ",
+          "      330 |   0.7144 |  4.758960e+06 |   +7.97% |  2.62e-10 |      ",
+          "      340 |   0.6805 |  5.424786e+06 |  +13.99% |  3.70e-10 |      ",
+          "      350 |   0.6523 |  5.323783e+06 |   -1.86% |  5.82e-10 |      ",
+          "      360 |   0.6020 |  5.322043e+06 |   -0.03% |  9.06e-10 |      ",
+          "      370 |   0.5716 |  5.738349e+06 |   +7.82% |  1.32e-09 |      ",
+          "      380 |   0.5335 |  5.084070e+06 |  -11.40% |  2.14e-09 |      ",
+          "      390 |   0.4728 |  5.315076e+06 |   +4.54% |  3.29e-09 |      ",
+          "      400 |   0.4441 |  5.010036e+06 |   -5.74% |  5.29e-09 |      ",
+          "      410 |   0.3974 |  5.170438e+06 |   +3.20% |  8.09e-09 |      ",
+          "      420 |   0.3547 |  4.973543e+06 |   -3.81% |  1.30e-08 |      ",
+          "      430 |   0.3327 |  4.786912e+06 |   -3.75% |  1.95e-08 |      ",
+          "      440 |   0.3053 |  4.684245e+06 |   -2.14% |  2.84e-08 |      ",
+          "      450 |   0.2752 |  4.625782e+06 |   -1.25% |  4.17e-08 |      ",
+          "      460 |   0.2471 |  4.572072e+06 |   -1.16% |  6.14e-08 |      ",
+          "      470 |   0.2199 |  4.530462e+06 |   -0.91% |  9.05e-08 |      ",
+          "      480 |   0.1940 |  4.497685e+06 |   -0.72% |  1.33e-07 |      ",
+          "      490 |   0.1704 |  4.477522e+06 |   -0.45% |  1.96e-07 |      ",
+          "      500 |   0.1500 |  4.464245e+06 |   -0.30% |  2.89e-07 |      ",
+          "      510 |   0.1318 |  4.457634e+06 |   -0.15% |  4.26e-07 |      ",
+          "      520 |   0.1154 |  4.456453e+06 |   -0.03% |  6.28e-07 |      ",
+          "      530 |   0.1003 |  4.460431e+06 |   +0.09% |  9.24e-07 |      ",
+          "      531 |   0.0989 |  4.460886e+06 |          |  9.98e-07 |      ",
+          "[INFO GPL-1001] Global placement finished at iteration 531"
+        ],
+        "trace_sha256": "208dea591ee7d25a4d52c726e4811e294047ef224eb6d7bd79e2f6a94fecffff",
+        "final_iterations": [
+          "531"
+        ],
+        "routability_iterations": [],
+        "initial_iterations": [
+          "1",
+          "2",
+          "3",
+          "4",
+          "5",
+          "6",
+          "7",
+          "8",
+          "9",
+          "10",
+          "11",
+          "12",
+          "13",
+          "14",
+          "15",
+          "16",
+          "17",
+          "18",
+          "19",
+          "20"
+        ]
+      },
+      "formal_candidate_algorithm": {
+        "trace": [
+          "[InitialPlace]  Iter: 1 conjugate gradient residual: 0.00150776 HPWL: 13849076190",
+          "[InitialPlace]  Iter: 2 conjugate gradient residual: 0.00110863 HPWL: 8606878342",
+          "[InitialPlace]  Iter: 3 conjugate gradient residual: 0.00079658 HPWL: 6656092677",
+          "[InitialPlace]  Iter: 4 conjugate gradient residual: 0.00058435 HPWL: 5759527515",
+          "[InitialPlace]  Iter: 5 conjugate gradient residual: 0.00045318 HPWL: 5206488561",
+          "[InitialPlace]  Iter: 6 conjugate gradient residual: 0.00469546 HPWL: 4909238640",
+          "[InitialPlace]  Iter: 7 conjugate gradient residual: 0.00048761 HPWL: 5773107742",
+          "[InitialPlace]  Iter: 8 conjugate gradient residual: 0.00037699 HPWL: 5416132472",
+          "[InitialPlace]  Iter: 9 conjugate gradient residual: 0.00036960 HPWL: 5180108899",
+          "[InitialPlace]  Iter: 10 conjugate gradient residual: 0.00029812 HPWL: 5029457993",
+          "[InitialPlace]  Iter: 11 conjugate gradient residual: 0.00025661 HPWL: 4942406006",
+          "[InitialPlace]  Iter: 12 conjugate gradient residual: 0.00021503 HPWL: 4873580463",
+          "[InitialPlace]  Iter: 13 conjugate gradient residual: 0.00026283 HPWL: 4828264037",
+          "[InitialPlace]  Iter: 14 conjugate gradient residual: 0.00018511 HPWL: 4789396266",
+          "[InitialPlace]  Iter: 15 conjugate gradient residual: 0.00021359 HPWL: 4750109274",
+          "[InitialPlace]  Iter: 16 conjugate gradient residual: 0.00017947 HPWL: 4714811616",
+          "[InitialPlace]  Iter: 17 conjugate gradient residual: 0.00013618 HPWL: 4678807487",
+          "[InitialPlace]  Iter: 18 conjugate gradient residual: 0.00015029 HPWL: 4647848857",
+          "[InitialPlace]  Iter: 19 conjugate gradient residual: 0.00012558 HPWL: 4617452504",
+          "[InitialPlace]  Iter: 20 conjugate gradient residual: 0.00015879 HPWL: 4586204966",
+          "        0 |   0.9968 |  8.096159e+05 |   +0.00% |  6.65e-17 |      ",
+          "       10 |   0.9892 |  1.219801e+06 |  +50.66% |  9.87e-17 |      ",
+          "       20 |   0.9844 |  1.295418e+06 |   +6.20% |  1.58e-16 |      ",
+          "       30 |   0.9814 |  1.307253e+06 |   +0.91% |  2.56e-16 |      ",
+          "       40 |   0.9804 |  1.290270e+06 |   -1.30% |  4.17e-16 |      ",
+          "       50 |   0.9801 |  1.287615e+06 |   -0.21% |  6.77e-16 |      ",
+          "       60 |   0.9799 |  1.292521e+06 |   +0.38% |  1.10e-15 |      ",
+          "       70 |   0.9797 |  1.293069e+06 |   +0.04% |  1.78e-15 |      ",
+          "       80 |   0.9796 |  1.292190e+06 |   -0.07% |  2.90e-15 |      ",
+          "       90 |   0.9795 |  1.290323e+06 |   -0.14% |  4.71e-15 |      ",
+          "      100 |   0.9796 |  1.285461e+06 |   -0.38% |  7.66e-15 |      ",
+          "      110 |   0.9797 |  1.278238e+06 |   -0.56% |  1.25e-14 |      ",
+          "      120 |   0.9798 |  1.270291e+06 |   -0.62% |  2.03e-14 |      ",
+          "      130 |   0.9799 |  1.263193e+06 |   -0.56% |  3.31e-14 |      ",
+          "      140 |   0.9799 |  1.259137e+06 |   -0.32% |  5.39e-14 |      ",
+          "      150 |   0.9796 |  1.260550e+06 |   +0.11% |  8.78e-14 |      ",
+          "      160 |   0.9792 |  1.267151e+06 |   +0.52% |  1.43e-13 |      ",
+          "      170 |   0.9785 |  1.276799e+06 |   +0.76% |  2.32e-13 |      ",
+          "      180 |   0.9777 |  1.291007e+06 |   +1.11% |  3.77e-13 |      ",
+          "      190 |   0.9764 |  1.314993e+06 |   +1.86% |  6.11e-13 |      ",
+          "      200 |   0.9745 |  1.359133e+06 |   +3.36% |  9.86e-13 |      ",
+          "      210 |   0.9714 |  1.438788e+06 |   +5.86% |  1.58e-12 |      ",
+          "      220 |   0.9664 |  1.574648e+06 |   +9.44% |  2.50e-12 |      ",
+          "      230 |   0.9581 |  1.780508e+06 |  +13.07% |  3.90e-12 |      ",
+          "      240 |   0.9466 |  2.049283e+06 |  +15.10% |  6.00e-12 |      ",
+          "      250 |   0.9327 |  2.365380e+06 |  +15.42% |  9.12e-12 |      ",
+          "      260 |   0.9167 |  2.704549e+06 |  +14.34% |  1.38e-11 |      ",
+          "      270 |   0.8975 |  3.077477e+06 |  +13.79% |  2.08e-11 |      ",
+          "      280 |   0.8755 |  3.499017e+06 |  +13.70% |  3.09e-11 |      ",
+          "      290 |   0.8503 |  3.910006e+06 |  +11.75% |  4.59e-11 |      ",
+          "      300 |   0.8224 |  4.175475e+06 |   +6.79% |  7.00e-11 |      ",
+          "      310 |   0.7891 |  4.265666e+06 |   +2.16% |  1.11e-10 |      ",
+          "      320 |   0.7514 |  4.407599e+06 |   +3.33% |  1.73e-10 |      ",
+          "      330 |   0.7144 |  4.758960e+06 |   +7.97% |  2.62e-10 |      ",
+          "      340 |   0.6805 |  5.424786e+06 |  +13.99% |  3.70e-10 |      ",
+          "      350 |   0.6523 |  5.323783e+06 |   -1.86% |  5.82e-10 |      ",
+          "      360 |   0.6020 |  5.322043e+06 |   -0.03% |  9.06e-10 |      ",
+          "      370 |   0.5716 |  5.738349e+06 |   +7.82% |  1.32e-09 |      ",
+          "      380 |   0.5335 |  5.084070e+06 |  -11.40% |  2.14e-09 |      ",
+          "      390 |   0.4728 |  5.315076e+06 |   +4.54% |  3.29e-09 |      ",
+          "      400 |   0.4441 |  5.010036e+06 |   -5.74% |  5.29e-09 |      ",
+          "      410 |   0.3974 |  5.170438e+06 |   +3.20% |  8.09e-09 |      ",
+          "      420 |   0.3547 |  4.973543e+06 |   -3.81% |  1.30e-08 |      ",
+          "      430 |   0.3327 |  4.786912e+06 |   -3.75% |  1.95e-08 |      ",
+          "      440 |   0.3053 |  4.684245e+06 |   -2.14% |  2.84e-08 |      ",
+          "      450 |   0.2752 |  4.625782e+06 |   -1.25% |  4.17e-08 |      ",
+          "      460 |   0.2471 |  4.572072e+06 |   -1.16% |  6.14e-08 |      ",
+          "      470 |   0.2199 |  4.530462e+06 |   -0.91% |  9.05e-08 |      ",
+          "      480 |   0.1940 |  4.497685e+06 |   -0.72% |  1.33e-07 |      ",
+          "      490 |   0.1704 |  4.477522e+06 |   -0.45% |  1.96e-07 |      ",
+          "      500 |   0.1500 |  4.464245e+06 |   -0.30% |  2.89e-07 |      ",
+          "      510 |   0.1318 |  4.457634e+06 |   -0.15% |  4.26e-07 |      ",
+          "      520 |   0.1154 |  4.456453e+06 |   -0.03% |  6.28e-07 |      ",
+          "      530 |   0.1003 |  4.460431e+06 |   +0.09% |  9.24e-07 |      ",
+          "      531 |   0.0989 |  4.460886e+06 |          |  9.98e-07 |      ",
+          "[INFO GPL-1001] Global placement finished at iteration 531"
+        ],
+        "trace_sha256": "208dea591ee7d25a4d52c726e4811e294047ef224eb6d7bd79e2f6a94fecffff",
+        "final_iterations": [
+          "531"
+        ],
+        "routability_iterations": [],
+        "initial_iterations": [
+          "1",
+          "2",
+          "3",
+          "4",
+          "5",
+          "6",
+          "7",
+          "8",
+          "9",
+          "10",
+          "11",
+          "12",
+          "13",
+          "14",
+          "15",
+          "16",
+          "17",
+          "18",
+          "19",
+          "20"
+        ]
+      },
+      "formal_master_candidate_algorithm_exact": true,
+      "normalization": "calls and seconds/call reported for every phase; use accepted iteration/pass traces to distinguish algorithm work changes",
+      "profile_output_exact": true,
+      "profile_algorithm_trace_exact": true,
+      "log_sha256": "32e3f6afe9fa0599b4e0a4049affbf3e61cd344fffa68231062e9b8b5f67042d",
+      "accepted_candidate_log_sha256": "20be7ce00aea25e1d90887350c9e685918e792e4a629b8055b13481fd6d405db",
+      "accepted_master_log_sha256": "facdc1dcbc89dee53bdd8182dff77747f6e95726c43f01b3c494657561cdfb21",
+      "tcl_sha256": "6ea2915048495d601782e87fc8e0255f4e9270cfa10318752d14b25320176227"
+    },
+    {
+      "role": "candidate",
+      "design": "large02",
+      "threads": 4,
+      "accepted_reference_threads": 1,
+      "state_hash": "ad56039bdda8119ea7ee39d2f453f555bf89e9a55fdfc42b2d547e3dc6b584d3",
+      "state_rows": 719776,
+      "quality": [
+        "LARGE_AREA 755282.794",
+        "LARGE_HPWL 4484987.9425"
+      ],
+      "seconds_profiled": 93.503630424,
+      "phase": {
+        "records": [
+          {
+            "name": "initial_placement",
+            "inclusive_ms": 30736.609845,
+            "exclusive_ms": 1332.409179,
+            "calls": 1
+          },
+          {
+            "name": "initial_solver",
+            "inclusive_ms": 29404.200666,
+            "exclusive_ms": 4521.926678,
+            "calls": 1
+          },
+          {
+            "name": "initial_update_pins",
+            "inclusive_ms": 314.669725,
+            "exclusive_ms": 314.669725,
+            "calls": 20
+          },
+          {
+            "name": "initial_create_matrix",
+            "inclusive_ms": 6909.547683,
+            "exclusive_ms": 6909.547683,
+            "calls": 20
+          },
+          {
+            "name": "initial_sparse_solve",
+            "inclusive_ms": 16050.031227,
+            "exclusive_ms": 16050.031227,
+            "calls": 20
+          },
+          {
+            "name": "initial_update_coordinates",
+            "inclusive_ms": 1608.025353,
+            "exclusive_ms": 1608.025353,
+            "calls": 20
+          },
+          {
+            "name": "nesterov",
+            "inclusive_ms": 41471.715693,
+            "exclusive_ms": 2532.092488,
+            "calls": 1
+          },
+          {
+            "name": "nesterov_init",
+            "inclusive_ms": 201.303587,
+            "exclusive_ms": 50.938063,
+            "calls": 1
+          },
+          {
+            "name": "coordinates_and_deposit",
+            "inclusive_ms": 5943.976385,
+            "exclusive_ms": 0.349051,
+            "calls": 538
+          },
+          {
+            "name": "density_center_pin_sync",
+            "inclusive_ms": 2558.088357,
+            "exclusive_ms": 2558.088357,
+            "calls": 538
+          },
+          {
+            "name": "density_deposit",
+            "inclusive_ms": 3385.538977,
+            "exclusive_ms": 256.308188,
+            "calls": 538
+          },
+          {
+            "name": "density_scatter",
+            "inclusive_ms": 2217.263353,
+            "exclusive_ms": 2217.263353,
+            "calls": 538
+          },
+          {
+            "name": "density_overflow",
+            "inclusive_ms": 911.967436,
+            "exclusive_ms": 911.967436,
+            "calls": 538
+          },
+          {
+            "name": "density_field",
+            "inclusive_ms": 2796.205672,
+            "exclusive_ms": 776.254802,
+            "calls": 538
+          },
+          {
+            "name": "fft",
+            "inclusive_ms": 2019.95087,
+            "exclusive_ms": 2019.95087,
+            "calls": 538
+          },
+          {
+            "name": "wirelength_force",
+            "inclusive_ms": 5278.619788,
+            "exclusive_ms": 5278.619788,
+            "calls": 538
+          },
+          {
+            "name": "gradient_gather_combine",
+            "inclusive_ms": 22724.908466,
+            "exclusive_ms": 1.471814,
+            "calls": 538
+          },
+          {
+            "name": "wirelength_gather",
+            "inclusive_ms": 19097.115124,
+            "exclusive_ms": 19097.115124,
+            "calls": 538
+          },
+          {
+            "name": "density_gather_precondition",
+            "inclusive_ms": 3298.111261,
+            "exclusive_ms": 3298.111261,
+            "calls": 538
+          },
+          {
+            "name": "gradient_serial_sum",
+            "inclusive_ms": 328.210267,
+            "exclusive_ms": 328.210267,
+            "calls": 538
+          },
+          {
+            "name": "step_length",
+            "inclusive_ms": 1362.835202,
+            "exclusive_ms": 0.399445,
+            "calls": 537
+          },
+          {
+            "name": "distance",
+            "inclusive_ms": 1362.435757,
+            "exclusive_ms": 2.442405,
+            "calls": 1074
+          },
+          {
+            "name": "distance_parallel_squares",
+            "inclusive_ms": 754.73347,
+            "exclusive_ms": 754.73347,
+            "calls": 1074
+          },
+          {
+            "name": "distance_serial_sum",
+            "inclusive_ms": 605.259882,
+            "exclusive_ms": 605.259882,
+            "calls": 1074
+          },
+          {
+            "name": "iteration_attempt",
+            "inclusive_ms": 38737.981609,
+            "exclusive_ms": 1.70195,
+            "calls": 532
+          },
+          {
+            "name": "nesterov_coordinates",
+            "inclusive_ms": 9471.451942,
+            "exclusive_ms": 780.09967,
+            "calls": 536
+          },
+          {
+            "name": "timing_feedback",
+            "inclusive_ms": 0.117851,
+            "exclusive_ms": 0.117851,
+            "calls": 532
+          },
+          {
+            "name": "routability_snapshot",
+            "inclusive_ms": 0.114139,
+            "exclusive_ms": 0.114139,
+            "calls": 532
+          },
+          {
+            "name": "routability_feedback",
+            "inclusive_ms": 0.106019,
+            "exclusive_ms": 0.106019,
+            "calls": 532
+          }
+        ],
+        "totals": {
+          "initial_placement": {
+            "inclusive_ms": 30736.609845,
+            "exclusive_ms": 1332.409179,
+            "calls": 1,
+            "inclusive_seconds_per_call": 30.736609845,
+            "exclusive_seconds_per_call": 1.3324091789999999
+          },
+          "initial_solver": {
+            "inclusive_ms": 29404.200666,
+            "exclusive_ms": 4521.926678,
+            "calls": 1,
+            "inclusive_seconds_per_call": 29.404200666,
+            "exclusive_seconds_per_call": 4.521926678
+          },
+          "initial_update_pins": {
+            "inclusive_ms": 314.669725,
+            "exclusive_ms": 314.669725,
+            "calls": 20,
+            "inclusive_seconds_per_call": 0.01573348625,
+            "exclusive_seconds_per_call": 0.01573348625
+          },
+          "initial_create_matrix": {
+            "inclusive_ms": 6909.547683,
+            "exclusive_ms": 6909.547683,
+            "calls": 20,
+            "inclusive_seconds_per_call": 0.34547738415,
+            "exclusive_seconds_per_call": 0.34547738415
+          },
+          "initial_sparse_solve": {
+            "inclusive_ms": 16050.031227,
+            "exclusive_ms": 16050.031227,
+            "calls": 20,
+            "inclusive_seconds_per_call": 0.80250156135,
+            "exclusive_seconds_per_call": 0.80250156135
+          },
+          "initial_update_coordinates": {
+            "inclusive_ms": 1608.025353,
+            "exclusive_ms": 1608.025353,
+            "calls": 20,
+            "inclusive_seconds_per_call": 0.08040126765,
+            "exclusive_seconds_per_call": 0.08040126765
+          },
+          "nesterov": {
+            "inclusive_ms": 41471.715693,
+            "exclusive_ms": 2532.092488,
+            "calls": 1,
+            "inclusive_seconds_per_call": 41.471715693,
+            "exclusive_seconds_per_call": 2.532092488
+          },
+          "nesterov_init": {
+            "inclusive_ms": 201.303587,
+            "exclusive_ms": 50.938063,
+            "calls": 1,
+            "inclusive_seconds_per_call": 0.201303587,
+            "exclusive_seconds_per_call": 0.050938063
+          },
+          "coordinates_and_deposit": {
+            "inclusive_ms": 5943.976385,
+            "exclusive_ms": 0.349051,
+            "calls": 538,
+            "inclusive_seconds_per_call": 0.011048283243494423,
+            "exclusive_seconds_per_call": 6.487936802973978e-07
+          },
+          "density_center_pin_sync": {
+            "inclusive_ms": 2558.088357,
+            "exclusive_ms": 2558.088357,
+            "calls": 538,
+            "inclusive_seconds_per_call": 0.004754811072490706,
+            "exclusive_seconds_per_call": 0.004754811072490706
+          },
+          "density_deposit": {
+            "inclusive_ms": 3385.538977,
+            "exclusive_ms": 256.308188,
+            "calls": 538,
+            "inclusive_seconds_per_call": 0.00629282337732342,
+            "exclusive_seconds_per_call": 0.00047640927137546465
+          },
+          "density_scatter": {
+            "inclusive_ms": 2217.263353,
+            "exclusive_ms": 2217.263353,
+            "calls": 538,
+            "inclusive_seconds_per_call": 0.004121307347583643,
+            "exclusive_seconds_per_call": 0.004121307347583643
+          },
+          "density_overflow": {
+            "inclusive_ms": 911.967436,
+            "exclusive_ms": 911.967436,
+            "calls": 538,
+            "inclusive_seconds_per_call": 0.0016951067583643124,
+            "exclusive_seconds_per_call": 0.0016951067583643124
+          },
+          "density_field": {
+            "inclusive_ms": 2796.205672,
+            "exclusive_ms": 776.254802,
+            "calls": 538,
+            "inclusive_seconds_per_call": 0.0051974083122676585,
+            "exclusive_seconds_per_call": 0.0014428527918215613
+          },
+          "fft": {
+            "inclusive_ms": 2019.95087,
+            "exclusive_ms": 2019.95087,
+            "calls": 538,
+            "inclusive_seconds_per_call": 0.0037545555204460965,
+            "exclusive_seconds_per_call": 0.0037545555204460965
+          },
+          "wirelength_force": {
+            "inclusive_ms": 5278.619788,
+            "exclusive_ms": 5278.619788,
+            "calls": 538,
+            "inclusive_seconds_per_call": 0.009811560944237917,
+            "exclusive_seconds_per_call": 0.009811560944237917
+          },
+          "gradient_gather_combine": {
+            "inclusive_ms": 22724.908466,
+            "exclusive_ms": 1.471814,
+            "calls": 538,
+            "inclusive_seconds_per_call": 0.0422396068141264,
+            "exclusive_seconds_per_call": 2.73571375464684e-06
+          },
+          "wirelength_gather": {
+            "inclusive_ms": 19097.115124,
+            "exclusive_ms": 19097.115124,
+            "calls": 538,
+            "inclusive_seconds_per_call": 0.03549649651301115,
+            "exclusive_seconds_per_call": 0.03549649651301115
+          },
+          "density_gather_precondition": {
+            "inclusive_ms": 3298.111261,
+            "exclusive_ms": 3298.111261,
+            "calls": 538,
+            "inclusive_seconds_per_call": 0.0061303183289962825,
+            "exclusive_seconds_per_call": 0.0061303183289962825
+          },
+          "gradient_serial_sum": {
+            "inclusive_ms": 328.210267,
+            "exclusive_ms": 328.210267,
+            "calls": 538,
+            "inclusive_seconds_per_call": 0.0006100562583643122,
+            "exclusive_seconds_per_call": 0.0006100562583643122
+          },
+          "step_length": {
+            "inclusive_ms": 1362.835202,
+            "exclusive_ms": 0.399445,
+            "calls": 537,
+            "inclusive_seconds_per_call": 0.0025378681601489757,
+            "exclusive_seconds_per_call": 7.438454376163873e-07
+          },
+          "distance": {
+            "inclusive_ms": 1362.435757,
+            "exclusive_ms": 2.442405,
+            "calls": 1074,
+            "inclusive_seconds_per_call": 0.0012685621573556797,
+            "exclusive_seconds_per_call": 2.2741201117318434e-06
+          },
+          "distance_parallel_squares": {
+            "inclusive_ms": 754.73347,
+            "exclusive_ms": 754.73347,
+            "calls": 1074,
+            "inclusive_seconds_per_call": 0.0007027313500931098,
+            "exclusive_seconds_per_call": 0.0007027313500931098
+          },
+          "distance_serial_sum": {
+            "inclusive_ms": 605.259882,
+            "exclusive_ms": 605.259882,
+            "calls": 1074,
+            "inclusive_seconds_per_call": 0.000563556687150838,
+            "exclusive_seconds_per_call": 0.000563556687150838
+          },
+          "iteration_attempt": {
+            "inclusive_ms": 38737.981609,
+            "exclusive_ms": 1.70195,
+            "calls": 532,
+            "inclusive_seconds_per_call": 0.07281575490413535,
+            "exclusive_seconds_per_call": 3.199154135338346e-06
+          },
+          "nesterov_coordinates": {
+            "inclusive_ms": 9471.451942,
+            "exclusive_ms": 780.09967,
+            "calls": 536,
+            "inclusive_seconds_per_call": 0.01767061929477612,
+            "exclusive_seconds_per_call": 0.0014554098320895522
+          },
+          "timing_feedback": {
+            "inclusive_ms": 0.117851,
+            "exclusive_ms": 0.117851,
+            "calls": 532,
+            "inclusive_seconds_per_call": 2.2152443609022556e-07,
+            "exclusive_seconds_per_call": 2.2152443609022556e-07
+          },
+          "routability_snapshot": {
+            "inclusive_ms": 0.114139,
+            "exclusive_ms": 0.114139,
+            "calls": 532,
+            "inclusive_seconds_per_call": 2.14546992481203e-07,
+            "exclusive_seconds_per_call": 2.14546992481203e-07
+          },
+          "routability_feedback": {
+            "inclusive_ms": 0.106019,
+            "exclusive_ms": 0.106019,
+            "calls": 532,
+            "inclusive_seconds_per_call": 1.9928383458646616e-07,
+            "exclusive_seconds_per_call": 1.9928383458646616e-07
+          }
+        },
+        "root_ms": 72208.325538,
+        "exclusive_sum_ms": 72208.325538,
+        "iteration_attempts": 532
+      },
+      "process_resource": "\tCommand being timed: \"/workspace/openroad-soa-profile/payload/binaries/candidate-profile -no_init -exit /workspace/openroad-soa-profile/results/large02-candidate-t4/run.tcl\"\n\tUser time (seconds): 198.70\n\tSystem time (seconds): 4.27\n\tPercent of CPU this job got: 217%\n\tElapsed (wall clock) time (h:mm:ss or m:ss): 1:33.47\n\tAverage shared text size (kbytes): 0\n\tAverage unshared data size (kbytes): 0\n\tAverage stack size (kbytes): 0\n\tAverage total size (kbytes): 0\n\tMaximum resident set size (kbytes): 1474980\n\tAverage resident set size (kbytes): 0\n\tMajor (requiring I/O) page faults: 0\n\tMinor (reclaiming a frame) page faults: 867217\n\tVoluntary context switches: 107998\n\tInvoluntary context switches: 196\n\tSwaps: 0\n\tFile system inputs: 0\n\tFile system outputs: 123680\n\tSocket messages sent: 0\n\tSocket messages received: 0\n\tSignals delivered: 0\n\tPage size (bytes): 4096\n\tExit status: 0\n",
+      "ompt": {
+        "measured": true,
+        "initialization": [
+          {
+            "initialized": true,
+            "wait_registration": 5,
+            "thread_registration": 5,
+            "parallel_registration": 5
+          }
+        ],
+        "finalization": [
+          {
+            "wait_registration": 5,
+            "callback_pairs": 103120,
+            "threads": 4,
+            "parallel_regions": 19862,
+            "invalid_pairs": 0
+          }
+        ],
+        "waits": [
+          {
+            "phase": "nesterov",
+            "thread_wait_ms": 56182.46701,
+            "initial_thread_wait_ms": 104.574975,
+            "callback_pairs": 6412
+          },
+          {
+            "phase": "nesterov_init",
+            "thread_wait_ms": 42.513471,
+            "initial_thread_wait_ms": 4.150314,
+            "callback_pairs": 12
+          },
+          {
+            "phase": "wirelength_force",
+            "thread_wait_ms": 3824.260993,
+            "initial_thread_wait_ms": 33.987658,
+            "callback_pairs": 2152
+          },
+          {
+            "phase": "wirelength_gather",
+            "thread_wait_ms": 11891.614394,
+            "initial_thread_wait_ms": 2009.676173,
+            "callback_pairs": 2152
+          },
+          {
+            "phase": "density_field",
+            "thread_wait_ms": 248.859438,
+            "initial_thread_wait_ms": 19.862267,
+            "callback_pairs": 2152
+          },
+          {
+            "phase": "density_gather_precondition",
+            "thread_wait_ms": 1898.424932,
+            "initial_thread_wait_ms": 182.056798,
+            "callback_pairs": 4304
+          },
+          {
+            "phase": "fft",
+            "thread_wait_ms": 1679.120281,
+            "initial_thread_wait_ms": 381.587548,
+            "callback_pairs": 27976
+          },
+          {
+            "phase": "initial_sparse_solve",
+            "thread_wait_ms": 72275.344637,
+            "initial_thread_wait_ms": 2027.350693,
+            "callback_pairs": 32160
+          },
+          {
+            "phase": "density_scatter",
+            "thread_wait_ms": 481.762403,
+            "initial_thread_wait_ms": 176.751025,
+            "callback_pairs": 8608
+          },
+          {
+            "phase": "density_overflow",
+            "thread_wait_ms": 2229.811114,
+            "initial_thread_wait_ms": 34.986755,
+            "callback_pairs": 2152
+          },
+          {
+            "phase": "distance_parallel_squares",
+            "thread_wait_ms": 3095.113598,
+            "initial_thread_wait_ms": 669.593598,
+            "callback_pairs": 4296
+          },
+          {
+            "phase": "nesterov_coordinates",
+            "thread_wait_ms": 214.365546,
+            "initial_thread_wait_ms": 45.066469,
+            "callback_pairs": 4288
+          },
+          {
+            "phase": "density_center_pin_sync",
+            "thread_wait_ms": 1808.771948,
+            "initial_thread_wait_ms": 330.749437,
+            "callback_pairs": 6456
+          }
+        ],
+        "units": "thread-time, not wall-time"
+      },
+      "algorithm": {
+        "trace": [
+          "[InitialPlace]  Iter: 1 conjugate gradient residual: 0.00150776 HPWL: 13849076190",
+          "[InitialPlace]  Iter: 2 conjugate gradient residual: 0.00110863 HPWL: 8606878342",
+          "[InitialPlace]  Iter: 3 conjugate gradient residual: 0.00079658 HPWL: 6656092677",
+          "[InitialPlace]  Iter: 4 conjugate gradient residual: 0.00058435 HPWL: 5759527515",
+          "[InitialPlace]  Iter: 5 conjugate gradient residual: 0.00045318 HPWL: 5206488561",
+          "[InitialPlace]  Iter: 6 conjugate gradient residual: 0.00469546 HPWL: 4909238640",
+          "[InitialPlace]  Iter: 7 conjugate gradient residual: 0.00048761 HPWL: 5773107742",
+          "[InitialPlace]  Iter: 8 conjugate gradient residual: 0.00037699 HPWL: 5416132472",
+          "[InitialPlace]  Iter: 9 conjugate gradient residual: 0.00036960 HPWL: 5180108899",
+          "[InitialPlace]  Iter: 10 conjugate gradient residual: 0.00029812 HPWL: 5029457993",
+          "[InitialPlace]  Iter: 11 conjugate gradient residual: 0.00025661 HPWL: 4942406006",
+          "[InitialPlace]  Iter: 12 conjugate gradient residual: 0.00021503 HPWL: 4873580463",
+          "[InitialPlace]  Iter: 13 conjugate gradient residual: 0.00026283 HPWL: 4828264037",
+          "[InitialPlace]  Iter: 14 conjugate gradient residual: 0.00018511 HPWL: 4789396266",
+          "[InitialPlace]  Iter: 15 conjugate gradient residual: 0.00021359 HPWL: 4750109274",
+          "[InitialPlace]  Iter: 16 conjugate gradient residual: 0.00017947 HPWL: 4714811616",
+          "[InitialPlace]  Iter: 17 conjugate gradient residual: 0.00013618 HPWL: 4678807487",
+          "[InitialPlace]  Iter: 18 conjugate gradient residual: 0.00015029 HPWL: 4647848857",
+          "[InitialPlace]  Iter: 19 conjugate gradient residual: 0.00012558 HPWL: 4617452504",
+          "[InitialPlace]  Iter: 20 conjugate gradient residual: 0.00015879 HPWL: 4586204966",
+          "        0 |   0.9968 |  8.096159e+05 |   +0.00% |  6.65e-17 |      ",
+          "       10 |   0.9892 |  1.219801e+06 |  +50.66% |  9.87e-17 |      ",
+          "       20 |   0.9844 |  1.295418e+06 |   +6.20% |  1.58e-16 |      ",
+          "       30 |   0.9814 |  1.307253e+06 |   +0.91% |  2.56e-16 |      ",
+          "       40 |   0.9804 |  1.290270e+06 |   -1.30% |  4.17e-16 |      ",
+          "       50 |   0.9801 |  1.287615e+06 |   -0.21% |  6.77e-16 |      ",
+          "       60 |   0.9799 |  1.292521e+06 |   +0.38% |  1.10e-15 |      ",
+          "       70 |   0.9797 |  1.293069e+06 |   +0.04% |  1.78e-15 |      ",
+          "       80 |   0.9796 |  1.292190e+06 |   -0.07% |  2.90e-15 |      ",
+          "       90 |   0.9795 |  1.290323e+06 |   -0.14% |  4.71e-15 |      ",
+          "      100 |   0.9796 |  1.285461e+06 |   -0.38% |  7.66e-15 |      ",
+          "      110 |   0.9797 |  1.278238e+06 |   -0.56% |  1.25e-14 |      ",
+          "      120 |   0.9798 |  1.270291e+06 |   -0.62% |  2.03e-14 |      ",
+          "      130 |   0.9799 |  1.263193e+06 |   -0.56% |  3.31e-14 |      ",
+          "      140 |   0.9799 |  1.259137e+06 |   -0.32% |  5.39e-14 |      ",
+          "      150 |   0.9796 |  1.260550e+06 |   +0.11% |  8.78e-14 |      ",
+          "      160 |   0.9792 |  1.267151e+06 |   +0.52% |  1.43e-13 |      ",
+          "      170 |   0.9785 |  1.276799e+06 |   +0.76% |  2.32e-13 |      ",
+          "      180 |   0.9777 |  1.291007e+06 |   +1.11% |  3.77e-13 |      ",
+          "      190 |   0.9764 |  1.314993e+06 |   +1.86% |  6.11e-13 |      ",
+          "      200 |   0.9745 |  1.359133e+06 |   +3.36% |  9.86e-13 |      ",
+          "      210 |   0.9714 |  1.438788e+06 |   +5.86% |  1.58e-12 |      ",
+          "      220 |   0.9664 |  1.574648e+06 |   +9.44% |  2.50e-12 |      ",
+          "      230 |   0.9581 |  1.780508e+06 |  +13.07% |  3.90e-12 |      ",
+          "      240 |   0.9466 |  2.049283e+06 |  +15.10% |  6.00e-12 |      ",
+          "      250 |   0.9327 |  2.365380e+06 |  +15.42% |  9.12e-12 |      ",
+          "      260 |   0.9167 |  2.704549e+06 |  +14.34% |  1.38e-11 |      ",
+          "      270 |   0.8975 |  3.077477e+06 |  +13.79% |  2.08e-11 |      ",
+          "      280 |   0.8755 |  3.499017e+06 |  +13.70% |  3.09e-11 |      ",
+          "      290 |   0.8503 |  3.910006e+06 |  +11.75% |  4.59e-11 |      ",
+          "      300 |   0.8224 |  4.175475e+06 |   +6.79% |  7.00e-11 |      ",
+          "      310 |   0.7891 |  4.265666e+06 |   +2.16% |  1.11e-10 |      ",
+          "      320 |   0.7514 |  4.407599e+06 |   +3.33% |  1.73e-10 |      ",
+          "      330 |   0.7144 |  4.758960e+06 |   +7.97% |  2.62e-10 |      ",
+          "      340 |   0.6805 |  5.424786e+06 |  +13.99% |  3.70e-10 |      ",
+          "      350 |   0.6523 |  5.323783e+06 |   -1.86% |  5.82e-10 |      ",
+          "      360 |   0.6020 |  5.322043e+06 |   -0.03% |  9.06e-10 |      ",
+          "      370 |   0.5716 |  5.738349e+06 |   +7.82% |  1.32e-09 |      ",
+          "      380 |   0.5335 |  5.084070e+06 |  -11.40% |  2.14e-09 |      ",
+          "      390 |   0.4728 |  5.315076e+06 |   +4.54% |  3.29e-09 |      ",
+          "      400 |   0.4441 |  5.010036e+06 |   -5.74% |  5.29e-09 |      ",
+          "      410 |   0.3974 |  5.170438e+06 |   +3.20% |  8.09e-09 |      ",
+          "      420 |   0.3547 |  4.973543e+06 |   -3.81% |  1.30e-08 |      ",
+          "      430 |   0.3327 |  4.786912e+06 |   -3.75% |  1.95e-08 |      ",
+          "      440 |   0.3053 |  4.684245e+06 |   -2.14% |  2.84e-08 |      ",
+          "      450 |   0.2752 |  4.625782e+06 |   -1.25% |  4.17e-08 |      ",
+          "      460 |   0.2471 |  4.572072e+06 |   -1.16% |  6.14e-08 |      ",
+          "      470 |   0.2199 |  4.530462e+06 |   -0.91% |  9.05e-08 |      ",
+          "      480 |   0.1940 |  4.497685e+06 |   -0.72% |  1.33e-07 |      ",
+          "      490 |   0.1704 |  4.477522e+06 |   -0.45% |  1.96e-07 |      ",
+          "      500 |   0.1500 |  4.464245e+06 |   -0.30% |  2.89e-07 |      ",
+          "      510 |   0.1318 |  4.457634e+06 |   -0.15% |  4.26e-07 |      ",
+          "      520 |   0.1154 |  4.456453e+06 |   -0.03% |  6.28e-07 |      ",
+          "      530 |   0.1003 |  4.460431e+06 |   +0.09% |  9.24e-07 |      ",
+          "      531 |   0.0989 |  4.460886e+06 |          |  9.98e-07 |      ",
+          "[INFO GPL-1001] Global placement finished at iteration 531"
+        ],
+        "trace_sha256": "208dea591ee7d25a4d52c726e4811e294047ef224eb6d7bd79e2f6a94fecffff",
+        "final_iterations": [
+          "531"
+        ],
+        "routability_iterations": [],
+        "initial_iterations": [
+          "1",
+          "2",
+          "3",
+          "4",
+          "5",
+          "6",
+          "7",
+          "8",
+          "9",
+          "10",
+          "11",
+          "12",
+          "13",
+          "14",
+          "15",
+          "16",
+          "17",
+          "18",
+          "19",
+          "20"
+        ]
+      },
+      "formal_master_algorithm": {
+        "trace": [
+          "[InitialPlace]  Iter: 1 conjugate gradient residual: 0.00150776 HPWL: 13849076190",
+          "[InitialPlace]  Iter: 2 conjugate gradient residual: 0.00110863 HPWL: 8606878342",
+          "[InitialPlace]  Iter: 3 conjugate gradient residual: 0.00079658 HPWL: 6656092677",
+          "[InitialPlace]  Iter: 4 conjugate gradient residual: 0.00058435 HPWL: 5759527515",
+          "[InitialPlace]  Iter: 5 conjugate gradient residual: 0.00045318 HPWL: 5206488561",
+          "[InitialPlace]  Iter: 6 conjugate gradient residual: 0.00469546 HPWL: 4909238640",
+          "[InitialPlace]  Iter: 7 conjugate gradient residual: 0.00048761 HPWL: 5773107742",
+          "[InitialPlace]  Iter: 8 conjugate gradient residual: 0.00037699 HPWL: 5416132472",
+          "[InitialPlace]  Iter: 9 conjugate gradient residual: 0.00036960 HPWL: 5180108899",
+          "[InitialPlace]  Iter: 10 conjugate gradient residual: 0.00029812 HPWL: 5029457993",
+          "[InitialPlace]  Iter: 11 conjugate gradient residual: 0.00025661 HPWL: 4942406006",
+          "[InitialPlace]  Iter: 12 conjugate gradient residual: 0.00021503 HPWL: 4873580463",
+          "[InitialPlace]  Iter: 13 conjugate gradient residual: 0.00026283 HPWL: 4828264037",
+          "[InitialPlace]  Iter: 14 conjugate gradient residual: 0.00018511 HPWL: 4789396266",
+          "[InitialPlace]  Iter: 15 conjugate gradient residual: 0.00021359 HPWL: 4750109274",
+          "[InitialPlace]  Iter: 16 conjugate gradient residual: 0.00017947 HPWL: 4714811616",
+          "[InitialPlace]  Iter: 17 conjugate gradient residual: 0.00013618 HPWL: 4678807487",
+          "[InitialPlace]  Iter: 18 conjugate gradient residual: 0.00015029 HPWL: 4647848857",
+          "[InitialPlace]  Iter: 19 conjugate gradient residual: 0.00012558 HPWL: 4617452504",
+          "[InitialPlace]  Iter: 20 conjugate gradient residual: 0.00015879 HPWL: 4586204966",
+          "        0 |   0.9968 |  8.096159e+05 |   +0.00% |  6.65e-17 |      ",
+          "       10 |   0.9892 |  1.219801e+06 |  +50.66% |  9.87e-17 |      ",
+          "       20 |   0.9844 |  1.295418e+06 |   +6.20% |  1.58e-16 |      ",
+          "       30 |   0.9814 |  1.307253e+06 |   +0.91% |  2.56e-16 |      ",
+          "       40 |   0.9804 |  1.290270e+06 |   -1.30% |  4.17e-16 |      ",
+          "       50 |   0.9801 |  1.287615e+06 |   -0.21% |  6.77e-16 |      ",
+          "       60 |   0.9799 |  1.292521e+06 |   +0.38% |  1.10e-15 |      ",
+          "       70 |   0.9797 |  1.293069e+06 |   +0.04% |  1.78e-15 |      ",
+          "       80 |   0.9796 |  1.292190e+06 |   -0.07% |  2.90e-15 |      ",
+          "       90 |   0.9795 |  1.290323e+06 |   -0.14% |  4.71e-15 |      ",
+          "      100 |   0.9796 |  1.285461e+06 |   -0.38% |  7.66e-15 |      ",
+          "      110 |   0.9797 |  1.278238e+06 |   -0.56% |  1.25e-14 |      ",
+          "      120 |   0.9798 |  1.270291e+06 |   -0.62% |  2.03e-14 |      ",
+          "      130 |   0.9799 |  1.263193e+06 |   -0.56% |  3.31e-14 |      ",
+          "      140 |   0.9799 |  1.259137e+06 |   -0.32% |  5.39e-14 |      ",
+          "      150 |   0.9796 |  1.260550e+06 |   +0.11% |  8.78e-14 |      ",
+          "      160 |   0.9792 |  1.267151e+06 |   +0.52% |  1.43e-13 |      ",
+          "      170 |   0.9785 |  1.276799e+06 |   +0.76% |  2.32e-13 |      ",
+          "      180 |   0.9777 |  1.291007e+06 |   +1.11% |  3.77e-13 |      ",
+          "      190 |   0.9764 |  1.314993e+06 |   +1.86% |  6.11e-13 |      ",
+          "      200 |   0.9745 |  1.359133e+06 |   +3.36% |  9.86e-13 |      ",
+          "      210 |   0.9714 |  1.438788e+06 |   +5.86% |  1.58e-12 |      ",
+          "      220 |   0.9664 |  1.574648e+06 |   +9.44% |  2.50e-12 |      ",
+          "      230 |   0.9581 |  1.780508e+06 |  +13.07% |  3.90e-12 |      ",
+          "      240 |   0.9466 |  2.049283e+06 |  +15.10% |  6.00e-12 |      ",
+          "      250 |   0.9327 |  2.365380e+06 |  +15.42% |  9.12e-12 |      ",
+          "      260 |   0.9167 |  2.704549e+06 |  +14.34% |  1.38e-11 |      ",
+          "      270 |   0.8975 |  3.077477e+06 |  +13.79% |  2.08e-11 |      ",
+          "      280 |   0.8755 |  3.499017e+06 |  +13.70% |  3.09e-11 |      ",
+          "      290 |   0.8503 |  3.910006e+06 |  +11.75% |  4.59e-11 |      ",
+          "      300 |   0.8224 |  4.175475e+06 |   +6.79% |  7.00e-11 |      ",
+          "      310 |   0.7891 |  4.265666e+06 |   +2.16% |  1.11e-10 |      ",
+          "      320 |   0.7514 |  4.407599e+06 |   +3.33% |  1.73e-10 |      ",
+          "      330 |   0.7144 |  4.758960e+06 |   +7.97% |  2.62e-10 |      ",
+          "      340 |   0.6805 |  5.424786e+06 |  +13.99% |  3.70e-10 |      ",
+          "      350 |   0.6523 |  5.323783e+06 |   -1.86% |  5.82e-10 |      ",
+          "      360 |   0.6020 |  5.322043e+06 |   -0.03% |  9.06e-10 |      ",
+          "      370 |   0.5716 |  5.738349e+06 |   +7.82% |  1.32e-09 |      ",
+          "      380 |   0.5335 |  5.084070e+06 |  -11.40% |  2.14e-09 |      ",
+          "      390 |   0.4728 |  5.315076e+06 |   +4.54% |  3.29e-09 |      ",
+          "      400 |   0.4441 |  5.010036e+06 |   -5.74% |  5.29e-09 |      ",
+          "      410 |   0.3974 |  5.170438e+06 |   +3.20% |  8.09e-09 |      ",
+          "      420 |   0.3547 |  4.973543e+06 |   -3.81% |  1.30e-08 |      ",
+          "      430 |   0.3327 |  4.786912e+06 |   -3.75% |  1.95e-08 |      ",
+          "      440 |   0.3053 |  4.684245e+06 |   -2.14% |  2.84e-08 |      ",
+          "      450 |   0.2752 |  4.625782e+06 |   -1.25% |  4.17e-08 |      ",
+          "      460 |   0.2471 |  4.572072e+06 |   -1.16% |  6.14e-08 |      ",
+          "      470 |   0.2199 |  4.530462e+06 |   -0.91% |  9.05e-08 |      ",
+          "      480 |   0.1940 |  4.497685e+06 |   -0.72% |  1.33e-07 |      ",
+          "      490 |   0.1704 |  4.477522e+06 |   -0.45% |  1.96e-07 |      ",
+          "      500 |   0.1500 |  4.464245e+06 |   -0.30% |  2.89e-07 |      ",
+          "      510 |   0.1318 |  4.457634e+06 |   -0.15% |  4.26e-07 |      ",
+          "      520 |   0.1154 |  4.456453e+06 |   -0.03% |  6.28e-07 |      ",
+          "      530 |   0.1003 |  4.460431e+06 |   +0.09% |  9.24e-07 |      ",
+          "      531 |   0.0989 |  4.460886e+06 |          |  9.98e-07 |      ",
+          "[INFO GPL-1001] Global placement finished at iteration 531"
+        ],
+        "trace_sha256": "208dea591ee7d25a4d52c726e4811e294047ef224eb6d7bd79e2f6a94fecffff",
+        "final_iterations": [
+          "531"
+        ],
+        "routability_iterations": [],
+        "initial_iterations": [
+          "1",
+          "2",
+          "3",
+          "4",
+          "5",
+          "6",
+          "7",
+          "8",
+          "9",
+          "10",
+          "11",
+          "12",
+          "13",
+          "14",
+          "15",
+          "16",
+          "17",
+          "18",
+          "19",
+          "20"
+        ]
+      },
+      "formal_candidate_algorithm": {
+        "trace": [
+          "[InitialPlace]  Iter: 1 conjugate gradient residual: 0.00150776 HPWL: 13849076190",
+          "[InitialPlace]  Iter: 2 conjugate gradient residual: 0.00110863 HPWL: 8606878342",
+          "[InitialPlace]  Iter: 3 conjugate gradient residual: 0.00079658 HPWL: 6656092677",
+          "[InitialPlace]  Iter: 4 conjugate gradient residual: 0.00058435 HPWL: 5759527515",
+          "[InitialPlace]  Iter: 5 conjugate gradient residual: 0.00045318 HPWL: 5206488561",
+          "[InitialPlace]  Iter: 6 conjugate gradient residual: 0.00469546 HPWL: 4909238640",
+          "[InitialPlace]  Iter: 7 conjugate gradient residual: 0.00048761 HPWL: 5773107742",
+          "[InitialPlace]  Iter: 8 conjugate gradient residual: 0.00037699 HPWL: 5416132472",
+          "[InitialPlace]  Iter: 9 conjugate gradient residual: 0.00036960 HPWL: 5180108899",
+          "[InitialPlace]  Iter: 10 conjugate gradient residual: 0.00029812 HPWL: 5029457993",
+          "[InitialPlace]  Iter: 11 conjugate gradient residual: 0.00025661 HPWL: 4942406006",
+          "[InitialPlace]  Iter: 12 conjugate gradient residual: 0.00021503 HPWL: 4873580463",
+          "[InitialPlace]  Iter: 13 conjugate gradient residual: 0.00026283 HPWL: 4828264037",
+          "[InitialPlace]  Iter: 14 conjugate gradient residual: 0.00018511 HPWL: 4789396266",
+          "[InitialPlace]  Iter: 15 conjugate gradient residual: 0.00021359 HPWL: 4750109274",
+          "[InitialPlace]  Iter: 16 conjugate gradient residual: 0.00017947 HPWL: 4714811616",
+          "[InitialPlace]  Iter: 17 conjugate gradient residual: 0.00013618 HPWL: 4678807487",
+          "[InitialPlace]  Iter: 18 conjugate gradient residual: 0.00015029 HPWL: 4647848857",
+          "[InitialPlace]  Iter: 19 conjugate gradient residual: 0.00012558 HPWL: 4617452504",
+          "[InitialPlace]  Iter: 20 conjugate gradient residual: 0.00015879 HPWL: 4586204966",
+          "        0 |   0.9968 |  8.096159e+05 |   +0.00% |  6.65e-17 |      ",
+          "       10 |   0.9892 |  1.219801e+06 |  +50.66% |  9.87e-17 |      ",
+          "       20 |   0.9844 |  1.295418e+06 |   +6.20% |  1.58e-16 |      ",
+          "       30 |   0.9814 |  1.307253e+06 |   +0.91% |  2.56e-16 |      ",
+          "       40 |   0.9804 |  1.290270e+06 |   -1.30% |  4.17e-16 |      ",
+          "       50 |   0.9801 |  1.287615e+06 |   -0.21% |  6.77e-16 |      ",
+          "       60 |   0.9799 |  1.292521e+06 |   +0.38% |  1.10e-15 |      ",
+          "       70 |   0.9797 |  1.293069e+06 |   +0.04% |  1.78e-15 |      ",
+          "       80 |   0.9796 |  1.292190e+06 |   -0.07% |  2.90e-15 |      ",
+          "       90 |   0.9795 |  1.290323e+06 |   -0.14% |  4.71e-15 |      ",
+          "      100 |   0.9796 |  1.285461e+06 |   -0.38% |  7.66e-15 |      ",
+          "      110 |   0.9797 |  1.278238e+06 |   -0.56% |  1.25e-14 |      ",
+          "      120 |   0.9798 |  1.270291e+06 |   -0.62% |  2.03e-14 |      ",
+          "      130 |   0.9799 |  1.263193e+06 |   -0.56% |  3.31e-14 |      ",
+          "      140 |   0.9799 |  1.259137e+06 |   -0.32% |  5.39e-14 |      ",
+          "      150 |   0.9796 |  1.260550e+06 |   +0.11% |  8.78e-14 |      ",
+          "      160 |   0.9792 |  1.267151e+06 |   +0.52% |  1.43e-13 |      ",
+          "      170 |   0.9785 |  1.276799e+06 |   +0.76% |  2.32e-13 |      ",
+          "      180 |   0.9777 |  1.291007e+06 |   +1.11% |  3.77e-13 |      ",
+          "      190 |   0.9764 |  1.314993e+06 |   +1.86% |  6.11e-13 |      ",
+          "      200 |   0.9745 |  1.359133e+06 |   +3.36% |  9.86e-13 |      ",
+          "      210 |   0.9714 |  1.438788e+06 |   +5.86% |  1.58e-12 |      ",
+          "      220 |   0.9664 |  1.574648e+06 |   +9.44% |  2.50e-12 |      ",
+          "      230 |   0.9581 |  1.780508e+06 |  +13.07% |  3.90e-12 |      ",
+          "      240 |   0.9466 |  2.049283e+06 |  +15.10% |  6.00e-12 |      ",
+          "      250 |   0.9327 |  2.365380e+06 |  +15.42% |  9.12e-12 |      ",
+          "      260 |   0.9167 |  2.704549e+06 |  +14.34% |  1.38e-11 |      ",
+          "      270 |   0.8975 |  3.077477e+06 |  +13.79% |  2.08e-11 |      ",
+          "      280 |   0.8755 |  3.499017e+06 |  +13.70% |  3.09e-11 |      ",
+          "      290 |   0.8503 |  3.910006e+06 |  +11.75% |  4.59e-11 |      ",
+          "      300 |   0.8224 |  4.175475e+06 |   +6.79% |  7.00e-11 |      ",
+          "      310 |   0.7891 |  4.265666e+06 |   +2.16% |  1.11e-10 |      ",
+          "      320 |   0.7514 |  4.407599e+06 |   +3.33% |  1.73e-10 |      ",
+          "      330 |   0.7144 |  4.758960e+06 |   +7.97% |  2.62e-10 |      ",
+          "      340 |   0.6805 |  5.424786e+06 |  +13.99% |  3.70e-10 |      ",
+          "      350 |   0.6523 |  5.323783e+06 |   -1.86% |  5.82e-10 |      ",
+          "      360 |   0.6020 |  5.322043e+06 |   -0.03% |  9.06e-10 |      ",
+          "      370 |   0.5716 |  5.738349e+06 |   +7.82% |  1.32e-09 |      ",
+          "      380 |   0.5335 |  5.084070e+06 |  -11.40% |  2.14e-09 |      ",
+          "      390 |   0.4728 |  5.315076e+06 |   +4.54% |  3.29e-09 |      ",
+          "      400 |   0.4441 |  5.010036e+06 |   -5.74% |  5.29e-09 |      ",
+          "      410 |   0.3974 |  5.170438e+06 |   +3.20% |  8.09e-09 |      ",
+          "      420 |   0.3547 |  4.973543e+06 |   -3.81% |  1.30e-08 |      ",
+          "      430 |   0.3327 |  4.786912e+06 |   -3.75% |  1.95e-08 |      ",
+          "      440 |   0.3053 |  4.684245e+06 |   -2.14% |  2.84e-08 |      ",
+          "      450 |   0.2752 |  4.625782e+06 |   -1.25% |  4.17e-08 |      ",
+          "      460 |   0.2471 |  4.572072e+06 |   -1.16% |  6.14e-08 |      ",
+          "      470 |   0.2199 |  4.530462e+06 |   -0.91% |  9.05e-08 |      ",
+          "      480 |   0.1940 |  4.497685e+06 |   -0.72% |  1.33e-07 |      ",
+          "      490 |   0.1704 |  4.477522e+06 |   -0.45% |  1.96e-07 |      ",
+          "      500 |   0.1500 |  4.464245e+06 |   -0.30% |  2.89e-07 |      ",
+          "      510 |   0.1318 |  4.457634e+06 |   -0.15% |  4.26e-07 |      ",
+          "      520 |   0.1154 |  4.456453e+06 |   -0.03% |  6.28e-07 |      ",
+          "      530 |   0.1003 |  4.460431e+06 |   +0.09% |  9.24e-07 |      ",
+          "      531 |   0.0989 |  4.460886e+06 |          |  9.98e-07 |      ",
+          "[INFO GPL-1001] Global placement finished at iteration 531"
+        ],
+        "trace_sha256": "208dea591ee7d25a4d52c726e4811e294047ef224eb6d7bd79e2f6a94fecffff",
+        "final_iterations": [
+          "531"
+        ],
+        "routability_iterations": [],
+        "initial_iterations": [
+          "1",
+          "2",
+          "3",
+          "4",
+          "5",
+          "6",
+          "7",
+          "8",
+          "9",
+          "10",
+          "11",
+          "12",
+          "13",
+          "14",
+          "15",
+          "16",
+          "17",
+          "18",
+          "19",
+          "20"
+        ]
+      },
+      "formal_master_candidate_algorithm_exact": true,
+      "normalization": "calls and seconds/call reported for every phase; use accepted iteration/pass traces to distinguish algorithm work changes",
+      "profile_output_exact": true,
+      "profile_algorithm_trace_exact": true,
+      "log_sha256": "555322796989606c8ba7e690c2b3115b9706de117821a5b1901758bb84df9c3c",
+      "accepted_candidate_log_sha256": "20be7ce00aea25e1d90887350c9e685918e792e4a629b8055b13481fd6d405db",
+      "accepted_master_log_sha256": "facdc1dcbc89dee53bdd8182dff77747f6e95726c43f01b3c494657561cdfb21",
+      "tcl_sha256": "6ea2915048495d601782e87fc8e0255f4e9270cfa10318752d14b25320176227"
+    }
+  ]
+}

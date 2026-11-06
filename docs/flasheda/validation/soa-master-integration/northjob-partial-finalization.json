@@ -1,0 +1,15 @@
+{
+  "scope": "Northjob-partial",
+  "actions": [],
+  "stage_exit": "137",
+  "toolchain_manifest_sha256": "00cb0617e7ab0f1e29923662e1061b631910381666bb274ad13b134074e8d344",
+  "profile_runner_present": false,
+  "migration_bundle": {
+    "path": "/gpfs/users/linlizhi/flasheda-soa-merge-local-20261106/e2b-migration.tar.gz",
+    "bytes": 296960279,
+    "sha256": "5164fc811c4e8fb47f265015286927e3590915d52339249b6138cb0a82a2e53d",
+    "input_bytes": 1053024179,
+    "members": 80,
+    "purpose": "New E2B profiles use fresh same-sandbox master/candidate paired runs; never mix Northjob and E2B absolute times"
+  }
+}

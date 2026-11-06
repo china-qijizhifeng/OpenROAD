@@ -1,0 +1,16 @@
+{
+  "immutable_acceptance_receipt": "acceptance-receipt.json",
+  "source_manifest_fixed": {
+    "local": "/Users/shom/Downloads/openroad-gpl-soa/build/soa/merge-master-local/source-manifest-fixed.json",
+    "gpfs": "/gpfs/users/linlizhi/flasheda-soa-merge-local-20261106/results/source-manifest-fixed.json",
+    "archive_member": "results/source-manifest-fixed.json"
+  },
+  "acceptance_evidence_archive": {
+    "sha256": "7f776da0a015b97c06629762699e66088da06f0389c3072d7dd3ce8694a4edec",
+    "bytes": 88964979,
+    "members": 214,
+    "local": "/Users/shom/Downloads/openroad-gpl-soa/build/soa/merge-master-local/acceptance-evidence.tar.gz",
+    "gpfs": "/gpfs/users/linlizhi/flasheda-soa-merge-local-20261106/acceptance-evidence.tar.gz"
+  },
+  "verification": "Local archive SHA matched remote receipt; unique archive member names; complete fixed source manifest present"
+}

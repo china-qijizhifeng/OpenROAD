@@ -1,0 +1,49 @@
+{
+  "job_alias": "flasheda-soa-merge-local-20261106",
+  "job_identity": "job-322eb2b469a6-20261106185948",
+  "timestamp_utc": "2026-11-06T13:29:13.519856+00:00",
+  "profile_runner_stop": {
+    "pid": 41741,
+    "ppid": 35015,
+    "precondition": "exact run-phase.py cmdline and T stopped state verified in worker-process-before-cleanup.json",
+    "signal": "SIGKILL",
+    "stage_exit": "137",
+    "absent_after_stop": true
+  },
+  "evidence_archives_sha_verified": true,
+  "binaries_preserved": {
+    "baseline": {
+      "sha256": "9eedbe284a9330f4269c1c1c557ae869f2d9c8472ae0610b3f7dc0f98b6b3fc4",
+      "bytes": 124296512,
+      "source_path": "/tmp/soa-master-source/baseline/bazel-bin/openroad",
+      "archive_path": "/gpfs/users/linlizhi/flasheda-soa-merge-local-20261106/binaries/baseline",
+      "copied_binary_version_probe": "bazel-nostamp",
+      "readelf_needed": "\nDynamic section at offset 0x62f8e28 contains 28 entries:\n  Tag        Type                         Name/Value\n 0x0000000000000001 (NEEDED)             Shared library: [libpthread.so.0]\n 0x0000000000000001 (NEEDED)             Shared library: [libdl.so.2]\n 0x0000000000000001 (NEEDED)             Shared library: [libm.so.6]\n 0x0000000000000001 (NEEDED)             Shared library: [libc.so.6]\n 0x0000000000000001 (NEEDED)             Shared library: [ld-linux-x86-64.so.2]\n 0x000000000000001e (FLAGS)              BIND_NOW\n 0x000000006ffffffb (FLAGS_1)            Flags: NOW\n 0x0000000000000015 (DEBUG)              0x0\n 0x0000000000000007 (RELA)               0x204ce8\n 0x0000000000000008 (RELASZ)             912 (bytes)\n 0x0000000000000009 (RELAENT)            24 (bytes)\n 0x0000000000000017 (JMPREL)             0x205078\n 0x0000000000000002 (PLTRELSZ)           10896 (bytes)\n 0x0000000000000003 (PLTGOT)             0x64fb2a8\n 0x0000000000000014 (PLTREL)             RELA\n 0x0000000000000006 (SYMTAB)             0x200320\n 0x000000000000000b (SYMENT)             24 (bytes)\n 0x0000000000000005 (STRTAB)             0x2037e8\n 0x000000000000000a (STRSZ)              5369 (bytes)\n 0x000000006ffffef5 (GNU_HASH)           0x203708\n 0x0000000000000019 (INIT_ARRAY)         0x641dbc0\n 0x000000000000001b (INIT_ARRAYSZ)       4992 (bytes)\n 0x000000000000001a (FINI_ARRAY)         0x641ef40\n 0x000000000000001c (FINI_ARRAYSZ)       8 (bytes)\n 0x000000006ffffff0 (VERSYM)             0x203158\n 0x000000006ffffffe (VERNEED)            0x203534\n 0x000000006fffffff (VERNEEDNUM)         5\n 0x0000000000000000 (NULL)               0x0\n"
+    },
+    "candidate": {
+      "sha256": "bf95389f331b53e91cc3942d3c32a38aa2dcdfcaa57a6d520e43ca7e944a2edd",
+      "bytes": 124405560,
+      "source_path": "/tmp/soa-master-source/candidate/bazel-bin/openroad",
+      "archive_path": "/gpfs/users/linlizhi/flasheda-soa-merge-local-20261106/binaries/candidate",
+      "copied_binary_version_probe": "bazel-nostamp",
+      "readelf_needed": "\nDynamic section at offset 0x630e0b8 contains 28 entries:\n  Tag        Type                         Name/Value\n 0x0000000000000001 (NEEDED)             Shared library: [libpthread.so.0]\n 0x0000000000000001 (NEEDED)             Shared library: [libdl.so.2]\n 0x0000000000000001 (NEEDED)             Shared library: [libm.so.6]\n 0x0000000000000001 (NEEDED)             Shared library: [libc.so.6]\n 0x0000000000000001 (NEEDED)             Shared library: [ld-linux-x86-64.so.2]\n 0x000000000000001e (FLAGS)              BIND_NOW\n 0x000000006ffffffb (FLAGS_1)            Flags: NOW\n 0x0000000000000015 (DEBUG)              0x0\n 0x0000000000000007 (RELA)               0x204ce8\n 0x0000000000000008 (RELASZ)             912 (bytes)\n 0x0000000000000009 (RELAENT)            24 (bytes)\n 0x0000000000000017 (JMPREL)             0x205078\n 0x0000000000000002 (PLTRELSZ)           10896 (bytes)\n 0x0000000000000003 (PLTGOT)             0x6510538\n 0x0000000000000014 (PLTREL)             RELA\n 0x0000000000000006 (SYMTAB)             0x200320\n 0x000000000000000b (SYMENT)             24 (bytes)\n 0x0000000000000005 (STRTAB)             0x2037e8\n 0x000000000000000a (STRSZ)              5369 (bytes)\n 0x000000006ffffef5 (GNU_HASH)           0x203708\n 0x0000000000000019 (INIT_ARRAY)         0x6432c00\n 0x000000000000001b (INIT_ARRAYSZ)       4992 (bytes)\n 0x000000000000001a (FINI_ARRAY)         0x6433f80\n 0x000000000000001c (FINI_ARRAYSZ)       8 (bytes)\n 0x000000006ffffff0 (VERSYM)             0x203158\n 0x000000006ffffffe (VERNEED)            0x203534\n 0x000000006fffffff (VERNEEDNUM)         5\n 0x0000000000000000 (NULL)               0x0\n"
+    },
+    "baseline-profile": {
+      "sha256": "22228aebad6a44413ec8eb93828cd6a2ff3660b40e78ef15fa3f72e63d882aef",
+      "bytes": 124305680,
+      "source_path": "/tmp/soa-master-source/baseline-profile/bazel-bin/openroad",
+      "archive_path": "/gpfs/users/linlizhi/flasheda-soa-merge-local-20261106/binaries/baseline-profile",
+      "copied_binary_version_probe": "bazel-nostamp",
+      "readelf_needed": "\nDynamic section at offset 0x62fa8e8 contains 28 entries:\n  Tag        Type                         Name/Value\n 0x0000000000000001 (NEEDED)             Shared library: [libpthread.so.0]\n 0x0000000000000001 (NEEDED)             Shared library: [libdl.so.2]\n 0x0000000000000001 (NEEDED)             Shared library: [libm.so.6]\n 0x0000000000000001 (NEEDED)             Shared library: [libc.so.6]\n 0x0000000000000001 (NEEDED)             Shared library: [ld-linux-x86-64.so.2]\n 0x000000000000001e (FLAGS)              BIND_NOW\n 0x000000006ffffffb (FLAGS_1)            Flags: NOW\n 0x0000000000000015 (DEBUG)              0x0\n 0x0000000000000007 (RELA)               0x204ce8\n 0x0000000000000008 (RELASZ)             912 (bytes)\n 0x0000000000000009 (RELAENT)            24 (bytes)\n 0x0000000000000017 (JMPREL)             0x205078\n 0x0000000000000002 (PLTRELSZ)           10896 (bytes)\n 0x0000000000000003 (PLTGOT)             0x64fcd68\n 0x0000000000000014 (PLTREL)             RELA\n 0x0000000000000006 (SYMTAB)             0x200320\n 0x000000000000000b (SYMENT)             24 (bytes)\n 0x0000000000000005 (STRTAB)             0x2037e8\n 0x000000000000000a (STRSZ)              5369 (bytes)\n 0x000000006ffffef5 (GNU_HASH)           0x203708\n 0x0000000000000019 (INIT_ARRAY)         0x641f540\n 0x000000000000001b (INIT_ARRAYSZ)       4992 (bytes)\n 0x000000000000001a (FINI_ARRAY)         0x64208c0\n 0x000000000000001c (FINI_ARRAYSZ)       8 (bytes)\n 0x000000006ffffff0 (VERSYM)             0x203158\n 0x000000006ffffffe (VERNEED)            0x203534\n 0x000000006fffffff (VERNEEDNUM)         5\n 0x0000000000000000 (NULL)               0x0\n"
+    },
+    "candidate-profile": {
+      "sha256": "eac4a2b0413e00db6a8d1fdba97c6defaab0097a4d44c7b8340788836c15e8c1",
+      "bytes": 124411144,
+      "source_path": "/tmp/soa-master-source/candidate-profile/bazel-bin/openroad",
+      "archive_path": "/gpfs/users/linlizhi/flasheda-soa-merge-local-20261106/binaries/candidate-profile",
+      "copied_binary_version_probe": "bazel-nostamp",
+      "readelf_needed": "\nDynamic section at offset 0x630efb8 contains 28 entries:\n  Tag        Type                         Name/Value\n 0x0000000000000001 (NEEDED)             Shared library: [libpthread.so.0]\n 0x0000000000000001 (NEEDED)             Shared library: [libdl.so.2]\n 0x0000000000000001 (NEEDED)             Shared library: [libm.so.6]\n 0x0000000000000001 (NEEDED)             Shared library: [libc.so.6]\n 0x0000000000000001 (NEEDED)             Shared library: [ld-linux-x86-64.so.2]\n 0x000000000000001e (FLAGS)              BIND_NOW\n 0x000000006ffffffb (FLAGS_1)            Flags: NOW\n 0x0000000000000015 (DEBUG)              0x0\n 0x0000000000000007 (RELA)               0x204ce8\n 0x0000000000000008 (RELASZ)             912 (bytes)\n 0x0000000000000009 (RELAENT)            24 (bytes)\n 0x0000000000000017 (JMPREL)             0x205078\n 0x0000000000000002 (PLTRELSZ)           10896 (bytes)\n 0x0000000000000003 (PLTGOT)             0x6511438\n 0x0000000000000014 (PLTREL)             RELA\n 0x0000000000000006 (SYMTAB)             0x200320\n 0x000000000000000b (SYMENT)             24 (bytes)\n 0x0000000000000005 (STRTAB)             0x2037e8\n 0x000000000000000a (STRSZ)              5369 (bytes)\n 0x000000006ffffef5 (GNU_HASH)           0x203708\n 0x0000000000000019 (INIT_ARRAY)         0x64339c0\n 0x000000000000001b (INIT_ARRAYSZ)       4992 (bytes)\n 0x000000000000001a (FINI_ARRAY)         0x6434d40\n 0x000000000000001c (FINI_ARRAYSZ)       8 (bytes)\n 0x000000006ffffff0 (VERSYM)             0x203158\n 0x000000006ffffffe (VERNEED)            0x203534\n 0x000000006fffffff (VERNEEDNUM)         5\n 0x0000000000000000 (NULL)               0x0\n"
+    }
+  },
+  "stop_requested": true
+}

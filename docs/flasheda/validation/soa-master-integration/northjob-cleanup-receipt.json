@@ -1,0 +1,35 @@
+{
+  "job_alias": "flasheda-soa-merge-local-20261106",
+  "job_identity": "job-322eb2b469a6-20261106185948",
+  "recorded_at_utc": "2026-11-06T13:30:56.006921+00:00",
+  "worker_exit": 0,
+  "worker_final_status": {
+    "status": "Completed",
+    "ready_status": "0/1",
+    "namespace": "qiji",
+    "creator": "linlizhi"
+  },
+  "deletion_response": {
+    "success": true
+  },
+  "post_delete_exact_alias_query": [],
+  "local_evidence": {
+    "northjob-partial-profile": {
+      "path": "build/soa/merge-master-local/northjob-partial-profile-evidence.tar.gz",
+      "sha256": "535dee6da02c7ca1c28eac7246a1068c2b7710b4fe58edd07befca12fa75cc99",
+      "bytes": 47005312,
+      "members": 120,
+      "completed_results": 8
+    },
+    "e2b-migration": {
+      "path": "build/soa/merge-master-local/e2b-migration.tar.gz",
+      "sha256": "5164fc811c4e8fb47f265015286927e3590915d52339249b6138cb0a82a2e53d",
+      "bytes": 296960279,
+      "members": 80
+    }
+  },
+  "preservation": "All three acceptance/profile/migration archive SHA values verified on GPFS before STOP; two new local archives SHA and unique archive members verified. Four binaries remain on GPFS and in E2B migration.",
+  "timing_policy": "Northjob AES pairs are single-run phase attribution only. Never combine Northjob absolute timings with E2B absolute timings.",
+  "functional_acceptance_receipt_unchanged": true,
+  "profile_run_status": "8 completed; candidate large01 T1 incomplete; three candidate large configurations never scheduled"
+}

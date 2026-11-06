@@ -1,0 +1,268 @@
+design,role,self_percent,dso,privilege,symbol
+aes_cipher_top,baseline,38.41,baseline,.,"gpl::BinGrid::scatterDensityAreaInPlace(std::__1::vector<gpl::GCellHandle, std::__1::allocator<gpl::GCellHandle> > const&, int) [clone .omp_outlined]"
+aes_cipher_top,baseline,19.30,baseline,.,gpl::GCellHandle::getGCell() const
+aes_cipher_top,baseline,7.96,baseline,.,gpl::NesterovBase::getDensityGradient(gpl::GCell const*) const
+aes_cipher_top,baseline,2.99,baseline,.,"gpl::BinGrid::updateBinsGCellDensityArea(std::__1::vector<gpl::GCellHandle, std::__1::allocator<gpl::GCellHandle> > const&, int) [clone .omp_outlined]"
+aes_cipher_top,baseline,2.34,baseline,.,"gpl::NesterovBaseCommon::updateWireLengthForceWA_native(float, float) [clone .omp_outlined.212] [clone .llvm.713817837769799209]"
+aes_cipher_top,baseline,2.20,baseline,.,"gpl::BinGrid::updateBinsGCellDensityArea(std::__1::vector<gpl::GCellHandle, std::__1::allocator<gpl::GCellHandle> > const&, int)"
+aes_cipher_top,baseline,2.09,baseline,.,"gpl::NesterovBase::updateGCellDensityCenterLocation(std::__1::vector<gpl::FloatPoint, std::__1::allocator<gpl::FloatPoint> > const&)"
+aes_cipher_top,baseline,1.78,baseline,.,"gpl::NesterovBaseCommon::getWireLengthGradientPinWA(gpl::GPin const*, float, float) const"
+aes_cipher_top,baseline,1.42,baseline,.,gpl::NesterovBase::nesterovUpdateCoordinates(float) [clone .omp_outlined] [clone .llvm.713817837769799209]
+aes_cipher_top,baseline,1.22,baseline,.,"gpl::NesterovBaseCommon::getWireLengthGradientWA(gpl::GCell const*, float, float) const"
+aes_cipher_top,baseline,0.95,baseline,.,"gpl::NesterovBaseCommon::updateWireLengthForceWA_native(float, float) [clone .omp_outlined] [clone .llvm.713817837769799209]"
+aes_cipher_top,baseline,0.86,baseline,.,"Eigen::internal::sparse_time_dense_product_impl<Eigen::Ref<Eigen::SparseMatrix<float, 1, int> const, 0, Eigen::OuterStride<-1> >, Eigen::Matrix<float, -1, 1, 0, -1, 1>, Eigen::Matrix<float, -1, 1, 0, -1, 1>, float, 1, true>::run(Eigen::Ref<Eigen::SparseMatrix<float, 1, int> const, 0, Eigen::OuterStride<-1> > const&, Eigen::Matrix<float, -1, 1, 0, -1, 1> const&, Eigen::Matrix<float, -1, 1, 0, -1, 1>&, float const&) [clone .omp_outlined]"
+aes_cipher_top,baseline,0.64,baseline,.,"gpl::(anonymous namespace)::CpuFftBackend::solve(gpl::BinGridSpan, gpl::BinGridSpan, gpl::BinGridSpan, gpl::BinGridSpan)"
+aes_cipher_top,baseline,0.63,baseline,.,gpl::NesterovBase::updateDensityFieldBin() [clone .omp_outlined] [clone .llvm.713817837769799209]
+aes_cipher_top,baseline,0.63,baseline,.,"gpl::(anonymous namespace)::CpuHpwlBackend::computeHpwl(std::__1::vector<gpl::GNet, std::__1::allocator<gpl::GNet> >&) [clone .omp_outlined]"
+aes_cipher_top,baseline,0.62,baseline,.,"gpl::NesterovBase::updateGradients(std::__1::vector<gpl::FloatPoint, std::__1::allocator<gpl::FloatPoint> >&, std::__1::vector<gpl::FloatPoint, std::__1::allocator<gpl::FloatPoint> >&, std::__1::vector<gpl::FloatPoint, std::__1::allocator<gpl::FloatPoint> >&, float, float) [clone .omp_outlined]"
+aes_cipher_top,baseline,0.44,baseline,.,gpl::NesterovBase::updateDensityFieldBin() [clone .omp_outlined.311] [clone .llvm.713817837769799209]
+aes_cipher_top,baseline,0.43,baseline,.,"gpl::ddct(int, int, float*, int*, float*)"
+aes_cipher_top,baseline,0.42,baseline,.,"gpl::(anonymous namespace)::CpuWirelengthGradientBackend::getCellGradients(std::__1::vector<gpl::GCellHandle, std::__1::allocator<gpl::GCellHandle> > const&, std::__1::vector<gpl::FloatPoint, std::__1::allocator<gpl::FloatPoint> >&) [clone .omp_outlined]"
+aes_cipher_top,baseline,0.39,baseline,.,"utl::Logger::debugCheck(utl::ToolId, char const*, int) const"
+aes_cipher_top,baseline,0.39,baseline,.,"sta::Table::findValueOrder2(float, float) const"
+aes_cipher_top,baseline,0.37,baseline,.,"Eigen::internal::Assignment<Eigen::Matrix<float, -1, 1, 0, -1, 1>, Eigen::SolveWithGuess<Eigen::BiCGSTAB<Eigen::SparseMatrix<float, 1, int>, Eigen::IdentityPreconditioner>, Eigen::Matrix<float, -1, 1, 0, -1, 1>, Eigen::Matrix<float, -1, 1, 0, -1, 1> >, Eigen::internal::assign_op<float, float>, Eigen::internal::Dense2Dense, void>::run(Eigen::Matrix<float, -1, 1, 0, -1, 1>&, Eigen::SolveWithGuess<Eigen::BiCGSTAB<Eigen::SparseMatrix<float, 1, int>, Eigen::IdentityPreconditioner>, Eigen::Matrix<float, -1, 1, 0, -1, 1>, Eigen::Matrix<float, -1, 1, 0, -1, 1> > const&, Eigen::internal::assign_op<float, float> const&)"
+aes_cipher_top,baseline,0.34,baseline,.,sta::dbNetwork::instance(sta::Pin const*) const
+aes_cipher_top,baseline,0.31,baseline,.,sta::DmpPi::Vl0(double)
+aes_cipher_top,baseline,0.30,baseline,.,"gpl::NesterovBase::getStepLength(std::__1::vector<gpl::FloatPoint, std::__1::allocator<gpl::FloatPoint> > const&, std::__1::vector<gpl::FloatPoint, std::__1::allocator<gpl::FloatPoint> > const&, std::__1::vector<gpl::FloatPoint, std::__1::allocator<gpl::FloatPoint> > const&, std::__1::vector<gpl::FloatPoint, std::__1::allocator<gpl::FloatPoint> > const&)"
+aes_cipher_top,baseline,0.29,baseline,.,sta::dbNetwork::port(sta::Pin const*) const
+aes_cipher_top,baseline,0.27,baseline,.,sta::dbNetwork::id(sta::Pin const*) const
+aes_cipher_top,baseline,0.24,libm.so.6,.,0x0000000000078204
+aes_cipher_top,baseline,0.24,[unknown],k,0xffffffff81c00d70
+aes_cipher_top,baseline,0.23,baseline,.,"sta::findRoot(std::__1::function<void (double, double&, double&)> const&, double, double, double, double, double, int)"
+aes_cipher_top,baseline,0.23,baseline,.,"gpl::cftf081(float*, float const*)"
+aes_cipher_top,baseline,0.22,baseline,.,"gpl::ddxt2d_sub(int, int, int, int, float**, float*, int*, float*) [clone .llvm.10192065956405781601]"
+aes_cipher_top,baseline,0.20,baseline,.,"gpl::cftfsub(int, float*, int*, int, float*)"
+aes_cipher_top,baseline,0.20,baseline,.,"gpl::(anonymous namespace)::CpuDensityGradientBackend::getCellGradients(std::__1::vector<gpl::GCellHandle, std::__1::allocator<gpl::GCellHandle> > const&, std::__1::vector<gpl::FloatPoint, std::__1::allocator<gpl::FloatPoint> >&) [clone .omp_outlined]"
+aes_cipher_top,baseline,0.19,libm.so.6,.,0x000000000007820a
+aes_cipher_top,baseline,0.19,baseline,.,"rsz::Rebuffer::insertBufferOptions(std::__1::vector<std::__1::shared_ptr<rsz::BufferedNet>, std::__1::allocator<std::__1::shared_ptr<rsz::BufferedNet> > >&, int, int, bool, rsz::FixedDelay, rsz::BufferedNet*, bool)"
+aes_cipher_top,baseline,0.17,baseline,.,"gpl::cftmdl1(int, float*, float const*)"
+aes_cipher_top,baseline,0.16,baseline,.,"SWIG_TypeQueryModule(swig_module_info*, swig_module_info*, char const*)"
+aes_cipher_top,baseline,0.16,baseline,.,"tcmalloc::tcmalloc_internal::FreeWithHooksOrPerThread(void*, std::__1::optional<unsigned long>, unsigned long)"
+aes_cipher_top,baseline,0.16,baseline,.,gpl::Net::updateBox(bool)
+aes_cipher_top,baseline,0.15,baseline,.,gpl::NesterovBase::updateNextIter(int) [clone .omp_outlined]
+aes_cipher_top,baseline,0.15,baseline,.,"std::__1::__murmur2_or_cityhash<unsigned long, 64ul>::operator()[abi:nqe230102](void const*, unsigned long) const"
+aes_cipher_top,baseline,0.15,baseline,.,"std::__1::__hash_const_iterator<std::__1::__hash_node<std::__1::__hash_value_type<sta::Pin const*, std::__1::set<sta::ExceptionPath*, std::__1::less<sta::ExceptionPath*>, std::__1::allocator<sta::ExceptionPath*> > >, void*>*> std::__1::__hash_table<std::__1::__hash_value_type<sta::Pin const*, std::__1::set<sta::ExceptionPath*, std::__1::less<sta::ExceptionPath*>, std::__1::allocator<sta::ExceptionPath*> > >, std::__1::__unordered_map_hasher<sta::Pin const*, std::__1::pair<sta::Pin const* const, std::__1::set<sta::ExceptionPath*, std::__1::less<sta::ExceptionPath*>, std::__1::allocator<sta::ExceptionPath*> > >, std::__1::hash<sta::Pin const*>, std::__1::equal_to<sta::Pin const*> >, std::__1::__unordered_map_equal<sta::Pin const*, std::__1::pair<sta::Pin const* const, std::__1::set<sta::ExceptionPath*, std::__1::less<sta::ExceptionPath*>, std::__1::allocator<sta::ExceptionPath*> > >, std::__1::equal_to<sta::Pin const*>, std::__1::hash<sta::Pin const*> >, std::__1::allocator<std::__1::pair<sta::Pin const* const, std::__1::set<sta::ExceptionPath*, std::__1::less<sta::ExceptionPath*>, std::__1::allocator<sta::ExceptionPath*> > > > >::find[abi:nqe230102]<sta::Pin const*>(sta::Pin const* const&) const"
+aes_cipher_top,baseline,0.14,baseline,.,sta::dbNetwork::cell(sta::Instance const*) const
+aes_cipher_top,baseline,0.14,baseline,.,sta::dbNetwork::parent(sta::Instance const*) const
+aes_cipher_top,baseline,0.14,baseline,.,"gpl::NesterovBase::updateGradients(std::__1::vector<gpl::FloatPoint, std::__1::allocator<gpl::FloatPoint> >&, std::__1::vector<gpl::FloatPoint, std::__1::allocator<gpl::FloatPoint> >&, std::__1::vector<gpl::FloatPoint, std::__1::allocator<gpl::FloatPoint> >&, float, float)"
+aes_cipher_top,baseline,0.13,baseline,.,"gpl::cftmdl2(int, float*, float const*)"
+aes_cipher_top,baseline,0.13,baseline,.,"odb::dbITerm::getAvgXY(int*, int*) const"
+aes_cipher_top,baseline,0.12,baseline,.,sta::dbNetwork::libertyPort(sta::Pin const*) const
+aes_cipher_top,baseline,0.12,baseline,.,"utl::base64_decode(std::__1::basic_string<char, std::__1::char_traits<char>, std::__1::allocator<char> > const&)"
+aes_cipher_top,baseline,0.12,baseline,.,"tcmalloc::tcmalloc_internal::FreeSmallSlow(void*, std::__1::optional<unsigned long>, unsigned long)"
+aes_cipher_top,baseline,0.12,baseline,.,sta::DmpAlg::findDriverParams(double)
+aes_cipher_top,baseline,0.12,baseline,.,"std::__1::vector<std::__1::shared_ptr<rsz::BufferedNet>, std::__1::allocator<std::__1::shared_ptr<rsz::BufferedNet> > > rsz::Rebuffer::bufferForTimingTopK(std::__1::shared_ptr<rsz::BufferedNet> const&, bool, int)::$_0::operator()<rsz::visitor<$_0> >(rsz::visitor<$_0>&, int, std::__1::shared_ptr<rsz::BufferedNet> const&) const"
+aes_cipher_top,baseline,0.12,baseline,.,"sta::ReduceToPi::reducePiDfs(sta::Pin const*, sta::ParasiticNode*, sta::ParasiticResistor*, double, double&, double&, double&, double&, double&)"
+aes_cipher_top,baseline,0.12,baseline,.,"std::__1::__function::__func<sta::DmpAlg::findVlCrossing(double, double, double)::$_0, void (double, double&, double&)>::operator()[abi:nqe230102](double&&, double&, double&)"
+aes_cipher_top,baseline,0.11,baseline,.,gpl::NesterovBase::updateDensitySize() [clone .omp_outlined] [clone .llvm.713817837769799209]
+aes_cipher_top,baseline,0.11,baseline,.,sta::Search::arrivalInvalid(sta::Vertex*)
+aes_cipher_top,baseline,0.11,baseline,.,"gpl::ddst(int, int, float*, int*, float*)"
+aes_cipher_top,baseline,0.10,baseline,.,"sta::PathVisitor::visitFromPath(sta::Pin const*, sta::Vertex*, sta::RiseFall const*, sta::Path*, sta::Edge*, sta::TimingArc*, sta::Pin const*, sta::Vertex*, sta::RiseFall const*, sta::MinMax const*)"
+aes_cipher_top,baseline,0.10,baseline,.,"rsz::BufferedNet::wireRC(sta::Scene const*, rsz::Resizer const*, est::EstimateParasitics const*, double&, double&)"
+aes_cipher_top,baseline,0.10,baseline,.,"sta::ReduceToPiElmore::reduceElmoreDfs(sta::Pin const*, sta::ParasiticNode*, sta::ParasiticResistor*, double, sta::Parasitic*)"
+aes_cipher_top,candidate,11.82,candidate,.,"void gpl::DensityGridView::forEachOverlap<gpl::DensityGridView::gather(gpl::DensityRect const&) const::{lambda(unsigned long, float)#1}>(gpl::DensityRect const&, gpl::DensityGridView::gather(gpl::DensityRect const&) const::{lambda(unsigned long, float)#1}&&) const"
+aes_cipher_top,candidate,8.51,candidate,.,"gpl::BinGrid::scatterDensityAreaInPlace(std::__1::vector<gpl::GCellRowList, std::__1::allocator<gpl::GCellRowList> > const&, int)::$_0::operator()(gpl::GCellRowList const&, unsigned long, long*, long*) const"
+aes_cipher_top,candidate,5.54,candidate,.,"void gpl::NesterovBase::combineGradientsColumns<true>(gpl::PointColumns&, gpl::PointColumns const&, gpl::PointColumns&) [clone .omp_outlined]"
+aes_cipher_top,candidate,5.49,candidate,.,"gpl::NesterovBaseCommon::updateWireLengthForceWA_soa(float, float) [clone .omp_outlined] [clone .llvm.16767344741911684198]"
+aes_cipher_top,candidate,5.25,libc.so.6,.,0x00000000001a1efa
+aes_cipher_top,candidate,3.60,candidate,.,"gpl::pinGradientColumns(gpl::SoaStorage<int, int, int, int, float, float, float, float, float, float, float, float, float, float, float, std::__1::vector<gpl::GPin*, std::__1::allocator<gpl::GPin*> >, std::__1::vector<gpl::Net*, std::__1::allocator<gpl::Net*> >, unsigned char> const&, gpl::SoaStorage<int, int, int, int, float, float, float, float, unsigned char, unsigned char, unsigned char, unsigned char, gpl::GCell*, gpl::GNet*, std::__1::vector<gpl::Pin*, std::__1::allocator<gpl::Pin*> >, unsigned long> const&, unsigned long, unsigned long, float, float)"
+aes_cipher_top,candidate,3.41,candidate,.,"gpl::BinGrid::updateBinsGCellDensityArea(std::__1::vector<gpl::GCellHandle, std::__1::allocator<gpl::GCellHandle> > const&, std::__1::vector<gpl::GCellRowList, std::__1::allocator<gpl::GCellRowList> > const&, int) [clone .omp_outlined]"
+aes_cipher_top,candidate,3.19,candidate,.,"gpl::getDistance(gpl::PointColumns const&, gpl::PointColumns const&, gpl::PointColumns&, int) [clone .omp_outlined] [clone .llvm.224855100747797707]"
+aes_cipher_top,candidate,2.87,candidate,.,gpl::NesterovBase::updateNextCoordinatesColumns(float) [clone .omp_outlined] [clone .llvm.224855100747797707]
+aes_cipher_top,candidate,2.72,candidate,.,"gpl::NesterovBaseCommon::getWireLengthGradientsWA_cpu(std::__1::vector<gpl::GCellHandle, std::__1::allocator<gpl::GCellHandle> > const&, gpl::PointColumns&, float, float) [clone .omp_outlined] [clone .llvm.16767344741911684198]"
+aes_cipher_top,candidate,2.17,candidate,.,"gpl::(anonymous namespace)::CpuFftBackend::solve(gpl::BinGridSpan, gpl::BinGridSpan, gpl::BinGridSpan, gpl::BinGridSpan) [clone .omp_outlined]"
+aes_cipher_top,candidate,2.11,candidate,.,"Eigen::internal::sparse_time_dense_product_impl<Eigen::Ref<Eigen::SparseMatrix<float, 1, int> const, 0, Eigen::OuterStride<-1> >, Eigen::Matrix<float, -1, 1, 0, -1, 1>, Eigen::Matrix<float, -1, 1, 0, -1, 1>, float, 1, true>::run(Eigen::Ref<Eigen::SparseMatrix<float, 1, int> const, 0, Eigen::OuterStride<-1> > const&, Eigen::Matrix<float, -1, 1, 0, -1, 1> const&, Eigen::Matrix<float, -1, 1, 0, -1, 1>&, float const&) [clone .omp_outlined]"
+aes_cipher_top,candidate,1.62,candidate,.,gpl::NesterovBaseCommon::updateDensityPinLocations(gpl::GCellRowList const&) [clone .omp_outlined] [clone .llvm.16767344741911684198]
+aes_cipher_top,candidate,1.49,candidate,.,gpl::NesterovBase::updateGCellDensityCenterLocation(gpl::PointColumns const&) [clone .omp_outlined] [clone .llvm.224855100747797707]
+aes_cipher_top,candidate,1.33,candidate,.,"gpl::(anonymous namespace)::CpuFftBackend::transform(float**, int, bool, bool) [clone .omp_outlined]"
+aes_cipher_top,candidate,1.25,candidate,.,gpl::NesterovBase::updateDensityFieldBin() [clone .omp_outlined] [clone .llvm.224855100747797707]
+aes_cipher_top,candidate,1.22,candidate,.,sta::dbNetwork::instance(sta::Pin const*) const
+aes_cipher_top,candidate,1.15,candidate,.,"Eigen::internal::Assignment<Eigen::Matrix<float, -1, 1, 0, -1, 1>, Eigen::SolveWithGuess<Eigen::BiCGSTAB<Eigen::SparseMatrix<float, 1, int>, Eigen::IdentityPreconditioner>, Eigen::Matrix<float, -1, 1, 0, -1, 1>, Eigen::Matrix<float, -1, 1, 0, -1, 1> >, Eigen::internal::assign_op<float, float>, Eigen::internal::Dense2Dense, void>::run(Eigen::Matrix<float, -1, 1, 0, -1, 1>&, Eigen::SolveWithGuess<Eigen::BiCGSTAB<Eigen::SparseMatrix<float, 1, int>, Eigen::IdentityPreconditioner>, Eigen::Matrix<float, -1, 1, 0, -1, 1>, Eigen::Matrix<float, -1, 1, 0, -1, 1> > const&, Eigen::internal::assign_op<float, float> const&)"
+aes_cipher_top,candidate,1.13,candidate,.,"gpl::ddct(int, int, float*, int*, float*)"
+aes_cipher_top,candidate,1.08,candidate,.,"gpl::BinGrid::scatterDensityAreaInPlace(std::__1::vector<gpl::GCellRowList, std::__1::allocator<gpl::GCellRowList> > const&, int) [clone .omp_outlined]"
+aes_cipher_top,candidate,0.96,candidate,.,"gpl::BinGrid::updateBinsGCellDensityArea(std::__1::vector<gpl::GCellHandle, std::__1::allocator<gpl::GCellHandle> > const&, std::__1::vector<gpl::GCellRowList, std::__1::allocator<gpl::GCellRowList> > const&, int)"
+aes_cipher_top,candidate,0.83,candidate,.,gpl::NesterovPlace::doNesterovPlace(int)
+aes_cipher_top,candidate,0.81,candidate,.,gpl::NesterovBaseCommon::getHpwlColumns() [clone .omp_outlined] [clone .llvm.16767344741911684198]
+aes_cipher_top,candidate,0.76,candidate,.,sta::dbNetwork::port(sta::Pin const*) const
+aes_cipher_top,candidate,0.73,candidate,.,"sta::Table::findValueOrder2(float, float) const"
+aes_cipher_top,candidate,0.73,candidate,.,sta::DmpPi::Vl0(double)
+aes_cipher_top,candidate,0.73,candidate,.,"sta::findRoot(std::__1::function<void (double, double&, double&)> const&, double, double, double, double, double, int)"
+aes_cipher_top,candidate,0.66,candidate,.,"gpl::cftfsub(int, float*, int*, int, float*)"
+aes_cipher_top,candidate,0.59,candidate,.,"gpl::NesterovBase::updateGradients(gpl::PointColumns&, gpl::PointColumns&, gpl::PointColumns&, float, float)"
+aes_cipher_top,candidate,0.54,candidate,.,"gpl::cftf081(float*, float const*)"
+aes_cipher_top,candidate,0.48,candidate,.,"tcmalloc::tcmalloc_internal::FreeWithHooksOrPerThread(void*, std::__1::optional<unsigned long>, unsigned long)"
+aes_cipher_top,candidate,0.48,candidate,.,"gpl::ddst(int, int, float*, int*, float*)"
+aes_cipher_top,candidate,0.46,candidate,.,sta::dbNetwork::id(sta::Pin const*) const
+aes_cipher_top,candidate,0.45,candidate,.,"std::__1::__function::__func<sta::DmpAlg::findVlCrossing(double, double, double)::$_0, void (double, double&, double&)>::operator()[abi:nqe230102](double&&, double&, double&)"
+aes_cipher_top,candidate,0.43,candidate,.,"tcmalloc::tcmalloc_internal::TCMallocPolicy<tcmalloc::tcmalloc_internal::CppOomPolicy, tcmalloc::tcmalloc_internal::DefaultAlignPolicy, tcmalloc::tcmalloc_internal::AllocationAccessHotPolicy, tcmalloc::tcmalloc_internal::InvokeHooksPolicy, tcmalloc::tcmalloc_internal::NonSizeReturningPolicy, tcmalloc::tcmalloc_internal::LocalNumaPartitionPolicy>::pointer_type tcmalloc::tcmalloc_internal::alloc_small_sampled_hooks_or_perthread<tcmalloc::tcmalloc_internal::TCMallocPolicy<tcmalloc::tcmalloc_internal::CppOomPolicy, tcmalloc::tcmalloc_internal::DefaultAlignPolicy, tcmalloc::tcmalloc_internal::AllocationAccessHotPolicy, tcmalloc::tcmalloc_internal::InvokeHooksPolicy, tcmalloc::tcmalloc_internal::NonSizeReturningPolicy, tcmalloc::tcmalloc_internal::LocalNumaPartitionPolicy> >(unsigned long, unsigned long, tcmalloc::tcmalloc_internal::TCMallocPolicy<tcmalloc::tcmalloc_internal::CppOomPolicy, tcmalloc::tcmalloc_internal::DefaultAlignPolicy, tcmalloc::tcmalloc_internal::AllocationAccessHotPolicy, tcmalloc::tcmalloc_internal::InvokeHooksPolicy, tcmalloc::tcmalloc_internal::NonSizeReturningPolicy, tcmalloc::tcmalloc_internal::LocalNumaPartitionPolicy>, unsigned long)"
+aes_cipher_top,candidate,0.41,candidate,.,"gpl::cftmdl1(int, float*, float const*)"
+aes_cipher_top,candidate,0.41,candidate,.,"std::__1::__murmur2_or_cityhash<unsigned long, 64ul>::operator()[abi:nqe230102](void const*, unsigned long) const"
+aes_cipher_top,candidate,0.40,candidate,.,gpl::GCellHandle::getGCell() const
+aes_cipher_top,candidate,0.34,candidate,.,gpl::Net::updateBox(bool)
+aes_cipher_top,candidate,0.33,candidate,.,gpl::NesterovBase::updateNextIter(int) [clone .omp_outlined]
+aes_cipher_top,candidate,0.33,candidate,.,"odb::dbITerm::getAvgXY(int*, int*) const"
+aes_cipher_top,candidate,0.32,candidate,.,"SWIG_TypeQueryModule(swig_module_info*, swig_module_info*, char const*)"
+aes_cipher_top,candidate,0.31,candidate,.,"std::__1::vector<est::ParasiticsCapacitance, std::__1::allocator<est::ParasiticsCapacitance> > const& est::EstimateParasitics::resolveWireRC<est::ParasiticsCapacitance>(std::__1::vector<est::ParasiticsCapacitance, std::__1::allocator<est::ParasiticsCapacitance> > est::EstimateParasitics::WireRC::*) const"
+aes_cipher_top,candidate,0.29,[unknown],k,0xffffffff81c00d70
+aes_cipher_top,candidate,0.29,candidate,.,"rsz::Rebuffer::insertBufferOptions(std::__1::vector<std::__1::shared_ptr<rsz::BufferedNet>, std::__1::allocator<std::__1::shared_ptr<rsz::BufferedNet> > >&, int, int, bool, rsz::FixedDelay, rsz::BufferedNet*, bool)"
+aes_cipher_top,candidate,0.29,candidate,.,"sta::PathVisitor::visitFromPath(sta::Pin const*, sta::Vertex*, sta::RiseFall const*, sta::Path*, sta::Edge*, sta::TimingArc*, sta::Pin const*, sta::Vertex*, sta::RiseFall const*, sta::MinMax const*)"
+aes_cipher_top,candidate,0.27,candidate,.,sta::dbNetwork::parent(sta::Instance const*) const
+aes_cipher_top,candidate,0.27,candidate,.,"sta::GateTableModel::findValue(sta::Pvt const*, sta::TableModel const*, float, float, float) const"
+aes_cipher_top,candidate,0.27,candidate,.,"sta::ReduceToPi::reducePiDfs(sta::Pin const*, sta::ParasiticNode*, sta::ParasiticResistor*, double, double&, double&, double&, double&, double&)"
+aes_cipher_top,candidate,0.27,candidate,.,"std::__1::__hash_const_iterator<std::__1::__hash_node<std::__1::__hash_value_type<sta::Pin const*, std::__1::set<sta::ExceptionPath*, std::__1::less<sta::ExceptionPath*>, std::__1::allocator<sta::ExceptionPath*> > >, void*>*> std::__1::__hash_table<std::__1::__hash_value_type<sta::Pin const*, std::__1::set<sta::ExceptionPath*, std::__1::less<sta::ExceptionPath*>, std::__1::allocator<sta::ExceptionPath*> > >, std::__1::__unordered_map_hasher<sta::Pin const*, std::__1::pair<sta::Pin const* const, std::__1::set<sta::ExceptionPath*, std::__1::less<sta::ExceptionPath*>, std::__1::allocator<sta::ExceptionPath*> > >, std::__1::hash<sta::Pin const*>, std::__1::equal_to<sta::Pin const*> >, std::__1::__unordered_map_equal<sta::Pin const*, std::__1::pair<sta::Pin const* const, std::__1::set<sta::ExceptionPath*, std::__1::less<sta::ExceptionPath*>, std::__1::allocator<sta::ExceptionPath*> > >, std::__1::equal_to<sta::Pin const*>, std::__1::hash<sta::Pin const*> >, std::__1::allocator<std::__1::pair<sta::Pin const* const, std::__1::set<sta::ExceptionPath*, std::__1::less<sta::ExceptionPath*>, std::__1::allocator<sta::ExceptionPath*> > > > >::find[abi:nqe230102]<sta::Pin const*>(sta::Pin const* const&) const"
+aes_cipher_top,candidate,0.27,candidate,.,sta::dbNetwork::net(sta::Pin const*) const
+aes_cipher_top,candidate,0.26,candidate,.,"utl::base64_decode(std::__1::basic_string<char, std::__1::char_traits<char>, std::__1::allocator<char> > const&)"
+aes_cipher_top,candidate,0.25,candidate,.,operator new[](unsigned long)
+aes_cipher_top,candidate,0.23,candidate,.,sta::DmpPi::V0(double)
+aes_cipher_top,candidate,0.23,candidate,.,"gpl::cftbsub(int, float*, int*, int, float*)"
+aes_cipher_top,candidate,0.22,candidate,.,"tcmalloc::tcmalloc_internal::FreeSmallSlow(void*, std::__1::optional<unsigned long>, unsigned long)"
+aes_cipher_top,candidate,0.22,libc.so.6,.,0x00000000001a197f
+aes_cipher_top,candidate,0.21,candidate,.,"sta::DmpPi::evalDmpEqns(Eigen::Matrix<double, 3, 1, 0, 3, 1>&, Eigen::Matrix<double, 3, 1, 0, 3, 1>&, Eigen::Matrix<double, 3, 3, 0, 3, 3>&)"
+aes_cipher_top,candidate,0.21,candidate,.,"std::__1::__function::__func<sta::DmpAlg::findVoCrossing(double, double, double)::$_0, void (double, double&, double&)>::operator()[abi:nqe230102](double&&, double&, double&)"
+aes_cipher_top,candidate,0.21,candidate,.,"tcmalloc::tcmalloc_internal::TCMallocPolicy<tcmalloc::tcmalloc_internal::CppOomPolicy, tcmalloc::tcmalloc_internal::DefaultAlignPolicy, tcmalloc::tcmalloc_internal::AllocationAccessHotPolicy, tcmalloc::tcmalloc_internal::InvokeHooksPolicy, tcmalloc::tcmalloc_internal::NonSizeReturningPolicy, tcmalloc::tcmalloc_internal::LocalNumaPartitionPolicy>::pointer_type tcmalloc::tcmalloc_internal::slow_alloc_small<tcmalloc::tcmalloc_internal::TCMallocPolicy<tcmalloc::tcmalloc_internal::CppOomPolicy, tcmalloc::tcmalloc_internal::DefaultAlignPolicy, tcmalloc::tcmalloc_internal::AllocationAccessHotPolicy, tcmalloc::tcmalloc_internal::InvokeHooksPolicy, tcmalloc::tcmalloc_internal::NonSizeReturningPolicy, tcmalloc::tcmalloc_internal::LocalNumaPartitionPolicy> >(unsigned long, unsigned int, tcmalloc::tcmalloc_internal::TCMallocPolicy<tcmalloc::tcmalloc_internal::CppOomPolicy, tcmalloc::tcmalloc_internal::DefaultAlignPolicy, tcmalloc::tcmalloc_internal::AllocationAccessHotPolicy, tcmalloc::tcmalloc_internal::InvokeHooksPolicy, tcmalloc::tcmalloc_internal::NonSizeReturningPolicy, tcmalloc::tcmalloc_internal::LocalNumaPartitionPolicy>)"
+aes_cipher_top,candidate,0.19,candidate,.,sta::dbNetwork::libertyPort(sta::Port const*) const
+aes_cipher_top,candidate,0.19,candidate,.,sta::DmpAlg::findDriverParams(double)
+aes_cipher_top,candidate,0.19,candidate,.,sta::dbNetwork::cell(sta::Instance const*) const
+aes_cipher_top,candidate,0.19,candidate,.,"std::__1::vector<std::__1::__tree_const_iterator<boost::polygon::boolean_op_45<long long>::Scan45ElementT<boost::polygon::boolean_op_45<long long>::Count1>, std::__1::__tree_node<boost::polygon::boolean_op_45<long long>::Scan45ElementT<boost::polygon::boolean_op_45<long long>::Count1>, void*>*, long>, std::__1::allocator<std::__1::__tree_const_iterator<boost::polygon::boolean_op_45<long long>::Scan45ElementT<boost::polygon::boolean_op_45<long long>::Count1>, std::__1::__tree_node<boost::polygon::boolean_op_45<long long>::Scan45ElementT<boost::polygon::boolean_op_45<long long>::Count1>, void*>*, long> > >::emplace_back[abi:nqe230102]<std::__1::__tree_const_iterator<boost::polygon::boolean_op_45<long long>::Scan45ElementT<boost::polygon::boolean_op_45<long long>::Count1>, std::__1::__tree_node<boost::polygon::boolean_op_45<long long>::Scan45ElementT<boost::polygon::boolean_op_45<long long>::Count1>, void*>*, long> const&>(std::__1::__tree_const_iterator<boost::polygon::boolean_op_45<long long>::Scan45ElementT<boost::polygon::boolean_op_45<long long>::Count1>, std::__1::__tree_node<boost::polygon::boolean_op_45<long long>::Scan45ElementT<boost::polygon::boolean_op_45<long long>::Count1>, void*>*, long> const&)::{lambda()#2}::operator()[abi:nqe230102]() const"
+aes_cipher_top,candidate,0.19,candidate,.,"gpl::cftmdl2(int, float*, float const*)"
+aes_cipher_top,candidate,0.18,libc.so.6,.,0x00000000000690d1
+aes_cipher_top,candidate,0.17,candidate,.,"void std::__1::__tree_balance_after_insert[abi:nqe230102]<std::__1::__tree_node_base<void*>*>(std::__1::__tree_node_base<void*>*, std::__1::__tree_node_base<void*>*)"
+aes_cipher_top,candidate,0.17,candidate,.,"sta::Tag::matchCmp(sta::Tag const*, sta::Tag const*, bool, sta::StaState const*)"
+aes_cipher_top,candidate,0.17,candidate,.,"std::__1::vector<std::__1::shared_ptr<rsz::BufferedNet>, std::__1::allocator<std::__1::shared_ptr<rsz::BufferedNet> > > rsz::Rebuffer::bufferForTimingTopK(std::__1::shared_ptr<rsz::BufferedNet> const&, bool, int)::$_0::operator()<rsz::visitor<$_0> >(rsz::visitor<$_0>&, int, std::__1::shared_ptr<rsz::BufferedNet> const&) const"
+aes_cipher_top,candidate,0.17,candidate,.,"sta::ConcreteParasitics::findPiElmore(sta::Pin const*, sta::RiseFall const*, sta::MinMax const*) const"
+aes_cipher_top,candidate,0.17,candidate,.,"sta::ReduceToPiElmore::reduceElmoreDfs(sta::Pin const*, sta::ParasiticNode*, sta::ParasiticResistor*, double, sta::Parasitic*)"
+aes_cipher_top,candidate,0.17,candidate,.,sta::dbNetwork::name(sta::Instance const*) const
+aes_cipher_top,candidate,0.17,candidate,.,"sta::GateTableModel::findAxisValues(sta::TableModel const*, float, float, float, float&, float&, float&) const"
+aes_cipher_top,candidate,0.16,candidate,.,CreateHashEntry.llvm.17630432623800516478
+aes_cipher_top,candidate,0.15,candidate,.,"std::__1::vector<est::ParasiticsResistance, std::__1::allocator<est::ParasiticsResistance> > const& est::EstimateParasitics::resolveWireRC<est::ParasiticsResistance>(std::__1::vector<est::ParasiticsResistance, std::__1::allocator<est::ParasiticsResistance> > est::EstimateParasitics::WireRC::*) const"
+aes_cipher_top,candidate,0.15,candidate,.,"sta::GraphDelayCalc::annotateDelaySlew(sta::Edge*, sta::TimingArc const*, sta::Delay const&, sta::Delay const&, sta::Scene const*, sta::MinMax const*)"
+aes_cipher_top,candidate,0.15,candidate,.,sta::Search::arrivalInvalid(sta::Vertex*)
+aes_cipher_top,candidate,0.15,candidate,.,gpl::InitialPlace::doBicgstabPlace(int)
+aes_cipher_top,candidate,0.15,libc.so.6,.,pthread_mutex_lock
+aes_cipher_top,candidate,0.14,candidate,.,"void Eigen::internal::set_from_triplets<std::__1::__wrap_iter<Eigen::Triplet<float, int>*>, Eigen::SparseMatrix<float, 1, int>, Eigen::internal::scalar_sum_op<float, float> >(std::__1::__wrap_iter<Eigen::Triplet<float, int>*> const&, std::__1::__wrap_iter<Eigen::Triplet<float, int>*> const&, Eigen::SparseMatrix<float, 1, int>&, Eigen::internal::scalar_sum_op<float, float>)"
+aes_cipher_top,candidate,0.14,candidate,.,"sta::RequiredVisitor::visitFromToPath(sta::Pin const*, sta::Vertex*, sta::RiseFall const*, sta::Tag*, sta::Path*, sta::Delay const&, sta::Edge*, sta::TimingArc*, sta::Delay, sta::Vertex*, sta::RiseFall const*, sta::Tag*, sta::Delay&, sta::MinMax const*)"
+aes_cipher_top,candidate,0.14,candidate,.,rsz::Rebuffer::drvrPinTiming(std::__1::shared_ptr<rsz::BufferedNet> const&)
+aes_cipher_top,candidate,0.14,candidate,.,"sta::LumpedCapDelayCalc::makeResult(sta::LibertyLibrary const*, sta::RiseFall const*, sta::Delay const&, sta::Delay const&, std::__1::map<sta::Pin const*, unsigned long, sta::PinIdLess, std::__1::allocator<std::__1::pair<sta::Pin const* const, unsigned long> > > const&)"
+aes_cipher_top,candidate,0.12,candidate,.,grt::Rudy::processIntersectionSignalNet(odb::Rect)
+aes_cipher_top,candidate,0.12,candidate,.,"gpl::(anonymous namespace)::CpuFftBackend::solve(gpl::BinGridSpan, gpl::BinGridSpan, gpl::BinGridSpan, gpl::BinGridSpan)"
+aes_cipher_top,candidate,0.12,candidate,.,__kmpc_dispatch_next_8u
+aes_cipher_top,candidate,0.12,candidate,.,"sta::DmpPi::init(sta::LibertyLibrary const*, sta::LibertyCell const*, sta::Pvt const*, sta::GateTableModel const*, sta::RiseFall const*, double, double, double, double, double)"
+aes_cipher_top,candidate,0.12,candidate,.,sta::Parasitics::parasiticNodeResistorMap(sta::Parasitic const*) const
+aes_cipher_top,candidate,0.12,candidate,.,"__cxxabiv1::__si_class_type_info::search_above_dst(__cxxabiv1::__dynamic_cast_info*, void const*, void const*, int, bool) const"
+aes_cipher_top,candidate,0.12,candidate,.,"rsz::BufferedNet::wireRC(sta::Scene const*, rsz::Resizer const*, est::EstimateParasitics const*, double&, double&)"
+aes_cipher_top,candidate,0.12,candidate,.,"sta::DmpAlg::findVlCrossing(double, double, double)"
+aes_cipher_top,candidate,0.12,candidate,.,"sta::DmpCeffDelayCalc::gateDelay(sta::Pin const*, sta::TimingArc const*, sta::Delay const&, float, sta::Parasitic const*, std::__1::map<sta::Pin const*, unsigned long, sta::PinIdLess, std::__1::allocator<std::__1::pair<sta::Pin const* const, unsigned long> > > const&, sta::Scene const*, sta::MinMax const*)"
+aes_cipher_top,candidate,0.12,candidate,.,sta::dbNetwork::id(sta::Net const*) const
+aes_cipher_top,candidate,0.11,candidate,.,"sta::DmpAlg::dy(double, double, double, double)"
+aes_cipher_top,candidate,0.10,libc.so.6,.,pthread_cond_wait
+large02,baseline,20.81,baseline,.,"gpl::NesterovBaseCommon::getWireLengthGradientPinWA(gpl::GPin const*, float, float) const"
+large02,baseline,10.66,baseline,.,"gpl::BinGrid::scatterDensityAreaInPlace(std::__1::vector<gpl::GCellHandle, std::__1::allocator<gpl::GCellHandle> > const&, int) [clone .omp_outlined]"
+large02,baseline,8.72,baseline,.,"Eigen::internal::sparse_time_dense_product_impl<Eigen::Ref<Eigen::SparseMatrix<float, 1, int> const, 0, Eigen::OuterStride<-1> >, Eigen::Matrix<float, -1, 1, 0, -1, 1>, Eigen::Matrix<float, -1, 1, 0, -1, 1>, float, 1, true>::run(Eigen::Ref<Eigen::SparseMatrix<float, 1, int> const, 0, Eigen::OuterStride<-1> > const&, Eigen::Matrix<float, -1, 1, 0, -1, 1> const&, Eigen::Matrix<float, -1, 1, 0, -1, 1>&, float const&) [clone .omp_outlined]"
+large02,baseline,7.22,baseline,.,"gpl::NesterovBase::updateGCellDensityCenterLocation(std::__1::vector<gpl::FloatPoint, std::__1::allocator<gpl::FloatPoint> > const&)"
+large02,baseline,6.99,baseline,.,"gpl::NesterovBaseCommon::getWireLengthGradientWA(gpl::GCell const*, float, float) const"
+large02,baseline,5.46,baseline,.,"gpl::NesterovBaseCommon::updateWireLengthForceWA_native(float, float) [clone .omp_outlined.212] [clone .llvm.713817837769799209]"
+large02,baseline,5.09,baseline,.,gpl::GCellHandle::getGCell() const
+large02,baseline,4.10,baseline,.,"gpl::(anonymous namespace)::CpuHpwlBackend::computeHpwl(std::__1::vector<gpl::GNet, std::__1::allocator<gpl::GNet> >&) [clone .omp_outlined]"
+large02,baseline,3.61,baseline,.,gpl::NesterovBase::getDensityGradient(gpl::GCell const*) const
+large02,baseline,3.20,baseline,.,"Eigen::internal::Assignment<Eigen::Matrix<float, -1, 1, 0, -1, 1>, Eigen::SolveWithGuess<Eigen::BiCGSTAB<Eigen::SparseMatrix<float, 1, int>, Eigen::IdentityPreconditioner>, Eigen::Matrix<float, -1, 1, 0, -1, 1>, Eigen::Matrix<float, -1, 1, 0, -1, 1> >, Eigen::internal::assign_op<float, float>, Eigen::internal::Dense2Dense, void>::run(Eigen::Matrix<float, -1, 1, 0, -1, 1>&, Eigen::SolveWithGuess<Eigen::BiCGSTAB<Eigen::SparseMatrix<float, 1, int>, Eigen::IdentityPreconditioner>, Eigen::Matrix<float, -1, 1, 0, -1, 1>, Eigen::Matrix<float, -1, 1, 0, -1, 1> > const&, Eigen::internal::assign_op<float, float> const&)"
+large02,baseline,2.80,baseline,.,"utl::Logger::debugCheck(utl::ToolId, char const*, int) const"
+large02,baseline,1.99,baseline,.,"gpl::BinGrid::updateBinsGCellDensityArea(std::__1::vector<gpl::GCellHandle, std::__1::allocator<gpl::GCellHandle> > const&, int) [clone .omp_outlined]"
+large02,baseline,1.48,baseline,.,"gpl::NesterovBaseCommon::updateWireLengthForceWA_native(float, float) [clone .omp_outlined] [clone .llvm.713817837769799209]"
+large02,baseline,1.48,baseline,.,gpl::Net::updateBox(bool)
+large02,baseline,1.39,baseline,.,"SWIG_TypeQueryModule(swig_module_info*, swig_module_info*, char const*)"
+large02,baseline,0.94,baseline,.,gpl::InitialPlace::doBicgstabPlace(int)
+large02,baseline,0.67,baseline,.,gpl::NesterovBase::updateDensityFieldBin() [clone .omp_outlined.311] [clone .llvm.713817837769799209]
+large02,baseline,0.62,baseline,.,gpl::NesterovBase::nesterovUpdateCoordinates(float) [clone .omp_outlined] [clone .llvm.713817837769799209]
+large02,baseline,0.50,baseline,.,"void Eigen::internal::set_from_triplets<std::__1::__wrap_iter<Eigen::Triplet<float, int>*>, Eigen::SparseMatrix<float, 1, int>, Eigen::internal::scalar_sum_op<float, float> >(std::__1::__wrap_iter<Eigen::Triplet<float, int>*> const&, std::__1::__wrap_iter<Eigen::Triplet<float, int>*> const&, Eigen::SparseMatrix<float, 1, int>&, Eigen::internal::scalar_sum_op<float, float>)"
+large02,baseline,0.48,baseline,.,"gpl::(anonymous namespace)::CpuWirelengthGradientBackend::getCellGradients(std::__1::vector<gpl::GCellHandle, std::__1::allocator<gpl::GCellHandle> > const&, std::__1::vector<gpl::FloatPoint, std::__1::allocator<gpl::FloatPoint> >&) [clone .omp_outlined]"
+large02,baseline,0.43,baseline,.,CreateHashEntry.llvm.17630432623800516478
+large02,baseline,0.39,[unknown],k,0xffffffff81c00d70
+large02,baseline,0.39,baseline,.,"gpl::ddct(int, int, float*, int*, float*)"
+large02,baseline,0.38,baseline,.,gpl::NesterovBase::updateDensityFieldBin() [clone .omp_outlined] [clone .llvm.713817837769799209]
+large02,baseline,0.33,baseline,.,"odb::dbInst::setOrigin(int, int)"
+large02,baseline,0.30,baseline,.,"gpl::BinGrid::updateBinsGCellDensityArea(std::__1::vector<gpl::GCellHandle, std::__1::allocator<gpl::GCellHandle> > const&, int)"
+large02,baseline,0.30,baseline,.,TclGetNamespaceForQualName
+large02,baseline,0.30,baseline,.,TEBCresume.llvm.17774391271193043122
+large02,baseline,0.29,baseline,.,"gpl::NesterovBase::updateGradients(std::__1::vector<gpl::FloatPoint, std::__1::allocator<gpl::FloatPoint> >&, std::__1::vector<gpl::FloatPoint, std::__1::allocator<gpl::FloatPoint> >&, std::__1::vector<gpl::FloatPoint, std::__1::allocator<gpl::FloatPoint> >&, float, float) [clone .omp_outlined]"
+large02,baseline,0.29,libc.so.6,.,0x000000000019b43c
+large02,baseline,0.28,baseline,.,"gpl::NesterovBase::getStepLength(std::__1::vector<gpl::FloatPoint, std::__1::allocator<gpl::FloatPoint> > const&, std::__1::vector<gpl::FloatPoint, std::__1::allocator<gpl::FloatPoint> > const&, std::__1::vector<gpl::FloatPoint, std::__1::allocator<gpl::FloatPoint> > const&, std::__1::vector<gpl::FloatPoint, std::__1::allocator<gpl::FloatPoint> > const&)"
+large02,baseline,0.26,baseline,.,"odb::definNet::connection(char const*, char const*)"
+large02,baseline,0.21,baseline,.,gpl::NesterovBase::updateNextIter(int) [clone .omp_outlined]
+large02,baseline,0.20,baseline,.,TclHashStringKey
+large02,baseline,0.20,baseline,.,"Eigen::SparseMatrix<float, 1, int>& Eigen::SparseMatrix<float, 1, int>::operator=<Eigen::SparseMatrix<float, 0, int> >(Eigen::SparseMatrixBase<Eigen::SparseMatrix<float, 0, int> > const&)"
+large02,baseline,0.19,baseline,.,"gpl::ddxt2d_sub(int, int, int, int, float**, float*, int*, float*) [clone .llvm.10192065956405781601]"
+large02,baseline,0.17,baseline,.,gpl::PlacerBaseCommon::init()
+large02,baseline,0.17,baseline,.,"gpl::cftf161(float*, float const*)"
+large02,baseline,0.17,libc.so.6,.,0x000000000019b448
+large02,baseline,0.16,baseline,.,"gpl::cftfsub(int, float*, int*, int, float*)"
+large02,baseline,0.15,baseline,.,TEOV_NotFound
+large02,baseline,0.14,baseline,.,"gpl::(anonymous namespace)::CpuDensityGradientBackend::getCellGradients(std::__1::vector<gpl::GCellHandle, std::__1::allocator<gpl::GCellHandle> > const&, std::__1::vector<gpl::FloatPoint, std::__1::allocator<gpl::FloatPoint> >&) [clone .omp_outlined]"
+large02,baseline,0.14,libc.so.6,.,0x000000000019bc62
+large02,baseline,0.13,libm.so.6,.,0x000000000007820a
+large02,baseline,0.12,libc.so.6,.,pthread_getspecific
+large02,baseline,0.12,baseline,.,"odb::dbITerm::getAvgXY(int*, int*) const"
+large02,baseline,0.12,baseline,.,"gpl::cftmdl1(int, float*, float const*)"
+large02,baseline,0.12,baseline,.,"odbUnknownCmd(void*, Tcl_Interp*, int, Tcl_Obj* const*)"
+large02,baseline,0.11,baseline,.,"gpl::NesterovBase::updateGradients(std::__1::vector<gpl::FloatPoint, std::__1::allocator<gpl::FloatPoint> >&, std::__1::vector<gpl::FloatPoint, std::__1::allocator<gpl::FloatPoint> >&, std::__1::vector<gpl::FloatPoint, std::__1::allocator<gpl::FloatPoint> >&, float, float)"
+large02,baseline,0.11,baseline,.,"gpl::ddst(int, int, float*, int*, float*)"
+large02,baseline,0.10,baseline,.,Tcl_EvalObjv
+large02,baseline,0.10,libc.so.6,.,0x000000000019b457
+large02,candidate,24.88,candidate,.,"gpl::pinGradientColumns(gpl::SoaStorage<int, int, int, int, float, float, float, float, float, float, float, float, float, float, float, std::__1::vector<gpl::GPin*, std::__1::allocator<gpl::GPin*> >, std::__1::vector<gpl::Net*, std::__1::allocator<gpl::Net*> >, unsigned char> const&, gpl::SoaStorage<int, int, int, int, float, float, float, float, unsigned char, unsigned char, unsigned char, unsigned char, gpl::GCell*, gpl::GNet*, std::__1::vector<gpl::Pin*, std::__1::allocator<gpl::Pin*> >, unsigned long> const&, unsigned long, unsigned long, float, float)"
+large02,candidate,11.64,candidate,.,"Eigen::internal::sparse_time_dense_product_impl<Eigen::Ref<Eigen::SparseMatrix<float, 1, int> const, 0, Eigen::OuterStride<-1> >, Eigen::Matrix<float, -1, 1, 0, -1, 1>, Eigen::Matrix<float, -1, 1, 0, -1, 1>, float, 1, true>::run(Eigen::Ref<Eigen::SparseMatrix<float, 1, int> const, 0, Eigen::OuterStride<-1> > const&, Eigen::Matrix<float, -1, 1, 0, -1, 1> const&, Eigen::Matrix<float, -1, 1, 0, -1, 1>&, float const&) [clone .omp_outlined]"
+large02,candidate,8.84,candidate,.,"gpl::NesterovBaseCommon::updateWireLengthForceWA_soa(float, float) [clone .omp_outlined] [clone .llvm.16767344741911684198]"
+large02,candidate,7.37,candidate,.,"gpl::NesterovBaseCommon::getWireLengthGradientsWA_cpu(std::__1::vector<gpl::GCellHandle, std::__1::allocator<gpl::GCellHandle> > const&, gpl::PointColumns&, float, float) [clone .omp_outlined] [clone .llvm.16767344741911684198]"
+large02,candidate,4.89,candidate,.,gpl::NesterovBaseCommon::updateDensityPinLocations(gpl::GCellRowList const&) [clone .omp_outlined] [clone .llvm.16767344741911684198]
+large02,candidate,3.99,candidate,.,"Eigen::internal::Assignment<Eigen::Matrix<float, -1, 1, 0, -1, 1>, Eigen::SolveWithGuess<Eigen::BiCGSTAB<Eigen::SparseMatrix<float, 1, int>, Eigen::IdentityPreconditioner>, Eigen::Matrix<float, -1, 1, 0, -1, 1>, Eigen::Matrix<float, -1, 1, 0, -1, 1> >, Eigen::internal::assign_op<float, float>, Eigen::internal::Dense2Dense, void>::run(Eigen::Matrix<float, -1, 1, 0, -1, 1>&, Eigen::SolveWithGuess<Eigen::BiCGSTAB<Eigen::SparseMatrix<float, 1, int>, Eigen::IdentityPreconditioner>, Eigen::Matrix<float, -1, 1, 0, -1, 1>, Eigen::Matrix<float, -1, 1, 0, -1, 1> > const&, Eigen::internal::assign_op<float, float> const&)"
+large02,candidate,3.38,candidate,.,"void gpl::DensityGridView::forEachOverlap<gpl::DensityGridView::gather(gpl::DensityRect const&) const::{lambda(unsigned long, float)#1}>(gpl::DensityRect const&, gpl::DensityGridView::gather(gpl::DensityRect const&) const::{lambda(unsigned long, float)#1}&&) const"
+large02,candidate,2.95,candidate,.,"gpl::BinGrid::scatterDensityAreaInPlace(std::__1::vector<gpl::GCellRowList, std::__1::allocator<gpl::GCellRowList> > const&, int)::$_0::operator()(gpl::GCellRowList const&, unsigned long, long*, long*) const"
+large02,candidate,2.60,candidate,.,"void gpl::NesterovBase::combineGradientsColumns<true>(gpl::PointColumns&, gpl::PointColumns const&, gpl::PointColumns&) [clone .omp_outlined]"
+large02,candidate,1.99,candidate,.,gpl::Net::updateBox(bool)
+large02,candidate,1.99,candidate,.,gpl::InitialPlace::doBicgstabPlace(int)
+large02,candidate,1.76,candidate,.,"SWIG_TypeQueryModule(swig_module_info*, swig_module_info*, char const*)"
+large02,candidate,1.66,candidate,.,gpl::NesterovBaseCommon::getHpwlColumns() [clone .omp_outlined] [clone .llvm.16767344741911684198]
+large02,candidate,1.51,candidate,.,gpl::NesterovBase::updateNextCoordinatesColumns(float) [clone .omp_outlined] [clone .llvm.224855100747797707]
+large02,candidate,1.45,candidate,.,gpl::NesterovBase::updateDensityFieldBin() [clone .omp_outlined] [clone .llvm.224855100747797707]
+large02,candidate,0.88,candidate,.,"gpl::getDistance(gpl::PointColumns const&, gpl::PointColumns const&, gpl::PointColumns&, int) [clone .omp_outlined] [clone .llvm.224855100747797707]"
+large02,candidate,0.82,candidate,.,"gpl::(anonymous namespace)::CpuFftBackend::solve(gpl::BinGridSpan, gpl::BinGridSpan, gpl::BinGridSpan, gpl::BinGridSpan) [clone .omp_outlined]"
+large02,candidate,0.70,candidate,.,"void Eigen::internal::set_from_triplets<std::__1::__wrap_iter<Eigen::Triplet<float, int>*>, Eigen::SparseMatrix<float, 1, int>, Eigen::internal::scalar_sum_op<float, float> >(std::__1::__wrap_iter<Eigen::Triplet<float, int>*> const&, std::__1::__wrap_iter<Eigen::Triplet<float, int>*> const&, Eigen::SparseMatrix<float, 1, int>&, Eigen::internal::scalar_sum_op<float, float>)"
+large02,candidate,0.62,candidate,.,"gpl::BinGrid::scatterDensityAreaInPlace(std::__1::vector<gpl::GCellRowList, std::__1::allocator<gpl::GCellRowList> > const&, int) [clone .omp_outlined]"
+large02,candidate,0.58,candidate,.,CreateHashEntry.llvm.17630432623800516478
+large02,candidate,0.53,candidate,.,"gpl::(anonymous namespace)::CpuFftBackend::transform(float**, int, bool, bool) [clone .omp_outlined]"
+large02,candidate,0.53,candidate,.,"gpl::BinGrid::updateBinsGCellDensityArea(std::__1::vector<gpl::GCellHandle, std::__1::allocator<gpl::GCellHandle> > const&, std::__1::vector<gpl::GCellRowList, std::__1::allocator<gpl::GCellRowList> > const&, int) [clone .omp_outlined]"
+large02,candidate,0.51,candidate,.,"gpl::ddct(int, int, float*, int*, float*)"
+large02,candidate,0.50,libc.so.6,.,0x00000000001a1efa
+large02,candidate,0.47,candidate,.,"odb::dbInst::setOrigin(int, int)"
+large02,candidate,0.44,candidate,.,TclGetNamespaceForQualName
+large02,candidate,0.43,candidate,.,TEBCresume.llvm.17774391271193043122
+large02,candidate,0.39,candidate,.,"gpl::BinGrid::updateBinsGCellDensityArea(std::__1::vector<gpl::GCellHandle, std::__1::allocator<gpl::GCellHandle> > const&, std::__1::vector<gpl::GCellRowList, std::__1::allocator<gpl::GCellRowList> > const&, int)"
+large02,candidate,0.36,candidate,.,"odb::definNet::connection(char const*, char const*)"
+large02,candidate,0.34,[unknown],k,0xffffffff81c00d70
+large02,candidate,0.30,candidate,.,gpl::NesterovPlace::doNesterovPlace(int)
+large02,candidate,0.29,libc.so.6,.,0x000000000019b43c
+large02,candidate,0.26,candidate,.,gpl::GCellHandle::getGCell() const
+large02,candidate,0.26,candidate,.,TclHashStringKey
+large02,candidate,0.24,candidate,.,"gpl::Instance::dbSetCenterLocation(int, int)"
+large02,candidate,0.24,candidate,.,gpl::NesterovBase::updateGCellDensityCenterLocation(gpl::PointColumns const&) [clone .omp_outlined] [clone .llvm.224855100747797707]
+large02,candidate,0.23,candidate,.,TEOV_NotFound
+large02,candidate,0.23,candidate,.,"Eigen::SparseMatrix<float, 1, int>& Eigen::SparseMatrix<float, 1, int>::operator=<Eigen::SparseMatrix<float, 0, int> >(Eigen::SparseMatrixBase<Eigen::SparseMatrix<float, 0, int> > const&)"
+large02,candidate,0.23,candidate,.,"gpl::cftfsub(int, float*, int*, int, float*)"
+large02,candidate,0.22,candidate,.,gpl::PlacerBaseCommon::init()
+large02,candidate,0.21,candidate,.,"gpl::cftf161(float*, float const*)"
+large02,candidate,0.19,libc.so.6,.,0x000000000019bc62
+large02,candidate,0.18,candidate,.,"gpl::cftmdl1(int, float*, float const*)"
+large02,candidate,0.18,candidate,.,"gpl::NesterovBase::updateGradients(gpl::PointColumns&, gpl::PointColumns&, gpl::PointColumns&, float, float)"
+large02,candidate,0.16,candidate,.,Tcl_EvalObjv
+large02,candidate,0.15,candidate,.,gpl::NesterovBase::updateNextIter(int) [clone .omp_outlined]
+large02,candidate,0.15,libc.so.6,.,0x000000000019b448
+large02,candidate,0.14,candidate,.,"odb::dbITerm::getAvgXY(int*, int*) const"
+large02,candidate,0.14,libc.so.6,.,0x000000000019bc68
+large02,candidate,0.13,candidate,.,"odb::dbInst::create(odb::dbBlock*, odb::dbMaster*, char const*, odb::dbRegion*, bool, odb::dbModule*)"
+large02,candidate,0.13,libc.so.6,.,0x000000000019b457
+large02,candidate,0.12,libc.so.6,.,0x000000000019b44e
+large02,candidate,0.12,candidate,.,"gpl::ddst(int, int, float*, int*, float*)"
+large02,candidate,0.11,candidate,.,TclpAlloc
+large02,candidate,0.11,candidate,.,Tcl_ResetResult
+large02,candidate,0.11,candidate,.,"odb::dbModuleModNetITermItr::getObject(unsigned int, ...)"
+large02,candidate,0.11,candidate,.,"gpl::cftf162(float*, float const*)"
+large02,candidate,0.10,candidate,.,"gpl::cftbsub(int, float*, int*, int, float*)"
+large02,candidate,0.10,candidate,.,"tcmalloc::tcmalloc_internal::TCMallocPolicy<tcmalloc::tcmalloc_internal::CppOomPolicy, tcmalloc::tcmalloc_internal::DefaultAlignPolicy, tcmalloc::tcmalloc_internal::AllocationAccessHotPolicy, tcmalloc::tcmalloc_internal::InvokeHooksPolicy, tcmalloc::tcmalloc_internal::NonSizeReturningPolicy, tcmalloc::tcmalloc_internal::LocalNumaPartitionPolicy>::pointer_type tcmalloc::tcmalloc_internal::alloc_small_sampled_hooks_or_perthread<tcmalloc::tcmalloc_internal::TCMallocPolicy<tcmalloc::tcmalloc_internal::CppOomPolicy, tcmalloc::tcmalloc_internal::DefaultAlignPolicy, tcmalloc::tcmalloc_internal::AllocationAccessHotPolicy, tcmalloc::tcmalloc_internal::InvokeHooksPolicy, tcmalloc::tcmalloc_internal::NonSizeReturningPolicy, tcmalloc::tcmalloc_internal::LocalNumaPartitionPolicy> >(unsigned long, unsigned long, tcmalloc::tcmalloc_internal::TCMallocPolicy<tcmalloc::tcmalloc_internal::CppOomPolicy, tcmalloc::tcmalloc_internal::DefaultAlignPolicy, tcmalloc::tcmalloc_internal::AllocationAccessHotPolicy, tcmalloc::tcmalloc_internal::InvokeHooksPolicy, tcmalloc::tcmalloc_internal::NonSizeReturningPolicy, tcmalloc::tcmalloc_internal::LocalNumaPartitionPolicy>, unsigned long)"

@@ -1,0 +1,9 @@
+design,role,threads,mode,observed_wall_s,user_s,sys_s,average_occupied_cores,max_rss_bytes,stage_placement_ms,output_exact,algorithm_exact,samples,lost_samples,gpl_symbols_visible,unknown_symbol_percent_reported_rows
+aes_cipher_top,baseline,4,stat,56.43,113.48,3.57,2.0742512847776005,545112064,53582.582,True,True,,,,
+aes_cipher_top,candidate,4,stat,33.61,56.78,7.23,1.9044927105028266,577695744,30770.67,True,True,,,,
+aes_cipher_top,baseline,4,record,63.14,129.52,1.79,2.0796642382008237,544837632,59772.525,True,True,13K of event 'cycles:u',0,True,0.6699999999999999
+aes_cipher_top,candidate,4,record,30.14,52.91,3.06,1.8570006635700065,581156864,26873.356,True,True,5K of event 'cycles:u',0,True,5.94
+large02,baseline,4,stat,133.69,267.79,5.94,2.0474979430024685,1194930176,112697.72,True,True,,,,
+large02,candidate,4,stat,94.92,200.72,7.67,2.195427728613569,1498234880,74086.98,True,True,,,,
+large02,baseline,4,record,133.24,266.79,5.08,2.0404533173221253,1194147840,111510.059,True,True,27K of event 'cycles:u',0,True,1.22
+large02,candidate,4,record,96.2,204.32,5.80,2.1841995841995843,1503031296,74458.372,True,True,21K of event 'cycles:u',0,True,1.86
