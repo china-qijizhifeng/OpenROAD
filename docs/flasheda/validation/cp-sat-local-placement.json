@@ -1,0 +1,65 @@
+{
+  "source_base_commit": "2847efec57c70e532ca40cf7969e044541a25a94",
+  "final_source_overlay_sha256": "2b11363b9781c24cb9f4d387c7583f88b2db662aa4cfb73c175b9e7e5df83350",
+  "python_bazel": "3.13 (hermetic rules_python)",
+  "ortools": "9.14.6206",
+  "wheel_sha256": "d47d77bd2a880a827d851417c694aecd918aff2d491cbb8d195ed7574a0b36bf",
+  "tests": {
+    "placement_model_test": {
+      "status": "passed",
+      "enumerated_problems": 45
+    },
+    "cp_sat_placement_test": {
+      "status": "passed",
+      "methods": 7
+    },
+    "installed_api_tests": {
+      "status": "passed",
+      "methods": 7
+    },
+    "optional_dependency_import": {
+      "status": "passed",
+      "ortools_installed": false
+    },
+    "installed_cli": {
+      "status": "applied",
+      "exit_code": 0,
+      "hpwl_before_dbu": 10000,
+      "hpwl_after_dbu": 6000,
+      "displacement_dbu": 4000,
+      "candidate_count": 6
+    }
+  },
+  "installed": {
+    "python": "3.12.3 (main, Aug 31 2026, 10:18:26) [GCC 13.3.0]",
+    "ortools": "9.14.6206",
+    "openroad_wheel_version": "0.0.1",
+    "openroad_library_sha256": "13c15a2ba71d1849d371958f4abf522b4af4ccdf880f45650400ebf2011d47d7",
+    "module_sha256": {
+      "openroad.cp_sat_placement": "ece08c6cf7e6f400e970860d5a0727ac913ed79fd9909e18508d0a87dacc525c",
+      "openroad._placement_model": "24a2a96c3ce882f0127806416c373dae2f4e3e4915253f0478dad3add8e35a5b"
+    },
+    "installed_module_verified": true,
+    "placement_legal_after_odb_readback": true,
+    "joint_swap_verified": true,
+    "fixed_instances_preserved": true,
+    "connectivity_preserved": true,
+    "input_sha256": "165f09c1a3f617dee254d12110394a3b7633ec679782d7506351056e105fd368",
+    "output_sha256": "7dd1f3511b495116f0a3475ea53a9b2d9b322d67147cf3b7c0e6ccbb72e2ca67"
+  },
+  "scope": "Real OpenDB/checkPlacement + finite local geometry optimization; no timing, routing, PPA or whole-chip speedup claim.",
+  "initial_failures": "Corrected test harness import path/API placement status and expected one-site-gap rejection; no CP-SAT production implementation change was required.",
+  "sources": {
+    "MODULE.bazel": "ae60ab2007334b72569198efcf57c511151a5b31fc392c2eabe52a2d8808eb4f",
+    "MODULE.bazel.lock": "c4f133b13af4021f449fb0b377b9f14c85e0b2849748fd558301c8ba88af0a7c",
+    "python/openroad/BUILD": "da90051699555a00a516d5813ed6d1a2759a307407cc842e35aa57d409a7a71b",
+    "python/openroad/_placement_model.py": "24a2a96c3ce882f0127806416c373dae2f4e3e4915253f0478dad3add8e35a5b",
+    "python/openroad/cp_sat_placement.py": "ece08c6cf7e6f400e970860d5a0727ac913ed79fd9909e18508d0a87dacc525c",
+    "python/openroad/placement_model_test.py": "ef7118f7407cc34ab727a7c4e0453652e87f01cf06fe31a017ecd9776c989daf",
+    "python/openroad/cp_sat_placement_test.py": "2bc6c5e4f867766a2f5811b7013e790e424f09e9aba60171c64ebaca7731b1c3",
+    "python/openroad/cp_sat_test.lef": "4d3ed2bf40d6b5c8d2a6993569ad27d0e25584103cd0e7dddd3a428c6bb0d5e4",
+    "python/openroad/cp_sat_test.def": "0c79692f4ace784577b1333ce28b02c9ca277467879d3765e74cd3d650c301db",
+    "bazel/requirements_cp_sat.in": "ded3c669da6ef63e791db28120b5413add91871b959a2d3519ff80479bc67ff1",
+    "bazel/requirements_cp_sat_lock.txt": "213605a084c35d446c759a5c98ffb6257346be132ecfbcdac0ae7e69901da60d"
+  }
+}
