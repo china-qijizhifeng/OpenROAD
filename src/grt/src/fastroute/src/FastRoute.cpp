@@ -370,17 +370,18 @@ void FastRouteCore::setGridsAndLayers(int x, int y, int nLayers)
   corr_edge_3D_.resize(boost::extents[num_layers_][y_grid_][x_grid_]);
   pr_3D_.resize(boost::extents[num_layers_][y_grid_][x_grid_]);
 
-  total_size = static_cast<int64>(num_layers_) * y_range_ * x_range_;
+  // 3D searches stay inside the routing grid. The padded square used by
+  // legacy 2D scratch arrays is not needed for their distances or heap IDs.
+  total_size = static_cast<int64>(num_layers_) * y_grid_ * x_grid_;
   pop_heap2_3D_.resize(total_size, false);
 
   // allocate memory for priority queue
-  total_size = static_cast<int64>(y_grid_) * x_grid_ * num_layers_;
   src_heap_3D_.resize(total_size);
   dest_heap_3D_.resize(total_size);
 
-  d1_3D_.resize(boost::extents[num_layers_][y_range_][x_range_]);
-  d2_3D_.resize(boost::extents[num_layers_][y_range_][x_range_]);
-  path_len_3D_.resize(boost::extents[num_layers_][y_range_][x_range_]);
+  d1_3D_.resize(boost::extents[num_layers_][y_grid_][x_grid_]);
+  d2_3D_.resize(boost::extents[num_layers_][y_grid_][x_grid_]);
+  path_len_3D_.resize(boost::extents[num_layers_][y_grid_][x_grid_]);
 }
 
 void FastRouteCore::addVCapacity(int16_t verticalCapacity, int layer)
@@ -1205,7 +1206,7 @@ void FastRouteCore::initAuxVar()
 {
   tree_order_cong_.clear();
 
-  grid_hv_ = x_range_ * y_range_;
+  grid_hv_ = x_grid_ * y_grid_;
 
   parent_x1_.resize(boost::extents[y_grid_][x_grid_]);
   parent_y1_.resize(boost::extents[y_grid_][x_grid_]);

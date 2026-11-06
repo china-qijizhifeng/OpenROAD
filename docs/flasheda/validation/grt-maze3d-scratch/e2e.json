@@ -1,0 +1,438 @@
+{
+  "route_script_sha256": "9c5e4363b1f1fedbed1b20737a007149e3f966c4fc0abbfb4f3a31e85def6bee",
+  "complete": true,
+  "runs": [
+    {
+      "variant": "baseline",
+      "threads": 1,
+      "warmup": true,
+      "global_route_wall_s": 2.001026,
+      "global_route_user_s": 1.93,
+      "global_route_sys_s": 0.07,
+      "guide_sha256": "c5ab71af58d920660e8c63379472efc183ba8349f3f7ca5778a8eaa065596b2a",
+      "odb_sha256": "bbf4b338fcc5c611d3914cd0b791c7e1255760f3464246fcf4e0ab94923bfc43",
+      "wirelength_um": 655594,
+      "vias": 152307,
+      "resource": "\tCommand being timed: \"/workspace/grt/binaries/baseline -no_init -exit /workspace/grt/route-v5.tcl\"\n\tUser time (seconds): 2.14\n\tSystem time (seconds): 0.14\n\tPercent of CPU this job got: 99%\n\tElapsed (wall clock) time (h:mm:ss or m:ss): 0:02.28\n\tAverage shared text size (kbytes): 0\n\tAverage unshared data size (kbytes): 0\n\tAverage stack size (kbytes): 0\n\tAverage total size (kbytes): 0\n\tMaximum resident set size (kbytes): 297672\n\tAverage resident set size (kbytes): 0\n\tMajor (requiring I/O) page faults: 0\n\tMinor (reclaiming a frame) page faults: 64985\n\tVoluntary context switches: 24\n\tInvoluntary context switches: 6\n\tSwaps: 0\n\tFile system inputs: 0\n\tFile system outputs: 45296\n\tSocket messages sent: 0\n\tSocket messages received: 0\n\tSignals delivered: 0\n\tPage size (bytes): 4096\n\tExit status: 0\n"
+    },
+    {
+      "variant": "candidate",
+      "threads": 1,
+      "warmup": true,
+      "global_route_wall_s": 2.08188,
+      "global_route_user_s": 2.02,
+      "global_route_sys_s": 0.06,
+      "guide_sha256": "c5ab71af58d920660e8c63379472efc183ba8349f3f7ca5778a8eaa065596b2a",
+      "odb_sha256": "bbf4b338fcc5c611d3914cd0b791c7e1255760f3464246fcf4e0ab94923bfc43",
+      "wirelength_um": 655594,
+      "vias": 152307,
+      "resource": "\tCommand being timed: \"/workspace/grt/binaries/candidate -no_init -exit /workspace/grt/route-v5.tcl\"\n\tUser time (seconds): 2.22\n\tSystem time (seconds): 0.12\n\tPercent of CPU this job got: 99%\n\tElapsed (wall clock) time (h:mm:ss or m:ss): 0:02.35\n\tAverage shared text size (kbytes): 0\n\tAverage unshared data size (kbytes): 0\n\tAverage stack size (kbytes): 0\n\tAverage total size (kbytes): 0\n\tMaximum resident set size (kbytes): 229840\n\tAverage resident set size (kbytes): 0\n\tMajor (requiring I/O) page faults: 0\n\tMinor (reclaiming a frame) page faults: 48016\n\tVoluntary context switches: 24\n\tInvoluntary context switches: 5\n\tSwaps: 0\n\tFile system inputs: 0\n\tFile system outputs: 45296\n\tSocket messages sent: 0\n\tSocket messages received: 0\n\tSignals delivered: 0\n\tPage size (bytes): 4096\n\tExit status: 0\n"
+    },
+    {
+      "variant": "baseline",
+      "threads": 1,
+      "warmup": false,
+      "global_route_wall_s": 2.060573,
+      "global_route_user_s": 1.98,
+      "global_route_sys_s": 0.08,
+      "guide_sha256": "c5ab71af58d920660e8c63379472efc183ba8349f3f7ca5778a8eaa065596b2a",
+      "odb_sha256": "bbf4b338fcc5c611d3914cd0b791c7e1255760f3464246fcf4e0ab94923bfc43",
+      "wirelength_um": 655594,
+      "vias": 152307,
+      "resource": "\tCommand being timed: \"/workspace/grt/binaries/baseline -no_init -exit /workspace/grt/route-v5.tcl\"\n\tUser time (seconds): 2.20\n\tSystem time (seconds): 0.14\n\tPercent of CPU this job got: 99%\n\tElapsed (wall clock) time (h:mm:ss or m:ss): 0:02.35\n\tAverage shared text size (kbytes): 0\n\tAverage unshared data size (kbytes): 0\n\tAverage stack size (kbytes): 0\n\tAverage total size (kbytes): 0\n\tMaximum resident set size (kbytes): 297868\n\tAverage resident set size (kbytes): 0\n\tMajor (requiring I/O) page faults: 0\n\tMinor (reclaiming a frame) page faults: 65030\n\tVoluntary context switches: 26\n\tInvoluntary context switches: 3\n\tSwaps: 0\n\tFile system inputs: 0\n\tFile system outputs: 45296\n\tSocket messages sent: 0\n\tSocket messages received: 0\n\tSignals delivered: 0\n\tPage size (bytes): 4096\n\tExit status: 0\n"
+    },
+    {
+      "variant": "candidate",
+      "threads": 1,
+      "warmup": false,
+      "global_route_wall_s": 2.008565,
+      "global_route_user_s": 1.97,
+      "global_route_sys_s": 0.03,
+      "guide_sha256": "c5ab71af58d920660e8c63379472efc183ba8349f3f7ca5778a8eaa065596b2a",
+      "odb_sha256": "bbf4b338fcc5c611d3914cd0b791c7e1255760f3464246fcf4e0ab94923bfc43",
+      "wirelength_um": 655594,
+      "vias": 152307,
+      "resource": "\tCommand being timed: \"/workspace/grt/binaries/candidate -no_init -exit /workspace/grt/route-v5.tcl\"\n\tUser time (seconds): 2.16\n\tSystem time (seconds): 0.10\n\tPercent of CPU this job got: 99%\n\tElapsed (wall clock) time (h:mm:ss or m:ss): 0:02.27\n\tAverage shared text size (kbytes): 0\n\tAverage unshared data size (kbytes): 0\n\tAverage stack size (kbytes): 0\n\tAverage total size (kbytes): 0\n\tMaximum resident set size (kbytes): 229544\n\tAverage resident set size (kbytes): 0\n\tMajor (requiring I/O) page faults: 0\n\tMinor (reclaiming a frame) page faults: 47934\n\tVoluntary context switches: 23\n\tInvoluntary context switches: 4\n\tSwaps: 0\n\tFile system inputs: 0\n\tFile system outputs: 45296\n\tSocket messages sent: 0\n\tSocket messages received: 0\n\tSignals delivered: 0\n\tPage size (bytes): 4096\n\tExit status: 0\n"
+    },
+    {
+      "variant": "candidate",
+      "threads": 1,
+      "warmup": false,
+      "global_route_wall_s": 2.018609,
+      "global_route_user_s": 1.97,
+      "global_route_sys_s": 0.05,
+      "guide_sha256": "c5ab71af58d920660e8c63379472efc183ba8349f3f7ca5778a8eaa065596b2a",
+      "odb_sha256": "bbf4b338fcc5c611d3914cd0b791c7e1255760f3464246fcf4e0ab94923bfc43",
+      "wirelength_um": 655594,
+      "vias": 152307,
+      "resource": "\tCommand being timed: \"/workspace/grt/binaries/candidate -no_init -exit /workspace/grt/route-v5.tcl\"\n\tUser time (seconds): 2.15\n\tSystem time (seconds): 0.12\n\tPercent of CPU this job got: 99%\n\tElapsed (wall clock) time (h:mm:ss or m:ss): 0:02.28\n\tAverage shared text size (kbytes): 0\n\tAverage unshared data size (kbytes): 0\n\tAverage stack size (kbytes): 0\n\tAverage total size (kbytes): 0\n\tMaximum resident set size (kbytes): 229732\n\tAverage resident set size (kbytes): 0\n\tMajor (requiring I/O) page faults: 0\n\tMinor (reclaiming a frame) page faults: 47985\n\tVoluntary context switches: 25\n\tInvoluntary context switches: 6\n\tSwaps: 0\n\tFile system inputs: 0\n\tFile system outputs: 45296\n\tSocket messages sent: 0\n\tSocket messages received: 0\n\tSignals delivered: 0\n\tPage size (bytes): 4096\n\tExit status: 0\n"
+    },
+    {
+      "variant": "baseline",
+      "threads": 1,
+      "warmup": false,
+      "global_route_wall_s": 2.058455,
+      "global_route_user_s": 1.97,
+      "global_route_sys_s": 0.08,
+      "guide_sha256": "c5ab71af58d920660e8c63379472efc183ba8349f3f7ca5778a8eaa065596b2a",
+      "odb_sha256": "bbf4b338fcc5c611d3914cd0b791c7e1255760f3464246fcf4e0ab94923bfc43",
+      "wirelength_um": 655594,
+      "vias": 152307,
+      "resource": "\tCommand being timed: \"/workspace/grt/binaries/baseline -no_init -exit /workspace/grt/route-v5.tcl\"\n\tUser time (seconds): 2.19\n\tSystem time (seconds): 0.15\n\tPercent of CPU this job got: 99%\n\tElapsed (wall clock) time (h:mm:ss or m:ss): 0:02.36\n\tAverage shared text size (kbytes): 0\n\tAverage unshared data size (kbytes): 0\n\tAverage stack size (kbytes): 0\n\tAverage total size (kbytes): 0\n\tMaximum resident set size (kbytes): 297768\n\tAverage resident set size (kbytes): 0\n\tMajor (requiring I/O) page faults: 0\n\tMinor (reclaiming a frame) page faults: 65000\n\tVoluntary context switches: 24\n\tInvoluntary context switches: 6\n\tSwaps: 0\n\tFile system inputs: 0\n\tFile system outputs: 45296\n\tSocket messages sent: 0\n\tSocket messages received: 0\n\tSignals delivered: 0\n\tPage size (bytes): 4096\n\tExit status: 0\n"
+    },
+    {
+      "variant": "baseline",
+      "threads": 1,
+      "warmup": false,
+      "global_route_wall_s": 2.067602,
+      "global_route_user_s": 1.99,
+      "global_route_sys_s": 0.08,
+      "guide_sha256": "c5ab71af58d920660e8c63379472efc183ba8349f3f7ca5778a8eaa065596b2a",
+      "odb_sha256": "bbf4b338fcc5c611d3914cd0b791c7e1255760f3464246fcf4e0ab94923bfc43",
+      "wirelength_um": 655594,
+      "vias": 152307,
+      "resource": "\tCommand being timed: \"/workspace/grt/binaries/baseline -no_init -exit /workspace/grt/route-v5.tcl\"\n\tUser time (seconds): 2.18\n\tSystem time (seconds): 0.16\n\tPercent of CPU this job got: 99%\n\tElapsed (wall clock) time (h:mm:ss or m:ss): 0:02.34\n\tAverage shared text size (kbytes): 0\n\tAverage unshared data size (kbytes): 0\n\tAverage stack size (kbytes): 0\n\tAverage total size (kbytes): 0\n\tMaximum resident set size (kbytes): 297852\n\tAverage resident set size (kbytes): 0\n\tMajor (requiring I/O) page faults: 0\n\tMinor (reclaiming a frame) page faults: 65015\n\tVoluntary context switches: 28\n\tInvoluntary context switches: 3\n\tSwaps: 0\n\tFile system inputs: 0\n\tFile system outputs: 45296\n\tSocket messages sent: 0\n\tSocket messages received: 0\n\tSignals delivered: 0\n\tPage size (bytes): 4096\n\tExit status: 0\n"
+    },
+    {
+      "variant": "candidate",
+      "threads": 1,
+      "warmup": false,
+      "global_route_wall_s": 2.076456,
+      "global_route_user_s": 2.02,
+      "global_route_sys_s": 0.05,
+      "guide_sha256": "c5ab71af58d920660e8c63379472efc183ba8349f3f7ca5778a8eaa065596b2a",
+      "odb_sha256": "bbf4b338fcc5c611d3914cd0b791c7e1255760f3464246fcf4e0ab94923bfc43",
+      "wirelength_um": 655594,
+      "vias": 152307,
+      "resource": "\tCommand being timed: \"/workspace/grt/binaries/candidate -no_init -exit /workspace/grt/route-v5.tcl\"\n\tUser time (seconds): 2.22\n\tSystem time (seconds): 0.13\n\tPercent of CPU this job got: 99%\n\tElapsed (wall clock) time (h:mm:ss or m:ss): 0:02.36\n\tAverage shared text size (kbytes): 0\n\tAverage unshared data size (kbytes): 0\n\tAverage stack size (kbytes): 0\n\tAverage total size (kbytes): 0\n\tMaximum resident set size (kbytes): 229840\n\tAverage resident set size (kbytes): 0\n\tMajor (requiring I/O) page faults: 0\n\tMinor (reclaiming a frame) page faults: 48011\n\tVoluntary context switches: 25\n\tInvoluntary context switches: 2\n\tSwaps: 0\n\tFile system inputs: 0\n\tFile system outputs: 45296\n\tSocket messages sent: 0\n\tSocket messages received: 0\n\tSignals delivered: 0\n\tPage size (bytes): 4096\n\tExit status: 0\n"
+    },
+    {
+      "variant": "candidate",
+      "threads": 1,
+      "warmup": false,
+      "global_route_wall_s": 2.086991,
+      "global_route_user_s": 2.03,
+      "global_route_sys_s": 0.05,
+      "guide_sha256": "c5ab71af58d920660e8c63379472efc183ba8349f3f7ca5778a8eaa065596b2a",
+      "odb_sha256": "bbf4b338fcc5c611d3914cd0b791c7e1255760f3464246fcf4e0ab94923bfc43",
+      "wirelength_um": 655594,
+      "vias": 152307,
+      "resource": "\tCommand being timed: \"/workspace/grt/binaries/candidate -no_init -exit /workspace/grt/route-v5.tcl\"\n\tUser time (seconds): 2.24\n\tSystem time (seconds): 0.14\n\tPercent of CPU this job got: 99%\n\tElapsed (wall clock) time (h:mm:ss or m:ss): 0:02.39\n\tAverage shared text size (kbytes): 0\n\tAverage unshared data size (kbytes): 0\n\tAverage stack size (kbytes): 0\n\tAverage total size (kbytes): 0\n\tMaximum resident set size (kbytes): 229680\n\tAverage resident set size (kbytes): 0\n\tMajor (requiring I/O) page faults: 0\n\tMinor (reclaiming a frame) page faults: 47973\n\tVoluntary context switches: 25\n\tInvoluntary context switches: 8\n\tSwaps: 0\n\tFile system inputs: 0\n\tFile system outputs: 45296\n\tSocket messages sent: 0\n\tSocket messages received: 0\n\tSignals delivered: 0\n\tPage size (bytes): 4096\n\tExit status: 0\n"
+    },
+    {
+      "variant": "baseline",
+      "threads": 1,
+      "warmup": false,
+      "global_route_wall_s": 2.073207,
+      "global_route_user_s": 2.01,
+      "global_route_sys_s": 0.07,
+      "guide_sha256": "c5ab71af58d920660e8c63379472efc183ba8349f3f7ca5778a8eaa065596b2a",
+      "odb_sha256": "bbf4b338fcc5c611d3914cd0b791c7e1255760f3464246fcf4e0ab94923bfc43",
+      "wirelength_um": 655594,
+      "vias": 152307,
+      "resource": "\tCommand being timed: \"/workspace/grt/binaries/baseline -no_init -exit /workspace/grt/route-v5.tcl\"\n\tUser time (seconds): 2.21\n\tSystem time (seconds): 0.13\n\tPercent of CPU this job got: 99%\n\tElapsed (wall clock) time (h:mm:ss or m:ss): 0:02.36\n\tAverage shared text size (kbytes): 0\n\tAverage unshared data size (kbytes): 0\n\tAverage stack size (kbytes): 0\n\tAverage total size (kbytes): 0\n\tMaximum resident set size (kbytes): 298044\n\tAverage resident set size (kbytes): 0\n\tMajor (requiring I/O) page faults: 0\n\tMinor (reclaiming a frame) page faults: 65092\n\tVoluntary context switches: 25\n\tInvoluntary context switches: 3\n\tSwaps: 0\n\tFile system inputs: 0\n\tFile system outputs: 45296\n\tSocket messages sent: 0\n\tSocket messages received: 0\n\tSignals delivered: 0\n\tPage size (bytes): 4096\n\tExit status: 0\n"
+    },
+    {
+      "variant": "baseline",
+      "threads": 8,
+      "warmup": true,
+      "global_route_wall_s": 2.110528,
+      "global_route_user_s": 2.04,
+      "global_route_sys_s": 0.08,
+      "guide_sha256": "c5ab71af58d920660e8c63379472efc183ba8349f3f7ca5778a8eaa065596b2a",
+      "odb_sha256": "bbf4b338fcc5c611d3914cd0b791c7e1255760f3464246fcf4e0ab94923bfc43",
+      "wirelength_um": 655594,
+      "vias": 152307,
+      "resource": "\tCommand being timed: \"/workspace/grt/binaries/baseline -no_init -exit /workspace/grt/route-v5.tcl\"\n\tUser time (seconds): 2.26\n\tSystem time (seconds): 0.14\n\tPercent of CPU this job got: 100%\n\tElapsed (wall clock) time (h:mm:ss or m:ss): 0:02.40\n\tAverage shared text size (kbytes): 0\n\tAverage unshared data size (kbytes): 0\n\tAverage stack size (kbytes): 0\n\tAverage total size (kbytes): 0\n\tMaximum resident set size (kbytes): 297984\n\tAverage resident set size (kbytes): 0\n\tMajor (requiring I/O) page faults: 0\n\tMinor (reclaiming a frame) page faults: 65061\n\tVoluntary context switches: 93\n\tInvoluntary context switches: 5\n\tSwaps: 0\n\tFile system inputs: 0\n\tFile system outputs: 45296\n\tSocket messages sent: 0\n\tSocket messages received: 0\n\tSignals delivered: 0\n\tPage size (bytes): 4096\n\tExit status: 0\n"
+    },
+    {
+      "variant": "candidate",
+      "threads": 8,
+      "warmup": true,
+      "global_route_wall_s": 2.096741,
+      "global_route_user_s": 2.04,
+      "global_route_sys_s": 0.05,
+      "guide_sha256": "c5ab71af58d920660e8c63379472efc183ba8349f3f7ca5778a8eaa065596b2a",
+      "odb_sha256": "bbf4b338fcc5c611d3914cd0b791c7e1255760f3464246fcf4e0ab94923bfc43",
+      "wirelength_um": 655594,
+      "vias": 152307,
+      "resource": "\tCommand being timed: \"/workspace/grt/binaries/candidate -no_init -exit /workspace/grt/route-v5.tcl\"\n\tUser time (seconds): 2.26\n\tSystem time (seconds): 0.12\n\tPercent of CPU this job got: 99%\n\tElapsed (wall clock) time (h:mm:ss or m:ss): 0:02.39\n\tAverage shared text size (kbytes): 0\n\tAverage unshared data size (kbytes): 0\n\tAverage stack size (kbytes): 0\n\tAverage total size (kbytes): 0\n\tMaximum resident set size (kbytes): 229736\n\tAverage resident set size (kbytes): 0\n\tMajor (requiring I/O) page faults: 0\n\tMinor (reclaiming a frame) page faults: 48026\n\tVoluntary context switches: 93\n\tInvoluntary context switches: 4\n\tSwaps: 0\n\tFile system inputs: 0\n\tFile system outputs: 45296\n\tSocket messages sent: 0\n\tSocket messages received: 0\n\tSignals delivered: 0\n\tPage size (bytes): 4096\n\tExit status: 0\n"
+    },
+    {
+      "variant": "baseline",
+      "threads": 8,
+      "warmup": false,
+      "global_route_wall_s": 2.140822,
+      "global_route_user_s": 2.05,
+      "global_route_sys_s": 0.09,
+      "guide_sha256": "c5ab71af58d920660e8c63379472efc183ba8349f3f7ca5778a8eaa065596b2a",
+      "odb_sha256": "bbf4b338fcc5c611d3914cd0b791c7e1255760f3464246fcf4e0ab94923bfc43",
+      "wirelength_um": 655594,
+      "vias": 152307,
+      "resource": "\tCommand being timed: \"/workspace/grt/binaries/baseline -no_init -exit /workspace/grt/route-v5.tcl\"\n\tUser time (seconds): 2.25\n\tSystem time (seconds): 0.17\n\tPercent of CPU this job got: 100%\n\tElapsed (wall clock) time (h:mm:ss or m:ss): 0:02.43\n\tAverage shared text size (kbytes): 0\n\tAverage unshared data size (kbytes): 0\n\tAverage stack size (kbytes): 0\n\tAverage total size (kbytes): 0\n\tMaximum resident set size (kbytes): 298168\n\tAverage resident set size (kbytes): 0\n\tMajor (requiring I/O) page faults: 0\n\tMinor (reclaiming a frame) page faults: 65106\n\tVoluntary context switches: 103\n\tInvoluntary context switches: 3\n\tSwaps: 0\n\tFile system inputs: 0\n\tFile system outputs: 45296\n\tSocket messages sent: 0\n\tSocket messages received: 0\n\tSignals delivered: 0\n\tPage size (bytes): 4096\n\tExit status: 0\n"
+    },
+    {
+      "variant": "candidate",
+      "threads": 8,
+      "warmup": false,
+      "global_route_wall_s": 2.069382,
+      "global_route_user_s": 2.03,
+      "global_route_sys_s": 0.04,
+      "guide_sha256": "c5ab71af58d920660e8c63379472efc183ba8349f3f7ca5778a8eaa065596b2a",
+      "odb_sha256": "bbf4b338fcc5c611d3914cd0b791c7e1255760f3464246fcf4e0ab94923bfc43",
+      "wirelength_um": 655594,
+      "vias": 152307,
+      "resource": "\tCommand being timed: \"/workspace/grt/binaries/candidate -no_init -exit /workspace/grt/route-v5.tcl\"\n\tUser time (seconds): 2.23\n\tSystem time (seconds): 0.12\n\tPercent of CPU this job got: 100%\n\tElapsed (wall clock) time (h:mm:ss or m:ss): 0:02.36\n\tAverage shared text size (kbytes): 0\n\tAverage unshared data size (kbytes): 0\n\tAverage stack size (kbytes): 0\n\tAverage total size (kbytes): 0\n\tMaximum resident set size (kbytes): 229352\n\tAverage resident set size (kbytes): 0\n\tMajor (requiring I/O) page faults: 0\n\tMinor (reclaiming a frame) page faults: 47931\n\tVoluntary context switches: 100\n\tInvoluntary context switches: 4\n\tSwaps: 0\n\tFile system inputs: 0\n\tFile system outputs: 45296\n\tSocket messages sent: 0\n\tSocket messages received: 0\n\tSignals delivered: 0\n\tPage size (bytes): 4096\n\tExit status: 0\n"
+    },
+    {
+      "variant": "candidate",
+      "threads": 8,
+      "warmup": false,
+      "global_route_wall_s": 2.109005,
+      "global_route_user_s": 2.07,
+      "global_route_sys_s": 0.05,
+      "guide_sha256": "c5ab71af58d920660e8c63379472efc183ba8349f3f7ca5778a8eaa065596b2a",
+      "odb_sha256": "bbf4b338fcc5c611d3914cd0b791c7e1255760f3464246fcf4e0ab94923bfc43",
+      "wirelength_um": 655594,
+      "vias": 152307,
+      "resource": "\tCommand being timed: \"/workspace/grt/binaries/candidate -no_init -exit /workspace/grt/route-v5.tcl\"\n\tUser time (seconds): 2.29\n\tSystem time (seconds): 0.10\n\tPercent of CPU this job got: 100%\n\tElapsed (wall clock) time (h:mm:ss or m:ss): 0:02.39\n\tAverage shared text size (kbytes): 0\n\tAverage unshared data size (kbytes): 0\n\tAverage stack size (kbytes): 0\n\tAverage total size (kbytes): 0\n\tMaximum resident set size (kbytes): 229724\n\tAverage resident set size (kbytes): 0\n\tMajor (requiring I/O) page faults: 0\n\tMinor (reclaiming a frame) page faults: 48012\n\tVoluntary context switches: 100\n\tInvoluntary context switches: 5\n\tSwaps: 0\n\tFile system inputs: 0\n\tFile system outputs: 45296\n\tSocket messages sent: 0\n\tSocket messages received: 0\n\tSignals delivered: 0\n\tPage size (bytes): 4096\n\tExit status: 0\n"
+    },
+    {
+      "variant": "baseline",
+      "threads": 8,
+      "warmup": false,
+      "global_route_wall_s": 2.24954,
+      "global_route_user_s": 2.03,
+      "global_route_sys_s": 0.23,
+      "guide_sha256": "c5ab71af58d920660e8c63379472efc183ba8349f3f7ca5778a8eaa065596b2a",
+      "odb_sha256": "bbf4b338fcc5c611d3914cd0b791c7e1255760f3464246fcf4e0ab94923bfc43",
+      "wirelength_um": 655594,
+      "vias": 152307,
+      "resource": "\tCommand being timed: \"/workspace/grt/binaries/baseline -no_init -exit /workspace/grt/route-v5.tcl\"\n\tUser time (seconds): 2.21\n\tSystem time (seconds): 0.33\n\tPercent of CPU this job got: 100%\n\tElapsed (wall clock) time (h:mm:ss or m:ss): 0:02.54\n\tAverage shared text size (kbytes): 0\n\tAverage unshared data size (kbytes): 0\n\tAverage stack size (kbytes): 0\n\tAverage total size (kbytes): 0\n\tMaximum resident set size (kbytes): 298264\n\tAverage resident set size (kbytes): 0\n\tMajor (requiring I/O) page faults: 0\n\tMinor (reclaiming a frame) page faults: 65144\n\tVoluntary context switches: 100\n\tInvoluntary context switches: 5\n\tSwaps: 0\n\tFile system inputs: 0\n\tFile system outputs: 45296\n\tSocket messages sent: 0\n\tSocket messages received: 0\n\tSignals delivered: 0\n\tPage size (bytes): 4096\n\tExit status: 0\n"
+    },
+    {
+      "variant": "baseline",
+      "threads": 8,
+      "warmup": false,
+      "global_route_wall_s": 2.021317,
+      "global_route_user_s": 1.97,
+      "global_route_sys_s": 0.06,
+      "guide_sha256": "c5ab71af58d920660e8c63379472efc183ba8349f3f7ca5778a8eaa065596b2a",
+      "odb_sha256": "bbf4b338fcc5c611d3914cd0b791c7e1255760f3464246fcf4e0ab94923bfc43",
+      "wirelength_um": 655594,
+      "vias": 152307,
+      "resource": "\tCommand being timed: \"/workspace/grt/binaries/baseline -no_init -exit /workspace/grt/route-v5.tcl\"\n\tUser time (seconds): 2.17\n\tSystem time (seconds): 0.14\n\tPercent of CPU this job got: 100%\n\tElapsed (wall clock) time (h:mm:ss or m:ss): 0:02.31\n\tAverage shared text size (kbytes): 0\n\tAverage unshared data size (kbytes): 0\n\tAverage stack size (kbytes): 0\n\tAverage total size (kbytes): 0\n\tMaximum resident set size (kbytes): 298488\n\tAverage resident set size (kbytes): 0\n\tMajor (requiring I/O) page faults: 0\n\tMinor (reclaiming a frame) page faults: 65184\n\tVoluntary context switches: 102\n\tInvoluntary context switches: 5\n\tSwaps: 0\n\tFile system inputs: 0\n\tFile system outputs: 45296\n\tSocket messages sent: 0\n\tSocket messages received: 0\n\tSignals delivered: 0\n\tPage size (bytes): 4096\n\tExit status: 0\n"
+    },
+    {
+      "variant": "candidate",
+      "threads": 8,
+      "warmup": false,
+      "global_route_wall_s": 2.100123,
+      "global_route_user_s": 2.05,
+      "global_route_sys_s": 0.05,
+      "guide_sha256": "c5ab71af58d920660e8c63379472efc183ba8349f3f7ca5778a8eaa065596b2a",
+      "odb_sha256": "bbf4b338fcc5c611d3914cd0b791c7e1255760f3464246fcf4e0ab94923bfc43",
+      "wirelength_um": 655594,
+      "vias": 152307,
+      "resource": "\tCommand being timed: \"/workspace/grt/binaries/candidate -no_init -exit /workspace/grt/route-v5.tcl\"\n\tUser time (seconds): 2.24\n\tSystem time (seconds): 0.11\n\tPercent of CPU this job got: 99%\n\tElapsed (wall clock) time (h:mm:ss or m:ss): 0:02.36\n\tAverage shared text size (kbytes): 0\n\tAverage unshared data size (kbytes): 0\n\tAverage stack size (kbytes): 0\n\tAverage total size (kbytes): 0\n\tMaximum resident set size (kbytes): 230112\n\tAverage resident set size (kbytes): 0\n\tMajor (requiring I/O) page faults: 0\n\tMinor (reclaiming a frame) page faults: 48082\n\tVoluntary context switches: 100\n\tInvoluntary context switches: 5\n\tSwaps: 0\n\tFile system inputs: 0\n\tFile system outputs: 45296\n\tSocket messages sent: 0\n\tSocket messages received: 0\n\tSignals delivered: 0\n\tPage size (bytes): 4096\n\tExit status: 0\n"
+    },
+    {
+      "variant": "candidate",
+      "threads": 8,
+      "warmup": false,
+      "global_route_wall_s": 2.089709,
+      "global_route_user_s": 2.05,
+      "global_route_sys_s": 0.04,
+      "guide_sha256": "c5ab71af58d920660e8c63379472efc183ba8349f3f7ca5778a8eaa065596b2a",
+      "odb_sha256": "bbf4b338fcc5c611d3914cd0b791c7e1255760f3464246fcf4e0ab94923bfc43",
+      "wirelength_um": 655594,
+      "vias": 152307,
+      "resource": "\tCommand being timed: \"/workspace/grt/binaries/candidate -no_init -exit /workspace/grt/route-v5.tcl\"\n\tUser time (seconds): 2.27\n\tSystem time (seconds): 0.08\n\tPercent of CPU this job got: 100%\n\tElapsed (wall clock) time (h:mm:ss or m:ss): 0:02.35\n\tAverage shared text size (kbytes): 0\n\tAverage unshared data size (kbytes): 0\n\tAverage stack size (kbytes): 0\n\tAverage total size (kbytes): 0\n\tMaximum resident set size (kbytes): 229792\n\tAverage resident set size (kbytes): 0\n\tMajor (requiring I/O) page faults: 0\n\tMinor (reclaiming a frame) page faults: 48039\n\tVoluntary context switches: 101\n\tInvoluntary context switches: 4\n\tSwaps: 0\n\tFile system inputs: 0\n\tFile system outputs: 45296\n\tSocket messages sent: 0\n\tSocket messages received: 0\n\tSignals delivered: 0\n\tPage size (bytes): 4096\n\tExit status: 0\n"
+    },
+    {
+      "variant": "baseline",
+      "threads": 8,
+      "warmup": false,
+      "global_route_wall_s": 2.107381,
+      "global_route_user_s": 1.99,
+      "global_route_sys_s": 0.13,
+      "guide_sha256": "c5ab71af58d920660e8c63379472efc183ba8349f3f7ca5778a8eaa065596b2a",
+      "odb_sha256": "bbf4b338fcc5c611d3914cd0b791c7e1255760f3464246fcf4e0ab94923bfc43",
+      "wirelength_um": 655594,
+      "vias": 152307,
+      "resource": "\tCommand being timed: \"/workspace/grt/binaries/baseline -no_init -exit /workspace/grt/route-v5.tcl\"\n\tUser time (seconds): 2.18\n\tSystem time (seconds): 0.22\n\tPercent of CPU this job got: 99%\n\tElapsed (wall clock) time (h:mm:ss or m:ss): 0:02.40\n\tAverage shared text size (kbytes): 0\n\tAverage unshared data size (kbytes): 0\n\tAverage stack size (kbytes): 0\n\tAverage total size (kbytes): 0\n\tMaximum resident set size (kbytes): 298336\n\tAverage resident set size (kbytes): 0\n\tMajor (requiring I/O) page faults: 0\n\tMinor (reclaiming a frame) page faults: 65164\n\tVoluntary context switches: 99\n\tInvoluntary context switches: 9\n\tSwaps: 0\n\tFile system inputs: 0\n\tFile system outputs: 45296\n\tSocket messages sent: 0\n\tSocket messages received: 0\n\tSignals delivered: 0\n\tPage size (bytes): 4096\n\tExit status: 0\n"
+    }
+  ],
+  "regressions": [
+    {
+      "case": "gcd",
+      "results": {
+        "baseline": {
+          "exit_code": 0,
+          "valid": true,
+          "outputs": {
+            "gcd-tcl.guide": "a98a9273194c5af8f0f5f0fcb5d9a234cf7078f16c6749c88fd627c21594207f"
+          },
+          "output_count": 1,
+          "validation_mode": "native_checks_and_output_hashes"
+        },
+        "candidate": {
+          "exit_code": 0,
+          "valid": true,
+          "outputs": {
+            "gcd-tcl.guide": "a98a9273194c5af8f0f5f0fcb5d9a234cf7078f16c6749c88fd627c21594207f"
+          },
+          "output_count": 1,
+          "validation_mode": "native_checks_and_output_hashes"
+        }
+      },
+      "outputs_identical": true
+    },
+    {
+      "case": "colocated_pins",
+      "results": {
+        "baseline": {
+          "exit_code": 0,
+          "valid": true,
+          "outputs": {
+            "colocated_pins-tcl.guide": "219df5fa4f710515c74eea3d159c5478bfe2668af8ec67f4773e54f2a99ec4a6"
+          },
+          "output_count": 1,
+          "validation_mode": "native_checks_and_output_hashes"
+        },
+        "candidate": {
+          "exit_code": 0,
+          "valid": true,
+          "outputs": {
+            "colocated_pins-tcl.guide": "219df5fa4f710515c74eea3d159c5478bfe2668af8ec67f4773e54f2a99ec4a6"
+          },
+          "output_count": 1,
+          "validation_mode": "native_checks_and_output_hashes"
+        }
+      },
+      "outputs_identical": true
+    },
+    {
+      "case": "overlapping_edges",
+      "results": {
+        "baseline": {
+          "exit_code": 0,
+          "valid": true,
+          "outputs": {
+            "overlapping_edges-tcl.guide": "fdfcc76892714ef5a6c5cc35ab137e512375059f8c15bae35ac1d63c620dd3f3"
+          },
+          "output_count": 1,
+          "validation_mode": "native_checks_and_output_hashes"
+        },
+        "candidate": {
+          "exit_code": 0,
+          "valid": true,
+          "outputs": {
+            "overlapping_edges-tcl.guide": "fdfcc76892714ef5a6c5cc35ab137e512375059f8c15bae35ac1d63c620dd3f3"
+          },
+          "output_count": 1,
+          "validation_mode": "native_checks_and_output_hashes"
+        }
+      },
+      "outputs_identical": true
+    },
+    {
+      "case": "resistance_aware_asap7_fr",
+      "results": {
+        "baseline": {
+          "exit_code": 0,
+          "valid": true,
+          "outputs": {
+            "resistance_aware_asap7_fr-tcl.guide": "f55e1f5a48f6ec90c7209a7cf46141d8743ed41397737be9cc10700aaf06a9b8"
+          },
+          "output_count": 1,
+          "validation_mode": "native_checks_and_output_hashes"
+        },
+        "candidate": {
+          "exit_code": 0,
+          "valid": true,
+          "outputs": {
+            "resistance_aware_asap7_fr-tcl.guide": "f55e1f5a48f6ec90c7209a7cf46141d8743ed41397737be9cc10700aaf06a9b8"
+          },
+          "output_count": 1,
+          "validation_mode": "native_checks_and_output_hashes"
+        }
+      },
+      "outputs_identical": true
+    },
+    {
+      "case": "resistance_aware_asap7_fr_threads",
+      "results": {
+        "baseline": {
+          "exit_code": 0,
+          "valid": true,
+          "outputs": {
+            "resistance_aware_threads_1-tcl.guide": "f55e1f5a48f6ec90c7209a7cf46141d8743ed41397737be9cc10700aaf06a9b8",
+            "resistance_aware_threads_4-tcl.guide": "f55e1f5a48f6ec90c7209a7cf46141d8743ed41397737be9cc10700aaf06a9b8"
+          },
+          "output_count": 2,
+          "validation_mode": "native_checks_and_output_hashes"
+        },
+        "candidate": {
+          "exit_code": 0,
+          "valid": true,
+          "outputs": {
+            "resistance_aware_threads_1-tcl.guide": "f55e1f5a48f6ec90c7209a7cf46141d8743ed41397737be9cc10700aaf06a9b8",
+            "resistance_aware_threads_4-tcl.guide": "f55e1f5a48f6ec90c7209a7cf46141d8743ed41397737be9cc10700aaf06a9b8"
+          },
+          "output_count": 2,
+          "validation_mode": "native_checks_and_output_hashes"
+        }
+      },
+      "outputs_identical": true
+    },
+    {
+      "case": "incremental_from_odb",
+      "results": {
+        "baseline": {
+          "exit_code": 0,
+          "valid": true,
+          "outputs": {},
+          "output_count": 0,
+          "validation_mode": "exit_and_log_only"
+        },
+        "candidate": {
+          "exit_code": 0,
+          "valid": true,
+          "outputs": {},
+          "output_count": 0,
+          "validation_mode": "exit_and_log_only"
+        }
+      },
+      "outputs_identical": null
+    },
+    {
+      "case": "snapshot_batched_incremental_state",
+      "results": {
+        "baseline": {
+          "exit_code": 0,
+          "valid": true,
+          "outputs": {},
+          "output_count": 0,
+          "validation_mode": "native_assertions_and_log"
+        },
+        "candidate": {
+          "exit_code": 0,
+          "valid": true,
+          "outputs": {},
+          "output_count": 0,
+          "validation_mode": "native_assertions_and_log"
+        }
+      },
+      "outputs_identical": null
+    }
+  ],
+  "binary_sha256": {
+    "baseline": "bf95389f331b53e91cc3942d3c32a38aa2dcdfcaa57a6d520e43ca7e944a2edd",
+    "candidate": "dcf3a4bdbcea0fabaf6a905f03af2b913aeb73f74a5b5fa2cffa809936940226"
+  },
+  "input_sha256": {
+    "aes-placed.def": "596b5a0b5a5f56604b411c525dd61e18034fcccfc331c38267dde3ce24840b86",
+    "Nangate45.lef": "caa4e9b45e081f93720ce2c4d581497321ddc6fbcb1ffe1b384e324bbd5d43a7"
+  }
+}
