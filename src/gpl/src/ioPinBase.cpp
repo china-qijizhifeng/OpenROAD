@@ -124,7 +124,7 @@ void IoPinBase::refreshGPins()
 {
   gpins_.resize(bterms_.size());
   for (size_t i = 0; i < bterms_.size(); ++i) {
-    gpins_[i] = nbc_->dbToNb(bterms_[i]);
+    gpins_.set(i, nbc_->dbToNb(bterms_[i]));
   }
 }
 
@@ -281,14 +281,14 @@ FloatPoint IoPinBase::seed(const size_t io_index) const
     return project(io_index, bbox.xCenter(), bbox.yCenter());
   }
 
-  const GPin* own = gpins_[io_index];
-  const GNet* gnet = own != nullptr ? own->getGNet() : nullptr;
+  SoaRef<GPin> own = gpins_[io_index];
+  SoaRef<GNet> gnet = own != nullptr ? own->getGNet() : nullptr;
 
   int64_t sum_x = 0, sum_y = 0;
   int64_t cnt = 0;
   if (gnet != nullptr) {
-    for (GPin* gpin : gnet->getGPins()) {
-      const GCell* gc = gpin->getGCell();
+    for (SoaRef<GPin> gpin : gnet->getGPins()) {
+      SoaRef<GCell> gc = gpin->getGCell();
       if (gc != nullptr && gc->isInstance()) {
         sum_x += gc->cx();
         sum_y += gc->cy();
@@ -569,11 +569,11 @@ void IoPinBase::netBoxes(const size_t io_index,
                          std::vector<NetBox>& boxes) const
 {
   boxes.clear();
-  auto collect = [&](const GPin* self, const bool mirrored) {
+  auto collect = [&](SoaRef<GPin> self, const bool mirrored) {
     if (self == nullptr) {
       return;
     }
-    const GNet* net = self->getGNet();
+    SoaRef<GNet> net = self->getGNet();
     if (net == nullptr || net->isDontCare()) {
       return;
     }
@@ -583,7 +583,7 @@ void IoPinBase::netBoxes(const size_t io_index,
              std::numeric_limits<float>::lowest(),
              net->getTotalWeight(),
              mirrored};
-    for (const GPin* p : net->getGPins()) {
+    for (SoaRef<GPin> p : net->getGPins()) {
       if (p == self) {
         continue;
       }

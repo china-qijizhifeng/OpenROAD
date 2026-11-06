@@ -50,7 +50,7 @@ class CpuWirelengthGradientBackend : public WirelengthGradientBackend
         gCells, out, last_wl_coef_x_, last_wl_coef_y_);
   }
 
-  FloatPoint getCellGradient(const GCell* gCell) override
+  FloatPoint getCellGradient(SoaRef<GCell> gCell) override
   {
     return nbc_->getWireLengthGradientWA(
         gCell, last_wl_coef_x_, last_wl_coef_y_);

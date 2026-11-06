@@ -85,6 +85,9 @@ class InitialPlace
   Eigen::VectorXf instLocVecY_, fixedInstForceVecY_;
   SMatrix placeInstForceMatrixX_, placeInstForceMatrixY_;
 
+  size_t triplet_capacity_x_ = 0, triplet_capacity_y_ = 0;
+  size_t solve_pin_capacity_ = 0;
+
   void placeInstsInitialPositions();
   void setPlaceInstExtId();
   void updatePinInfo();

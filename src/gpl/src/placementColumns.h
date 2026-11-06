@@ -50,6 +50,7 @@ struct GCellColumns
     change,
     kind,
     locked,
+    gradientBegin,
   };
   using Store = SoaStorage<int,
                            int,
@@ -62,11 +63,12 @@ struct GCellColumns
                            float,
                            float,
                            float,
-                           std::vector<Instance*>,
-                           std::vector<GPin*>,
+                           SoaRows<Instance>,
+                           SoaRows<GPin>,
                            CellAreaChange,
                            CellKind,
-                           uint8_t>;
+                           uint8_t,
+                           uint32_t>;
 };
 // Stable row/optimizer-index maps, rebuilt only when the region topology
 // changes. They own no numerical copies or pointers into reallocatable columns.
@@ -100,24 +102,28 @@ struct GNetColumns
     nets,
     isDontCare,
   };
-  using Store = SoaStorage<int,
-                           int,
-                           int,
-                           int,
-                           float,
-                           float,
-                           float,
-                           float,
-                           float,
-                           float,
-                           float,
-                           float,
-                           float,
-                           float,
-                           float,
-                           std::vector<GPin*>,
-                           std::vector<Net*>,
-                           uint8_t>;
+  using Columns = SoaStorage<int,
+                             int,
+                             int,
+                             int,
+                             float,
+                             float,
+                             float,
+                             float,
+                             float,
+                             float,
+                             float,
+                             float,
+                             float,
+                             float,
+                             float,
+                             SoaRows<GPin>,
+                             SoaRows<Net>,
+                             uint8_t>;
+  struct Store : Columns
+  {
+    uint64_t weight_revision = 0;
+  };
 };
 struct GPinColumns
 {
@@ -140,6 +146,7 @@ struct GPinColumns
     pins,
     // WA intermediates are indexed in net CSR order; geometry keeps its row.
     waSlot,
+    gradientSlot,
   };
   using Store = SoaStorage<int,
                            int,
@@ -153,10 +160,11 @@ struct GPinColumns
                            uint8_t,
                            uint8_t,
                            uint8_t,
-                           GCell*,
-                           GNet*,
-                           std::vector<Pin*>,
-                           size_t>;
+                           SoaRef<GCell>,
+                           SoaRef<GNet>,
+                           SoaRows<Pin>,
+                           size_t,
+                           uint32_t>;
 };
 struct BinColumns
 {

@@ -461,7 +461,7 @@ void NesterovPlace::runTimingDriven(int iter,
     int nbc_total_gcells_before_td = nbc_->getGCells().size();
 
     for (auto& nb : nbVec_) {
-      for (const auto& cell : nb->getGCells()) {
+      for (auto cell : nb->getGCells()) {
         if (cell->isInstance()) {
           ++nb_gcells_before_td;
         }
@@ -515,7 +515,7 @@ void NesterovPlace::runTimingDriven(int iter,
         = nbc_->getNewGcellsCount() - nbc_->getDeletedGcellsCount();
     td_accumulated_delta_area += nbc_->getDeltaArea();
     for (auto& nb : nbVec_) {
-      for (const auto& cell : nb->getGCells()) {
+      for (auto cell : nb->getGCells()) {
         if (cell->isInstance()) {
           ++nb_gcells_after_td;
         }

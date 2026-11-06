@@ -26,7 +26,7 @@
 namespace gpl {
 namespace {
 
-int64_t cellArea(const GCell* cell)
+int64_t cellArea(SoaRef<GCell> cell)
 {
   return static_cast<int64_t>(cell->dx()) * cell->dy();
 }
@@ -236,7 +236,7 @@ class CongestionBuffersTest : public tst::IntegratedFixture
     return inst;
   }
 
-  GCell* cellFor(odb::dbInst* inst)
+  SoaRef<GCell> cellFor(odb::dbInst* inst)
   {
     for (const auto& nb : nb_vec_) {
       for (const auto& handle : nb->getGCells()) {
@@ -298,7 +298,7 @@ class CongestionBuffersTest : public tst::IntegratedFixture
 
 TEST_F(CongestionBuffersTest, RefreshesRudyAndPreservesExistingInflation)
 {
-  GCell* existing = nbc_->getGCells().front();
+  SoaRef<GCell> existing = nbc_->getGCells().front();
   existing->setSize(existing->dx() + 400,
                     existing->dy() + 400,
                     GCell::GCellChange::kRoutability);
@@ -455,7 +455,7 @@ TEST_F(CongestionBuffersTest, OddDimensionsHaveExactNonshrinkingAreaAccounting)
 {
   addDemand();
   auto* buffer = insertBuffer("odd_geometry");
-  GCell* cell = cellFor(buffer);
+  SoaRef<GCell> cell = cellFor(buffer);
   cell->setAllLocations(cell->lx(), cell->ly(), cell->ux() + 1, cell->uy() + 1);
   const int width = cell->dx();
   const int height = cell->dy();
@@ -719,7 +719,7 @@ TEST_F(CongestionBuffersTest, NoFillerAreaDoesNotBuyInflationWithDensity)
 
 TEST_F(MovableMacroBuffersTest, LiveMacroChargeUsesCurrentTargetDensity)
 {
-  GCell* macro = cellFor(macro_);
+  SoaRef<GCell> macro = cellFor(macro_);
   ASSERT_NE(macro, nullptr);
   EXPECT_EQ(liveInflationArea(), 0);
   const int64_t base_area = cellArea(macro);

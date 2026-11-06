@@ -2,7 +2,6 @@
 // Copyright (c) 2026, The OpenROAD Authors
 
 #pragma once
-
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -13,6 +12,7 @@
 
 #include "odb/geom.h"
 #include "point.h"
+#include "soaStorage.h"
 
 namespace odb {
 class dbBTerm;
@@ -63,7 +63,7 @@ class IoPinBase
   // For debug (global_placement_debug -pin).
   size_t size() const { return bterms_.size(); }
   odb::dbBTerm* getBTerm(size_t io_index) const { return bterms_[io_index]; }
-  GPin* getGPin(size_t io_index) const { return gpins_[io_index]; }
+  SoaRef<GPin> getGPin(size_t io_index) const { return gpins_[io_index]; }
   std::optional<size_t> findPin(const odb::dbBTerm* bterm) const;
   odb::Rect pinRect(size_t io_index) const;
   // Where the pin jumps next, before the spacing.
@@ -178,7 +178,7 @@ class IoPinBase
   // Pins
   std::vector<odb::dbBTerm*> bterms_;
   // Null for a port without a GPin.
-  std::vector<GPin*> gpins_;
+  SoaRows<GPin> gpins_;
   std::vector<odb::Point> pin_size_;
 
   // Positions at the Nesterov iterates

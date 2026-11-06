@@ -4,6 +4,7 @@
 #include "initialPlace.h"
 
 #include <algorithm>
+#include <array>
 #include <climits>
 #include <cmath>
 #include <cstddef>
@@ -134,7 +135,7 @@ void InitialPlace::placeInstsInitialPositions()
   int count_db_location = 0;
   int count_core_center = 0;
 
-  for (auto& inst : pbc_->placeInsts()) {
+  for (auto inst : pbc_->placeInsts()) {
     if (inst->isLocked()) {
       continue;
     }
@@ -183,18 +184,18 @@ void InitialPlace::placeInstsInitialPositions()
 void InitialPlace::setPlaceInstExtId()
 {
   // reset ExtId for all instances
-  for (auto& inst : pbc_->getInsts()) {
+  for (auto inst : pbc_->getInsts()) {
     inst->setExtId(INT_MAX);
   }
   // set index only with place-able instances
-  for (auto& inst : pbc_->placeInsts()) {
-    inst->setExtId(&inst - pbc_->placeInsts().data());
+  for (size_t i = 0; i < pbc_->placeInsts().size(); ++i) {
+    pbc_->placeInsts()[i]->setExtId(i);
   }
 }
 
 // Only movable IO port pins are excluded from the initial B2B solve;
 // fixed ports (LOCKED/FIRM/COVER) keep anchoring cells here.
-static bool isMovableIoPin(const Pin* pin, bool place_ios_mode)
+static bool isMovableIoPin(SoaRef<Pin> pin, bool place_ios_mode)
 {
   return place_ios_mode && pin->isBTerm()
          && !pin->getDbBTerm()->getFirstPinPlacementStatus().isFixed();
@@ -202,60 +203,71 @@ static bool isMovableIoPin(const Pin* pin, bool place_ios_mode)
 
 void InitialPlace::updatePinInfo()
 {
-  // reset all MinMax attributes
-  for (auto& pin : pbc_->getPins()) {
-    pin->unsetMinPinX();
-    pin->unsetMinPinY();
-    pin->unsetMaxPinX();
-    pin->unsetMaxPinY();
-  }
-
-  for (auto& net : pbc_->getNets()) {
-    Pin *pinMinX = nullptr, *pinMinY = nullptr;
-    Pin *pinMaxX = nullptr, *pinMaxY = nullptr;
-    int lx = INT_MAX, ly = INT_MAX;
-    int ux = INT_MIN, uy = INT_MIN;
-
-    // Mark B2B info on Pin structures
-    for (auto& pin : net->getPins()) {
-      if (isMovableIoPin(pin, ipVars_.placeIosMode)) {
+  auto& pins = *pbc_->pinColumns();
+  auto& min_x = pins.column<PinColumns::minPinXField>();
+  auto& min_y = pins.column<PinColumns::minPinYField>();
+  auto& max_x = pins.column<PinColumns::maxPinXField>();
+  auto& max_y = pins.column<PinColumns::maxPinYField>();
+  std::fill(min_x.begin(), min_x.end(), 0);
+  std::fill(min_y.begin(), min_y.end(), 0);
+  std::fill(max_x.begin(), max_x.end(), 0);
+  std::fill(max_y.begin(), max_y.end(), 0);
+  const auto& x = pins.column<PinColumns::cx>();
+  const auto& y = pins.column<PinColumns::cy>();
+  const size_t none = x.size();
+  triplet_capacity_x_ = triplet_capacity_y_ = pbc_->placeInsts().size();
+  solve_pin_capacity_ = 0;
+  for (const auto net : pbc_->getNets()) {
+    size_t xmin = none, xmax = none, ymin = none, ymax = none, count = 0;
+    int lx = INT_MAX, ly = INT_MAX, ux = INT_MIN, uy = INT_MIN;
+    const auto& adjacency = net->getPins();
+    for (size_t row : adjacency.rows()) {
+      if (isMovableIoPin({adjacency.storage(), row}, ipVars_.placeIosMode)) {
         continue;
       }
-      if (lx > pin->cx()) {
-        if (pinMinX) {
-          pinMinX->unsetMinPinX();
-        }
-        lx = pin->cx();
-        pinMinX = pin;
-        pinMinX->setMinPinX();
+      ++count;
+      // Strict comparisons keep the first pin on equal coordinates.
+      if (lx > x[row]) {
+        lx = x[row];
+        xmin = row;
       }
-
-      if (ux < pin->cx()) {
-        if (pinMaxX) {
-          pinMaxX->unsetMaxPinX();
-        }
-        ux = pin->cx();
-        pinMaxX = pin;
-        pinMaxX->setMaxPinX();
+      if (ux < x[row]) {
+        ux = x[row];
+        xmax = row;
       }
-
-      if (ly > pin->cy()) {
-        if (pinMinY) {
-          pinMinY->unsetMinPinY();
-        }
-        ly = pin->cy();
-        pinMinY = pin;
-        pinMinY->setMinPinY();
+      if (ly > y[row]) {
+        ly = y[row];
+        ymin = row;
       }
-
-      if (uy < pin->cy()) {
-        if (pinMaxY) {
-          pinMaxY->unsetMaxPinY();
-        }
-        uy = pin->cy();
-        pinMaxY = pin;
-        pinMaxY->setMaxPinY();
+      if (uy < y[row]) {
+        uy = y[row];
+        ymax = row;
       }
+    }
+    if (xmin != none) {
+      min_x[xmin] = 1;
+    }
+    if (xmax != none) {
+      max_x[xmax] = 1;
+    }
+    if (ymin != none) {
+      min_y[ymin] = 1;
+    }
+    if (ymax != none) {
+      max_y[ymax] = 1;
+    }
+    if (count > 1 && adjacency.size() < ipVars_.maxFanout) {
+      solve_pin_capacity_ = std::max(solve_pin_capacity_, count);
+      // Each B2B pair contributes at most four triplets. Fixed and same-inst
+      // pairs contribute fewer; this bound avoids growth without an O(n^2)
+      // pass.
+      auto bound = [count, none](size_t first, size_t last) {
+        const size_t extrema
+            = (first != none) + (last != none && last != first);
+        return 4 * (extrema * (count - extrema) + extrema * (extrema - 1) / 2);
+      };
+      triplet_capacity_x_ += bound(xmin, xmax);
+      triplet_capacity_y_ += bound(ymin, ymax);
     }
   }
 }
@@ -284,11 +296,11 @@ void InitialPlace::createSparseMatrix()
   //
 
   std::vector<T> listX, listY;
-  listX.reserve(1000000);
-  listY.reserve(1000000);
+  listX.reserve(triplet_capacity_x_);
+  listY.reserve(triplet_capacity_y_);
 
   // initialize vector
-  for (auto& inst : pbc_->placeInsts()) {
+  for (auto inst : pbc_->placeInsts()) {
     int idx = inst->getExtId();
 
     instLocVecX_(idx) = inst->cx();
@@ -304,9 +316,18 @@ void InitialPlace::createSparseMatrix()
     }
   }
 
-  std::vector<Pin*> solve_pins;
+  struct SolvePin
+  {
+    SoaRef<Instance> instance;
+    int x, y, inst_x, inst_y, index;
+    bool movable, locked, min_x, max_x, min_y, max_y;
+  };
+  std::vector<SolvePin> solve_pins;
+  solve_pins.reserve(solve_pin_capacity_);
+  const auto& pins = *pbc_->pinColumns();
+  const auto& instances = *pbc_->instanceColumns();
   // for each net
-  for (auto& net : pbc_->getNets()) {
+  for (auto net : pbc_->getNets()) {
     // skip for small nets.
     if (net->getPins().size() <= 1) {
       continue;
@@ -320,25 +341,65 @@ void InitialPlace::createSparseMatrix()
 
     float netWeight = ipVars_.netWeightScale / (net->getPins().size() - 1);
     solve_pins.clear();
-    for (Pin* pin : net->getPins()) {
+    for (SoaRef<Pin> pin : net->getPins()) {
       if (!isMovableIoPin(pin, ipVars_.placeIosMode)) {
-        solve_pins.push_back(pin);
+        const size_t row = pin.row();
+        const auto instance = pins.at<PinColumns::inst>(row);
+        const size_t ir = instance ? instance.row() : 0;
+        const int inst_x = instance ? (instances.at<InstanceColumns::lx>(ir)
+                                       + instances.at<InstanceColumns::ux>(ir))
+                                          / 2
+                                    : 0;
+        const int inst_y = instance ? (instances.at<InstanceColumns::ly>(ir)
+                                       + instances.at<InstanceColumns::uy>(ir))
+                                          / 2
+                                    : 0;
+        solve_pins.push_back(
+            {instance,
+             pins.at<PinColumns::cx>(row),
+             pins.at<PinColumns::cy>(row),
+             inst_x,
+             inst_y,
+             instance ? instances.at<InstanceColumns::extId>(ir) : INT_MAX,
+             pin->isPlaceInstConnected(),
+             instance && instance->isLocked(),
+             bool(pins.at<PinColumns::minPinXField>(row)),
+             bool(pins.at<PinColumns::maxPinXField>(row)),
+             bool(pins.at<PinColumns::minPinYField>(row)),
+             bool(pins.at<PinColumns::maxPinYField>(row))});
       }
     }
-    // foreach two pins in single nets.
+    // Only pairs touching an x/y extreme can contribute B2B terms. Keep the
+    // original lexicographic pin-pair order while skipping all other pairs.
+    std::array<int, 4> extrema;
+    size_t extreme_count = 0;
+    for (size_t i = 0; i < solve_pins.size(); ++i) {
+      const auto& pin = solve_pins[i];
+      if (pin.min_x || pin.max_x || pin.min_y || pin.max_y) {
+        extrema[extreme_count++] = i;
+      }
+    }
     for (int pinIdx1 = 1; pinIdx1 < solve_pins.size(); ++pinIdx1) {
-      Pin* pin1 = solve_pins[pinIdx1];
-      for (int pinIdx2 = 0; pinIdx2 < pinIdx1; ++pinIdx2) {
-        Pin* pin2 = solve_pins[pinIdx2];
+      const auto& pin1 = solve_pins[pinIdx1];
+      const bool all_predecessors
+          = pin1.min_x || pin1.max_x || pin1.min_y || pin1.max_y;
+      const size_t pair_count
+          = all_predecessors
+                ? pinIdx1
+                : std::lower_bound(
+                      extrema.begin(), extrema.begin() + extreme_count, pinIdx1)
+                      - extrema.begin();
+      for (size_t pair = 0; pair < pair_count; ++pair) {
+        const int pinIdx2 = all_predecessors ? pair : extrema[pair];
+        const auto& pin2 = solve_pins[pinIdx2];
         // no need to fill in when instance is same
-        if (pin1->getInstance() == pin2->getInstance()) {
+        if (pin1.instance == pin2.instance) {
           continue;
         }
 
         // B2B modeling on min/maxX pins.
-        if (pin1->isMinPinX() || pin1->isMaxPinX() || pin2->isMinPinX()
-            || pin2->isMaxPinX()) {
-          int diffX = abs(pin1->cx() - pin2->cx());
+        if (pin1.min_x || pin1.max_x || pin2.min_x || pin2.max_x) {
+          int diffX = abs(pin1.x - pin2.x);
           float weightX = 0;
           if (diffX > ipVars_.minDiffLength) {
             weightX = netWeight / diffX;
@@ -347,13 +408,11 @@ void InitialPlace::createSparseMatrix()
           }
 
           // both pin cames from instance
-          if (pin1->isPlaceInstConnected() && pin2->isPlaceInstConnected()) {
-            Instance* instance1 = pin1->getInstance();
-            Instance* instance2 = pin2->getInstance();
-            const int inst1 = instance1->getExtId();
-            const int inst2 = instance2->getExtId();
-            const bool locked1 = instance1->isLocked();
-            const bool locked2 = instance2->isLocked();
+          if (pin1.movable && pin2.movable) {
+            const int inst1 = pin1.index;
+            const int inst2 = pin2.index;
+            const bool locked1 = pin1.locked;
+            const bool locked2 = pin2.locked;
 
             if (!locked1 && !locked2) {
               // Both movable: standard B2B matrix terms
@@ -364,51 +423,44 @@ void InitialPlace::createSparseMatrix()
 
               fixedInstForceVecX_(inst1)
                   += -weightX
-                     * ((pin1->cx() - instance1->cx())
-                        - (pin2->cx() - instance2->cx()));
+                     * ((pin1.x - pin1.inst_x) - (pin2.x - pin2.inst_x));
               fixedInstForceVecX_(inst2)
                   += -weightX
-                     * ((pin2->cx() - instance2->cx())
-                        - (pin1->cx() - instance1->cx()));
+                     * ((pin2.x - pin2.inst_x) - (pin1.x - pin1.inst_x));
             } else if (locked1 && !locked2) {
               // inst1 is fixed: treat pin1 as a fixed terminal for inst2
               listX.emplace_back(inst2, inst2, weightX);
               fixedInstForceVecX_(inst2)
-                  += weightX * (pin1->cx() - (pin2->cx() - instance2->cx()));
+                  += weightX * (pin1.x - (pin2.x - pin2.inst_x));
             } else if (!locked1 && locked2) {
               // inst2 is fixed: treat pin2 as a fixed terminal for inst1
               listX.emplace_back(inst1, inst1, weightX);
               fixedInstForceVecX_(inst1)
-                  += weightX * (pin2->cx() - (pin1->cx() - instance1->cx()));
+                  += weightX * (pin2.x - (pin1.x - pin1.inst_x));
             }
             // both locked: no matrix or RHS contribution needed
           }
           // pin1 from IO port / pin2 from Instance
-          else if (!pin1->isPlaceInstConnected()
-                   && pin2->isPlaceInstConnected()) {
-            const int inst2 = pin2->getInstance()->getExtId();
+          else if (!pin1.movable && pin2.movable) {
+            const int inst2 = pin2.index;
             listX.emplace_back(inst2, inst2, weightX);
 
             fixedInstForceVecX_(inst2)
-                += weightX
-                   * (pin1->cx() - (pin2->cx() - pin2->getInstance()->cx()));
+                += weightX * (pin1.x - (pin2.x - pin2.inst_x));
           }
           // pin1 from Instance / pin2 from IO port
-          else if (pin1->isPlaceInstConnected()
-                   && !pin2->isPlaceInstConnected()) {
-            const int inst1 = pin1->getInstance()->getExtId();
+          else if (pin1.movable && !pin2.movable) {
+            const int inst1 = pin1.index;
             listX.emplace_back(inst1, inst1, weightX);
 
             fixedInstForceVecX_(inst1)
-                += weightX
-                   * (pin2->cx() - (pin1->cx() - pin1->getInstance()->cx()));
+                += weightX * (pin2.x - (pin1.x - pin1.inst_x));
           }
         }
 
         // B2B modeling on min/maxY pins.
-        if (pin1->isMinPinY() || pin1->isMaxPinY() || pin2->isMinPinY()
-            || pin2->isMaxPinY()) {
-          int diffY = abs(pin1->cy() - pin2->cy());
+        if (pin1.min_y || pin1.max_y || pin2.min_y || pin2.max_y) {
+          int diffY = abs(pin1.y - pin2.y);
           float weightY = 0;
           if (diffY > ipVars_.minDiffLength) {
             weightY = netWeight / diffY;
@@ -417,13 +469,11 @@ void InitialPlace::createSparseMatrix()
           }
 
           // both pin cames from instance
-          if (pin1->isPlaceInstConnected() && pin2->isPlaceInstConnected()) {
-            Instance* instance1 = pin1->getInstance();
-            Instance* instance2 = pin2->getInstance();
-            const int inst1 = instance1->getExtId();
-            const int inst2 = instance2->getExtId();
-            const bool locked1 = instance1->isLocked();
-            const bool locked2 = instance2->isLocked();
+          if (pin1.movable && pin2.movable) {
+            const int inst1 = pin1.index;
+            const int inst2 = pin2.index;
+            const bool locked1 = pin1.locked;
+            const bool locked2 = pin2.locked;
 
             if (!locked1 && !locked2) {
               // Both movable: standard B2B matrix terms
@@ -434,44 +484,38 @@ void InitialPlace::createSparseMatrix()
 
               fixedInstForceVecY_(inst1)
                   += -weightY
-                     * ((pin1->cy() - instance1->cy())
-                        - (pin2->cy() - instance2->cy()));
+                     * ((pin1.y - pin1.inst_y) - (pin2.y - pin2.inst_y));
               fixedInstForceVecY_(inst2)
                   += -weightY
-                     * ((pin2->cy() - instance2->cy())
-                        - (pin1->cy() - instance1->cy()));
+                     * ((pin2.y - pin2.inst_y) - (pin1.y - pin1.inst_y));
             } else if (locked1 && !locked2) {
               // inst1 is fixed: treat pin1 as a fixed terminal for inst2
               listY.emplace_back(inst2, inst2, weightY);
               fixedInstForceVecY_(inst2)
-                  += weightY * (pin1->cy() - (pin2->cy() - instance2->cy()));
+                  += weightY * (pin1.y - (pin2.y - pin2.inst_y));
             } else if (!locked1 && locked2) {
               // inst2 is fixed: treat pin2 as a fixed terminal for inst1
               listY.emplace_back(inst1, inst1, weightY);
               fixedInstForceVecY_(inst1)
-                  += weightY * (pin2->cy() - (pin1->cy() - instance1->cy()));
+                  += weightY * (pin2.y - (pin1.y - pin1.inst_y));
             }
             // both locked: no matrix or RHS contribution needed
           }
           // pin1 from IO port / pin2 from Instance
-          else if (!pin1->isPlaceInstConnected()
-                   && pin2->isPlaceInstConnected()) {
-            const int inst2 = pin2->getInstance()->getExtId();
+          else if (!pin1.movable && pin2.movable) {
+            const int inst2 = pin2.index;
             listY.emplace_back(inst2, inst2, weightY);
 
             fixedInstForceVecY_(inst2)
-                += weightY
-                   * (pin1->cy() - (pin2->cy() - pin2->getInstance()->cy()));
+                += weightY * (pin1.y - (pin2.y - pin2.inst_y));
           }
           // pin1 from Instance / pin2 from IO port
-          else if (pin1->isPlaceInstConnected()
-                   && !pin2->isPlaceInstConnected()) {
-            const int inst1 = pin1->getInstance()->getExtId();
+          else if (pin1.movable && !pin2.movable) {
+            const int inst1 = pin1.index;
             listY.emplace_back(inst1, inst1, weightY);
 
             fixedInstForceVecY_(inst1)
-                += weightY
-                   * (pin2->cy() - (pin1->cy() - pin1->getInstance()->cy()));
+                += weightY * (pin2.y - (pin1.y - pin1.inst_y));
           }
         }
       }
@@ -484,7 +528,7 @@ void InitialPlace::createSparseMatrix()
 
 void InitialPlace::updateCoordi()
 {
-  for (auto& inst : pbc_->placeInsts()) {
+  for (auto inst : pbc_->placeInsts()) {
     int idx = inst->getExtId();
     if (!inst->isLocked()) {
       int new_x = instLocVecX_(idx);

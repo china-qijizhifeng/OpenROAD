@@ -62,7 +62,7 @@ struct InstanceColumns
     is_locked
   };
   using Store = SoaStorage<odb::dbInst*,
-                           std::vector<Pin*>,
+                           SoaRows<Pin>,
                            int,
                            int,
                            int,
@@ -90,8 +90,8 @@ struct PinColumns
     maxPinYField
   };
   using Store = SoaStorage<odb::dbObject*,
-                           Instance*,
-                           Net*,
+                           SoaRef<Instance>,
+                           SoaRef<Net>,
                            int,
                            int,
                            int,
@@ -114,7 +114,7 @@ struct NetColumns
     ux,
     uy
   };
-  using Store = SoaStorage<odb::dbNet*, std::vector<Pin*>, int, int, int, int>;
+  using Store = SoaStorage<odb::dbNet*, SoaRows<Pin>, int, int, int, int>;
 };
 
 class Instance
@@ -184,13 +184,21 @@ class Instance
   void setExtId(int extId);
   int getExtId() const { return data_.get<InstanceColumns::extId>(); }
 
-  void addPin(Pin* pin);
-  const std::vector<Pin*>& getPins() const
+  void addPin(SoaRef<Pin> pin);
+  const SoaRows<Pin>& getPins() const
   {
     return data_.get<InstanceColumns::pins>();
   }
   void snapOutward(const odb::Point& origin, int step_x, int step_y);
   int64_t extendSizeByScale(double scale, utl::Logger* logger);
+
+  Instance(SoaViewTag tag, void* store, size_t row) : data_(tag, store, row) {}
+  SoaRef<Instance> ref() const
+  {
+    return {data_.storageIdentity(), data_.slot()};
+  }
+  SoaRow<Store>& numericRow() { return data_; }
+  const SoaRow<Store>& numericRow() const { return data_; }
 
  private:
   SoaRow<Store> data_;
@@ -240,18 +248,23 @@ class Pin
   int getOffsetCx() const;
   int getOffsetCy() const;
 
-  void updateLocation(const Instance* inst);
+  void updateLocation(SoaRef<Instance> inst);
 
-  void setInstance(Instance* inst);
-  void setNet(Net* net);
+  void setInstance(SoaRef<Instance> inst);
+  void setNet(SoaRef<Net> net);
 
   bool isPlaceInstConnected() const;
 
-  Instance* getInstance() const { return data_.get<PinColumns::inst>(); }
-  Net* getNet() const { return data_.get<PinColumns::net>(); }
+  SoaRef<Instance> getInstance() const { return data_.get<PinColumns::inst>(); }
+  SoaRef<Net> getNet() const { return data_.get<PinColumns::net>(); }
   std::string getName() const;
 
   void updateCoordi(odb::dbITerm* iTerm);
+
+  Pin(SoaViewTag tag, void* store, size_t row) : data_(tag, store, row) {}
+  SoaRef<Pin> ref() const { return {data_.storageIdentity(), data_.slot()}; }
+  SoaRow<Store>& numericRow() { return data_; }
+  const SoaRow<Store>& numericRow() const { return data_; }
 
  private:
   SoaRow<Store> data_;
@@ -295,15 +308,17 @@ class Net
 
   void updateBox(bool skipIoMode = false);
 
-  const std::vector<Pin*>& getPins() const
-  {
-    return data_.get<NetColumns::pins>();
-  }
+  const SoaRows<Pin>& getPins() const { return data_.get<NetColumns::pins>(); }
 
   odb::dbNet* getDbNet() const { return data_.get<NetColumns::net>(); }
   odb::dbSigType getSigType() const;
 
-  void addPin(Pin* pin);
+  void addPin(SoaRef<Pin> pin);
+
+  Net(SoaViewTag tag, void* store, size_t row) : data_(tag, store, row) {}
+  SoaRef<Net> ref() const { return {data_.storageIdentity(), data_.slot()}; }
+  SoaRow<Store>& numericRow() { return data_; }
+  const SoaRow<Store>& numericRow() const { return data_; }
 
  private:
   SoaRow<Store> data_;
@@ -377,18 +392,18 @@ class PlacerBaseCommon
                    utl::Logger* log);
   ~PlacerBaseCommon();
 
-  const std::vector<Instance*>& placeInsts() const { return placeInsts_; }
-  const std::vector<Instance*>& getInsts() const { return insts_; }
-  const std::vector<Pin*>& getPins() const { return pins_; }
-  const std::vector<Net*>& getNets() const { return nets_; }
+  const SoaRows<Instance>& placeInsts() const { return placeInsts_; }
+  const SoaRows<Instance>& getInsts() const { return insts_; }
+  const SoaRows<Pin>& getPins() const { return pins_; }
+  const SoaRows<Net>& getNets() const { return nets_; }
 
   Die& getDie() { return die_; }
 
   // Pb : PlacerBase
-  Instance* dbToPb(odb::dbInst* inst) const;
-  Pin* dbToPb(odb::dbITerm* term) const;
-  Pin* dbToPb(odb::dbBTerm* term) const;
-  Net* dbToPb(odb::dbNet* net) const;
+  SoaRef<Instance> dbToPb(odb::dbInst* inst) const;
+  SoaRef<Pin> dbToPb(odb::dbITerm* term) const;
+  SoaRef<Pin> dbToPb(odb::dbBTerm* term) const;
+  SoaRef<Net> dbToPb(odb::dbNet* net) const;
 
   int siteSizeX() const { return siteSizeX_; }
   int siteSizeY() const { return siteSizeY_; }
@@ -416,22 +431,22 @@ class PlacerBaseCommon
 
   std::shared_ptr<Instance::Store> instance_columns_
       = std::make_shared<Instance::Store>();
-  std::vector<Instance> instStor_;
+  SoaPool<Instance> instStor_{instance_columns_};
   std::shared_ptr<Pin::Store> pin_columns_ = std::make_shared<Pin::Store>();
   std::shared_ptr<Net::Store> net_columns_ = std::make_shared<Net::Store>();
-  std::vector<Pin> pinStor_;
-  std::vector<Net> netStor_;
+  SoaPool<Pin> pinStor_{pin_columns_};
+  SoaPool<Net> netStor_{net_columns_};
 
-  std::vector<Instance*> insts_;
-  std::vector<Pin*> pins_;
-  std::vector<Net*> nets_;
+  SoaRows<Instance> insts_;
+  SoaRows<Pin> pins_;
+  SoaRows<Net> nets_;
 
-  std::vector<Instance*> placeInsts_;
+  SoaRows<Instance> placeInsts_;
 
-  boost::unordered::unordered_flat_map<odb::dbInst*, Instance*> instMap_;
+  boost::unordered::unordered_flat_map<odb::dbInst*, uint32_t> instMap_;
   // The key is a dbITerm or a dbBTerm
-  boost::unordered::unordered_flat_map<odb::dbObject*, Pin*> pinMap_;
-  boost::unordered::unordered_flat_map<odb::dbNet*, Net*> netMap_;
+  boost::unordered::unordered_flat_map<odb::dbObject*, uint32_t> pinMap_;
+  boost::unordered::unordered_flat_map<odb::dbNet*, uint32_t> netMap_;
 
   int siteSizeX_ = 0;
   int siteSizeY_ = 0;
@@ -454,7 +469,7 @@ class PlacerBase
              odb::dbGroup* group = nullptr);
   ~PlacerBase();
 
-  const std::vector<Instance*>& getInsts() const { return pb_insts_; }
+  const SoaRows<Instance>& getInsts() const { return pb_insts_; }
 
   //
   // placeInsts : a real instance that need to be placed
@@ -463,10 +478,10 @@ class PlacerBase
   //
   // nonPlaceInsts : fixedInsts + dummyInsts to enable fast-iterate on Bin-init
   //
-  const std::vector<Instance*>& placeInsts() const { return placeInsts_; }
-  const std::vector<Instance*>& fixedInsts() const { return fixedInsts_; }
-  const std::vector<Instance*>& dummyInsts() const { return dummyInsts_; }
-  const std::vector<Instance*>& nonPlaceInsts() const { return nonPlaceInsts_; }
+  const SoaRows<Instance>& placeInsts() const { return placeInsts_; }
+  const SoaRows<Instance>& fixedInsts() const { return fixedInsts_; }
+  const SoaRows<Instance>& dummyInsts() const { return dummyInsts_; }
+  const SoaRows<Instance>& nonPlaceInsts() const { return nonPlaceInsts_; }
 
   Die& getDie() { return die_; }
   int64_t getRegionArea() const { return region_area_; }
@@ -498,14 +513,14 @@ class PlacerBase
 
   std::shared_ptr<Instance::Store> instance_columns_
       = std::make_shared<Instance::Store>();
-  std::vector<Instance> instStor_;
+  SoaPool<Instance> instStor_;
 
-  std::vector<Instance*> pb_insts_;
+  SoaRows<Instance> pb_insts_;
 
-  std::vector<Instance*> placeInsts_;
-  std::vector<Instance*> fixedInsts_;
-  std::vector<Instance*> dummyInsts_;
-  std::vector<Instance*> nonPlaceInsts_;
+  SoaRows<Instance> placeInsts_;
+  SoaRows<Instance> fixedInsts_;
+  SoaRows<Instance> dummyInsts_;
+  SoaRows<Instance> nonPlaceInsts_;
 
   int siteSizeX_ = 0;
   int siteSizeY_ = 9;

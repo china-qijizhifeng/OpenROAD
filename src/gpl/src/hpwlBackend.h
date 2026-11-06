@@ -11,11 +11,12 @@
 // learning anything about the GPU build.
 
 #pragma once
-
 #include <cstdint>
 #include <memory>
 #include <type_traits>
 #include <vector>
+
+#include "soaStorage.h"
 
 namespace gpl {
 
@@ -43,13 +44,13 @@ class HpwlBackend
   HpwlBackend(HpwlBackend&&) = delete;
   HpwlBackend& operator=(HpwlBackend&&) = delete;
 
-  virtual int64_t computeHpwl(std::vector<GNet>& nets) = 0;
+  virtual int64_t computeHpwl(SoaPool<GNet>& nets) = 0;
 
   // Refreshes host GNet boxes from the backend's last computeHpwl result.
   // No-op on the CPU backend (its computeHpwl already updates them); the GPU
   // backend copies the device-resident boxes back and applies GNet::setBox.
   // No-op as well if computeHpwl has not run yet.
-  virtual void mirrorNetBoxesToHost(std::vector<GNet>& nets) {}
+  virtual void mirrorNetBoxesToHost(SoaPool<GNet>& nets) {}
 
   // Short label for diagnostic logging; constructed-once factory choice.
   virtual const char* name() const = 0;

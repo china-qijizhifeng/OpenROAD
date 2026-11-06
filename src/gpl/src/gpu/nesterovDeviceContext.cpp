@@ -134,7 +134,7 @@ NesterovDeviceContext::NesterovDeviceContext(
   const float grid_uy = static_cast<float>(bg.uy());
 
   for (int i = 0; i < num_cells_; ++i) {
-    const GCell* gc = nb_gcells[i];
+    SoaRef<GCell> gc = nb_gcells[i];
     h_num_pins[i] = static_cast<int>(gc->gPins().size());
     h_area[i] = static_cast<float>(gc->dx()) * static_cast<float>(gc->dy());
     h_locked[i] = gc->isLocked() ? 1 : 0;
@@ -200,7 +200,7 @@ void NesterovDeviceContext::refreshCellDensityParams(
   std::vector<float> h_scale(num_cells_);
   std::vector<int> h_kind(num_cells_);
   for (int i = 0; i < num_cells_; ++i) {
-    const GCell* gc = nb_gcells[i];
+    SoaRef<GCell> gc = nb_gcells[i];
     h_half_ddx[i] = gc->dDx() / 2;
     h_half_ddy[i] = gc->dDy() / 2;
     h_scale[i] = gc->getDensityScale();
@@ -257,12 +257,12 @@ void NesterovDeviceContext::initDensityDeviceState(const BinGrid& bg)
   std::vector<int> h_lx(nbins), h_ly(nbins), h_ux(nbins), h_uy(nbins);
   std::vector<float> h_target(nbins), h_scaled(nbins);
   std::vector<long long> h_np(nbins), h_np_u(nbins);
-  const std::vector<Bin>& bins = bg.getBinsConst();
+  const SoaPool<Bin>& bins = bg.getBinsConst();
   for (int x = 0; x < s.bin_cnt_x; ++x) {
     for (int y = 0; y < s.bin_cnt_y; ++y) {
       // BinGrid stores [y * binCntX + x]; the device views use the FFT
       // layout [x * binCntY + y] shared with d_bin_density / d_bin_elec_*.
-      const Bin& b = bins[static_cast<size_t>(y) * s.bin_cnt_x + x];
+      const Bin b = bins[static_cast<size_t>(y) * s.bin_cnt_x + x];
       const size_t k = static_cast<size_t>(x) * s.bin_cnt_y + y;
       h_lx[k] = b.lx();
       h_ly[k] = b.ly();

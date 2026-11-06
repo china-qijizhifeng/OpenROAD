@@ -225,7 +225,7 @@ void GraphicsImpl::drawInitial(web::Painter& painter)
   drawBounds(painter);
 
   painter.setPen(web::Painter::kWhite, /* cosmetic */ true);
-  for (auto& inst : pbc_->placeInsts()) {
+  for (auto inst : pbc_->placeInsts()) {
     int lx = inst->lx();
     int ly = inst->ly();
     int ux = inst->ux();
@@ -253,7 +253,7 @@ void GraphicsImpl::drawField(web::Painter& painter)
     }
     float efMax = 0;
     int max_len = std::numeric_limits<int>::max();
-    for (auto& bin : bins) {
+    for (auto bin : bins) {
       efMax = std::max(efMax,
                        std::hypot(bin.electroFieldX(), bin.electroFieldY()));
       max_len = std::min({max_len, bin.dx(), bin.dy()});
@@ -263,7 +263,7 @@ void GraphicsImpl::drawField(web::Painter& painter)
       continue;
     }
     const double field_scale = static_cast<double>(max_len) / efMax;
-    for (auto& bin : bins) {
+    for (auto bin : bins) {
       const float fx = bin.electroFieldX();
       const float fy = bin.electroFieldY();
       const float dx = fx * field_scale;
@@ -292,21 +292,20 @@ void GraphicsImpl::drawCells(const std::vector<GCellHandle>& cells,
                              web::Painter& painter,
                              size_t nb_index)
 {
-  for (const auto& handle : cells) {
-    const GCell* gCell = handle;
+  for (auto handle : cells) {
+    SoaRef<GCell> gCell = handle;
     drawSingleGCell(gCell, painter, nb_index);
   }
 }
 
-void GraphicsImpl::drawCells(const std::vector<GCell*>& cells,
-                             web::Painter& painter)
+void GraphicsImpl::drawCells(const SoaRows<GCell>& cells, web::Painter& painter)
 {
-  for (const auto& gCell : cells) {
+  for (auto gCell : cells) {
     drawSingleGCell(gCell, painter);
   }
 }
 
-void GraphicsImpl::drawSingleGCell(const GCell* gCell,
+void GraphicsImpl::drawSingleGCell(SoaRef<GCell> gCell,
                                    web::Painter& painter,
                                    size_t nb_index)
 {
@@ -407,10 +406,10 @@ void GraphicsImpl::drawSelectedIoPin(web::Painter& painter)
   painter.setBrush(selected);
   painter.drawRect(io->pinRect(*idx));
 
-  const GPin* gpin = io->getGPin(*idx);
+  SoaRef<GPin> gpin = io->getGPin(*idx);
   if (gpin != nullptr && gpin->getGNet() != nullptr) {
     painter.setPen(web::Painter::kYellow, true);
-    for (const GPin* other_pin : gpin->getGNet()->getGPins()) {
+    for (SoaRef<GPin> other_pin : gpin->getGNet()->getGPins()) {
       if (other_pin != gpin) {
         painter.drawLine(
             gpin->cx(), gpin->cy(), other_pin->cx(), other_pin->cy());
@@ -431,7 +430,7 @@ void GraphicsImpl::drawTimingNets(web::Painter& painter)
   const auto& gnets = nbc_->getGNets();
 
   float max_weight = 1.0f;
-  for (const GNet* net : gnets) {
+  for (SoaRef<GNet> net : gnets) {
     max_weight = std::max(max_weight, net->getTimingWeight());
   }
 
@@ -441,7 +440,7 @@ void GraphicsImpl::drawTimingNets(web::Painter& painter)
 
   painter.setBrush(web::Painter::kTransparent);
 
-  for (const GNet* net : gnets) {
+  for (SoaRef<GNet> net : gnets) {
     const float w = net->getTimingWeight();
     if (w <= 1.0f) {
       continue;
@@ -463,7 +462,7 @@ void GraphicsImpl::drawNesterov(web::Painter& painter)
     painter.setPen(web::Painter::kTransparent);
 
     for (const auto& nb : nbVec_) {
-      for (auto& bin : nb->getBins()) {
+      for (auto bin : nb->getBins()) {
         int density = bin.getDensity() * 50 + 20;
         web::Painter::Color color;
         if (density > 255) {
@@ -510,7 +509,7 @@ void GraphicsImpl::drawNesterov(web::Painter& painter)
     web::Painter::Color color = light_colors[pb_idx % light_colors.size()];
     painter.setBrush(color);
 
-    for (auto& pb_inst : pb->nonPlaceInsts()) {
+    for (auto pb_inst : pb->nonPlaceInsts()) {
       painter.drawRect(
           {pb_inst->lx(), pb_inst->ly(), pb_inst->ux(), pb_inst->uy()});
     }
@@ -519,13 +518,13 @@ void GraphicsImpl::drawNesterov(web::Painter& painter)
   // Draw lines to neighbors
   if (selected_ != kInvalidIndex && nbc_->getGCellByIndex(selected_)) {
     painter.setPen(web::Painter::kYellow, true);
-    for (GPin* pin : nbc_->getGCellByIndex(selected_)->gPins()) {
-      GNet* net = pin->getGNet();
+    for (SoaRef<GPin> pin : nbc_->getGCellByIndex(selected_)->gPins()) {
+      SoaRef<GNet> net = pin->getGNet();
       if (!net) {
         continue;
       }
-      for (GPin* other_pin : net->getGPins()) {
-        GCell* neighbor = other_pin->getGCell();
+      for (SoaRef<GPin> other_pin : net->getGPins()) {
+        SoaRef<GCell> neighbor = other_pin->getGCell();
         if (neighbor == nbc_->getGCellByIndex(selected_)) {
           continue;
         }
@@ -536,7 +535,7 @@ void GraphicsImpl::drawNesterov(web::Painter& painter)
 
     // Draw gradient direction lines in the GUI from the GCell center.
     // We scale vectors to fit nicely within the cell (similar to drawField()).
-    const GCell* gcell = nbc_->getGCellByIndex(selected_);
+    SoaRef<GCell> gcell = nbc_->getGCellByIndex(selected_);
     auto wlCoeffX = np_->getWireLengthCoefX();
     auto wlCoeffY = np_->getWireLengthCoefY();
     size_t nb_index = 0;
@@ -684,7 +683,7 @@ void GraphicsImpl::reportSelected()
   if (selected_ == kInvalidIndex) {
     return;
   }
-  const GCell* gcell = nbc_->getGCellByIndex(selected_);
+  SoaRef<GCell> gcell = nbc_->getGCellByIndex(selected_);
   logger_->report("Inst: {}", gcell->getName());
 
   if (np_) {
@@ -692,7 +691,7 @@ void GraphicsImpl::reportSelected()
     auto wlCoeffY = np_->getWireLengthCoefY();
 
     logger_->report("  Wire Length Gradient");
-    for (auto& gPin : gcell->gPins()) {
+    for (auto gPin : gcell->gPins()) {
       FloatPoint wlGradPin
           = nbc_->getWireLengthGradientPinWA(gPin, wlCoeffX, wlCoeffY);
       const float weight = gPin->getGNet()->getTotalWeight();
@@ -915,7 +914,7 @@ web::SelectionSet GraphicsImpl::select(odb::dbTechLayer* layer,
     if (cell->isInstance()) {
       reportSelected();
       web::SelectionSet selected;
-      for (Instance* inst : cell->insts()) {
+      for (SoaRef<Instance> inst : cell->insts()) {
         selected.insert(web::Gui::get()->makeSelected(inst->dbInst()));
       }
       return selected;
@@ -955,7 +954,7 @@ bool GraphicsImpl::populateMap()
   double max_value = std::numeric_limits<double>::lowest();
 
   if (heatmap_type_ == OverflowMinMax) {
-    for (const Bin& bin : grid.getBins()) {
+    for (auto bin : grid.getBins()) {
       int64_t binArea = bin.getBinArea();
       const float scaledBinArea
           = static_cast<float>(binArea * bin.getTargetDensity());
@@ -972,7 +971,7 @@ bool GraphicsImpl::populateMap()
     }
   }
 
-  for (const Bin& bin : grid.getBins()) {
+  for (auto bin : grid.getBins()) {
     odb::Rect box(bin.lx(), bin.ly(), bin.ux(), bin.uy());
     double value = 0.0;
 
@@ -1006,7 +1005,7 @@ bool GraphicsImpl::populateMap()
 void GraphicsImpl::populateXYGrid()
 {
   BinGrid& grid = nbVec_[0]->getBinGrid();
-  std::vector<Bin>& bin = grid.getBins();
+  SoaPool<Bin>& bin = grid.getBins();
   int x_grid = grid.getBinCntX();
   int y_grid = grid.getBinCntY();
 

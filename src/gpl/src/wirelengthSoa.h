@@ -46,10 +46,11 @@ inline void resetPinWaColumns(GPinColumns::Store& pins,
   clear(pins.column<GPinColumns::hasMaxExpSumY>());
 }
 
+template <typename Rows>
 inline void updateNetBoxColumns(GNetColumns::Store& nets,
                                 const GPinColumns::Store& pins,
                                 size_t n,
-                                std::span<const size_t> pin_rows)
+                                const Rows& pin_rows)
 {
   int lx = INT_MAX, ly = INT_MAX, ux = INT_MIN, uy = INT_MIN;
   const auto& x = pins.column<GPinColumns::cx>();
@@ -78,10 +79,11 @@ inline float wirelengthFastExp(float value)
   return value;
 }
 
+template <typename Rows>
 inline void updateNetForceColumns(GNetColumns::Store& nets,
                                   GPinColumns::Store& pins,
                                   size_t n,
-                                  std::span<const size_t> rows,
+                                  const Rows& rows,
                                   float coef_x,
                                   float coef_y,
                                   float min_force)
@@ -160,9 +162,32 @@ inline void updateNetForceColumns(GNetColumns::Store& nets,
   nets.at<GNetColumns::waYExpMaxSumY>(n) = weighted_max_y;
 }
 
-inline FloatPoint pinGradientColumns(const GNetColumns::Store& nets,
+// Net-invariant loads and float denominator products are shared by all pins.
+// The pin numerator retains the native float/double evaluation order.
+struct NetGradientTerms
+{
+  float min_x, weighted_min_x, max_x, weighted_max_x;
+  float min_y, weighted_min_y, max_y, weighted_max_y;
+  float min_x_squared, max_x_squared, min_y_squared, max_y_squared;
+  NetGradientTerms(const GNetColumns::Store& nets, size_t n)
+      : min_x(nets.at<GNetColumns::waExpMinSumX>(n)),
+        weighted_min_x(nets.at<GNetColumns::waXExpMinSumX>(n)),
+        max_x(nets.at<GNetColumns::waExpMaxSumX>(n)),
+        weighted_max_x(nets.at<GNetColumns::waXExpMaxSumX>(n)),
+        min_y(nets.at<GNetColumns::waExpMinSumY>(n)),
+        weighted_min_y(nets.at<GNetColumns::waYExpMinSumY>(n)),
+        max_y(nets.at<GNetColumns::waExpMaxSumY>(n)),
+        weighted_max_y(nets.at<GNetColumns::waYExpMaxSumY>(n)),
+        min_x_squared(min_x * min_x),
+        max_x_squared(max_x * max_x),
+        min_y_squared(min_y * min_y),
+        max_y_squared(max_y * max_y)
+  {
+  }
+};
+
+inline FloatPoint pinGradientColumns(const NetGradientTerms& terms,
                                      const GPinColumns::Store& pins,
-                                     size_t n,
                                      size_t p,
                                      float wlCoeffX,
                                      float wlCoeffY)
@@ -174,56 +199,65 @@ inline FloatPoint pinGradientColumns(const GNetColumns::Store& nets,
   // min x
   if (pins.at<GPinColumns::hasMinExpSumX>(wa)) {
     // from Net.
-    float waExpMinSumX = nets.at<GNetColumns::waExpMinSumX>(n);
-    float waXExpMinSumX = nets.at<GNetColumns::waXExpMinSumX>(n);
+    float waExpMinSumX = terms.min_x;
+    float waXExpMinSumX = terms.weighted_min_x;
 
     gradientMinX
         = (waExpMinSumX
                * (pins.at<GPinColumns::minExpSumX>(wa)
                   * (1.0 - wlCoeffX * pins.at<GPinColumns::cx>(p)))
            + wlCoeffX * pins.at<GPinColumns::minExpSumX>(wa) * waXExpMinSumX)
-          / (waExpMinSumX * waExpMinSumX);
+          / terms.min_x_squared;
   }
 
   // max x
   if (pins.at<GPinColumns::hasMaxExpSumX>(wa)) {
-    float waExpMaxSumX = nets.at<GNetColumns::waExpMaxSumX>(n);
-    float waXExpMaxSumX = nets.at<GNetColumns::waXExpMaxSumX>(n);
+    float waExpMaxSumX = terms.max_x;
+    float waXExpMaxSumX = terms.weighted_max_x;
 
     gradientMaxX
         = (waExpMaxSumX
                * (pins.at<GPinColumns::maxExpSumX>(wa)
                   * (1.0 + wlCoeffX * pins.at<GPinColumns::cx>(p)))
            - wlCoeffX * pins.at<GPinColumns::maxExpSumX>(wa) * waXExpMaxSumX)
-          / (waExpMaxSumX * waExpMaxSumX);
+          / terms.max_x_squared;
   }
 
   // min y
   if (pins.at<GPinColumns::hasMinExpSumY>(wa)) {
-    float waExpMinSumY = nets.at<GNetColumns::waExpMinSumY>(n);
-    float waYExpMinSumY = nets.at<GNetColumns::waYExpMinSumY>(n);
+    float waExpMinSumY = terms.min_y;
+    float waYExpMinSumY = terms.weighted_min_y;
 
     gradientMinY
         = (waExpMinSumY
                * (pins.at<GPinColumns::minExpSumY>(wa)
                   * (1.0 - wlCoeffY * pins.at<GPinColumns::cy>(p)))
            + wlCoeffY * pins.at<GPinColumns::minExpSumY>(wa) * waYExpMinSumY)
-          / (waExpMinSumY * waExpMinSumY);
+          / terms.min_y_squared;
   }
 
   // max y
   if (pins.at<GPinColumns::hasMaxExpSumY>(wa)) {
-    float waExpMaxSumY = nets.at<GNetColumns::waExpMaxSumY>(n);
-    float waYExpMaxSumY = nets.at<GNetColumns::waYExpMaxSumY>(n);
+    float waExpMaxSumY = terms.max_y;
+    float waYExpMaxSumY = terms.weighted_max_y;
 
     gradientMaxY
         = (waExpMaxSumY
                * (pins.at<GPinColumns::maxExpSumY>(wa)
                   * (1.0 + wlCoeffY * pins.at<GPinColumns::cy>(p)))
            - wlCoeffY * pins.at<GPinColumns::maxExpSumY>(wa) * waYExpMaxSumY)
-          / (waExpMaxSumY * waExpMaxSumY);
+          / terms.max_y_squared;
   }
 
   return {gradientMinX - gradientMaxX, gradientMinY - gradientMaxY};
+}
+inline FloatPoint pinGradientColumns(const GNetColumns::Store& nets,
+                                     const GPinColumns::Store& pins,
+                                     size_t n,
+                                     size_t p,
+                                     float coef_x,
+                                     float coef_y)
+{
+  return pinGradientColumns(NetGradientTerms(nets, n), pins, p, coef_x, coef_y);
 }
 }  // namespace gpl

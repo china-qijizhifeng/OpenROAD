@@ -33,7 +33,7 @@ class CpuHpwlBackend : public HpwlBackend
  public:
   explicit CpuHpwlBackend(NesterovBaseCommon* nbc) : nbc_(nbc) {}
 
-  int64_t computeHpwl(std::vector<GNet>& nets) override
+  int64_t computeHpwl(SoaPool<GNet>& nets) override
   {
     return nbc_->getHpwlColumns();
   }
@@ -64,7 +64,7 @@ std::unique_ptr<HpwlBackend> makeHpwlBackend(const BackendContext& ctx)
 // gpu/gpuHpwlBackend.h. Lives here rather than in gpuHpwlBackend.cpp because
 // that TU is compiled as CUDA and does not get the OpenMP flags this loop
 // needs.
-void applyNetBoxesParallel(std::vector<GNet>& gNetStor,
+void applyNetBoxesParallel(SoaPool<GNet>& gNetStor,
                            const int* lx,
                            const int* ly,
                            const int* ux,

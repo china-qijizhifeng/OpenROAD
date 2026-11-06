@@ -85,7 +85,7 @@ class PowerDriven : public tst::Fixture
     PowerBase power(nbc, sta_.get(), net_weight, &logger_);
     power.setPowerNetWeights();
     std::map<std::string, float> weights;
-    for (GNet* gnet : nbc->getGNets()) {
+    for (SoaRef<GNet> gnet : nbc->getGNets()) {
       if (gnet->getGPins().size() <= 1) {
         EXPECT_EQ(gnet->getTotalWeight(), 1);
         continue;
@@ -267,7 +267,7 @@ TEST_F(PowerDriven, DestroyedAnnotatedBufferIsForgotten)
       nb_vars, pbc, &logger_, /* num_threads = */ 1, Clusters{});
   PowerBase power(nbc, sta_.get(), kWeight, &logger_);
   auto weight_of = [&](const odb::dbNet* net) {
-    for (GNet* gnet : nbc->getGNets()) {
+    for (SoaRef<GNet> gnet : nbc->getGNets()) {
       if (gnet->getPbNet()->getDbNet() == net) {
         return gnet->getTotalWeight() - 1;
       }

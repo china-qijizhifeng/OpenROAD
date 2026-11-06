@@ -152,7 +152,7 @@ class TimingRepairIntegrationTest : public tst::IntegratedFixture
 
   bool routabilityNeeded() const { return np_->is_routability_need_; }
 
-  int64_t inflateCellForTest(GCell* cell,
+  int64_t inflateCellForTest(SoaRef<GCell> cell,
                              float ratio,
                              std::optional<int64_t> area_limit = std::nullopt)
   {
@@ -176,7 +176,7 @@ class TimingRepairIntegrationTest : public tst::IntegratedFixture
     return {inserted, inflated};
   }
 
-  GCell* liveCellFor(odb::dbInst* inst) const
+  SoaRef<GCell> liveCellFor(odb::dbInst* inst) const
   {
     // dbToNb() resolves through the construction-time PlacerBase map, which
     // does not contain resizer-created instances. Handles resolve live storage
@@ -315,7 +315,7 @@ class TimingRepairIntegrationTest : public tst::IntegratedFixture
       }
       ++new_cells;
       EXPECT_GE(cell->gPins().size(), 2);
-      for (const auto* pin : cell->gPins()) {
+      for (const auto pin : cell->gPins()) {
         EXPECT_NE(pin->getGNet(), nullptr);
         ASSERT_NE(pin->getPbPin()->getDbITerm(), nullptr);
         EXPECT_NE(pin->getPbPin()->getDbITerm()->getNet(), nullptr);
@@ -459,7 +459,7 @@ TEST_F(TimingRepairIntegrationTest,
     }
     ++live_creations;
     EXPECT_GE(cell->gPins().size(), 2);
-    for (const auto* pin : cell->gPins()) {
+    for (const auto pin : cell->gPins()) {
       EXPECT_NE(pin->getGNet(), nullptr);
       ASSERT_NE(pin->getPbPin()->getDbITerm(), nullptr);
       EXPECT_NE(pin->getPbPin()->getDbITerm()->getNet(), nullptr);
@@ -496,7 +496,7 @@ TEST_F(TimingRepairIntegrationTest,
        SharedInflationPreservesLegacyFloatRoundingAndBoundedArea)
 {
   makePlacer();
-  auto* cell = liveCellFor(block_->findInst("fanout_driver"));
+  auto cell = liveCellFor(block_->findInst("fanout_driver"));
   ASSERT_NE(cell, nullptr);
   // Float sqrt/multiply rounds the width to 1003.5; double arithmetic stays
   // just below it. The stored even widths therefore differ by two DBUs.
@@ -660,7 +660,7 @@ class MixedMacroTimingRepairIntegrationTest : public TimingRepairIntegrationTest
     ASSERT_EQ(nb_vec_.size(), 1u);
     const auto& nb = nb_vec_.front();
     ASSERT_NE(macro_, nullptr);
-    auto* macro_cell = liveCellFor(macro_);
+    auto macro_cell = liveCellFor(macro_);
     ASSERT_NE(macro_cell, nullptr);
     ASSERT_TRUE(macro_cell->isMacroInstance());
     ASSERT_GT(nb->getStdInstArea(), 0);
@@ -731,7 +731,7 @@ class MixedMacroTimingRepairIntegrationTest : public TimingRepairIntegrationTest
       EXPECT_NE(cell->changeType(), GCell::GCellChange::kRoutability);
       EXPECT_EQ(cell->getInflationArea(), 0);
       EXPECT_GE(cell->gPins().size(), 2);
-      for (const auto* pin : cell->gPins()) {
+      for (const auto pin : cell->gPins()) {
         ASSERT_NE(pin->getPbPin()->getDbITerm(), nullptr);
         EXPECT_NE(pin->getPbPin()->getDbITerm()->getNet(), nullptr);
       }
@@ -799,7 +799,7 @@ TEST_F(MixedMacroTimingRepairIntegrationTest,
   const auto& nb = nb_vec_.front();
   const float density = nb->getTargetDensity();
   const int64_t movable_area = nb->getMovableArea();
-  auto* macro_cell = liveCellFor(macro_);
+  auto macro_cell = liveCellFor(macro_);
   ASSERT_NE(macro_cell, nullptr);
   const int macro_dx = macro_cell->dx();
   const int macro_dy = macro_cell->dy();
@@ -825,7 +825,7 @@ TEST_F(MixedMacroTimingRepairIntegrationTest,
   makePlacer();
   completeRoutability();
   ASSERT_FALSE(routabilityNeeded());
-  auto* macro_cell = liveCellFor(macro_);
+  auto macro_cell = liveCellFor(macro_);
   ASSERT_NE(macro_cell, nullptr);
   const int macro_dx = macro_cell->dx();
   const int macro_dy = macro_cell->dy();
@@ -952,7 +952,7 @@ TEST_F(TimingRepairIntegrationTest,
     EXPECT_EQ(liveCellFor(driver)->getInflationArea(), 0);
     EXPECT_TRUE(ep_.hasParasiticsInvalid());
     odb::dbInst* deleted = nullptr;
-    for (const auto* cell : nbc_->getGCells()) {
+    for (const auto cell : nbc_->getGCells()) {
       if (cell->isStdInstance() && cell->getInflationArea() > 0
           && cell->getName().starts_with("sink_")) {
         deleted = cell->insts().front()->dbInst();
@@ -1063,7 +1063,7 @@ TEST_F(TimingRepairIntegrationTest,
   }
   ASSERT_FALSE(ep_.isIncrementalParasiticsEnabled());
   ASSERT_FALSE(ep_.hasParasiticsInvalid());
-  auto* cell = liveCellFor(driver);
+  auto cell = liveCellFor(driver);
   ASSERT_NE(cell, nullptr);
   ASSERT_EQ(cell->changeType(), GCell::GCellChange::kDownsize);
   ASSERT_EQ(cell->getInflationArea(), 0);
@@ -1101,7 +1101,7 @@ TEST_F(TimingRepairIntegrationTest,
   checkDensityAccounting();
   auto* buffer = inflatedNewBuffer();
   ASSERT_NE(buffer, nullptr);
-  auto* buffer_cell = liveCellFor(buffer);
+  auto buffer_cell = liveCellFor(buffer);
   ASSERT_NE(buffer_cell, nullptr);
   const int buffer_dx = buffer_cell->dx();
   const int buffer_dy = buffer_cell->dy();
@@ -1149,7 +1149,7 @@ TEST_F(TimingRepairIntegrationTest,
   buffer->findITerm("Z")->connect(output);
   block_->findInst("sink_0")->findITerm("A1")->connect(output);
   nbc_->fixPointers();
-  auto* cell = liveCellFor(buffer);
+  auto cell = liveCellFor(buffer);
   ASSERT_NE(cell, nullptr);
   ASSERT_EQ(cell->dx(), buffer->getBBox()->getDX());
   ASSERT_EQ(cell->dy(), buffer->getBBox()->getDY());
@@ -1179,8 +1179,8 @@ TEST_F(TimingRepairIntegrationTest, PhysicalResizeReclaimsLiveInflation)
   runTiming(0.2f);
   auto* buffer = inflatedNewBuffer();
   ASSERT_NE(buffer, nullptr);
-  GCell* cell = nbc_->getGCells().front();
-  for (auto* candidate : nbc_->getGCells()) {
+  SoaRef<GCell> cell = nbc_->getGCells().front();
+  for (const auto candidate : nbc_->getGCells()) {
     if (candidate->contains(buffer)) {
       cell = candidate;
       break;
@@ -1207,7 +1207,7 @@ TEST_F(TimingRepairIntegrationTest, DeletionReclaimsAllowanceForReplacement)
   ASSERT_NE(buffer, nullptr);
   int64_t released = 0;
   int center_x = 0, center_y = 0;
-  for (auto* cell : nbc_->getGCells()) {
+  for (const auto cell : nbc_->getGCells()) {
     if (cell->contains(buffer)) {
       released = cell->getInflationArea();
       center_x = cell->dCx();

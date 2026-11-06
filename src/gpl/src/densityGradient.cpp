@@ -48,7 +48,7 @@ class CpuDensityGradientBackend : public DensityGradientBackend
     }
   }
 
-  FloatPoint getCellGradient(const GCell* gCell) override
+  FloatPoint getCellGradient(SoaRef<GCell> gCell) override
   {
     return nb_->getDensityGradient(gCell);
   }

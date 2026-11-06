@@ -2,13 +2,14 @@
 // Copyright (c) 2018-2025, The OpenROAD Authors
 
 #pragma once
-
 #include <cstdint>
 #include <memory>
 #include <optional>
 #include <unordered_map>
 #include <utility>
 #include <vector>
+
+#include "soaStorage.h"
 
 namespace odb {
 class dbDatabase;
@@ -266,7 +267,7 @@ class RouteBase
   // The tile holding the given point, or nullptr if it falls outside the grid.
   Tile* getTile(int x, int y) const;
 
-  static int64_t inflateCell(GCell* cell,
+  static int64_t inflateCell(SoaRef<GCell> cell,
                              float ratio,
                              std::optional<int64_t> area_limit = std::nullopt);
 

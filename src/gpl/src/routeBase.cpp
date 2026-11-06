@@ -461,7 +461,7 @@ void RouteBase::markTilesWithMovableArea()
   }
 
   for (const auto& nb : nbVec_) {
-    for (const auto& gCellHandle : nb->getGCells()) {
+    for (auto gCellHandle : nb->getGCells()) {
       if (!gCellHandle->isStdInstance()) {
         continue;
       }
@@ -564,9 +564,9 @@ void RouteBase::weightCongestedNets()
 int RouteBase::applyNetWeights()
 {
   int weighted = 0;
-  for (GNet* gNet : nbc_->getGNets()) {
+  for (SoaRef<GNet> gNet : nbc_->getGNets()) {
     float weight = 1.0f;
-    for (const Net* net : gNet->getPbNets()) {
+    for (SoaRef<Net> net : gNet->getPbNets()) {
       auto it = netWeights_.find(net->getDbNet());
       if (it != netWeights_.end()) {
         weight = std::fmax(weight, it->second);
@@ -605,7 +605,7 @@ bool RouteBase::scaleInflationToBudget()
 
   double wanted = 0;
   for (const auto& nb : nbVec_) {
-    for (const auto& gCellHandle : nb->getGCells()) {
+    for (auto gCellHandle : nb->getGCells()) {
       if (!gCellHandle->isStdInstance()) {
         continue;
       }
@@ -690,7 +690,7 @@ void RouteBase::calculateRudyTiles()
   debugInflatedTiles();
 }
 
-int64_t RouteBase::inflateCell(GCell* cell,
+int64_t RouteBase::inflateCell(SoaRef<GCell> cell,
                                float ratio,
                                std::optional<int64_t> area_limit)
 {
@@ -752,7 +752,7 @@ int64_t RouteBase::inflateNewCells()
     const auto& nb = nbVec_[i];
     // The cached areas still describe the design before timing repair.
     int64_t standard_cell_area = 0;
-    for (const auto& cell : nb->getGCells()) {
+    for (auto cell : nb->getGCells()) {
       if (cell->isStdInstance()) {
         standard_cell_area += static_cast<int64_t>(cell->dx()) * cell->dy();
       }
@@ -770,8 +770,8 @@ int64_t RouteBase::inflateNewCells()
     // Never buy virtual area by increasing the repaired design's density.
     available = std::min(available, removable_area);
     int64_t added = 0;
-    for (const auto& handle : nb->getGCells()) {
-      const GCell* cell = handle;
+    for (auto handle : nb->getGCells()) {
+      SoaRef<GCell> cell = handle;
       if (!cell->isStdInstance() || cell->insts().size() != 1
           || !new_instances.contains(cell->insts().front()->dbInst())
           || cell->changeType() == GCell::GCellChange::kRoutability) {
@@ -1096,7 +1096,7 @@ std::pair<bool, bool> RouteBase::routability(
   for (int nb_index = 0; nb_index < nbVec_.size(); nb_index++) {
     inflatedAreaDelta_[nb_index] = 0;
     // run bloating and get inflatedAreaDelta_
-    for (auto& gCellHandle : nbVec_[nb_index]->getGCells()) {
+    for (auto gCellHandle : nbVec_[nb_index]->getGCells()) {
       // only care about "standard cell"
       if (!gCellHandle->isStdInstance()) {
         continue;
@@ -1585,7 +1585,7 @@ void RouteBase::increaseCounter()
 void RouteBase::printGCellInflation() const
 {
   std::vector<float> cell_inflation_ratios;
-  for (auto& gCell : nbc_->getGCells()) {
+  for (auto gCell : nbc_->getGCells()) {
     if (!gCell->isStdInstance() || gCell->insts().empty() || !gCell->insts()[0]
         || !gCell->insts()[0]->dbInst()) {
       continue;

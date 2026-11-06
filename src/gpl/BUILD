@@ -138,6 +138,7 @@ cc_library(
         "src/wirelengthGradient.cpp",
         "src/wirelengthSoa.cpp",
         "src/wirelengthSoa.h",
+        "src/wirelengthSimd.h",
         "src/wirelengthGradientBackend.h",
     ] + select({
         "//:gpu_cuda": [
@@ -362,7 +363,7 @@ cc_library(
 
 cc_library(
     name = "wirelength_soa",
-    hdrs = ["src/wirelengthSoa.h"],
+    hdrs = ["src/wirelengthSoa.h", "src/wirelengthSimd.h"],
     includes = ["src"],
     deps = [":placement_columns", ":point_columns"],
 )

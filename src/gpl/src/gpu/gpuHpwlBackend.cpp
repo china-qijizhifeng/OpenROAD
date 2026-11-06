@@ -67,7 +67,7 @@ GpuHpwlBackend::GpuHpwlBackend(DeviceState* device_state, int num_threads)
 
 GpuHpwlBackend::~GpuHpwlBackend() = default;
 
-int64_t GpuHpwlBackend::computeHpwl(std::vector<GNet>& gNetStor)
+int64_t GpuHpwlBackend::computeHpwl(SoaPool<GNet>& gNetStor)
 {
   const int n_nets = static_cast<int>(gNetStor.size());
   if (n_nets == 0) {
@@ -226,7 +226,7 @@ int64_t GpuHpwlBackend::computeHpwl(std::vector<GNet>& gNetStor)
   return total_hpwl;
 }
 
-void GpuHpwlBackend::mirrorNetBoxesToHost(std::vector<GNet>& gNetStor)
+void GpuHpwlBackend::mirrorNetBoxesToHost(SoaPool<GNet>& gNetStor)
 {
   Impl& s = *impl_;
   if (s.d_lx.extent(0) != gNetStor.size() || gNetStor.empty()) {

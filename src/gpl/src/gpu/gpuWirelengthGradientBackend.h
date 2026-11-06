@@ -10,11 +10,11 @@
 // gpuWirelengthGradientBackend.cpp and wirelengthOp.cpp.
 
 #pragma once
-
 #include <cstddef>
 #include <memory>
 #include <vector>
 
+#include "../soaStorage.h"
 #include "point.h"
 #include "wirelengthGradientBackend.h"
 
@@ -40,7 +40,7 @@ class GpuWirelengthGradientBackend : public WirelengthGradientBackend
   void updateForce(float wlCoefX, float wlCoefY) override;
   void getCellGradients(const std::vector<GCellHandle>& gCells,
                         PointColumns& out) override;
-  FloatPoint getCellGradient(const GCell* gCell) override;
+  FloatPoint getCellGradient(SoaRef<GCell> gCell) override;
   void prepareDeviceGradients() override;
 
   const char* name() const override { return "GPU (Kokkos)"; }

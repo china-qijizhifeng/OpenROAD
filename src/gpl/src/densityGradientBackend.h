@@ -10,12 +10,12 @@
 // Plain C++ header (no Kokkos).
 
 #pragma once
-
 #include <memory>
 #include <type_traits>
 #include <vector>
 
 #include "point.h"
+#include "soaStorage.h"
 
 namespace gpl {
 
@@ -35,9 +35,10 @@ class DensityGradientBackend
   DensityGradientBackend& operator=(DensityGradientBackend&&) = delete;
 
   virtual void getCellGradients(const std::vector<GCellHandle>& gCells,
-                                PointColumns& out) = 0;
+                                PointColumns& out)
+      = 0;
 
-  virtual FloatPoint getCellGradient(const GCell* gCell) = 0;
+  virtual FloatPoint getCellGradient(SoaRef<GCell> gCell) = 0;
 
   virtual const char* name() const = 0;
 

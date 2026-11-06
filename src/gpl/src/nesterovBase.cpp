@@ -63,8 +63,8 @@ using utl::GPL;
 
 static float calculateBiVariateNormalCDF(biNormalParameters i);
 
-static int64_t getOverlapArea(const Bin* bin,
-                              const Instance* inst,
+static int64_t getOverlapArea(SoaRef<Bin> bin,
+                              SoaRef<Instance> inst,
                               int dbu_per_micron);
 
 static float getDistance(const PointColumns& a,
@@ -80,7 +80,7 @@ static float getSecondNorm(const PointColumns& a);
 //
 // Choose to use "float" only in the following functions
 #ifdef ENABLE_GPU
-static float getOverlapDensityArea(const Bin& bin, const GCell* cell);
+static float getOverlapDensityArea(const Bin& bin, SoaRef<GCell> cell);
 #endif
 
 static float fastExp(float exp);
@@ -88,12 +88,12 @@ static float fastExp(float exp);
 ////////////////////////////////////////////////
 // GCell
 
-GCell::GCell(Instance* inst, std::shared_ptr<NumericStore> storage)
-    : GCell(std::vector<Instance*>{inst}, std::move(storage))
+GCell::GCell(SoaRef<Instance> inst, std::shared_ptr<NumericStore> storage)
+    : GCell(SoaRows<Instance>{inst}, std::move(storage))
 {
 }
 
-GCell::GCell(const std::vector<Instance*>& insts,
+GCell::GCell(const SoaRows<Instance>& insts,
              std::shared_ptr<NumericStore> storage)
     : data_(std::move(storage))
 {
@@ -102,7 +102,7 @@ GCell::GCell(const std::vector<Instance*>& insts,
   data_.get<GCellColumns::kind>()
       = insts.front()->isMacro() ? CellKind::kMacro : CellKind::kStandard;
   data_.get<GCellColumns::locked>()
-      = std::any_of(insts.begin(), insts.end(), [](Instance* inst) {
+      = std::any_of(insts.begin(), insts.end(), [](SoaRef<Instance> inst) {
           return inst->isLocked();
         });
 }
@@ -128,7 +128,7 @@ bool GCell::isLocked() const
 void GCell::lock()
 {
   data_.get<GCellColumns::locked>() = isInstance();
-  for (Instance* inst : data_.get<GCellColumns::insts>()) {
+  for (SoaRef<Instance> inst : data_.get<GCellColumns::insts>()) {
     inst->lock();
   }
 }
@@ -154,7 +154,7 @@ void GCell::setAllLocations(int lx, int ly, int ux, int uy)
   data_.get<GCellColumns::dUy>() = data_.get<GCellColumns::uy>() = uy;
 }
 
-void GCell::addGPin(GPin* gPin)
+void GCell::addGPin(SoaRef<GPin> gPin)
 {
   data_.get<GCellColumns::gPins>().push_back(gPin);
 }
@@ -163,12 +163,12 @@ void GCell::updateLocations()
 {
   odb::Rect bbox;
   if (data_.get<GCellColumns::insts>().size() == 1) {
-    Instance* inst = data_.get<GCellColumns::insts>()[0];
+    SoaRef<Instance> inst = data_.get<GCellColumns::insts>()[0];
     bbox.init(inst->lx(), inst->ly(), inst->ux(), inst->uy());
   } else {
     bbox.mergeInit();
     int64_t inst_area = 0;
-    for (Instance* inst : data_.get<GCellColumns::insts>()) {
+    for (SoaRef<Instance> inst : data_.get<GCellColumns::insts>()) {
       inst_area += inst->getArea();
       bbox.merge({inst->lx(), inst->ly(), inst->ux(), inst->uy()});
     }
@@ -203,8 +203,8 @@ void GCell::setCenterLocation(int cx, int cy)
   data_.get<GCellColumns::ux>() = cx + halfDx;
   data_.get<GCellColumns::uy>() = cy + halfDy;
 
-  for (auto& gPin : data_.get<GCellColumns::gPins>()) {
-    gPin->updateLocation(this);
+  for (auto gPin : data_.get<GCellColumns::gPins>()) {
+    gPin->updateLocation(ref());
   }
 }
 
@@ -250,8 +250,8 @@ void GCell::setDensityLocation(int dLx, int dLy)
   data_.get<GCellColumns::dLy>() = dLy;
 
   // assume that density Center change the gPin coordi
-  for (auto& gPin : data_.get<GCellColumns::gPins>()) {
-    gPin->updateDensityLocation(this);
+  for (auto gPin : data_.get<GCellColumns::gPins>()) {
+    gPin->updateDensityLocation(ref());
   }
 }
 
@@ -267,8 +267,8 @@ void GCell::setDensityCenterLocation(int dCx, int dCy)
   data_.get<GCellColumns::dUy>() = dCy + halfDDy;
 
   // assume that density Center change the gPin coordi
-  for (auto& gPin : data_.get<GCellColumns::gPins>()) {
-    gPin->updateDensityLocation(this);
+  for (auto gPin : data_.get<GCellColumns::gPins>()) {
+    gPin->updateDensityLocation(ref());
   }
 }
 
@@ -301,9 +301,10 @@ void GCell::setGradientY(float gradientY)
 
 bool GCell::contains(odb::dbInst* db_inst) const
 {
-  return std::any_of(data_.get<GCellColumns::insts>().begin(),
-                     data_.get<GCellColumns::insts>().end(),
-                     [=](Instance* inst) { return inst->dbInst() == db_inst; });
+  return std::any_of(
+      data_.get<GCellColumns::insts>().begin(),
+      data_.get<GCellColumns::insts>().end(),
+      [=](SoaRef<Instance> inst) { return inst->dbInst() == db_inst; });
 }
 
 bool GCell::isInstance() const
@@ -374,7 +375,7 @@ void GCell::writeAttributesToCSV(std::ostream& out) const
 ////////////////////////////////////////////////
 // GNet
 
-GNet::GNet(Net* net, std::shared_ptr<NumericStore> storage)
+GNet::GNet(SoaRef<Net> net, std::shared_ptr<NumericStore> storage)
     : data_(std::move(storage))
 {
   data_.get<GNetColumns::timingWeight>() = 1;
@@ -382,7 +383,7 @@ GNet::GNet(Net* net, std::shared_ptr<NumericStore> storage)
   data_.get<GNetColumns::nets>().push_back(net);
 }
 
-GNet::GNet(const std::vector<Net*>& nets, std::shared_ptr<NumericStore> storage)
+GNet::GNet(const SoaRows<Net>& nets, std::shared_ptr<NumericStore> storage)
     : data_(std::move(storage))
 {
   data_.get<GNetColumns::timingWeight>() = 1;
@@ -390,7 +391,7 @@ GNet::GNet(const std::vector<Net*>& nets, std::shared_ptr<NumericStore> storage)
   data_.get<GNetColumns::nets>() = nets;
 }
 
-Net* GNet::getPbNet() const
+SoaRef<Net> GNet::getPbNet() const
 {
   return *data_.get<GNetColumns::nets>().begin();
 }
@@ -398,19 +399,22 @@ Net* GNet::getPbNet() const
 void GNet::setTimingWeight(float timingWeight)
 {
   data_.get<GNetColumns::timingWeight>() = timingWeight;
+  ++data_.storage().weight_revision;
 }
 
 void GNet::setCustomWeight(float customWeight)
 {
   data_.get<GNetColumns::customWeight>() = customWeight;
+  ++data_.storage().weight_revision;
 }
 
 void GNet::setPowerWeight(float powerWeight)
 {
   data_.get<GNetColumns::powerWeight>() = powerWeight;
+  ++data_.storage().weight_revision;
 }
 
-void GNet::addGPin(GPin* gPin)
+void GNet::addGPin(SoaRef<GPin> gPin)
 {
   data_.get<GNetColumns::gPins>().push_back(gPin);
 }
@@ -420,7 +424,7 @@ void GNet::updateBox()
   data_.get<GNetColumns::lx>() = data_.get<GNetColumns::ly>() = INT_MAX;
   data_.get<GNetColumns::ux>() = data_.get<GNetColumns::uy>() = INT_MIN;
 
-  for (auto& gPin : data_.get<GNetColumns::gPins>()) {
+  for (auto gPin : data_.get<GNetColumns::gPins>()) {
     data_.get<GNetColumns::lx>()
         = std::min(gPin->cx(), data_.get<GNetColumns::lx>());
     data_.get<GNetColumns::ly>()
@@ -512,7 +516,7 @@ void GNet::print(utl::Logger* log) const
 ////////////////////////////////////////////////
 // GPin
 
-GPin::GPin(Pin* pin, std::shared_ptr<NumericStore> storage)
+GPin::GPin(SoaRef<Pin> pin, std::shared_ptr<NumericStore> storage)
     : data_(std::move(storage))
 {
   data_.get<GPinColumns::waSlot>() = data_.slot();
@@ -523,24 +527,24 @@ GPin::GPin(Pin* pin, std::shared_ptr<NumericStore> storage)
   data_.get<GPinColumns::offsetCy>() = pin->getOffsetCy();
 }
 
-GPin::GPin(const std::vector<Pin*>& pins, std::shared_ptr<NumericStore> storage)
+GPin::GPin(const SoaRows<Pin>& pins, std::shared_ptr<NumericStore> storage)
     : data_(std::move(storage))
 {
   data_.get<GPinColumns::waSlot>() = data_.slot();
   data_.get<GPinColumns::pins>() = pins;
 }
 
-Pin* GPin::getPbPin() const
+SoaRef<Pin> GPin::getPbPin() const
 {
   return *data_.get<GPinColumns::pins>().begin();
 }
 
-void GPin::setGCell(GCell* gCell)
+void GPin::setGCell(SoaRef<GCell> gCell)
 {
   data_.get<GPinColumns::gCell>() = gCell;
 }
 
-void GPin::setGNet(GNet* gNet)
+void GPin::setGNet(SoaRef<GNet> gNet)
 {
   data_.get<GPinColumns::gNet>() = gNet;
 }
@@ -612,7 +616,7 @@ void GPin::setMinExpSumY(float minExpSumY)
       = minExpSumY;
 }
 
-void GPin::updateLocation(const GCell* gCell)
+void GPin::updateLocation(SoaRef<GCell> gCell)
 {
   data_.get<GPinColumns::cx>()
       = gCell->cx() + data_.get<GPinColumns::offsetCx>();
@@ -620,7 +624,7 @@ void GPin::updateLocation(const GCell* gCell)
       = gCell->cy() + data_.get<GPinColumns::offsetCy>();
 }
 
-void GPin::updateDensityLocation(const GCell* gCell)
+void GPin::updateDensityLocation(SoaRef<GCell> gCell)
 {
   data_.get<GPinColumns::cx>()
       = gCell->dCx() + data_.get<GPinColumns::offsetCx>();
@@ -630,7 +634,7 @@ void GPin::updateDensityLocation(const GCell* gCell)
 
 void GPin::updateCoordi()
 {
-  Pin* pb_pin = data_.get<GPinColumns::pins>()[0];
+  SoaRef<Pin> pb_pin = data_.get<GPinColumns::pins>()[0];
   data_.get<GPinColumns::cx>() = pb_pin->cx();
   data_.get<GPinColumns::cy>() = pb_pin->cy();
   data_.get<GPinColumns::offsetCx>() = pb_pin->getOffsetCx();
@@ -959,26 +963,26 @@ void BinGrid::initBins()
   // y-major API order so diagnostics and scalar reduction order stay unchanged.
   bins_.clear();
   bin_columns_ = std::make_shared<Bin::NumericStore>();
-  std::vector<Bin> fft_order;
-  fft_order.reserve(static_cast<size_t>(binCntX_) * binCntY_);
+  bins_ = SoaPool<Bin>(bin_columns_);
+  bins_.reserve(static_cast<size_t>(binCntX_) * binCntY_);
   for (int x = 0; x < binCntX_; ++x) {
     for (int y = 0; y < binCntY_; ++y) {
-      fft_order.emplace_back(x,
-                             y,
-                             lx_ + std::lround(x * binSizeX_),
-                             ly_ + std::lround(y * binSizeY_),
-                             lx_ + std::lround((x + 1) * binSizeX_),
-                             ly_ + std::lround((y + 1) * binSizeY_),
-                             targetDensity_,
-                             bin_columns_);
+      bins_.emplace_back(x,
+                         y,
+                         lx_ + std::lround(x * binSizeX_),
+                         ly_ + std::lround(y * binSizeY_),
+                         lx_ + std::lround((x + 1) * binSizeX_),
+                         ly_ + std::lround((y + 1) * binSizeY_),
+                         targetDensity_,
+                         bin_columns_);
     }
   }
-  bins_.reserve(fft_order.size());
+  std::vector<uint32_t> y_major;
+  y_major.reserve(bins_.size());
   for (int y = 0; y < binCntY_; ++y) {
     for (int x = 0; x < binCntX_; ++x) {
-      bins_.push_back(
-          std::move(fft_order[static_cast<size_t>(x) * binCntY_ + y]));
-      const auto& bin = bins_.back();
+      const auto bin = bins_[static_cast<size_t>(x) * binCntY_ + y];
+      y_major.push_back(bin.numericRow().slot());
       if (bin.dx() < 0 || bin.dy() < 0) {
         log_->warn(GPL,
                    34,
@@ -992,6 +996,7 @@ void BinGrid::initBins()
     }
   }
 
+  bins_.reorderRows(std::move(y_major));
   log_->info(GPL, 30, "Number of bins:             {:10}", bins_.size());
 
   // only initialized once
@@ -1000,7 +1005,7 @@ void BinGrid::initBins()
 
 void BinGrid::updateBinsNonPlaceArea()
 {
-  for (auto& bin : bins_) {
+  for (auto bin : bins_) {
     bin.setNonPlaceArea(0);
     bin.setNonPlaceAreaUnscaled(0);
   }
@@ -1017,7 +1022,7 @@ void BinGrid::updateBinsNonPlaceArea()
   const auto& non_place_insts = pb_->nonPlaceInsts();
   std::vector<std::vector<int>> bin_insts(bins_.size());
   for (size_t i = 0; i < non_place_insts.size(); ++i) {
-    const Instance* inst = non_place_insts[i];
+    SoaRef<Instance> inst = non_place_insts[i];
     if (inst->lx() >= inst->ux() || inst->ly() >= inst->uy()) {
       continue;
     }
@@ -1038,10 +1043,10 @@ void BinGrid::updateBinsNonPlaceArea()
     if (touching.empty()) {
       continue;
     }
-    Bin& bin = bins_[i];
+    Bin bin = bins_[i];
     if (touching.size() == 1) {
       // Single instance: union == clipped overlap, skip Boost.Polygon.
-      const Instance* inst = non_place_insts[touching.front()];
+      SoaRef<Instance> inst = non_place_insts[touching.front()];
       const int rectLx = std::max(bin.lx(), inst->lx());
       const int rectLy = std::max(bin.ly(), inst->ly());
       const int rectUx = std::min(bin.ux(), inst->ux());
@@ -1053,7 +1058,7 @@ void BinGrid::updateBinsNonPlaceArea()
     } else {
       Polygon90Set local_set;
       for (int idx : touching) {
-        const Instance* inst = non_place_insts[idx];
+        SoaRef<Instance> inst = non_place_insts[idx];
         local_set += BoostRect(inst->lx(), inst->ly(), inst->ux(), inst->uy());
       }
       local_set &= BoostRect(bin.lx(), bin.ly(), bin.ux(), bin.uy());
@@ -1073,14 +1078,14 @@ void BinGrid::updateBinsNonPlaceArea()
   const int dbu_per_micron
       = pb_->db()->getChip()->getBlock()->getDbUnitsPerMicron();
   std::vector<int64_t> nonPlaceAreaRaw(bins_.size(), 0);
-  for (auto& inst : pb_->nonPlaceInsts()) {
+  for (auto inst : pb_->nonPlaceInsts()) {
     std::pair<int, int> pairX = getMinMaxIdxX(inst);
     std::pair<int, int> pairY = getMinMaxIdxY(inst);
     for (int y = pairY.first; y < pairY.second; y++) {
       for (int x = pairX.first; x < pairX.second; x++) {
-        Bin& bin = bins_[y * binCntX_ + x];
+        Bin bin = bins_[y * binCntX_ + x];
         nonPlaceAreaRaw[y * binCntX_ + x]
-            += getOverlapArea(&bin, inst, dbu_per_micron);
+            += getOverlapArea(bin.ref(), inst, dbu_per_micron);
       }
     }
   }
@@ -1095,7 +1100,7 @@ void BinGrid::updateBinsNonPlaceArea()
     if (bin_insts[i].empty()) {
       continue;
     }
-    Bin& bin = bins_[i];
+    Bin bin = bins_[i];
     const int64_t cap
         = static_cast<int64_t>(unionArea[i] * bin.getTargetDensity() * 1.10f);
     if (bin.getNonPlaceArea() > cap) {
@@ -1233,7 +1238,7 @@ void BinGrid::updateBinsGCellDensityArea(
         for (int y = pairY.first; y < pairY.second; y++) {
           for (int x = pairX.first; x < pairX.second; x++) {
             const int bi = y * binCntX_ + x;
-            Bin& bin = bins_[bi];
+            Bin bin = bins_[bi];
             float v
                 = getOverlapDensityArea(bin, cell) * cell->getDensityScale();
             if (macro) {
@@ -1343,7 +1348,7 @@ void BinGrid::updateBinsGCellDensityArea(
   }
 }
 
-std::pair<int, int> BinGrid::getDensityMinMaxIdxX(const GCell* gcell) const
+std::pair<int, int> BinGrid::getDensityMinMaxIdxX(SoaRef<GCell> gcell) const
 {
   int lowerIdx = (gcell->dLx() - lx()) / binSizeX_;
   int upperIdx = std::ceil((gcell->dUx() - lx()) / binSizeX_);
@@ -1353,7 +1358,7 @@ std::pair<int, int> BinGrid::getDensityMinMaxIdxX(const GCell* gcell) const
   return std::make_pair(lowerIdx, upperIdx);
 }
 
-std::pair<int, int> BinGrid::getDensityMinMaxIdxY(const GCell* gcell) const
+std::pair<int, int> BinGrid::getDensityMinMaxIdxY(SoaRef<GCell> gcell) const
 {
   int lowerIdx = (gcell->dLy() - ly()) / binSizeY_;
   int upperIdx = std::ceil((gcell->dUy() - ly()) / binSizeY_);
@@ -1363,7 +1368,7 @@ std::pair<int, int> BinGrid::getDensityMinMaxIdxY(const GCell* gcell) const
   return std::make_pair(lowerIdx, upperIdx);
 }
 
-std::pair<int, int> BinGrid::getMinMaxIdxX(const Instance* inst) const
+std::pair<int, int> BinGrid::getMinMaxIdxX(SoaRef<Instance> inst) const
 {
   int lowerIdx = (inst->lx() - lx()) / binSizeX_;
   int upperIdx = std::ceil((inst->ux() - lx()) / binSizeX_);
@@ -1371,7 +1376,7 @@ std::pair<int, int> BinGrid::getMinMaxIdxX(const Instance* inst) const
   return std::make_pair(std::max(lowerIdx, 0), std::min(upperIdx, binCntX_));
 }
 
-std::pair<int, int> BinGrid::getMinMaxIdxY(const Instance* inst) const
+std::pair<int, int> BinGrid::getMinMaxIdxY(SoaRef<Instance> inst) const
 {
   int lowerIdx = (inst->ly() - ly()) / binSizeY_;
   int upperIdx = std::ceil((inst->uy() - ly()) / binSizeY_);
@@ -1446,18 +1451,18 @@ NesterovBaseCommon::NesterovBaseCommon(
   // gCellStor init
   gCellStor_.reserve(pbc_->placeInsts().size());
 
-  std::unordered_set<Instance*> in_cluster;
+  std::unordered_set<SoaRef<Instance>> in_cluster;
   for (const Cluster& cluster : clusters) {
-    std::vector<Instance*> insts;
+    SoaRows<Instance> insts;
     for (odb::dbInst* db_inst : cluster) {
-      Instance* inst = pbc_->dbToPb(db_inst);
+      SoaRef<Instance> inst = pbc_->dbToPb(db_inst);
       in_cluster.insert(inst);
       insts.emplace_back(inst);
     }
     gCellStor_.emplace_back(insts, cell_columns_);
   }
 
-  for (Instance* inst : pbc_->placeInsts()) {
+  for (SoaRef<Instance> inst : pbc_->placeInsts()) {
     if (in_cluster.find(inst) == in_cluster.end()) {
       gCellStor_.emplace_back(inst, cell_columns_);
     }
@@ -1474,39 +1479,44 @@ NesterovBaseCommon::NesterovBaseCommon(
 
   // gPinStor init
   gPinStor_.reserve(pbc_->getPins().size());
-  for (auto& pin : pbc_->getPins()) {
+  for (auto pin : pbc_->getPins()) {
     GPin myGPin(pin, pin_columns_);
     gPinStor_.push_back(std::move(myGPin));
   }
 
   // gNetStor init
   gNetStor_.reserve(pbc_->getNets().size());
-  for (auto& net : pbc_->getNets()) {
+  for (auto net : pbc_->getNets()) {
     GNet myGNet(net, net_columns_);
     gNetStor_.push_back(std::move(myGNet));
   }
 
+  gCellMap_.assign(
+      pbc_->instanceColumns()->column<InstanceColumns::lx>().size(),
+      std::numeric_limits<uint32_t>::max());
   // gCell ptr init
   nbc_gcells_.reserve(gCellStor_.size());
-  for (auto& gCell : gCellStor_) {
+  for (auto gCell : gCellStor_) {
     if (!gCell.isInstance()) {
       continue;
     }
-    nbc_gcells_.push_back(&gCell);
-    for (Instance* inst : gCell.insts()) {
-      gCellMap_[inst] = &gCell;
-      db_inst_to_nbc_index_map_[inst->dbInst()] = &gCell - gCellStor_.data();
+    nbc_gcells_.push_back(gCell.ref());
+    for (SoaRef<Instance> inst : gCell.insts()) {
+      gCellMap_[inst.row()] = gCell.numericRow().slot();
+      db_inst_to_nbc_index_map_[inst->dbInst()]
+          = gCellStor_.indexOf(gCell.ref());
     }
   }
 
   // gPin ptr init
-  gPinMap_.reserve(gPinStor_.size());
+  gPinMap_.assign(pbc_->pinColumns()->column<PinColumns::cx>().size(),
+                  std::numeric_limits<uint32_t>::max());
   db_iterm_to_index_map_.reserve(gPinStor_.size());
   gPins_.reserve(gPinStor_.size());
   for (size_t i = 0; i < gPinStor_.size(); ++i) {
-    GPin& gPin = gPinStor_[i];
-    gPins_.push_back(&gPin);
-    gPinMap_[gPin.getPbPin()] = &gPin;
+    GPin gPin = gPinStor_[i];
+    gPins_.push_back(gPin.ref());
+    gPinMap_[gPin.getPbPin().row()] = gPin.numericRow().slot();
     if (gPin.getPbPin()->isITerm()) {
       db_iterm_to_index_map_[gPin.getPbPin()->getDbITerm()] = i;
     } else if (gPin.getPbPin()->isBTerm()) {
@@ -1518,40 +1528,51 @@ NesterovBaseCommon::NesterovBaseCommon(
 
   // gNet ptr init
   gNets_.reserve(gNetStor_.size());
-  gNetMap_.reserve(gNetStor_.size());
+  gNetMap_.assign(pbc_->netColumns()->column<NetColumns::lx>().size(),
+                  std::numeric_limits<uint32_t>::max());
   db_net_to_index_map_.reserve(gNetStor_.size());
   for (size_t i = 0; i < gNetStor_.size(); ++i) {
-    GNet& gNet = gNetStor_[i];
-    gNets_.push_back(&gNet);
-    gNetMap_[gNet.getPbNet()] = &gNet;
+    GNet gNet = gNetStor_[i];
+    gNets_.push_back(gNet.ref());
+    gNetMap_[gNet.getPbNet().row()] = gNet.numericRow().slot();
     db_net_to_index_map_[gNet.getPbNet()->getDbNet()] = i;
   }
 
   // gCellStor_'s pins_ fill
 #pragma omp parallel for num_threads(num_threads_)
-  for (auto& gCell : gCellStor_) {
+  for (auto gCell : gCellStor_) {
     if (gCell.isFiller()) {
       continue;
     }
 
-    for (Instance* inst : gCell.insts()) {
-      for (auto& pin : inst->getPins()) {
+    size_t pin_count = 0;
+    for (const auto inst : gCell.insts()) {
+      pin_count += inst->getPins().size();
+    }
+    cell_columns_->at<GCellColumns::gPins>(gCell.numericRow().slot())
+        .reserve(pin_count);
+    for (SoaRef<Instance> inst : gCell.insts()) {
+      for (auto pin : inst->getPins()) {
         gCell.addGPin(pbToNb(pin));
       }
     }
   }
 
+  pin_columns_->column<GPinColumns::gCell>().bindTable(cell_columns_.get());
+  pin_columns_->column<GPinColumns::gNet>().bindTable(net_columns_.get());
   // gPinStor_' GNet and GCell fill
 #pragma omp parallel for num_threads(num_threads_)
-  for (auto& gPin : gPinStor_) {
+  for (auto gPin : gPinStor_) {
     gPin.setGCell(pbToNb(gPin.getPbPin()->getInstance()));
     gPin.setGNet(pbToNb(gPin.getPbPin()->getNet()));
   }
 
   // gNetStor_'s GPin fill
 #pragma omp parallel for num_threads(num_threads_)
-  for (auto& gNet : gNetStor_) {
-    for (auto& pin : gNet.getPbNet()->getPins()) {
+  for (auto gNet : gNetStor_) {
+    net_columns_->at<GNetColumns::gPins>(gNet.numericRow().slot())
+        .reserve(gNet.getPbNet()->getPins().size());
+    for (auto pin : gNet.getPbNet()->getPins()) {
       gNet.addGPin(pbToNb(pin));
     }
   }
@@ -1587,45 +1608,57 @@ NesterovBaseCommon::NesterovBaseCommon(
              wl_grad_backend_->name());
 }
 
-GCell* NesterovBaseCommon::pbToNb(Instance* inst) const
+SoaRef<GCell> NesterovBaseCommon::pbToNb(SoaRef<Instance> inst) const
 {
-  auto gcPtr = gCellMap_.find(inst);
-  return (gcPtr == gCellMap_.end()) ? nullptr : gcPtr->second;
+  if (!inst || inst.storage() != pbc_->instanceColumns().get()
+      || inst.row() >= gCellMap_.size()
+      || gCellMap_[inst.row()] == std::numeric_limits<uint32_t>::max()) {
+    return {};
+  }
+  return {cell_columns_.get(), gCellMap_[inst.row()]};
 }
 
-GPin* NesterovBaseCommon::pbToNb(Pin* pin) const
+SoaRef<GPin> NesterovBaseCommon::pbToNb(SoaRef<Pin> pin) const
 {
-  auto gpPtr = gPinMap_.find(pin);
-  return (gpPtr == gPinMap_.end()) ? nullptr : gpPtr->second;
+  if (!pin || pin.storage() != pbc_->pinColumns().get()
+      || pin.row() >= gPinMap_.size()
+      || gPinMap_[pin.row()] == std::numeric_limits<uint32_t>::max()) {
+    return {};
+  }
+  return {pin_columns_.get(), gPinMap_[pin.row()]};
 }
 
-GNet* NesterovBaseCommon::pbToNb(Net* net) const
+SoaRef<GNet> NesterovBaseCommon::pbToNb(SoaRef<Net> net) const
 {
-  auto gnPtr = gNetMap_.find(net);
-  return (gnPtr == gNetMap_.end()) ? nullptr : gnPtr->second;
+  if (!net || net.storage() != pbc_->netColumns().get()
+      || net.row() >= gNetMap_.size()
+      || gNetMap_[net.row()] == std::numeric_limits<uint32_t>::max()) {
+    return {};
+  }
+  return {net_columns_.get(), gNetMap_[net.row()]};
 }
 
-GCell* NesterovBaseCommon::dbToNb(odb::dbInst* inst) const
+SoaRef<GCell> NesterovBaseCommon::dbToNb(odb::dbInst* inst) const
 {
-  Instance* pbInst = pbc_->dbToPb(inst);
+  SoaRef<Instance> pbInst = pbc_->dbToPb(inst);
   return pbToNb(pbInst);
 }
 
-GPin* NesterovBaseCommon::dbToNb(odb::dbITerm* pin) const
+SoaRef<GPin> NesterovBaseCommon::dbToNb(odb::dbITerm* pin) const
 {
-  Pin* pbPin = pbc_->dbToPb(pin);
+  SoaRef<Pin> pbPin = pbc_->dbToPb(pin);
   return pbToNb(pbPin);
 }
 
-GPin* NesterovBaseCommon::dbToNb(odb::dbBTerm* pin) const
+SoaRef<GPin> NesterovBaseCommon::dbToNb(odb::dbBTerm* pin) const
 {
-  Pin* pbPin = pbc_->dbToPb(pin);
+  SoaRef<Pin> pbPin = pbc_->dbToPb(pin);
   return pbToNb(pbPin);
 }
 
-GNet* NesterovBaseCommon::dbToNb(odb::dbNet* net) const
+SoaRef<GNet> NesterovBaseCommon::dbToNb(odb::dbNet* net) const
 {
-  Net* pbNet = pbc_->dbToPb(net);
+  SoaRef<Net> pbNet = pbc_->dbToPb(net);
   return pbToNb(pbNet);
 }
 
@@ -1647,20 +1680,21 @@ void NesterovBaseCommon::updateWireLengthForceWA_native(float wlCoeffX,
     updateWireLengthForceWA_soa(wlCoeffX, wlCoeffY);
     return;
   }
+  pin_gradients_valid_ = false;
   // clear all WA variables.
 #pragma omp parallel for num_threads(num_threads_)
-  for (auto& gPin : gPinStor_) {
+  for (auto gPin : gPinStor_) {
     gPin.clearWaVars();
   }
 
   // If checks are very expensive, so short circuit them if debug is not enabled
   bool debug_enabled = log_->debugCheck(GPL, "wlUpdateWA", 1);
 #pragma omp parallel for num_threads(num_threads_)
-  for (auto& gNet : gNetStor_) {
+  for (auto gNet : gNetStor_) {
     gNet.clearWaVars();
     gNet.updateBox();
 
-    for (auto& gPin : gNet.getGPins()) {
+    for (auto gPin : gNet.getGPins()) {
       // The WA terms are shift invariant:
       //
       //   Sum(x_i * exp(x_i))    Sum(x_i * exp(x_i - C))
@@ -1744,7 +1778,7 @@ void NesterovBaseCommon::updateWireLengthForceWA_native(float wlCoeffX,
   }
 }
 
-GCell& NesterovBaseCommon::getGCell(size_t index)
+SoaRef<GCell> NesterovBaseCommon::getGCell(size_t index)
 {
   if (index >= gCellStor_.size()) {
     log_->error(utl::GPL,
@@ -1753,16 +1787,16 @@ GCell& NesterovBaseCommon::getGCell(size_t index)
                 index,
                 gCellStor_.size());
   }
-  return gCellStor_[index];
+  return gCellStor_.ref(index);
 }
 
-size_t NesterovBaseCommon::getGCellIndex(const GCell* gCell) const
+size_t NesterovBaseCommon::getGCellIndex(SoaRef<GCell> gCell) const
 {
-  return std::distance(gCellStor_.data(), gCell);
+  return gCellStor_.indexOf(gCell);
 }
 
 // get x,y WA Gradient values with given GCell
-FloatPoint NesterovBaseCommon::getWireLengthGradientWA(const GCell* gCell,
+FloatPoint NesterovBaseCommon::getWireLengthGradientWA(SoaRef<GCell> gCell,
                                                        float wlCoeffX,
                                                        float wlCoeffY) const
 {
@@ -1772,7 +1806,7 @@ FloatPoint NesterovBaseCommon::getWireLengthGradientWA(const GCell* gCell,
   }
   FloatPoint gradientPair;
 
-  for (auto& gPin : gCell->gPins()) {
+  for (auto gPin : gCell->gPins()) {
     auto tmpPair = getWireLengthGradientPinWA(gPin, wlCoeffX, wlCoeffY);
 
     debugPrint(log_,
@@ -1812,7 +1846,7 @@ FloatPoint NesterovBaseCommon::getWireLengthGradientWA(const GCell* gCell,
 //
 // You can't understand the following function
 // unless you read the (4.13) formula
-FloatPoint NesterovBaseCommon::getWireLengthGradientPinWA(const GPin* gPin,
+FloatPoint NesterovBaseCommon::getWireLengthGradientPinWA(SoaRef<GPin> gPin,
                                                           float wlCoeffX,
                                                           float wlCoeffY) const
 {
@@ -1879,7 +1913,7 @@ FloatPoint NesterovBaseCommon::getWireLengthGradientPinWA(const GPin* gPin,
 }
 
 FloatPoint NesterovBaseCommon::getWireLengthPreconditioner(
-    const GCell* gCell) const
+    SoaRef<GCell> gCell) const
 {
   return FloatPoint(gCell->gPins().size(), gCell->gPins().size());
 }
@@ -1888,9 +1922,9 @@ void NesterovBaseCommon::refreshCellLocks()
 {
   // Incremental phase 2 unlocks physical instances while retaining GCells.
   // Refresh the numerical flag at that boundary, outside the iteration loop.
-  for (auto& cell : gCellStor_) {
+  for (auto cell : gCellStor_) {
     cell.numericRow().get<GCellColumns::locked>() = std::any_of(
-        cell.insts().begin(), cell.insts().end(), [](const Instance* inst) {
+        cell.insts().begin(), cell.insts().end(), [](SoaRef<Instance> inst) {
           return inst->isLocked();
         });
   }
@@ -1902,9 +1936,9 @@ void NesterovBaseCommon::updateDbGCells()
     db_cbk_->removeOwner();
   }
 
-  for (auto& gCell : getGCells()) {
+  for (auto gCell : getGCells()) {
     if (gCell->isInstance()) {
-      for (Instance* inst : gCell->insts()) {
+      for (SoaRef<Instance> inst : gCell->insts()) {
         odb::dbInst* db_inst = inst->dbInst();
         db_inst->setPlacementStatus(odb::dbPlacementStatus::PLACED);
 
@@ -1940,12 +1974,12 @@ void NesterovBaseCommon::resizeMinRcCellSize()
 
 void NesterovBaseCommon::updateMinRcCellSize()
 {
-  for (auto& gCell : nbc_gcells_) {
+  for (size_t idx = 0; idx < nbc_gcells_.size(); ++idx) {
+    const auto gCell = nbc_gcells_[idx];
     if (!gCell->isStdInstance()) {
       continue;
     }
 
-    int idx = &gCell - nbc_gcells_.data();
     min_rc_width_[idx] = gCell->dx();
     min_rc_height_[idx] = gCell->dy();
   }
@@ -1953,12 +1987,12 @@ void NesterovBaseCommon::updateMinRcCellSize()
 
 void NesterovBaseCommon::revertGCellSizeToMinRc()
 {
-  for (auto& gCell : nbc_gcells_) {
+  for (size_t idx = 0; idx < nbc_gcells_.size(); ++idx) {
+    const auto gCell = nbc_gcells_[idx];
     if (!gCell->isStdInstance()) {
       continue;
     }
 
-    int idx = &gCell - nbc_gcells_.data();
     const int dx = min_rc_width_[idx];
     const int dy = min_rc_height_[idx];
 
@@ -1970,7 +2004,7 @@ void NesterovBaseCommon::revertGCellSizeToMinRc()
   }
 }
 
-GCell* NesterovBaseCommon::getGCellByIndex(size_t idx)
+SoaRef<GCell> NesterovBaseCommon::getGCellByIndex(size_t idx)
 {
   if (idx >= gCellStor_.size()) {
     log_->error(GPL,
@@ -1979,40 +2013,43 @@ GCell* NesterovBaseCommon::getGCellByIndex(size_t idx)
                 idx,
                 gCellStor_.size());
   }
-  return &gCellStor_[idx];
+  return gCellStor_.ref(idx);
 }
 
-// fixPointers() member functions assumes there was push_backs to storage
-// vectors, invalidating them. This function resets the pointers and maintain
-// consistency among parallel vectors. Most of the code here is based on
-// nesterovBaseCommon constructor.
-//
+// Rebuild ordered adjacency and optimizer-index maps after DB repair.
+// Row references survive growth and swap/remove; this boundary incorporates
+// changed DB connectivity rather than repairing addresses into object arrays.
 void NesterovBaseCommon::fixPointers()
 {
+  pin_gradients_valid_ = false;
   nbc_gcells_.clear();
-  gCellMap_.clear();
+  gCellMap_.assign(
+      pbc_->instanceColumns()->column<InstanceColumns::lx>().size(),
+      std::numeric_limits<uint32_t>::max());
   db_inst_to_nbc_index_map_.clear();
   nbc_gcells_.reserve(gCellStor_.size());
-  for (auto& gCell : gCellStor_) {
+  for (auto gCell : gCellStor_) {
     if (!gCell.isInstance()) {
       continue;
     }
-    nbc_gcells_.push_back(&gCell);
-    for (Instance* inst : gCell.insts()) {
-      gCellMap_[inst] = &gCell;
-      db_inst_to_nbc_index_map_[inst->dbInst()] = &gCell - gCellStor_.data();
+    nbc_gcells_.push_back(gCell.ref());
+    for (SoaRef<Instance> inst : gCell.insts()) {
+      gCellMap_[inst.row()] = gCell.numericRow().slot();
+      db_inst_to_nbc_index_map_[inst->dbInst()]
+          = gCellStor_.indexOf(gCell.ref());
     }
   }
 
   gPins_.clear();
-  gPinMap_.clear();
+  gPinMap_.assign(pbc_->pinColumns()->column<PinColumns::cx>().size(),
+                  std::numeric_limits<uint32_t>::max());
   db_iterm_to_index_map_.clear();
   db_bterm_to_index_map_.clear();
   gPins_.reserve(gPinStor_.size());
   for (size_t i = 0; i < gPinStor_.size(); ++i) {
-    GPin& gPin = gPinStor_[i];
-    gPins_.push_back(&gPin);
-    gPinMap_[gPin.getPbPin()] = &gPin;
+    GPin gPin = gPinStor_[i];
+    gPins_.push_back(gPin.ref());
+    gPinMap_[gPin.getPbPin().row()] = gPin.numericRow().slot();
     if (gPin.getPbPin()->isITerm()) {
       db_iterm_to_index_map_[gPin.getPbPin()->getDbITerm()] = i;
     } else if (gPin.getPbPin()->isBTerm()) {
@@ -2023,23 +2060,24 @@ void NesterovBaseCommon::fixPointers()
   }
 
   gNets_.clear();
-  gNetMap_.clear();
+  gNetMap_.assign(pbc_->netColumns()->column<NetColumns::lx>().size(),
+                  std::numeric_limits<uint32_t>::max());
   db_net_to_index_map_.clear();
   gNets_.reserve(gNetStor_.size());
   for (size_t i = 0; i < gNetStor_.size(); ++i) {
-    GNet& gNet = gNetStor_[i];
-    gNets_.push_back(&gNet);
-    gNetMap_[gNet.getPbNet()] = &gNet;
+    GNet gNet = gNetStor_[i];
+    gNets_.push_back(gNet.ref());
+    gNetMap_[gNet.getPbNet().row()] = gNet.numericRow().slot();
     db_net_to_index_map_[gNet.getPbNet()->getDbNet()] = i;
   }
 
-  for (auto& gCell : gCellStor_) {
+  for (auto gCell : gCellStor_) {
     if (gCell.isFiller()) {
       continue;
     }
 
     gCell.clearGPins();
-    for (Instance* inst : gCell.insts()) {
+    for (SoaRef<Instance> inst : gCell.insts()) {
       for (odb::dbITerm* iterm : inst->dbInst()->getITerms()) {
         if (isValidSigType(iterm->getSigType())) {
           auto it = db_iterm_to_index_map_.find(iterm);
@@ -2061,7 +2099,7 @@ void NesterovBaseCommon::fixPointers()
                           db_net->getSigType().getString());
             }
             size_t gpin_index = it->second;
-            gCell.addGPin(&gPinStor_[gpin_index]);
+            gCell.addGPin(gPinStor_[gpin_index].ref());
           } else {
             debugPrint(log_,
                        GPL,
@@ -2076,7 +2114,7 @@ void NesterovBaseCommon::fixPointers()
     }
   }
 
-  for (auto& gPin : gPinStor_) {
+  for (auto gPin : gPinStor_) {
     auto iterm = gPin.getPbPin()->getDbITerm();
     if (iterm != nullptr) {
       if (isValidSigType(iterm->getSigType())) {
@@ -2084,11 +2122,11 @@ void NesterovBaseCommon::fixPointers()
         auto net_it = db_net_to_index_map_.find(iterm->getNet());
 
         if (inst_it != db_inst_to_nbc_index_map_.end()) {
-          gPin.setGCell(&gCellStor_[inst_it->second]);
+          gPin.setGCell(gCellStor_[inst_it->second].ref());
         }
 
         if (net_it != db_net_to_index_map_.end()) {
-          gPin.setGNet(&gNetStor_[net_it->second]);
+          gPin.setGNet(gNetStor_[net_it->second].ref());
         } else {
           debugPrint(
               log_,
@@ -2110,14 +2148,14 @@ void NesterovBaseCommon::fixPointers()
     }
   }
 
-  for (auto& gNet : gNetStor_) {
+  for (auto gNet : gNetStor_) {
     gNet.clearGPins();
     for (odb::dbITerm* iterm : gNet.getPbNet()->getDbNet()->getITerms()) {
       if (isValidSigType(iterm->getSigType())) {
         auto it = db_iterm_to_index_map_.find(iterm);
         if (it != db_iterm_to_index_map_.end()) {
           size_t gpin_index = it->second;
-          gNet.addGPin(&gPinStor_[gpin_index]);
+          gNet.addGPin(gPinStor_[gpin_index].ref());
         }
       }
     }
@@ -2127,12 +2165,10 @@ void NesterovBaseCommon::fixPointers()
         auto it = db_bterm_to_index_map_.find(bterm);
         if (it != db_bterm_to_index_map_.end()) {
           size_t gpin_index = it->second;
-          gNet.addGPin(&gPinStor_[gpin_index]);
-          // Re-point the BTerm pin's net like the ITerm loop above does —
-          // destroyCbkGNet's swap-remove moves GNet objects between storage
-          // slots, so the pin's old pointer may now reference a different
-          // net (or a popped slot).
-          gPinStor_[gpin_index].setGNet(&gNet);
+          gNet.addGPin(gPinStor_[gpin_index].ref());
+          // Refresh the BTerm relation from live DB connectivity, as for
+          // ITerms above. Swap/remove permutes pool IDs, not stable rows.
+          gPinStor_[gpin_index].setGNet(gNet.ref());
         } else {
           debugPrint(log_,
                      GPL,
@@ -2204,7 +2240,7 @@ void NesterovBaseCommon::reportInstanceExtensionByPinDensity() const
 
   odb::dbBlock* block = pbc_->db()->getChip()->getBlock();
 
-  for (const GCell& gcell : gCellStor_) {
+  for (auto gcell : gCellStor_) {
     if (!gcell.isInstance()) {
       continue;
     }
@@ -2442,17 +2478,17 @@ NesterovBase::NesterovBase(
   nb_gcells_.reserve(pb_->getInsts().size() + fillerStor_.size());
 
   // add place instances
-  for (auto& pb_inst : pb_->placeInsts()) {
+  for (auto pb_inst : pb_->placeInsts()) {
     auto [x_offset, y_offset]
         = calculatePlacementPerturbationOffset(dbu_per_micron);
 
-    GCell* gCell = nbc_->pbToNb(pb_inst);
+    SoaRef<GCell> gCell = nbc_->pbToNb(pb_inst);
     if (pb_inst != gCell->insts()[0]) {
       // Only process the first cluster once
       continue;
     }
 
-    for (Instance* inst : gCell->insts()) {
+    for (SoaRef<Instance> inst : gCell->insts()) {
       if (!inst->isLocked()) {
         inst->setLocation(pb_inst->lx() + x_offset, pb_inst->ly() + y_offset);
       }
@@ -2589,7 +2625,7 @@ void NesterovBase::initFillerGCells()
 
   dxStor.reserve(pb_->placeInsts().size());
   dyStor.reserve(pb_->placeInsts().size());
-  for (auto& placeInst : pb_->placeInsts()) {
+  for (auto placeInst : pb_->placeInsts()) {
     dxStor.push_back(placeInst->dx());
     dyStor.push_back(placeInst->dy());
   }
@@ -2768,6 +2804,7 @@ void NesterovBase::initFillerGCells()
   // rand()'s RAND_MAX is only 32767.
   //
   boost::random::mt19937 randVal(0);
+  fillerStor_.reserve(fillerCnt);
   for (int i = 0; i < fillerCnt; i++) {
     // instability problem between g++ and clang++!
     auto randX = randVal();
@@ -2869,7 +2906,7 @@ void NesterovBase::checkColumnState()
                             : insts.front()->isMacro() ? CellKind::kMacro
                                                        : CellKind::kStandard;
       const bool locked
-          = std::any_of(insts.begin(), insts.end(), [](const Instance* inst) {
+          = std::any_of(insts.begin(), insts.end(), [](SoaRef<Instance> inst) {
               return inst->isLocked();
             });
       if (&row.storage() != list.columns || row.slot() != list.rows[k]
@@ -2889,7 +2926,8 @@ const std::vector<GCellRowList>& NesterovBase::kernelRows()
   if (kernel_rows_dirty_) {
     kernel_rows_.clear();
     for (size_t i = 0; i < nb_gcells_.size(); ++i) {
-      auto& row = nb_gcells_[i]->numericRow();
+      auto cell_view = *nb_gcells_[i];
+      auto& row = cell_view.numericRow();
       auto* columns = &row.storage();
       auto it = std::find_if(
           kernel_rows_.begin(), kernel_rows_.end(), [&](const auto& list) {
@@ -2964,7 +3002,7 @@ void NesterovBase::setTargetDensity(float density)
   targetDensity_ = density;
   bg_.setBinTargetDensity(density);
 #pragma omp parallel for num_threads(nbc_->getNumThreads())
-  for (auto& bin : getBins()) {
+  for (auto bin : getBins()) {
     bin.setBinTargetDensity(density);
   }
   // update nonPlaceArea's target denstiy
@@ -3081,7 +3119,7 @@ int64_t NesterovBase::getFillerCellArea() const
   return static_cast<int64_t>(fillerDx_) * static_cast<int64_t>(fillerDy_);
 }
 
-GCell& NesterovBase::getFillerGCell(size_t index)
+SoaRef<GCell> NesterovBase::getFillerGCell(size_t index)
 {
   if (index >= fillerStor_.size()) {
     log_->error(
@@ -3091,7 +3129,7 @@ GCell& NesterovBase::getFillerGCell(size_t index)
         index,
         fillerStor_.size());
   }
-  return fillerStor_[index];
+  return fillerStor_.ref(index);
 }
 
 int64_t NesterovBase::getWhiteSpaceArea() const
@@ -3179,7 +3217,7 @@ float NesterovBase::estimateTargetDensity(float overflow)
                min_density,
                max_density);
     float sum_overflow_area_unscaled = 0;
-    for (auto& bin : bins) {
+    for (auto bin : bins) {
       float non_place_area_unscaled = bin.getNonPlaceAreaUnscaled()
                                       / bin.getTargetDensity()
                                       * current_density;
@@ -3237,7 +3275,7 @@ void NesterovBase::updateDensitySize()
 {
   assert(omp_get_thread_num() == 0);
 #pragma omp parallel for num_threads(nbc_->getNumThreads())
-  for (auto& gCell : nb_gcells_) {
+  for (auto gCell : nb_gcells_) {
     float scaleX = 0, scaleY = 0;
     float densitySizeX = 0, densitySizeY = 0;
     if (gCell->dx() < REPLACE_SQRT2 * bg_.getBinSizeX()) {
@@ -3315,7 +3353,7 @@ void NesterovBase::updateAreas()
   // stdInstsArea and macroInstsArea
   stdInstsArea_ = macroInstsArea_ = 0;
   for (auto it = nb_gcells_.begin(); it < nb_gcells_.end(); ++it) {
-    auto& gCell = *it;
+    const SoaRef<GCell> gCell = *it;
     if (!gCell) {
       continue;
     }
@@ -3329,7 +3367,7 @@ void NesterovBase::updateAreas()
   }
 }
 
-void NesterovBase::updateDensityCoordiLayoutInside(GCell* gCell)
+void NesterovBase::updateDensityCoordiLayoutInside(SoaRef<GCell> gCell)
 {
   float targetLx = gCell->dLx();
   float targetLy = gCell->dLy();
@@ -3347,7 +3385,7 @@ void NesterovBase::updateDensityCoordiLayoutInside(GCell* gCell)
   gCell->setDensityLocation(targetLx, targetLy);
 }
 
-float NesterovBase::getDensityCoordiLayoutInsideX(const GCell* gCell,
+float NesterovBase::getDensityCoordiLayoutInsideX(SoaRef<GCell> gCell,
                                                   float cx) const
 {
   float adjVal = cx;
@@ -3362,7 +3400,7 @@ float NesterovBase::getDensityCoordiLayoutInsideX(const GCell* gCell,
   return adjVal;
 }
 
-float NesterovBase::getDensityCoordiLayoutInsideY(const GCell* gCell,
+float NesterovBase::getDensityCoordiLayoutInsideY(SoaRef<GCell> gCell,
                                                   float cy) const
 {
   float adjVal = cy;
@@ -3378,7 +3416,7 @@ float NesterovBase::getDensityCoordiLayoutInsideY(const GCell* gCell,
   return adjVal;
 }
 
-FloatPoint NesterovBase::getDensityPreconditioner(const GCell* gCell) const
+FloatPoint NesterovBase::getDensityPreconditioner(SoaRef<GCell> gCell) const
 {
   float areaVal
       = static_cast<float>(gCell->dx()) * static_cast<float>(gCell->dy());
@@ -3388,7 +3426,7 @@ FloatPoint NesterovBase::getDensityPreconditioner(const GCell* gCell) const
 
 // get GCells' electroFieldPair
 // i.e. get DensityGradient with given GCell
-FloatPoint NesterovBase::getDensityGradient(const GCell* gCell) const
+FloatPoint NesterovBase::getDensityGradient(SoaRef<GCell> gCell) const
 {
   const auto [x, y] = bg_.densityView().gather(densityRect(*gCell));
   return FloatPoint(x, y);
@@ -3427,7 +3465,7 @@ void NesterovBase::fillFillerDensityGradients(
     if (gCells[i].isNesterovBaseCommon()) {
       continue;  // instance — caller already filled it
     }
-    const GCell* gc = gCells[i];
+    SoaRef<GCell> gc = gCells[i];
     out[i] = getDensityGradient(gc);
   }
 }
@@ -3489,10 +3527,10 @@ void NesterovBase::initDensity1()
   snapshotPrevSLPSumGrads_.resize(gCellSize, FloatPoint());
 
 #pragma omp parallel for num_threads(nbc_->getNumThreads())
-  for (auto& gCell : nb_gcells_) {
+  for (size_t idx = 0; idx < nb_gcells_.size(); ++idx) {
+    const auto gCell = nb_gcells_[idx];
     updateDensityCoordiLayoutInside(gCell);
 
-    size_t idx = &gCell - nb_gcells_.data();
     curSLPCoordi_[idx] = prevSLPCoordi_[idx] = curCoordi_[idx]
         = initCoordi_[idx] = FloatPoint(gCell->dCx(), gCell->dCy());
   }
@@ -3905,7 +3943,7 @@ void NesterovBase::updateInitialPrevSLPCoordi()
 
 #pragma omp parallel for num_threads(nbc_->getNumThreads())
   for (size_t i = 0; i < nb_gcells_.size(); i++) {
-    GCell* curGCell = nb_gcells_[i];
+    SoaRef<GCell> curGCell = nb_gcells_[i];
 
     if (curGCell->isLocked()) {
       prevSLPCoordi_[i] = curSLPCoordi_[i];
@@ -4376,7 +4414,7 @@ bool NesterovBase::checkConvergence(int gpl_iter_count,
     }
 
 #pragma omp parallel for num_threads(nbc_->getNumThreads())
-    for (auto& gCell : nb_gcells_) {
+    for (auto gCell : nb_gcells_) {
       if (!gCell->isInstance()) {
         continue;
       }
@@ -4503,6 +4541,7 @@ bool NesterovBase::revertToSnapshot()
 
 void NesterovBaseCommon::moveGCell(odb::dbInst* db_inst)
 {
+  pin_gradients_valid_ = false;
   auto it = db_inst_to_nbc_index_map_.find(db_inst);
   if (it == db_inst_to_nbc_index_map_.end()) {
     debugPrint(log_,
@@ -4514,7 +4553,7 @@ void NesterovBaseCommon::moveGCell(odb::dbInst* db_inst)
     return;
   }
 
-  GCell* gcell = getGCellByIndex(it->second);
+  SoaRef<GCell> gcell = getGCellByIndex(it->second);
   odb::dbBox* bbox = db_inst->getBBox();
   gcell->setAllLocations(
       bbox->xMin(), bbox->yMin(), bbox->xMax(), bbox->yMax());
@@ -4527,6 +4566,7 @@ void NesterovBaseCommon::moveGCell(odb::dbInst* db_inst)
 
 void NesterovBaseCommon::resizeGCell(odb::dbInst* db_inst)
 {
+  pin_gradients_valid_ = false;
   auto it = db_inst_to_nbc_index_map_.find(db_inst);
   if (it == db_inst_to_nbc_index_map_.end()) {
     debugPrint(log_,
@@ -4538,7 +4578,7 @@ void NesterovBaseCommon::resizeGCell(odb::dbInst* db_inst)
     return;
   }
 
-  GCell* gcell = getGCellByIndex(it->second);
+  SoaRef<GCell> gcell = getGCellByIndex(it->second);
   if (!gcell->contains(db_inst)) {
     debugPrint(log_,
                GPL,
@@ -4553,7 +4593,7 @@ void NesterovBaseCommon::resizeGCell(odb::dbInst* db_inst)
       = static_cast<int64_t>(gcell->dx()) * static_cast<int64_t>(gcell->dy());
 
   // pull new instance dimensions from DB
-  for (Instance* inst : gcell->insts()) {
+  for (SoaRef<Instance> inst : gcell->insts()) {
     inst->copyDbLocation(pbc_.get());
   }
   // update gcell
@@ -4600,9 +4640,9 @@ void NesterovBase::updateGCellState()
     if (db_it != db_inst_to_nb_index_.end()) {
       size_t gcells_index = db_it->second;
       GCellHandle& handle = nb_gcells_[gcells_index];
-      GCell* gcell = handle;
+      SoaRef<GCell> gcell = handle;
 
-      for (auto& gpin : gcell->gPins()) {
+      for (auto gpin : gcell->gPins()) {
         gpin->getPbPin()->updateCoordi(gpin->getPbPin()->getDbITerm());
         gpin->updateCoordi();
       }
@@ -4691,17 +4731,21 @@ void NesterovBase::createCbkGCell(odb::dbInst* db_inst, size_t stor_index)
 
 size_t NesterovBaseCommon::createCbkGCell(odb::dbInst* db_inst)
 {
+  pin_gradients_valid_ = false;
   debugPrint(
       log_, GPL, "callbacks", 2, "NBC createCbkGCell {}", db_inst->getName());
   Instance pb_inst(db_inst, pbc_.get(), log_, pbc_->instanceColumns());
 
-  pb_insts_stor_.push_back(pb_inst);
-  GCell gcell(&pb_insts_stor_.back(), cell_columns_);
-  gCellStor_.push_back(gcell);
+  pb_insts_stor_.push_back(std::move(pb_inst));
+  GCell gcell(pb_insts_stor_.back().ref(), cell_columns_);
   min_rc_width_.push_back(gcell.dx());
   min_rc_height_.push_back(gcell.dy());
-  GCell* gcell_ptr = &gCellStor_.back();
-  gCellMap_[gcell_ptr->insts()[0]] = gcell_ptr;
+  gCellStor_.push_back(std::move(gcell));
+  SoaRef<GCell> gcell_ptr = gCellStor_.back().ref();
+  gCellMap_.resize(
+      pbc_->instanceColumns()->column<InstanceColumns::lx>().size(),
+      std::numeric_limits<uint32_t>::max());
+  gCellMap_[gcell_ptr->insts()[0].row()] = gcell_ptr.row();
   db_inst_to_nbc_index_map_[db_inst] = gCellStor_.size() - 1;
 
   int64_t area_change = static_cast<int64_t>(gcell_ptr->dx())
@@ -4714,25 +4758,31 @@ size_t NesterovBaseCommon::createCbkGCell(odb::dbInst* db_inst)
 
 void NesterovBaseCommon::createCbkGNet(odb::dbNet* db_net, bool skip_io_mode)
 {
+  pin_gradients_valid_ = false;
   debugPrint(log_, GPL, "callbacks", 3, "NBC createGNet");
   Net gpl_net(db_net, skip_io_mode, pbc_->netColumns());
-  pb_nets_stor_.push_back(gpl_net);
-  GNet gnet(&pb_nets_stor_.back(), net_columns_);
+  pb_nets_stor_.push_back(std::move(gpl_net));
+  GNet gnet(pb_nets_stor_.back().ref(), net_columns_);
   gNetStor_.push_back(std::move(gnet));
-  GNet* gnet_ptr = &gNetStor_.back();
-  gNetMap_[gnet_ptr->getPbNet()] = gnet_ptr;
+  SoaRef<GNet> gnet_ptr = gNetStor_.back().ref();
+  gNetMap_.resize(pbc_->netColumns()->column<NetColumns::lx>().size(),
+                  std::numeric_limits<uint32_t>::max());
+  gNetMap_[gnet_ptr->getPbNet().row()] = gnet_ptr.row();
   db_net_to_index_map_[db_net] = gNetStor_.size() - 1;
 }
 
 void NesterovBaseCommon::createCbkITerm(odb::dbITerm* iTerm)
 {
+  pin_gradients_valid_ = false;
   debugPrint(log_, GPL, "callbacks", 3, "NBC createITerm");
   Pin gpl_pin(iTerm, pbc_->pinColumns());
-  pb_pins_stor_.push_back(gpl_pin);
-  GPin gpin(&pb_pins_stor_.back(), pin_columns_);
+  pb_pins_stor_.push_back(std::move(gpl_pin));
+  GPin gpin(pb_pins_stor_.back().ref(), pin_columns_);
   gPinStor_.push_back(std::move(gpin));
-  GPin* gpin_ptr = &gPinStor_.back();
-  gPinMap_[gpin_ptr->getPbPin()] = gpin_ptr;
+  SoaRef<GPin> gpin_ptr = gPinStor_.back().ref();
+  gPinMap_.resize(pbc_->pinColumns()->column<PinColumns::cx>().size(),
+                  std::numeric_limits<uint32_t>::max());
+  gPinMap_[gpin_ptr->getPbPin().row()] = gpin_ptr.row();
   db_iterm_to_index_map_[iTerm] = gPinStor_.size() - 1;
 }
 
@@ -4816,6 +4866,7 @@ bool NesterovBase::updateHandle(odb::dbInst* db_inst, size_t handle)
 std::optional<std::pair<odb::dbInst*, size_t>>
 NesterovBaseCommon::destroyCbkGCell(odb::dbInst* db_inst)
 {
+  pin_gradients_valid_ = false;
   auto it = db_inst_to_nbc_index_map_.find(db_inst);
   if (it == db_inst_to_nbc_index_map_.end()) {
     debugPrint(log_,
@@ -4836,7 +4887,7 @@ NesterovBaseCommon::destroyCbkGCell(odb::dbInst* db_inst)
 
   std::optional<std::pair<odb::dbInst*, size_t>> replacement = std::nullopt;
   if (index_remove != last_index) {
-    std::swap(gCellStor_[index_remove], gCellStor_[last_index]);
+    gCellStor_.swapRows(index_remove, last_index);
     std::swap(min_rc_width_[index_remove], min_rc_width_[last_index]);
     std::swap(min_rc_height_[index_remove], min_rc_height_[last_index]);
 
@@ -4878,6 +4929,8 @@ void NesterovBase::cutFillerCells(int64_t inflation_area)
       = std::min(inflation_area / single_filler_area,
                  static_cast<int64_t>(fillerStor_.size()));
 
+  removed_fillers_.reserve(removed_fillers_.size()
+                           + static_cast<size_t>(max_fllers_to_remove));
   int64_t filler_area_before_removal = totalFillerArea_;
   size_t num_filler_before_removal = fillerStor_.size();
   int64_t availableFillerArea = single_filler_area * fillerStor_.size();
@@ -4887,7 +4940,7 @@ void NesterovBase::cutFillerCells(int64_t inflation_area)
        i >= 0 && removed_count < max_fllers_to_remove;
        --i) {
     if (nb_gcells_[i]->isFiller()) {
-      const GCell& removed = fillerStor_[nb_gcells_[i].getStorageIndex()];
+      const GCell removed = fillerStor_[nb_gcells_[i].getStorageIndex()];
       removed_fillers_.gcells.push_back(removed);
       removed_fillers_.curSLPCoordi.emplace_back(curSLPCoordi_[i]);
       removed_fillers_.curSLPWireLengthGrads.emplace_back(
@@ -5035,7 +5088,7 @@ void NesterovBase::destroyFillerGCell(size_t nb_index_remove)
   if (stor_index_remove != stor_last_index) {
     size_t replacer_index
         = filler_stor_index_to_nb_index_.find(stor_last_index)->second;
-    std::swap(fillerStor_[stor_index_remove], fillerStor_[stor_last_index]);
+    fillerStor_.swapRows(stor_index_remove, stor_last_index);
     rebindCellHandle(replacer_index, {this, stor_index_remove});
     filler_stor_index_to_nb_index_[stor_index_remove] = replacer_index;
   }
@@ -5057,6 +5110,7 @@ void NesterovBase::restoreRemovedFillers()
   }
 
   size_t num_fill_before = fillerStor_.size();
+  fillerStor_.reserve(num_fill_before + removed_fillers_.size());
   int64_t area_before = totalFillerArea_;
 
   for (size_t saved = 0; saved < removed_fillers_.size(); ++saved) {
@@ -5159,11 +5213,11 @@ void NesterovBase::redistributeFillerCells()
   dbBlock* block = pb_->db()->getChip()->getBlock();
 
   // Free capacity per bin (filler area is excluded)
-  std::vector<Bin>& bins = getBins();
+  SoaPool<Bin>& bins = getBins();
   std::vector<double> free_capacity(bins.size(), 0.0);
   double total_free_capacity = 0.0;
   for (size_t b = 0; b < bins.size(); ++b) {
-    const Bin& bin = bins[b];
+    const Bin bin = bins[b];
     const double scaled_bin_area
         = static_cast<double>(bin.getBinArea()) * bin.getTargetDensity();
     const double free = scaled_bin_area
@@ -5239,8 +5293,8 @@ void NesterovBase::redistributeFillerCells()
       break;
     }
 
-    const Bin& bin = bins[bin_idx];
-    GCell* gcell = nb_gcells_[i];
+    const Bin bin = bins[bin_idx];
+    SoaRef<GCell> gcell = nb_gcells_[i];
     const int half_dx = gcell->dx() / 2;
     const int half_dy = gcell->dy() / 2;
 
@@ -5310,6 +5364,7 @@ void NesterovBase::redistributeFillerCells()
 
 void NesterovBaseCommon::destroyCbkGNet(odb::dbNet* db_net)
 {
+  pin_gradients_valid_ = false;
   debugPrint(log_, GPL, "callbacks", 3, "NBC destroyGNet");
   auto db_it = db_net_to_index_map_.find(db_net);
   if (db_it == db_net_to_index_map_.end()) {
@@ -5332,7 +5387,7 @@ void NesterovBaseCommon::destroyCbkGNet(odb::dbNet* db_net)
   }
 
   if (index_remove != last_index) {
-    std::swap(gNetStor_[index_remove], gNetStor_[last_index]);
+    gNetStor_.swapRows(index_remove, last_index);
 
     // Update index map for the swapped net
     odb::dbNet* swapped_net
@@ -5346,6 +5401,7 @@ void NesterovBaseCommon::destroyCbkGNet(odb::dbNet* db_net)
 
 void NesterovBaseCommon::destroyCbkITerm(odb::dbITerm* db_iterm)
 {
+  pin_gradients_valid_ = false;
   debugPrint(log_, GPL, "callbacks", 3, "NBC destroyITerm");
   auto db_it = db_iterm_to_index_map_.find(db_iterm);
   if (db_it != db_iterm_to_index_map_.end()) {
@@ -5360,7 +5416,7 @@ void NesterovBaseCommon::destroyCbkITerm(odb::dbITerm* db_iterm)
                   last_index);
     }
     if (index_remove != last_index) {
-      std::swap(gPinStor_[index_remove], gPinStor_[last_index]);
+      gPinStor_.swapRows(index_remove, last_index);
       odb::dbITerm* swapped_iterm
           = gPinStor_[index_remove].getPbPin()->getDbITerm();
       db_iterm_to_index_map_[swapped_iterm] = index_remove;
@@ -5515,7 +5571,7 @@ void NesterovBaseCommon::printGCells()
 
 void NesterovBaseCommon::printGPins()
 {
-  for (auto& gpin : gPinStor_) {
+  for (auto gpin : gPinStor_) {
     gpin.print(log_);
   }
 }
@@ -5640,7 +5696,7 @@ void NesterovBase::writeGCellVectorsToCSV(const std::string& filename,
 }
 
 #ifdef ENABLE_GPU
-static float getOverlapDensityArea(const Bin& bin, const GCell* cell)
+static float getOverlapDensityArea(const Bin& bin, SoaRef<GCell> cell)
 {
   const int rectLx = std::max(bin.lx(), cell->dLx());
   const int rectLy = std::max(bin.ly(), cell->dLy());
@@ -5655,8 +5711,8 @@ static float getOverlapDensityArea(const Bin& bin, const GCell* cell)
 }
 #endif
 
-static int64_t getOverlapArea(const Bin* bin,
-                              const Instance* inst,
+static int64_t getOverlapArea(SoaRef<Bin> bin,
+                              SoaRef<Instance> inst,
                               int dbu_per_micron)
 {
   int rectLx = std::max(bin->lx(), inst->lx()),

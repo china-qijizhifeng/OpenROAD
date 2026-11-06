@@ -10,11 +10,11 @@
 // GpuHpwlBackend while staying a plain (non-CUDA) translation unit.
 
 #pragma once
-
 #include <cstdint>
 #include <memory>
 #include <vector>
 
+#include "../soaStorage.h"
 #include "hpwlBackend.h"
 
 namespace gpl {
@@ -51,13 +51,13 @@ class GpuHpwlBackend : public HpwlBackend
   // GCell positions and pin coords must be up-to-date. NesterovBaseCommon::
   // getHpwl() calls DeviceState::syncInstCoordsFromHost() and
   // updatePinLocations() right before invoking this backend.
-  int64_t computeHpwl(std::vector<GNet>& nets) override;
+  int64_t computeHpwl(SoaPool<GNet>& nets) override;
 
   // Copies the device-resident per-net boxes of the last computeHpwl back to
   // the host GNet objects (OpenMP setBox fan-out). No-op before the first
   // computeHpwl, and also when the device buffers were sized for a different
   // net count (i.e. computeHpwl has not rerun since the netlist changed).
-  void mirrorNetBoxesToHost(std::vector<GNet>& nets) override;
+  void mirrorNetBoxesToHost(SoaPool<GNet>& nets) override;
 
   const char* name() const override { return "GPU (Kokkos)"; }
 
@@ -72,7 +72,7 @@ class GpuHpwlBackend : public HpwlBackend
 // serial version of this loop cost ~2.8 ms per computeHpwl call (~3.1 s over
 // a large01 run). Defined in ../hpwl.cpp, a plain C++ TU: gpuHpwlBackend.cpp
 // is compiled as a CUDA TU, which does not get the OpenMP compile flags.
-void applyNetBoxesParallel(std::vector<GNet>& gNetStor,
+void applyNetBoxesParallel(SoaPool<GNet>& gNetStor,
                            const int* lx,
                            const int* ly,
                            const int* ux,

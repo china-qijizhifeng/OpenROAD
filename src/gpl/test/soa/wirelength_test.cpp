@@ -3,13 +3,17 @@
 #include <algorithm>
 #include <array>
 #include <bit>
+#include <cfenv>
 #include <climits>
 #include <cstdint>
+#include <iostream>
 #include <numeric>
 #include <random>
 #include <stdexcept>
+#include <string>
 #include <vector>
 
+#include "wirelengthSimd.h"
 #include "wirelengthSoa.h"
 
 namespace {
@@ -149,11 +153,143 @@ void compareNet(const GNetColumns::Store& nets,
     require(same(weighted[axis], expected.weighted[axis]));
   }
 }
+
+size_t simd_calls = 0;
+
+// The oracle uses geometry rows; production kernels read contiguous WA slots
+// and scatter to a separately permuted output. Untouched output slots retain
+// distinctive values, including negative zero, to detect stray stores.
+void compareScatter(const GPinColumns::Store& pins,
+                    const GNetColumns::Store& nets,
+                    size_t n,
+                    std::span<const size_t> rows,
+                    const NativeNet& net,
+                    const std::vector<PinForce>& forces,
+                    float cx,
+                    float cy,
+                    float weight,
+                    bool use_simd)
+{
+  std::vector<uint32_t> scatter_rows(rows.begin(), rows.end());
+  PointColumns expected;
+  expected.resize(pins.size() + 17, {-0.0f, 123.25f});
+  for (size_t p : rows) {
+    const uint32_t slot = pins.at<GPinColumns::gradientSlot>(p);
+    if (slot == UINT32_MAX) {
+      continue;
+    }
+    const auto gradient = nativeGradient(net,
+                                         forces[p],
+                                         pins.at<GPinColumns::cx>(p),
+                                         pins.at<GPinColumns::cy>(p),
+                                         cx,
+                                         cy);
+    expected[slot] = {gradient.x * weight, gradient.y * weight};
+  }
+  const NetGradientTerms terms(nets, n);
+  auto check = [&](auto kernel, const char* name) {
+    PointColumns actual;
+    actual.resize(expected.size(), {-0.0f, 123.25f});
+    std::fenv_t saved;
+    require(std::fegetenv(&saved) == 0);
+    require(std::feclearexcept(FE_ALL_EXCEPT) == 0);
+    kernel(terms, pins, scatter_rows, actual, cx, cy, weight);
+    const int exceptions = std::fetestexcept(FE_INVALID | FE_DIVBYZERO);
+    require(std::fesetenv(&saved) == 0);
+    if (exceptions != 0) {
+      throw std::runtime_error(std::string(name)
+                               + " raised invalid/divide-by-zero, pins="
+                               + std::to_string(rows.size()));
+    }
+    for (size_t slot = 0; slot < actual.size(); ++slot) {
+      if (!same(actual[slot].x, expected[slot].x)
+          || !same(actual[slot].y, expected[slot].y)) {
+        throw std::runtime_error(std::string(name) + " scatter mismatch, pins="
+                                 + std::to_string(rows.size())
+                                 + " slot=" + std::to_string(slot));
+      }
+    }
+  };
+  check(scatterNetPinGradientsScalar, "scalar");
+#if GPL_WIRELENGTH_AVX2
+  if (use_simd) {
+    check(scatterNetPinGradientsAvx2, "AVX2");
+    ++simd_calls;
+  }
+#else
+  require(!use_simd);
+#endif
+}
+
+void scatterBoundaryCases(bool use_simd)
+{
+  std::mt19937 rng(739);
+  for (size_t count : {0,  1,  2,  3,  4,  5,  6,  7,  8,  9,  10, 11, 12,
+                       13, 14, 15, 16, 17, 31, 32, 33, 63, 64, 65, 129}) {
+    GPinColumns::Store pins;
+    GNetColumns::Store nets;
+    nets.allocate();
+    const size_t geometry_count = count + 11;
+    std::vector<size_t> permutation(geometry_count);
+    std::iota(permutation.begin(), permutation.end(), 0);
+    std::shuffle(permutation.begin(), permutation.end(), rng);
+    for (size_t p = 0; p < geometry_count; ++p) {
+      pins.allocate();
+      // Odd coordinates beyond float's exact integer range expose premature
+      // conversion to double or a different coefficient multiplication order.
+      pins.at<GPinColumns::cx>(p)
+          = p % 3 == 0 ? 20000001 : int(rng() % 2000001) - 1000000;
+      pins.at<GPinColumns::cy>(p)
+          = p % 3 == 1 ? -20000001 : int(rng() % 2000001) - 1000000;
+      pins.at<GPinColumns::gradientSlot>(p) = permutation[p] + 8;
+    }
+    std::shuffle(permutation.begin(), permutation.end(), rng);
+    resetPinWaColumns(pins, permutation);
+    // An unaligned WA start catches assumptions hidden by aligned test data.
+    const auto rows = std::span<const size_t>(permutation).subspan(3, count);
+    const auto x = pins.column<GPinColumns::cx>();
+    const auto y = pins.column<GPinColumns::cy>();
+    for (int consumers = 0; consumers < 3; ++consumers) {
+      for (size_t p = 0; p < geometry_count; ++p) {
+        pins.at<GPinColumns::gradientSlot>(p)
+            = consumers == 2 || (consumers == 1 && p % 3 == 0) ? UINT32_MAX
+                                                               : p + 8;
+      }
+      for (const auto coefficient : {FloatPoint{0, 0},
+                                     FloatPoint{0.00001f, 0.00002f},
+                                     FloatPoint{0.00000001f, 0.00000003f},
+                                     FloatPoint{0, 0.00003f},
+                                     FloatPoint{0.00003f, 0}}) {
+        for (float minimum : {-10.0f, -1.0f, 0.0f}) {
+          std::vector<PinForce> forces(geometry_count);
+          const auto net = nativeForce(
+              x, y, rows, coefficient.x, coefficient.y, minimum, forces);
+          updateNetForceColumns(
+              nets, pins, 0, rows, coefficient.x, coefficient.y, minimum);
+          for (float weight : {0.0f, -0.0f, 1.0f, -1.0f, 0.375f, 7.25f}) {
+            compareScatter(pins,
+                           nets,
+                           0,
+                           rows,
+                           net,
+                           forces,
+                           coefficient.x,
+                           coefficient.y,
+                           weight,
+                           use_simd);
+          }
+        }
+      }
+    }
+  }
+}
 }  // namespace
 
 int main()
 {
   using namespace gpl;
+  const bool use_simd = hasAvx2Wirelength();
+  scatterBoundaryCases(use_simd);
   constexpr size_t pin_count = 4096, net_count = 137;
   GPinColumns::Store pins;
   GNetColumns::Store nets;
@@ -163,15 +299,24 @@ int main()
     pins.at<GPinColumns::cx>(p) = int(rng() % 2000001) - 1000000;
     pins.at<GPinColumns::cy>(p) = int(rng() % 2000001) - 1000000;
   }
-  const auto x = pins.column<GPinColumns::cx>();
-  const auto y = pins.column<GPinColumns::cy>();
   for (size_t n = 0; n < net_count; ++n) {
     nets.allocate();
   }
-  // Released slots remain allocated columns, as in real topology changes.
+  std::vector<uint32_t> gradient_slots(pin_count);
+  std::iota(gradient_slots.begin(), gradient_slots.end(), 8);
+  std::mt19937 slot_rng(918);
+  std::shuffle(gradient_slots.begin(), gradient_slots.end(), slot_rng);
+  for (size_t p = 0; p < pin_count; ++p) {
+    pins.at<GPinColumns::gradientSlot>(p)
+        = p % 7 == 0 ? UINT32_MAX : gradient_slots[p];
+  }
+  // Deleted rows release their topology; the column allocation remains
+  // reusable.
   for (size_t p = 0; p < pin_count; p += 13) {
     pins.release(p);
   }
+  const auto x = pins.column<GPinColumns::cx>();
+  const auto y = pins.column<GPinColumns::cy>();
   std::vector<size_t> geometry_rows;
   for (size_t p = 0; p < pin_count; ++p) {
     if (p % 13 != 0) {
@@ -216,6 +361,16 @@ int main()
         const auto expected = nativeForce(x, y, rows, cx, cy, minimum, forces);
         updateNetForceColumns(nets, pins, n, rows, cx, cy, minimum);
         compareNet(nets, n, expected);
+        compareScatter(pins,
+                       nets,
+                       n,
+                       rows,
+                       expected,
+                       forces,
+                       cx,
+                       cy,
+                       iteration % 2 == 0 ? 0.375f : 7.25f,
+                       use_simd);
         for (size_t p : rows) {
           comparePin(pins, p, forces[p]);
           const auto actual = pinGradientColumns(nets, pins, n, p, cx, cy);
@@ -230,5 +385,13 @@ int main()
       require(pins.column<GPinColumns::cx>() == x);
       require(pins.column<GPinColumns::cy>() == y);
     }
+  }
+  if (use_simd) {
+    require(simd_calls > 0);
+    std::cout << "PASS AVX2 native-oracle bitwise scatter: " << simd_calls
+              << " calls\n";
+  } else {
+    std::cout << "SKIP AVX2 scatter: runtime support unavailable; "
+                 "scalar native-oracle bitwise scatter passed\n";
   }
 }

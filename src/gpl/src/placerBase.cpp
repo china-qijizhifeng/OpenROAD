@@ -46,9 +46,9 @@ static std::pair<int, int> getMinMaxIdx(int ll,
                                         int minIdx,
                                         int maxIdx);
 
-static bool isCoreAreaOverlap(Die& die, Instance& inst);
+static bool isCoreAreaOverlap(const Die& die, const Instance& inst);
 
-static int64_t getOverlapWithCoreArea(Die& die, Instance& inst);
+static int64_t getOverlapWithCoreArea(const Die& die, const Instance& inst);
 
 ////////////////////////////////////////////////////////
 // Instance
@@ -154,8 +154,8 @@ void Instance::setLocation(int x, int y)
   data_.get<InstanceColumns::ly>() = y;
 
   // pins update
-  for (auto& pin : data_.get<InstanceColumns::pins>()) {
-    pin->updateLocation(this);
+  for (auto pin : data_.get<InstanceColumns::pins>()) {
+    pin->updateLocation(ref());
   }
 }
 
@@ -173,8 +173,8 @@ void Instance::setCenterLocation(int x, int y)
   data_.get<InstanceColumns::uy>() = y + halfY;
 
   // pins update
-  for (auto& pin : data_.get<InstanceColumns::pins>()) {
-    pin->updateLocation(this);
+  for (auto pin : data_.get<InstanceColumns::pins>()) {
+    pin->updateLocation(ref());
   }
 }
 
@@ -254,7 +254,7 @@ int64_t Instance::getArea() const
   return static_cast<int64_t>(dx()) * dy();
 }
 
-void Instance::addPin(Pin* pin)
+void Instance::addPin(SoaRef<Pin> pin)
 {
   data_.get<InstanceColumns::pins>().push_back(pin);
 }
@@ -547,18 +547,18 @@ void Pin::updateCoordi(odb::dbBTerm* bTerm,
   data_.get<PinColumns::cy>() = bbox.yCenter();
 }
 
-void Pin::updateLocation(const Instance* inst)
+void Pin::updateLocation(SoaRef<Instance> inst)
 {
   data_.get<PinColumns::cx>() = inst->cx() + data_.get<PinColumns::offsetCx>();
   data_.get<PinColumns::cy>() = inst->cy() + data_.get<PinColumns::offsetCy>();
 }
 
-void Pin::setInstance(Instance* inst)
+void Pin::setInstance(SoaRef<Instance> inst)
 {
   data_.get<PinColumns::inst>() = inst;
 }
 
-void Pin::setNet(Net* net)
+void Pin::setNet(SoaRef<Net> net)
 {
   data_.get<PinColumns::net>() = net;
 }
@@ -661,7 +661,7 @@ void Net::updateBox(bool skipIoMode)
   }
 }
 
-void Net::addPin(Pin* pin)
+void Net::addPin(SoaRef<Pin> pin)
 {
   data_.get<NetColumns::pins>().push_back(pin);
 }
@@ -864,11 +864,10 @@ void PlacerBaseCommon::init()
       temp_inst.snapOutward(core_rect.ll(), siteSizeX_, siteSizeY_);
     }
 
-    instStor_.push_back(temp_inst);
-
     if (temp_inst.dy() > siteSizeY_ * 6) {
       macroInstsArea_ += temp_inst.getArea();
     }
+    instStor_.push_back(std::move(temp_inst));
   }
 
   // Extending instances by average pin density.
@@ -923,7 +922,7 @@ void PlacerBaseCommon::init()
   // Adjust each movable instance to match the average density
   int64_t total_adjustment_area = 0;
   if (!pbVars_.disablePinDensityAdjust) {
-    for (auto& inst : instStor_) {
+    for (auto inst : instStor_) {
       if (!inst.isFixed() && inst.isInstance()) {
         int pin_count = count_signal_pins(inst);
         if (pin_count > 2 && avg_density > 0.0) {
@@ -949,29 +948,44 @@ void PlacerBaseCommon::init()
 
   instMap_.reserve(instStor_.size());
   insts_.reserve(instStor_.size());
-  for (auto& pb_inst : instStor_) {
-    instMap_[pb_inst.dbInst()] = &pb_inst;
-    insts_.push_back(&pb_inst);
+  for (auto pb_inst : instStor_) {
+    instMap_[pb_inst.dbInst()] = pb_inst.numericRow().slot();
+    insts_.push_back(pb_inst.ref());
 
     if (!pb_inst.isFixed()) {
-      placeInsts_.push_back(&pb_inst);
+      placeInsts_.push_back(pb_inst.ref());
     }
   }
 
   // nets fill
   dbSet<dbNet> db_nets = block->getNets();
-  netStor_.reserve(db_nets.size());
+  size_t pin_count = 0, net_count = 0;
+  for (dbNet* net : db_nets) {
+    if (net->getSigType() == dbSigType::SIGNAL
+        || net->getSigType() == dbSigType::CLOCK) {
+      ++net_count;
+      pin_count += net->getITerms().size();
+      if (!pbVars_.skipIoMode) {
+        pin_count += net->getBTerms().size();
+      }
+    }
+  }
+  netStor_.reserve(net_count);
+  pinStor_.reserve(pin_count);
   for (dbNet* db_net : db_nets) {
     dbSigType net_type = db_net->getSigType();
 
     // escape nets with VDD/VSS/reset nets
     if (net_type == dbSigType::SIGNAL || net_type == dbSigType::CLOCK) {
       Net temp_net(db_net, pbVars_.skipIoMode, net_columns_);
+      net_columns_->at<NetColumns::pins>(temp_net.numericRow().slot())
+          .reserve(db_net->getITerms().size()
+                   + (pbVars_.skipIoMode ? 0 : db_net->getBTerms().size()));
       netStor_.push_back(std::move(temp_net));
 
-      // this is safe because of "reserve"
-      Net* temp_net_ptr = &netStor_[netStor_.size() - 1];
-      netMap_[db_net] = temp_net_ptr;
+      // Row references survive column growth.
+      SoaRef<Net> temp_net_ptr = netStor_[netStor_.size() - 1].ref();
+      netMap_[db_net] = temp_net_ptr.row();
 
       for (dbITerm* iTerm : db_net->getITerms()) {
         Pin temp_pin(iTerm, pin_columns_);
@@ -993,26 +1007,28 @@ void PlacerBaseCommon::init()
   // pinMap_ and pins_ update
   pins_.reserve(pinStor_.size());
   pinMap_.reserve(pinStor_.size());
-  for (auto& pb_pin : pinStor_) {
+  for (auto pb_pin : pinStor_) {
     if (pb_pin.isITerm()) {
-      pinMap_[pb_pin.getDbITerm()] = &pb_pin;
+      pinMap_[pb_pin.getDbITerm()] = pb_pin.numericRow().slot();
     } else if (pb_pin.isBTerm()) {
-      pinMap_[pb_pin.getDbBTerm()] = &pb_pin;
+      pinMap_[pb_pin.getDbBTerm()] = pb_pin.numericRow().slot();
     }
-    pins_.push_back(&pb_pin);
+    pins_.push_back(pb_pin.ref());
   }
 
   // instStor_'s pins_ fill
-  for (auto& pb_inst : instStor_) {
+  for (auto pb_inst : instStor_) {
     if (!pb_inst.isInstance()) {
       continue;
     }
+    instance_columns_->at<InstanceColumns::pins>(pb_inst.numericRow().slot())
+        .reserve(pb_inst.dbInst()->getITerms().size());
     for (dbITerm* iTerm : pb_inst.dbInst()->getITerms()) {
       // note that, DB's ITerm can have
       // VDD/VSS pins.
       //
       // Escape those pins
-      Pin* cur_pin = dbToPb(iTerm);
+      SoaRef<Pin> cur_pin = dbToPb(iTerm);
       if (cur_pin) {
         pb_inst.addPin(cur_pin);
       }
@@ -1021,7 +1037,7 @@ void PlacerBaseCommon::init()
 
   // nets' pin update
   nets_.reserve(netStor_.size());
-  for (auto& pb_net : netStor_) {
+  for (auto pb_net : netStor_) {
     for (dbITerm* iTerm : pb_net.getDbNet()->getITerms()) {
       pb_net.addPin(dbToPb(iTerm));
     }
@@ -1030,7 +1046,7 @@ void PlacerBaseCommon::init()
         pb_net.addPin(dbToPb(bTerm));
       }
     }
-    nets_.push_back(&pb_net);
+    nets_.push_back(pb_net.ref());
   }
 }
 
@@ -1054,35 +1070,43 @@ void PlacerBaseCommon::reset()
 int64_t PlacerBaseCommon::getHpwl() const
 {
   int64_t hpwl = 0;
-  for (auto& net : nets_) {
+  for (auto net : nets_) {
     net->updateBox(pbVars_.skipIoMode);
     hpwl += net->getHpwl();
   }
   return hpwl;
 }
 
-Instance* PlacerBaseCommon::dbToPb(odb::dbInst* inst) const
+SoaRef<Instance> PlacerBaseCommon::dbToPb(odb::dbInst* inst) const
 {
   auto instPtr = instMap_.find(inst);
-  return (instPtr == instMap_.end()) ? nullptr : instPtr->second;
+  return (instPtr == instMap_.end())
+             ? SoaRef<Instance>{}
+             : SoaRef<Instance>{instance_columns_.get(), instPtr->second};
 }
 
-Pin* PlacerBaseCommon::dbToPb(odb::dbITerm* term) const
+SoaRef<Pin> PlacerBaseCommon::dbToPb(odb::dbITerm* term) const
 {
   auto pinPtr = pinMap_.find(term);
-  return (pinPtr == pinMap_.end()) ? nullptr : pinPtr->second;
+  return (pinPtr == pinMap_.end())
+             ? SoaRef<Pin>{}
+             : SoaRef<Pin>{pin_columns_.get(), pinPtr->second};
 }
 
-Pin* PlacerBaseCommon::dbToPb(odb::dbBTerm* term) const
+SoaRef<Pin> PlacerBaseCommon::dbToPb(odb::dbBTerm* term) const
 {
   auto pinPtr = pinMap_.find(term);
-  return (pinPtr == pinMap_.end()) ? nullptr : pinPtr->second;
+  return (pinPtr == pinMap_.end())
+             ? SoaRef<Pin>{}
+             : SoaRef<Pin>{pin_columns_.get(), pinPtr->second};
 }
 
-Net* PlacerBaseCommon::dbToPb(odb::dbNet* net) const
+SoaRef<Net> PlacerBaseCommon::dbToPb(odb::dbNet* net) const
 {
   auto netPtr = netMap_.find(net);
-  return (netPtr == netMap_.end()) ? nullptr : netPtr->second;
+  return (netPtr == netMap_.end())
+             ? SoaRef<Net>{}
+             : SoaRef<Net>{net_columns_.get(), netPtr->second};
 }
 
 void PlacerBaseCommon::printInfo() const
@@ -1116,6 +1140,8 @@ PlacerBase::PlacerBase(odb::dbDatabase* db,
              32,
              "---- Initialize Region: {}",
              (group_ == nullptr) ? "Top-level" : group_->getName());
+  instance_columns_ = pbCommon_->instanceColumns();
+  instStor_ = SoaPool<Instance>(instance_columns_);
   init(check_density);
 }
 
@@ -1156,7 +1182,7 @@ void PlacerBase::init(bool check_density)
   siteSizeX_ = pbCommon_->siteSizeX();
   siteSizeY_ = pbCommon_->siteSizeY();
 
-  for (auto& inst : pbCommon_->getInsts()) {
+  for (auto inst : pbCommon_->getInsts()) {
     if (!inst->isInstance()) {
       continue;
     }
@@ -1223,13 +1249,13 @@ void PlacerBase::init(bool check_density)
   initInstsForUnusableSites();
 
   // handle newly added dummy instances
-  for (auto& inst : instStor_) {
+  for (auto inst : instStor_) {
     if (inst.isDummy()) {
-      dummyInsts_.push_back(&inst);
-      nonPlaceInsts_.push_back(&inst);
+      dummyInsts_.push_back(inst.ref());
+      nonPlaceInsts_.push_back(inst.ref());
       nonPlaceInstsArea_ += inst.getArea();
     }
-    pb_insts_.push_back(&inst);
+    pb_insts_.push_back(inst.ref());
   }
 
   printInfo(check_density);
@@ -1399,7 +1425,7 @@ void PlacerBase::initInstsForUnusableSites()
   }
 
   // fill fixed instances' bbox
-  for (auto& inst : pbCommon_->getInsts()) {
+  for (auto inst : pbCommon_->getInsts()) {
     if (!inst->isFixed()) {
       continue;
     }
@@ -1628,7 +1654,7 @@ static std::pair<int, int> getMinMaxIdx(int ll,
   return std::make_pair(std::max(minIdx, lowerIdx), std::min(maxIdx, upperIdx));
 }
 
-static bool isCoreAreaOverlap(Die& die, Instance& inst)
+static bool isCoreAreaOverlap(const Die& die, const Instance& inst)
 {
   int rectLx = std::max(die.coreLx(), inst.lx()),
       rectLy = std::max(die.coreLy(), inst.ly()),
@@ -1637,7 +1663,7 @@ static bool isCoreAreaOverlap(Die& die, Instance& inst)
   return rectLx < rectUx && rectLy < rectUy;
 }
 
-static int64_t getOverlapWithCoreArea(Die& die, Instance& inst)
+static int64_t getOverlapWithCoreArea(const Die& die, const Instance& inst)
 {
   int rectLx = std::max(die.coreLx(), inst.lx()),
       rectLy = std::max(die.coreLy(), inst.ly()),

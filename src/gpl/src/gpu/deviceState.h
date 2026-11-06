@@ -26,11 +26,12 @@
 // Compiled only in the GPU build (--config=gpu).
 
 #pragma once
-
 #include <cstdint>
 #include <memory>
 #include <type_traits>
 #include <vector>
+
+#include "../soaStorage.h"
 
 namespace gpl {
 
@@ -49,9 +50,9 @@ class DeviceState
   // coords loaded each iter via syncInstCoordsFromHost(). The only public
   // ctor — default-construction is deleted so kokkos_ can never start out
   // null with a null deleter.
-  DeviceState(const std::vector<GCell>& gCellStor,
-              const std::vector<GPin>& gPinStor,
-              const std::vector<GNet>& gNetStor);
+  DeviceState(const SoaPool<GCell>& gCellStor,
+              const SoaPool<GPin>& gPinStor,
+              const SoaPool<GNet>& gNetStor);
   DeviceState() = delete;
   // Default destructor — the function-pointer deleter on kokkos_ (see
   // below) lets this stay inline without requiring KokkosDeviceState to be
@@ -75,15 +76,15 @@ class DeviceState
   // construction-time view and CSR here. The object identity is preserved so
   // backends holding a DeviceState* stay valid. Leaves coords invalidated;
   // the next ensureCoordsFresh() reloads coords and pin locations.
-  void rebuild(const std::vector<GCell>& gCellStor,
-               const std::vector<GPin>& gPinStor,
-               const std::vector<GNet>& gNetStor);
+  void rebuild(const SoaPool<GCell>& gCellStor,
+               const SoaPool<GPin>& gPinStor,
+               const SoaPool<GNet>& gNetStor);
 
   // Re-push current instance centers (= GCell::cx()/cy()) to the device.
   // Now used only on the init path; once nb_device_ctx_ exists, that
   // context scatters fresh inst coords each iteration via
   // scatterToDeviceState and this host-side path becomes redundant.
-  void syncInstCoordsFromHost(const std::vector<GCell>& gCellStor);
+  void syncInstCoordsFromHost(const SoaPool<GCell>& gCellStor);
 
   // Compute absolute pin centers on the device:
   //   d_pin_cx[i] = d_inst_cx[d_pin_inst_id[i]] + d_pin_offset_cx[i]
@@ -97,7 +98,7 @@ class DeviceState
   // the Nesterov inner loop. Called via
   // NesterovBaseCommon::refreshDeviceNetWeights after every virtual TD
   // iteration; non-virtual iterations reload weights through rebuild().
-  void refreshNetWeights(const std::vector<GNet>& gNetStor);
+  void refreshNetWeights(const SoaPool<GNet>& gNetStor);
 
   // Re-push per-inst density params (half_dx, half_dy, density_scale) after
   // they change. Called from NesterovBase::updateDensitySize (routability
@@ -105,7 +106,7 @@ class DeviceState
   // through rebuild() instead. The inst-density views are allocated at
   // construction, so this is safe to call any time after the ctor. Static
   // during the main Nesterov loop.
-  void refreshDensityParams(const std::vector<GCell>& gCellStor);
+  void refreshDensityParams(const SoaPool<GCell>& gCellStor);
 
   // Counts (for backends to size their own per-net / per-pin buffers).
   int numInsts() const;
@@ -136,7 +137,7 @@ class DeviceState
   //     mutator (updateGCellCenterLocation / updateGCellDensityCenterLocation
   //     and the db callbacks moveGCell / resizeGCell / fixPointers) so the
   //     next ensureCoordsFresh() re-syncs.
-  void ensureCoordsFresh(const std::vector<GCell>& gCellStor);
+  void ensureCoordsFresh(const SoaPool<GCell>& gCellStor);
   void markCoordsFresh() { coords_fresh_ = true; }
   void invalidateCoords() { coords_fresh_ = false; }
 
@@ -148,14 +149,14 @@ class DeviceState
  private:
   // Shared by the constructor and rebuild(): (re)allocate the inst/pin/net
   // views, rebuild both CSRs, and push static attributes + initial coords.
-  void buildTopology(const std::vector<GCell>& gCellStor,
-                     const std::vector<GPin>& gPinStor,
-                     const std::vector<GNet>& gNetStor);
+  void buildTopology(const SoaPool<GCell>& gCellStor,
+                     const SoaPool<GPin>& gPinStor,
+                     const SoaPool<GNet>& gNetStor);
   // (Re)allocate + fill the per-inst density views (half size, scale,
   // gradient). Sized num_insts_, so a rebuild() that changed the instance
   // count must re-run this. Called once from the constructor (which then sets
   // inst_density_ready_) and again from rebuild().
-  void rebuildInstDensityViews(const std::vector<GCell>& gCellStor);
+  void rebuildInstDensityViews(const SoaPool<GCell>& gCellStor);
 
   // Master-thread-only; see ensureCoordsFresh() for the thread-safety
   // rationale. No atomic.

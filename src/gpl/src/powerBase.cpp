@@ -94,10 +94,10 @@ void PowerBase::setPowerNetWeights()
   if (min_period_ <= 0) {
     return;
   }
-  for (auto& gNet : nbc_->getGNets()) {
+  for (auto gNet : nbc_->getGNets()) {
     float toggles = 0;
     if (gNet->getGPins().size() > 1) {
-      for (const Net* pb_net : gNet->getPbNets()) {
+      for (SoaRef<Net> pb_net : gNet->getPbNets()) {
         toggles = std::max(toggles,
                            netToggles(network_->dbToSta(pb_net->getDbNet())));
       }

@@ -43,6 +43,11 @@ class PointColumns
 
   size_t size() const { return x_.size(); }
   bool empty() const { return x_.empty(); }
+  void reserve(size_t size)
+  {
+    x_.reserve(size);
+    y_.reserve(size);
+  }
   void resize(size_t size, FloatPoint value = {})
   {
     x_.resize(size, value.x);

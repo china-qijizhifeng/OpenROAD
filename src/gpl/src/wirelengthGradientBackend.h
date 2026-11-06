@@ -10,12 +10,12 @@
 // a std::unique_ptr<WirelengthGradientBackend> member.
 
 #pragma once
-
 #include <memory>
 #include <type_traits>
 #include <vector>
 
 #include "point.h"
+#include "soaStorage.h"
 
 namespace gpl {
 
@@ -50,7 +50,7 @@ class WirelengthGradientBackend
       = 0;
 
   // Per-cell gradient (cold path). Backend may cache prior bulk results.
-  virtual FloatPoint getCellGradient(const GCell* gCell) = 0;
+  virtual FloatPoint getCellGradient(SoaRef<GCell> gCell) = 0;
 
   // Make the per-inst gradients available on the DEVICE without a host
   // round-trip. Only meaningful for the GPU backend (runs the K5 gather so

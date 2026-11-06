@@ -192,7 +192,7 @@ TEST_P(MasterTypeVisibility, InstanceIsSeenByGpl)
   PlacerBaseCommon pbc(db_.get(), vars, &logger_);
 
   const char* master_class = odb::dbMasterType(param.type).getString();
-  Instance* pb_inst = pbc.dbToPb(inst);
+  SoaRef<Instance> pb_inst = pbc.dbToPb(inst);
   if (param.occupies_a_site) {
     ASSERT_NE(pb_inst, nullptr)
         << "master class " << master_class
@@ -269,7 +269,7 @@ TEST_F(EndcapObstacles, EndcapsAreFixedObstaclesWithArea)
   EXPECT_EQ(pb.placeInsts().size(), 1);
 
   int64_t fixed_area = 0;
-  for (Instance* inst : pb.fixedInsts()) {
+  for (SoaRef<Instance> inst : pb.fixedInsts()) {
     fixed_area += inst->getArea();
   }
   const int64_t endcap_area

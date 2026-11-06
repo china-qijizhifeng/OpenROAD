@@ -13,8 +13,10 @@
 // soft-min term's derivative minus the soft-max term's).
 
 #include <algorithm>
+#include <bit>
 #include <cmath>
 #include <cstddef>
+#include <cstdint>
 #include <map>
 #include <memory>
 #include <numeric>
@@ -151,7 +153,7 @@ class WirelengthGradientTest : public ::testing::Test
   {
     nbc_->updateWireLengthForceWA(wl_coeff, wl_coeff);
     std::vector<FloatPoint> grads(kCellCount);
-    for (const GCell* gcell : nbc_->getGCells()) {
+    for (SoaRef<GCell> gcell : nbc_->getGCells()) {
       const std::string name = gcell->insts()[0]->dbInst()->getName();
       grads[cell_index_.at(name)]
           = nbc_->getWireLengthGradientWA(gcell, wl_coeff, wl_coeff);
@@ -226,6 +228,60 @@ class WirelengthGradientTest : public ::testing::Test
   std::map<std::string, int> cell_index_;
   std::vector<Net> nets_;
 };
+
+// Exercise the real bulk pipeline against immediate scalar evaluation,
+// including callers that request a reordered subset and reweight nets after
+// updateForce.
+TEST_F(WirelengthGradientTest, BulkIsExactAcrossSubsetsAndWeightChanges)
+{
+  std::vector<GCellHandle> cells;
+  for (size_t i = 0; i < nbc_->getGCellStor().size(); i += 2) {
+    cells.emplace_back(nbc_.get(), i);
+  }
+  std::reverse(cells.begin(), cells.end());
+  PointColumns bulk;
+  bulk.resize(cells.size());
+  for (float coefficient : {0.0f, 0.00001f, 0.0003f}) {
+    const float coefficient_y = 2 * coefficient;
+    nbc_->updateWireLengthForceWA(coefficient, coefficient_y);
+    auto check = [&] {
+      nbc_->getAllWireLengthGradientsWA(cells, bulk);
+      for (size_t i = 0; i < cells.size(); ++i) {
+        const auto expected = nbc_->getWireLengthGradientWA(
+            cells[i], coefficient, coefficient_y);
+        EXPECT_EQ(std::bit_cast<uint32_t>(bulk.x()[i]),
+                  std::bit_cast<uint32_t>(expected.x));
+        EXPECT_EQ(std::bit_cast<uint32_t>(bulk.y()[i]),
+                  std::bit_cast<uint32_t>(expected.y));
+      }
+    };
+    check();
+    nbc_->getWireLengthGradientsWA_cpu(
+        cells, bulk, coefficient + 0.00002f, coefficient_y);
+    for (size_t i = 0; i < cells.size(); ++i) {
+      const auto expected = nbc_->getWireLengthGradientWA(
+          cells[i], coefficient + 0.00002f, coefficient_y);
+      EXPECT_EQ(std::bit_cast<uint32_t>(bulk.x()[i]),
+                std::bit_cast<uint32_t>(expected.x));
+      EXPECT_EQ(std::bit_cast<uint32_t>(bulk.y()[i]),
+                std::bit_cast<uint32_t>(expected.y));
+    }
+    const auto net = nbc_->getGNets().front();
+    net->setTimingWeight(2.5f);
+    check();
+    net->setCustomWeight(0.7f);
+    check();
+    net->setPowerWeight(1.3f);
+    check();
+    // Coordinate refresh invalidates cached gradients before the next force.
+    auto first = *cells.front();
+    first.setDensityCenterLocation(first.dCx() + 19, first.dCy() - 13);
+    GCellRowList changed{
+        &first.numericRow().storage(), {first.numericRow().slot()}, {0}};
+    nbc_->updateDensityPinLocations(changed);
+    check();
+  }
+}
 
 // gamma of 1000 DBU against pin spreads of up to ~17000 DBU keeps the
 // dominant exponents in [-10, 0], where gpl's fastExp (a 1024th-power

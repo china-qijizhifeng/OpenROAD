@@ -208,7 +208,7 @@ bool TimingBase::executeTimingDriven(bool run_journal_restore,
              worst_slack_nets.size());
 
   int weighted_net_count = 0;
-  for (auto& gNet : nbc_->getGNets()) {
+  for (auto gNet : nbc_->getGNets()) {
     // default weight
     gNet->setTimingWeight(1.0);
     if (gNet->getGPins().size() > 1) {

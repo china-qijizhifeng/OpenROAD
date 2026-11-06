@@ -17,14 +17,14 @@ namespace gpl {
 namespace {
 
 // Return the GCell index in gCellStor, or -1 if it belongs to another pool.
-int indexOfGCell(const std::vector<GCell>& gCellStor, const GCell* gCell)
+int indexOfGCell(const SoaPool<GCell>& gCellStor, SoaRef<GCell> gCell)
 {
-  const GCell* base = gCellStor.data();
-  const std::less<const GCell*> before;
-  if (before(gCell, base) || !before(gCell, base + gCellStor.size())) {
+  if (!gCell || gCellStor.empty()
+      || gCell.storage() != gCellStor.front().ref().storage()) {
     return -1;
   }
-  return static_cast<int>(gCell - base);
+  const size_t index = gCellStor.indexOf(gCell);
+  return index < gCellStor.size() ? static_cast<int>(index) : -1;
 }
 
 // Deleter passed to the type-erased unique_ptr in deviceState.h. Defined
@@ -36,9 +36,9 @@ void deleteKokkosDeviceState(KokkosDeviceState* p)
 
 }  // namespace
 
-DeviceState::DeviceState(const std::vector<GCell>& gCellStor,
-                         const std::vector<GPin>& gPinStor,
-                         const std::vector<GNet>& gNetStor)
+DeviceState::DeviceState(const SoaPool<GCell>& gCellStor,
+                         const SoaPool<GPin>& gPinStor,
+                         const SoaPool<GNet>& gNetStor)
     : kokkos_(new KokkosDeviceState(), &deleteKokkosDeviceState)
 {
   ensureKokkosInitialized();
@@ -52,9 +52,9 @@ DeviceState::DeviceState(const std::vector<GCell>& gCellStor,
   inst_density_ready_ = true;
 }
 
-void DeviceState::buildTopology(const std::vector<GCell>& gCellStor,
-                                const std::vector<GPin>& gPinStor,
-                                const std::vector<GNet>& gNetStor)
+void DeviceState::buildTopology(const SoaPool<GCell>& gCellStor,
+                                const SoaPool<GPin>& gPinStor,
+                                const SoaPool<GNet>& gNetStor)
 {
   num_insts_ = static_cast<int>(gCellStor.size());
   num_pins_ = static_cast<int>(gPinStor.size());
@@ -117,10 +117,10 @@ void DeviceState::buildTopology(const std::vector<GCell>& gCellStor,
   std::vector<int> h_pin_cx_init(num_pins_);
   std::vector<int> h_pin_cy_init(num_pins_);
   for (int i = 0; i < num_pins_; ++i) {
-    const GPin& gPin = gPinStor[i];
+    const GPin gPin = gPinStor[i];
     h_pin_offset_cx[i] = gPin.offsetCx();
     h_pin_offset_cy[i] = gPin.offsetCy();
-    const GCell* gCell = gPin.getGCell();
+    SoaRef<GCell> gCell = gPin.getGCell();
     h_pin_inst_id[i] = gCell ? indexOfGCell(gCellStor, gCell) : -1;
     // GPin::cx()/cy() return absolute coords (set in the GPin ctor from the
     // DB pin position; later refreshed by updateLocation for instance pins
@@ -161,9 +161,9 @@ void DeviceState::buildTopology(const std::vector<GCell>& gCellStor,
   std::vector<int> h_net_pin_idx(total_net_pins);
   for (int n = 0; n < num_nets_; ++n) {
     int off = h_net_pin_off[n];
-    for (const GPin* gPin : gNetStor[n].getGPins()) {
-      // gPin is a pointer into gPinStor_; convert to index.
-      const int pin_idx = static_cast<int>(gPin - gPinStor.data());
+    for (SoaRef<GPin> gPin : gNetStor[n].getGPins()) {
+      // Convert stable row identity to the current device iteration index.
+      const int pin_idx = static_cast<int>(gPinStor.indexOf(gPin));
       h_net_pin_idx[off++] = pin_idx;
       // Pin→net id derived from the net→pin lists rather than
       // gPin.getGNet() so both directions of the CSR come from the same
@@ -250,9 +250,9 @@ void DeviceState::buildTopology(const std::vector<GCell>& gCellStor,
 // ~DeviceState() is inline-defaulted in deviceState.h thanks to the
 // function-pointer deleter on kokkos_.
 
-void DeviceState::rebuild(const std::vector<GCell>& gCellStor,
-                          const std::vector<GPin>& gPinStor,
-                          const std::vector<GNet>& gNetStor)
+void DeviceState::rebuild(const SoaPool<GCell>& gCellStor,
+                          const SoaPool<GPin>& gPinStor,
+                          const SoaPool<GNet>& gNetStor)
 {
   buildTopology(gCellStor, gPinStor, gNetStor);
   // The per-inst density views are sized num_insts_, which may have changed.
@@ -267,7 +267,7 @@ void DeviceState::rebuild(const std::vector<GCell>& gCellStor,
   invalidateCoords();
 }
 
-void DeviceState::rebuildInstDensityViews(const std::vector<GCell>& gCellStor)
+void DeviceState::rebuildInstDensityViews(const SoaPool<GCell>& gCellStor)
 {
   auto& s = *kokkos_;
   s.d_inst_density_half_dx
@@ -302,7 +302,7 @@ void DeviceState::rebuildInstDensityViews(const std::vector<GCell>& gCellStor)
   Kokkos::deep_copy(s.d_inst_density_scale, hv_s);
 }
 
-void DeviceState::syncInstCoordsFromHost(const std::vector<GCell>& gCellStor)
+void DeviceState::syncInstCoordsFromHost(const SoaPool<GCell>& gCellStor)
 {
   auto& s = *kokkos_;
   // IMPORTANT: read DENSITY centers (dCx/dCy), not regular centers (cx/cy).
@@ -346,7 +346,7 @@ void DeviceState::updatePinLocations()
       });
 }
 
-void DeviceState::refreshNetWeights(const std::vector<GNet>& gNetStor)
+void DeviceState::refreshNetWeights(const SoaPool<GNet>& gNetStor)
 {
   auto& s = *kokkos_;
   std::vector<float> h_weights(num_nets_);
@@ -358,7 +358,7 @@ void DeviceState::refreshNetWeights(const std::vector<GNet>& gNetStor)
   Kokkos::deep_copy(s.d_net_weight, hv);
 }
 
-void DeviceState::refreshDensityParams(const std::vector<GCell>& gCellStor)
+void DeviceState::refreshDensityParams(const SoaPool<GCell>& gCellStor)
 {
   auto& s = *kokkos_;
   std::vector<int> h_half_dx(num_insts_);
@@ -395,7 +395,7 @@ int DeviceState::numNets() const
   return num_nets_;
 }
 
-void DeviceState::ensureCoordsFresh(const std::vector<GCell>& gCellStor)
+void DeviceState::ensureCoordsFresh(const SoaPool<GCell>& gCellStor)
 {
   // Fast path: NB device context already scattered fresh inst coords (and
   // ran updatePinLocations()) via commitCoordsToDeviceState, and no host

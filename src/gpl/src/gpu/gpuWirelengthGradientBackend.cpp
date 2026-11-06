@@ -117,7 +117,7 @@ void GpuWirelengthGradientBackend::getCellGradients(
       out);
 }
 
-FloatPoint GpuWirelengthGradientBackend::getCellGradient(const GCell* gCell)
+FloatPoint GpuWirelengthGradientBackend::getCellGradient(SoaRef<GCell> gCell)
 {
   if (gCell->isFiller()) {
     return FloatPoint(0, 0);

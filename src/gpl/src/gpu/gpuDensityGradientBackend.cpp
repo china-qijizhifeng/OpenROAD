@@ -87,7 +87,7 @@ void GpuDensityGradientBackend::getCellGradients(
   nb->fillFillerDensityGradients(gCells, out);
 }
 
-FloatPoint GpuDensityGradientBackend::getCellGradient(const GCell* gCell)
+FloatPoint GpuDensityGradientBackend::getCellGradient(SoaRef<GCell> gCell)
 {
   if (gCell->isFiller()) {
     return impl_->nb->getDensityGradient(gCell);

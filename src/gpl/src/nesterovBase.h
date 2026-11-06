@@ -2,7 +2,6 @@
 // Copyright (c) 2018-2025, The OpenROAD Authors
 
 #pragma once
-
 #include <atomic>
 #include <cmath>
 #include <cstddef>
@@ -31,6 +30,7 @@
 #include "placerBase.h"
 #include "point.h"
 #include "routeBase.h"
+#include "soaStorage.h"
 #include "utl/Logger.h"
 namespace odb {
 class dbInst;
@@ -74,10 +74,10 @@ class GCell
   using GCellChange = CellAreaChange;
 
   // instance cells
-  GCell(Instance* inst,
+  GCell(SoaRef<Instance> inst,
         std::shared_ptr<NumericStore> storage
         = std::make_shared<NumericStore>());
-  GCell(const std::vector<Instance*>& insts,
+  GCell(const SoaRows<Instance>& insts,
         std::shared_ptr<NumericStore> storage
         = std::make_shared<NumericStore>());
 
@@ -89,18 +89,18 @@ class GCell
         std::shared_ptr<NumericStore> storage
         = std::make_shared<NumericStore>());
 
-  const std::vector<Instance*>& insts() const
+  const SoaRows<Instance>& insts() const
   {
     return data_.get<GCellColumns::insts>();
   }
-  const std::vector<GPin*>& gPins() const
+  const SoaRows<GPin>& gPins() const
   {
     return data_.get<GCellColumns::gPins>();
   }
 
   std::string getName() const;
 
-  void addGPin(GPin* gPin);
+  void addGPin(SoaRef<GPin> gPin);
   void clearGPins() { data_.get<GCellColumns::gPins>().clear(); }
 
   void updateLocations();
@@ -165,6 +165,10 @@ class GCell
 
   SoaRow<NumericStore>& numericRow() { return data_; }
   const SoaRow<NumericStore>& numericRow() const { return data_; }
+
+  GCell(SoaViewTag tag, void* store, size_t row) : data_(tag, store, row) {}
+  SoaRef<GCell> ref() const { return {data_.storageIdentity(), data_.slot()}; }
+  using Store = NumericStore;
 
  private:
   SoaRow<NumericStore> data_;
@@ -253,19 +257,19 @@ class GNet
 {
  public:
   using NumericStore = GNetColumns::Store;
-  GNet(Net* net,
+  GNet(SoaRef<Net> net,
        std::shared_ptr<NumericStore> storage
        = std::make_shared<NumericStore>());
-  GNet(const std::vector<Net*>& nets,
+  GNet(const SoaRows<Net>& nets,
        std::shared_ptr<NumericStore> storage
        = std::make_shared<NumericStore>());
 
-  Net* getPbNet() const;
-  const std::vector<Net*>& getPbNets() const
+  SoaRef<Net> getPbNet() const;
+  const SoaRows<Net>& getPbNets() const
   {
     return data_.get<GNetColumns::nets>();
   }
-  const std::vector<GPin*>& getGPins() const
+  const SoaRows<GPin>& getGPins() const
   {
     return data_.get<GNetColumns::gPins>();
   }
@@ -294,7 +298,7 @@ class GNet
     return data_.get<GNetColumns::customWeight>();
   }
 
-  void addGPin(GPin* gPin);
+  void addGPin(SoaRef<GPin> gPin);
   void clearGPins() { data_.get<GNetColumns::gPins>().clear(); }
   void updateBox();
   // GPU path writes the device-computed bbox back so lx()/ly()/ux()/uy() stay
@@ -335,7 +339,12 @@ class GNet
 
   void print(utl::Logger* log) const;
 
+  SoaRow<NumericStore>& numericRow() { return data_; }
   const SoaRow<NumericStore>& numericRow() const { return data_; }
+
+  GNet(SoaViewTag tag, void* store, size_t row) : data_(tag, store, row) {}
+  SoaRef<GNet> ref() const { return {data_.storageIdentity(), data_.slot()}; }
+  using Store = NumericStore;
 
  private:
   SoaRow<NumericStore> data_;
@@ -473,24 +482,24 @@ class GPin
 {
  public:
   using NumericStore = GPinColumns::Store;
-  GPin(Pin* pin,
+  GPin(SoaRef<Pin> pin,
        std::shared_ptr<NumericStore> storage
        = std::make_shared<NumericStore>());
-  GPin(const std::vector<Pin*>& pins,
+  GPin(const SoaRows<Pin>& pins,
        std::shared_ptr<NumericStore> storage
        = std::make_shared<NumericStore>());
 
-  Pin* getPbPin() const;
-  const std::vector<Pin*>& getPbPins() const
+  SoaRef<Pin> getPbPin() const;
+  const SoaRows<Pin>& getPbPins() const
   {
     return data_.get<GPinColumns::pins>();
   }
 
-  GCell* getGCell() const { return data_.get<GPinColumns::gCell>(); }
-  GNet* getGNet() const { return data_.get<GPinColumns::gNet>(); }
+  SoaRef<GCell> getGCell() const { return data_.get<GPinColumns::gCell>(); }
+  SoaRef<GNet> getGNet() const { return data_.get<GPinColumns::gNet>(); }
 
-  void setGCell(GCell* gCell);
-  void setGNet(GNet* gNet);
+  void setGCell(SoaRef<GCell> gCell);
+  void setGNet(SoaRef<GNet> gNet);
 
   int cx() const { return data_.get<GPinColumns::cx>(); }
   int cy() const { return data_.get<GPinColumns::cy>(); }
@@ -553,13 +562,18 @@ class GPin
   }
 
   void setCenterLocation(int cx, int cy);
-  void updateLocation(const GCell* gCell);
-  void updateDensityLocation(const GCell* gCell);
+  void updateLocation(SoaRef<GCell> gCell);
+  void updateDensityLocation(SoaRef<GCell> gCell);
 
   void print(utl::Logger* log) const;
   void updateCoordi();
 
+  SoaRow<NumericStore>& numericRow() { return data_; }
   const SoaRow<NumericStore>& numericRow() const { return data_; }
+
+  GPin(SoaViewTag tag, void* store, size_t row) : data_(tag, store, row) {}
+  SoaRef<GPin> ref() const { return {data_.storageIdentity(), data_.slot()}; }
+  using Store = NumericStore;
 
  private:
   SoaRow<NumericStore> data_;
@@ -651,7 +665,11 @@ class Bin
 
   int64_t getFillerArea() const { return data_.get<BinColumns::fillerArea>(); }
 
-  const SoaRow<NumericStore>& numericRow() const { return data_; }
+  Bin(SoaViewTag tag, void* store, size_t row) : data_(tag, store, row) {}
+  SoaRef<Bin> ref() const { return {data_.storageIdentity(), data_.slot()}; }
+  using Store = NumericStore;
+  SoaRow<Store>& numericRow() { return data_; }
+  const SoaRow<Store>& numericRow() const { return data_; }
 
  private:
   SoaRow<NumericStore> data_;
@@ -803,14 +821,14 @@ class BinGrid
   }
 
   // return bins_ index with given gcell
-  std::pair<int, int> getDensityMinMaxIdxX(const GCell* gcell) const;
-  std::pair<int, int> getDensityMinMaxIdxY(const GCell* gcell) const;
+  std::pair<int, int> getDensityMinMaxIdxX(SoaRef<GCell> gcell) const;
+  std::pair<int, int> getDensityMinMaxIdxY(SoaRef<GCell> gcell) const;
 
-  std::pair<int, int> getMinMaxIdxX(const Instance* inst) const;
-  std::pair<int, int> getMinMaxIdxY(const Instance* inst) const;
+  std::pair<int, int> getMinMaxIdxX(SoaRef<Instance> inst) const;
+  std::pair<int, int> getMinMaxIdxY(SoaRef<Instance> inst) const;
 
-  std::vector<Bin>& getBins();
-  const std::vector<Bin>& getBinsConst() const { return bins_; };
+  SoaPool<Bin>& getBins();
+  const SoaPool<Bin>& getBinsConst() const { return bins_; };
   Bin::NumericStore& numericBins() { return *bin_columns_; }
   const Bin::NumericStore& numericBins() const { return *bin_columns_; }
 
@@ -821,7 +839,7 @@ class BinGrid
  private:
   std::shared_ptr<Bin::NumericStore> bin_columns_
       = std::make_shared<Bin::NumericStore>();
-  std::vector<Bin> bins_;
+  SoaPool<Bin> bins_{bin_columns_};
   // Reused integer grids avoid atomics and preserve per-contribution
   // truncation.
   std::vector<int64_t> scatter_scratch_;
@@ -843,7 +861,7 @@ class BinGrid
   bool isSetBinCnt_ = false;
 };
 
-inline std::vector<Bin>& BinGrid::getBins()
+inline SoaPool<Bin>& BinGrid::getBins()
 {
   return bins_;
 }
@@ -934,24 +952,24 @@ class NesterovBaseCommon
   ~NesterovBaseCommon();
 
   void reportInstanceExtensionByPinDensity() const;
-  const std::vector<GCell*>& getGCells() const { return nbc_gcells_; }
-  const std::vector<GNet*>& getGNets() const { return gNets_; }
-  const std::vector<GPin*>& getGPins() const { return gPins_; }
+  const SoaRows<GCell>& getGCells() const { return nbc_gcells_; }
+  const SoaRows<GNet>& getGNets() const { return gNets_; }
+  const SoaRows<GPin>& getGPins() const { return gPins_; }
 
   //
   // placerBase To NesterovBase functions
   //
-  GCell* pbToNb(Instance* inst) const;
-  GPin* pbToNb(Pin* pin) const;
-  GNet* pbToNb(Net* net) const;
+  SoaRef<GCell> pbToNb(SoaRef<Instance> inst) const;
+  SoaRef<GPin> pbToNb(SoaRef<Pin> pin) const;
+  SoaRef<GNet> pbToNb(SoaRef<Net> net) const;
 
   //
   // OpenDB To NesterovBase functions
   //
-  GCell* dbToNb(odb::dbInst* inst) const;
-  GPin* dbToNb(odb::dbITerm* pin) const;
-  GPin* dbToNb(odb::dbBTerm* pin) const;
-  GNet* dbToNb(odb::dbNet* net) const;
+  SoaRef<GCell> dbToNb(odb::dbInst* inst) const;
+  SoaRef<GPin> dbToNb(odb::dbITerm* pin) const;
+  SoaRef<GPin> dbToNb(odb::dbBTerm* pin) const;
+  SoaRef<GNet> dbToNb(odb::dbNet* net) const;
 
   // WL force update based on WeightedAverage model
   // wlCoeffX : WireLengthCoefficient for X.
@@ -982,16 +1000,16 @@ class NesterovBaseCommon
   // backend. Defined in wirelengthGradient.cpp.
   void prepareDeviceWlGradients();
 
-  FloatPoint getWireLengthGradientPinWA(const GPin* gPin,
+  FloatPoint getWireLengthGradientPinWA(SoaRef<GPin> gPin,
                                         float wlCoeffX,
                                         float wlCoeffY) const;
 
-  FloatPoint getWireLengthGradientWA(const GCell* gCell,
+  FloatPoint getWireLengthGradientWA(SoaRef<GCell> gCell,
                                      float wlCoeffX,
                                      float wlCoeffY) const;
 
   // for preconditioner
-  FloatPoint getWireLengthPreconditioner(const GCell* gCell) const;
+  FloatPoint getWireLengthPreconditioner(SoaRef<GCell> gCell) const;
 
   int64_t getHpwl();
   int64_t getHpwlColumns();
@@ -1006,12 +1024,12 @@ class NesterovBaseCommon
   DeviceState* getDeviceState() { return device_state_.get(); }
 
   // Raw gCellStor_ accessor for DeviceState init (index correspondence).
-  const std::vector<GCell>& getGCellStor() const { return gCellStor_; }
+  const SoaPool<GCell>& getGCellStor() const { return gCellStor_; }
 
   // Number of threads of execution
   size_t getNumThreads() { return num_threads_; }
 
-  GCell* getGCellByIndex(size_t i);
+  SoaRef<GCell> getGCellByIndex(size_t i);
 
   void setCbk(nesterovDbCbk* cbk) { db_cbk_ = cbk; }
   size_t createCbkGCell(odb::dbInst* db_inst);
@@ -1045,8 +1063,8 @@ class NesterovBaseCommon
   void updateMinRcCellSize();
   void revertGCellSizeToMinRc();
 
-  GCell& getGCell(size_t index);
-  size_t getGCellIndex(const GCell* gCell) const;
+  SoaRef<GCell> getGCell(size_t index);
+  size_t getGCellIndex(SoaRef<GCell> gCell) const;
 
   void printGCells();
   void printGPins();
@@ -1066,13 +1084,15 @@ class NesterovBaseCommon
   NesterovBaseVars& getNbVars() { return nbVars_; }
 
  private:
+  PointColumns pin_gradients_;
+  bool pin_gradients_valid_ = false;
+  uint64_t pin_gradient_weight_revision_ = 0;
+  float pin_gradient_coef_x_ = 0, pin_gradient_coef_y_ = 0;
   void rebuildSoaTopology();
   void updateWireLengthForceWA_soa(float coef_x, float coef_y);
-  FloatPoint getWireLengthGradientWA_soa(const GCell* cell,
+  FloatPoint getWireLengthGradientWA_soa(SoaRef<GCell> cell,
                                          float coef_x,
                                          float coef_y) const;
-  std::vector<size_t> net_rows_, net_pin_offsets_, net_pin_rows_;
-  std::vector<size_t> cell_pin_offsets_, cell_pin_rows_, pin_net_rows_;
 
   NesterovBaseVars nbVars_;
   std::shared_ptr<PlacerBaseCommon> pbc_;
@@ -1084,19 +1104,19 @@ class NesterovBaseCommon
       = std::make_shared<GPin::NumericStore>();
   std::shared_ptr<GNet::NumericStore> net_columns_
       = std::make_shared<GNet::NumericStore>();
-  std::vector<GCell> gCellStor_;
-  std::vector<GNet> gNetStor_;
-  std::vector<GPin> gPinStor_;
+  SoaPool<GCell> gCellStor_{cell_columns_};
+  SoaPool<GNet> gNetStor_{net_columns_};
+  SoaPool<GPin> gPinStor_{pin_columns_};
 
-  std::vector<GCell*> nbc_gcells_;
+  SoaRows<GCell> nbc_gcells_;
   // For usage in routability mode, parallel to nbc_gcells_
   std::vector<int> min_rc_width_, min_rc_height_;
-  std::vector<GNet*> gNets_;
-  std::vector<GPin*> gPins_;
+  SoaRows<GNet> gNets_;
+  SoaRows<GPin> gPins_;
 
-  boost::unordered::unordered_flat_map<Instance*, GCell*> gCellMap_;
-  boost::unordered::unordered_flat_map<Pin*, GPin*> gPinMap_;
-  boost::unordered::unordered_flat_map<Net*, GNet*> gNetMap_;
+  std::vector<uint32_t> gCellMap_;
+  std::vector<uint32_t> gPinMap_;
+  std::vector<uint32_t> gNetMap_;
 
   boost::unordered::unordered_flat_map<odb::dbInst*, size_t>
       db_inst_to_nbc_index_map_;
@@ -1109,9 +1129,9 @@ class NesterovBaseCommon
 
   // These three deques should not be required if placerBase allows for dynamic
   // modifications on its vectors.
-  std::deque<Instance> pb_insts_stor_;
-  std::deque<Net> pb_nets_stor_;
-  std::deque<Pin> pb_pins_stor_;
+  SoaPool<Instance> pb_insts_stor_;
+  SoaPool<Net> pb_nets_stor_;
+  SoaPool<Pin> pb_pins_stor_;
 
   int num_threads_;
   // Device-resident state for GPU backends (pin coords + per-net/per-pin
@@ -1146,7 +1166,7 @@ class NesterovBase
                utl::Logger* log);
   ~NesterovBase();
 
-  GCell& getFillerGCell(size_t index);
+  SoaRef<GCell> getFillerGCell(size_t index);
 
   NesterovBaseCommon* getNbc() { return nbc_.get(); }
 
@@ -1182,8 +1202,8 @@ class NesterovBase
   int64_t getOverflowArea() const;
   int64_t getOverflowAreaUnscaled() const;
 
-  std::vector<Bin>& getBins();
-  const std::vector<Bin>& getBinsConst() const { return bg_.getBinsConst(); };
+  SoaPool<Bin>& getBins();
+  const SoaPool<Bin>& getBinsConst() const { return bg_.getBinsConst(); };
 
   // filler cells / area control
   // will be used in Routability-driven loop
@@ -1241,18 +1261,18 @@ class NesterovBase
   // RD can shrink the number of fillerCells.
   void cutFillerCells(int64_t targetFillerArea);
 
-  void updateDensityCoordiLayoutInside(GCell* gcell);
+  void updateDensityCoordiLayoutInside(SoaRef<GCell> gcell);
 
-  float getDensityCoordiLayoutInsideX(const GCell* gCell, float cx) const;
-  float getDensityCoordiLayoutInsideY(const GCell* gCell, float cy) const;
+  float getDensityCoordiLayoutInsideX(SoaRef<GCell> gCell, float cx) const;
+  float getDensityCoordiLayoutInsideY(SoaRef<GCell> gCell, float cy) const;
 
-  // FloatPoint getRegionGradient(const GCell* gCell, FloatPoint nextLocation)
+  // FloatPoint getRegionGradient(SoaRef<GCell> gCell, FloatPoint nextLocation)
   // const;
 
   // for preconditioner
-  FloatPoint getDensityPreconditioner(const GCell* gCell) const;
+  FloatPoint getDensityPreconditioner(SoaRef<GCell> gCell) const;
 
-  FloatPoint getDensityGradient(const GCell* gCell) const;
+  FloatPoint getDensityGradient(SoaRef<GCell> gCell) const;
   void getDensityGradientsColumns(PointColumns& out);
 
   // Fill out[i] with the density gradient for every filler cell in gCells, in
@@ -1477,7 +1497,7 @@ class NesterovBase
 
   std::shared_ptr<GCell::NumericStore> filler_columns_
       = std::make_shared<GCell::NumericStore>();
-  std::vector<GCell> fillerStor_;
+  SoaPool<GCell> fillerStor_{filler_columns_};
   std::vector<GCellHandle> nb_gcells_;
   std::vector<GCellRowList> kernel_rows_;
   bool kernel_rows_dirty_ = true;
@@ -1499,7 +1519,11 @@ class NesterovBase
 
   struct RemovedFillerColumns
   {
-    std::vector<GCell> gcells;
+    explicit RemovedFillerColumns(std::shared_ptr<GCell::NumericStore> store)
+        : gcells(std::move(store))
+    {
+    }
+    SoaPool<GCell> gcells;
     PointColumns curSLPCoordi;
     PointColumns curSLPWireLengthGrads;
     PointColumns curSLPDensityGrads;
@@ -1521,6 +1545,29 @@ class NesterovBase
     PointColumns snapshotPrevSLPSumGrads;
     size_t size() const { return gcells.size(); }
     bool empty() const { return gcells.empty(); }
+    void reserve(size_t count)
+    {
+      gcells.reserve(count);
+      curSLPCoordi.reserve(count);
+      curSLPWireLengthGrads.reserve(count);
+      curSLPDensityGrads.reserve(count);
+      curSLPSumGrads.reserve(count);
+      nextSLPCoordi.reserve(count);
+      nextSLPWireLengthGrads.reserve(count);
+      nextSLPDensityGrads.reserve(count);
+      nextSLPSumGrads.reserve(count);
+      prevSLPCoordi.reserve(count);
+      prevSLPWireLengthGrads.reserve(count);
+      prevSLPDensityGrads.reserve(count);
+      prevSLPSumGrads.reserve(count);
+      curCoordi.reserve(count);
+      nextCoordi.reserve(count);
+      initCoordi.reserve(count);
+      snapshotCoordi.reserve(count);
+      snapshotSLPCoordi.reserve(count);
+      snapshotSLPSumGrads.reserve(count);
+      snapshotPrevSLPSumGrads.reserve(count);
+    }
     void clear()
     {
       gcells.clear();
@@ -1545,7 +1592,7 @@ class NesterovBase
       snapshotPrevSLPSumGrads.resize(0);
     }
   };
-  RemovedFillerColumns removed_fillers_;
+  RemovedFillerColumns removed_fillers_{filler_columns_};
 
   float sumPhi_ = 0;
   float phiCoef_ = 0;
@@ -1644,7 +1691,7 @@ class NesterovBase
   std::unique_ptr<IoPinBase> io_;
 };
 
-inline std::vector<Bin>& NesterovBase::getBins()
+inline SoaPool<Bin>& NesterovBase::getBins()
 {
   return bg_.getBins();
 }
@@ -1675,14 +1722,14 @@ class GCellHandle
   }
 
   // Non-const versions
-  GCell* operator->() { return &getGCell(); }
-  GCell& operator*() { return getGCell(); }
-  operator GCell*() { return &getGCell(); }
+  SoaRef<GCell> operator->() { return getGCell(); }
+  GCell operator*() { return *getGCell(); }
+  operator SoaRef<GCell>() { return getGCell(); }
 
   // Const versions
-  const GCell* operator->() const { return &getGCell(); }
-  const GCell& operator*() const { return getGCell(); }
-  operator const GCell*() const { return &getGCell(); }
+  SoaRef<GCell> operator->() const { return getGCell(); }
+  GCell operator*() const { return *getGCell(); }
+  operator SoaRef<GCell>() const { return getGCell(); }
 
   bool isNesterovBaseCommon() const
   {
@@ -1706,7 +1753,7 @@ class GCellHandle
  private:
   using StorageVariant = std::variant<NesterovBaseCommon*, NesterovBase*>;
 
-  GCell& getGCell() const
+  SoaRef<GCell> getGCell() const
   {
     if (std::holds_alternative<NesterovBaseCommon*>(storage_)) {
       return std::get<NesterovBaseCommon*>(storage_)->getGCell(storage_index_);

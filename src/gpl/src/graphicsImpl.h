@@ -2,7 +2,6 @@
 // Copyright (c) 2020-2025, The OpenROAD Authors
 
 #pragma once
-
 #include <cstddef>
 #include <limits>
 #include <memory>
@@ -16,6 +15,7 @@
 #include "odb/db.h"
 #include "odb/geom.h"
 #include "routeBase.h"
+#include "soaStorage.h"
 #include "web/core.h"
 #include "web/heatMap.h"
 
@@ -155,11 +155,11 @@ class GraphicsImpl : public gpl::AbstractGraphics,
   };
 
   void drawField(web::Painter& painter);
-  void drawCells(const std::vector<GCell*>& cells, web::Painter& painter);
+  void drawCells(const SoaRows<GCell>& cells, web::Painter& painter);
   void drawCells(const std::vector<GCellHandle>& cells,
                  web::Painter& painter,
                  size_t nb_index);
-  void drawSingleGCell(const GCell* gCell,
+  void drawSingleGCell(SoaRef<GCell> gCell,
                        web::Painter& painter,
                        size_t nb_index = 0);
   void drawIoPins(web::Painter& painter);

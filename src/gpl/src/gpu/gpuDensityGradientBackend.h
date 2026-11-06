@@ -5,11 +5,11 @@
 // Kokkos-free PIMPL header.
 
 #pragma once
-
 #include <cstddef>
 #include <memory>
 #include <vector>
 
+#include "../soaStorage.h"
 #include "densityGradientBackend.h"
 #include "point.h"
 
@@ -31,7 +31,7 @@ class GpuDensityGradientBackend : public DensityGradientBackend
 
   void getCellGradients(const std::vector<GCellHandle>& gCells,
                         PointColumns& out) override;
-  FloatPoint getCellGradient(const GCell* gCell) override;
+  FloatPoint getCellGradient(SoaRef<GCell> gCell) override;
 
   const char* name() const override { return "GPU (Kokkos)"; }
 
