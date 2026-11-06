@@ -60,7 +60,8 @@ int main()
   // Independent owner lifetime and self-assignment.
   cells.clear();
   storage.reset();
-  other = other;
+  const Row& same_row = other;
+  other = same_row;
   require(other.get<0>() == 22);
   Row moved(std::move(other));
   require(moved.get<0>() == 22);
