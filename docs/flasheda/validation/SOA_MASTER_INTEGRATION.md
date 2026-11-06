@@ -6,6 +6,9 @@
 整合提交 `8bc1c3e674` 将 fork master `a6e7f507a1` 合入 `flasheda/gpl-soa`。
 GitHub 入口为 [PR #2](https://github.com/china-qijizhifeng/OpenROAD/pull/2)，目标是
 `china-qijizhifeng/OpenROAD:master`，不是官方上游仓库。
+PR 已于 2026-11-06 20:49 CST 合并，合并提交为
+`1ba3add7889ce159bdd07a89b767aacde9ba71c7`。合并前完成下述功能验收；
+独立 profile 的结果不作为已完成该合并的前提或性能证明。
 
 ## 整合处理
 

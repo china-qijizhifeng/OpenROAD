@@ -28,6 +28,14 @@ Register new source files, tools and tests in Bazel `BUILD` files.
 - Test one module: `bazelisk test //src/<module>/test/...`
 - Test one Tcl test: `bazelisk test --test_output=errors //src/<module>/test:<name>-tcl_test`
 
+## FlashEDA profiling environment
+
+- Delegate build, test and profiling execution to subagents so the main agent can continue code and result analysis.
+- For parallel profiling, prefer E2B through `hk-linlizhi-jumpserver` using the `SWEEnvMaker 0820` environment. Read the `e2b-code-validation` skill and verify the actual project, template, SDK and resources on HK before execution; do not infer a template ID from this name.
+- The verified HK launcher is `/root/SWEEnvMaker/bins/e2b/0820_run_nac_swe_q1_q45_pass4_c40_chenjun_template_id_canary.sh`, calling `/root/code-harbor/scripts/_harbor_entrypoint.py run`. Reuse its environment contract; do not launch its existing SWE benchmark batch for profiling.
+- On 2026-11-06 the 0820 template API exposed the ready FlashEDA template `flasheda-r5-cpu8-t16-20261030` (`vshaqeiaoi96u3cp66t3`, 8 vCPU / 16 GiB). Recheck availability and actual sandbox resources before use. Credentials belong only in client options and must not be logged or uploaded.
+- Split complete designs across independent sandboxes. Run the native/candidate pair serially inside each sandbox, keep profiling separate from uninstrumented timing, and record source, input, binary, environment and sandbox identities. Do not pool absolute timings from different hosts.
+
 ## AI Agent Skills
 
 Skills are located in `.agents/skills/` (with `.claude/skills` symlink for Claude Code).
