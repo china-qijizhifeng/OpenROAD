@@ -254,6 +254,7 @@ void Replace::doIncrementalPlace(const int threads, const PlaceOptions& options)
   for (auto& pb : pbVec_) {
     pb->unlockAll();
   }
+  nbc_->refreshCellLocks();
 
   // Phase 1 may have run out of its iteration budget short of the real
   // target even without diverging, so check the actual overflow reached

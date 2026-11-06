@@ -12,7 +12,7 @@ int main()
 {
   // Rectangular, rounded bins catch transposition and boundary mistakes that
   // a square, evenly divisible grid cannot detect.
-  constexpr int nx = 8, ny = 4, left = -17, bottom = 9;
+  constexpr int nx = 8, ny = 16, left = -17, bottom = 9;
   constexpr double dx = 10.375, dy = 13.25;
   std::vector<int> lx, ly, ux, uy;
   std::vector<float> fx, fy;
@@ -26,17 +26,24 @@ int main()
       fy.push_back((y + 7 * x) * -0.0625f);
     }
   }
+  std::vector<int> x_edges(nx + 1), y_edges(ny + 1);
+  for (int x = 0; x <= nx; ++x) {
+    x_edges[x] = left + std::lround(x * dx);
+  }
+  for (int y = 0; y <= ny; ++y) {
+    y_edges[y] = bottom + std::lround(y * dy);
+  }
   const gpl::DensityGridView grid{
-      left, bottom, nx, ny, dx, dy, lx, ly, ux, uy, fx, fy};
+      left, bottom, nx, ny, dx, dy, x_edges, y_edges, fx, fy};
   std::mt19937 random(42);
   std::vector<int64_t> actual(nx * ny, 0), expected(nx * ny, 0);
   for (int iteration = 0; iteration < 10000; ++iteration) {
     const int x = int(random() % 150) - 50;
-    const int y = int(random() % 100) - 20;
+    const int y = int(random() % 260) - 20;
     const gpl::DensityRect cell{x,
                                 y,
                                 x + int(random() % 100),
-                                y + int(random() % 70),
+                                y + int(random() % 220),
                                 float(random() % 100) / 113.0f};
     const bool macro = iteration % 3 == 0;
     float expected_x = 0, expected_y = 0;

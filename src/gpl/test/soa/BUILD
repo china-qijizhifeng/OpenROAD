@@ -28,3 +28,17 @@ cc_test(
     srcs = ["metadata_test.cpp"],
     deps = ["//src/gpl:placement_columns"],
 )
+
+cc_test(
+    name = "fft_test",
+    size = "small",
+    srcs = ["fft_test.cpp"],
+    deps = ["//src/gpl:fft_cpu"],
+)
+
+cc_test(
+    name = "wirelength_test",
+    size = "small",
+    srcs = ["wirelength_test.cpp"],
+    deps = ["//src/gpl:wirelength_soa"],
+)

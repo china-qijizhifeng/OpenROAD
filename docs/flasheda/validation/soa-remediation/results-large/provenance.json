@@ -1,0 +1,31 @@
+{
+  "job_alias": "flasheda-soa-large-remediation-20261106",
+  "job_identity": "job-388e9a7b6ce7-20261106113510",
+  "project": "WeaverRSI",
+  "queue": "proj-32",
+  "cpu": 24,
+  "memory_gib": 64,
+  "gpu": 0,
+  "deadline_seconds": 21600,
+  "image": "harbor.local.clusters/bp/weaver-trainer-megatron-bridge:v1.14.30@sha256:8e310d0cb124813a25683448b41df67331951aae06e17bddcfd3f7692f71520e",
+  "baseline_source_commit": "18216f3506f090aa7e12f83620b47f21ddff4f40",
+  "v2_base_commit": "dd8f2fc",
+  "v2_binary_sha256": "1bd73d9033dd39d6fc69c603d4835e6c28c2ab315a2b1f4d7b725b52015f57d1",
+  "native_binary_sha256": "d3e694dc50bde8d8c848fe153ff7d64e55ce6a96d9d9b4548cc6484ab07f1c0f",
+  "v2_source_archive_sha256": "60226a05d67fc4b7da266f34c7bbbe7e59e30bce3a1514d22060c2d0ab19ab6d",
+  "thread_settings": {
+    "GPL": [
+      1,
+      8
+    ],
+    "OpenSTA": 1,
+    "OMP_PROC_BIND": "FALSE",
+    "OMP_DYNAMIC": "FALSE",
+    "OMP_PLACES": null
+  },
+  "sampler": false,
+  "qor_scope": {
+    "ibex_core-td-rd": "global placement, detailed placement, check_placement, WNS/TNS, area, HPWL, complete database state",
+    "other_configs": "LEF/DEF-only global placement, area, HPWL, complete database state; timing not claimed"
+  }
+}

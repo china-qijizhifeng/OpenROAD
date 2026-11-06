@@ -1,0 +1,287 @@
+{
+  "runs": [
+    {
+      "placement_ms": 61805.702,
+      "wns_ns": 3.8813953150141347,
+      "tns_ns": 0.0,
+      "area_um2": 23367.834,
+      "hpwl_um": 440574.9175,
+      "placement_hash": "bc141af641d8db860dde7e3cee05047e037fb9b43171f0e8ee4b49d2ee903f92",
+      "legal": true,
+      "timers": [],
+      "categories_ms": {},
+      "rudy_ms": 0,
+      "iterations": [
+        "Nesterov Region: Top-level",
+        "Nesterov Global Placement.",
+        "Nesterov momentum.",
+        "Nesterov momentum."
+      ],
+      "binary": "soa-fused-openroad",
+      "threads": 1,
+      "repetition": 0
+    },
+    {
+      "placement_ms": 62226.319,
+      "wns_ns": 3.8813953150141347,
+      "tns_ns": 0.0,
+      "area_um2": 23367.834,
+      "hpwl_um": 440574.9175,
+      "placement_hash": "bc141af641d8db860dde7e3cee05047e037fb9b43171f0e8ee4b49d2ee903f92",
+      "legal": true,
+      "timers": [],
+      "categories_ms": {},
+      "rudy_ms": 0,
+      "iterations": [
+        "Nesterov Region: Top-level",
+        "Nesterov Global Placement.",
+        "Nesterov momentum.",
+        "Nesterov momentum."
+      ],
+      "binary": "soa-v3-openroad",
+      "threads": 1,
+      "repetition": 0
+    },
+    {
+      "placement_ms": 30096.185,
+      "wns_ns": 3.8813953150141347,
+      "tns_ns": 0.0,
+      "area_um2": 23367.834,
+      "hpwl_um": 440574.9175,
+      "placement_hash": "bc141af641d8db860dde7e3cee05047e037fb9b43171f0e8ee4b49d2ee903f92",
+      "legal": true,
+      "timers": [],
+      "categories_ms": {},
+      "rudy_ms": 0,
+      "iterations": [
+        "Nesterov Region: Top-level",
+        "Nesterov Global Placement.",
+        "Nesterov momentum.",
+        "Nesterov momentum."
+      ],
+      "binary": "soa-fused-openroad",
+      "threads": 8,
+      "repetition": 0
+    },
+    {
+      "placement_ms": 30843.705,
+      "wns_ns": 3.8813953150141347,
+      "tns_ns": 0.0,
+      "area_um2": 23367.834,
+      "hpwl_um": 440574.9175,
+      "placement_hash": "bc141af641d8db860dde7e3cee05047e037fb9b43171f0e8ee4b49d2ee903f92",
+      "legal": true,
+      "timers": [],
+      "categories_ms": {},
+      "rudy_ms": 0,
+      "iterations": [
+        "Nesterov Region: Top-level",
+        "Nesterov Global Placement.",
+        "Nesterov momentum.",
+        "Nesterov momentum."
+      ],
+      "binary": "soa-v3-openroad",
+      "threads": 8,
+      "repetition": 0
+    },
+    {
+      "placement_ms": 62421.649,
+      "wns_ns": 3.8813953150141347,
+      "tns_ns": 0.0,
+      "area_um2": 23367.834,
+      "hpwl_um": 440574.9175,
+      "placement_hash": "bc141af641d8db860dde7e3cee05047e037fb9b43171f0e8ee4b49d2ee903f92",
+      "legal": true,
+      "timers": [],
+      "categories_ms": {},
+      "rudy_ms": 0,
+      "iterations": [
+        "Nesterov Region: Top-level",
+        "Nesterov Global Placement.",
+        "Nesterov momentum.",
+        "Nesterov momentum."
+      ],
+      "binary": "soa-v3-openroad",
+      "threads": 1,
+      "repetition": 1
+    },
+    {
+      "placement_ms": 62128.06,
+      "wns_ns": 3.8813953150141347,
+      "tns_ns": 0.0,
+      "area_um2": 23367.834,
+      "hpwl_um": 440574.9175,
+      "placement_hash": "bc141af641d8db860dde7e3cee05047e037fb9b43171f0e8ee4b49d2ee903f92",
+      "legal": true,
+      "timers": [],
+      "categories_ms": {},
+      "rudy_ms": 0,
+      "iterations": [
+        "Nesterov Region: Top-level",
+        "Nesterov Global Placement.",
+        "Nesterov momentum.",
+        "Nesterov momentum."
+      ],
+      "binary": "soa-fused-openroad",
+      "threads": 1,
+      "repetition": 1
+    },
+    {
+      "placement_ms": 30500.743,
+      "wns_ns": 3.8813953150141347,
+      "tns_ns": 0.0,
+      "area_um2": 23367.834,
+      "hpwl_um": 440574.9175,
+      "placement_hash": "bc141af641d8db860dde7e3cee05047e037fb9b43171f0e8ee4b49d2ee903f92",
+      "legal": true,
+      "timers": [],
+      "categories_ms": {},
+      "rudy_ms": 0,
+      "iterations": [
+        "Nesterov Region: Top-level",
+        "Nesterov Global Placement.",
+        "Nesterov momentum.",
+        "Nesterov momentum."
+      ],
+      "binary": "soa-v3-openroad",
+      "threads": 8,
+      "repetition": 1
+    },
+    {
+      "placement_ms": 30631.899,
+      "wns_ns": 3.8813953150141347,
+      "tns_ns": 0.0,
+      "area_um2": 23367.834,
+      "hpwl_um": 440574.9175,
+      "placement_hash": "bc141af641d8db860dde7e3cee05047e037fb9b43171f0e8ee4b49d2ee903f92",
+      "legal": true,
+      "timers": [],
+      "categories_ms": {},
+      "rudy_ms": 0,
+      "iterations": [
+        "Nesterov Region: Top-level",
+        "Nesterov Global Placement.",
+        "Nesterov momentum.",
+        "Nesterov momentum."
+      ],
+      "binary": "soa-fused-openroad",
+      "threads": 8,
+      "repetition": 1
+    },
+    {
+      "placement_ms": 62079.55,
+      "wns_ns": 3.8813953150141347,
+      "tns_ns": 0.0,
+      "area_um2": 23367.834,
+      "hpwl_um": 440574.9175,
+      "placement_hash": "bc141af641d8db860dde7e3cee05047e037fb9b43171f0e8ee4b49d2ee903f92",
+      "legal": true,
+      "timers": [],
+      "categories_ms": {},
+      "rudy_ms": 0,
+      "iterations": [
+        "Nesterov Region: Top-level",
+        "Nesterov Global Placement.",
+        "Nesterov momentum.",
+        "Nesterov momentum."
+      ],
+      "binary": "soa-fused-openroad",
+      "threads": 1,
+      "repetition": 2
+    },
+    {
+      "placement_ms": 62006.343,
+      "wns_ns": 3.8813953150141347,
+      "tns_ns": 0.0,
+      "area_um2": 23367.834,
+      "hpwl_um": 440574.9175,
+      "placement_hash": "bc141af641d8db860dde7e3cee05047e037fb9b43171f0e8ee4b49d2ee903f92",
+      "legal": true,
+      "timers": [],
+      "categories_ms": {},
+      "rudy_ms": 0,
+      "iterations": [
+        "Nesterov Region: Top-level",
+        "Nesterov Global Placement.",
+        "Nesterov momentum.",
+        "Nesterov momentum."
+      ],
+      "binary": "soa-v3-openroad",
+      "threads": 1,
+      "repetition": 2
+    },
+    {
+      "placement_ms": 30721.918,
+      "wns_ns": 3.8813953150141347,
+      "tns_ns": 0.0,
+      "area_um2": 23367.834,
+      "hpwl_um": 440574.9175,
+      "placement_hash": "bc141af641d8db860dde7e3cee05047e037fb9b43171f0e8ee4b49d2ee903f92",
+      "legal": true,
+      "timers": [],
+      "categories_ms": {},
+      "rudy_ms": 0,
+      "iterations": [
+        "Nesterov Region: Top-level",
+        "Nesterov Global Placement.",
+        "Nesterov momentum.",
+        "Nesterov momentum."
+      ],
+      "binary": "soa-fused-openroad",
+      "threads": 8,
+      "repetition": 2
+    },
+    {
+      "placement_ms": 30215.911,
+      "wns_ns": 3.8813953150141347,
+      "tns_ns": 0.0,
+      "area_um2": 23367.834,
+      "hpwl_um": 440574.9175,
+      "placement_hash": "bc141af641d8db860dde7e3cee05047e037fb9b43171f0e8ee4b49d2ee903f92",
+      "legal": true,
+      "timers": [],
+      "categories_ms": {},
+      "rudy_ms": 0,
+      "iterations": [
+        "Nesterov Region: Top-level",
+        "Nesterov Global Placement.",
+        "Nesterov momentum.",
+        "Nesterov momentum."
+      ],
+      "binary": "soa-v3-openroad",
+      "threads": 8,
+      "repetition": 2
+    }
+  ],
+  "summary": {
+    "soa-fused-openroad-1": {
+      "median_ms": 62079.55,
+      "min_ms": 61805.702,
+      "max_ms": 62128.06,
+      "samples": 3
+    },
+    "soa-v3-openroad-1": {
+      "median_ms": 62226.319,
+      "min_ms": 62006.343,
+      "max_ms": 62421.649,
+      "samples": 3
+    },
+    "soa-fused-openroad-8": {
+      "median_ms": 30631.899,
+      "min_ms": 30096.185,
+      "max_ms": 30721.918,
+      "samples": 3
+    },
+    "soa-v3-openroad-8": {
+      "median_ms": 30500.743,
+      "min_ms": 30215.911,
+      "max_ms": 30843.705,
+      "samples": 3
+    }
+  },
+  "binary_sha256": {
+    "soa-fused-openroad": "1bd73d9033dd39d6fc69c603d4835e6c28c2ab315a2b1f4d7b725b52015f57d1",
+    "soa-v3-openroad": "4d627682245a2896c22ce73248c5e122ad5b6f01b3f73b387f8bb5f1c07a4252"
+  },
+  "complete": true
+}

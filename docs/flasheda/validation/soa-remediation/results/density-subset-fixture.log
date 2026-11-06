@@ -1,0 +1,53 @@
+Running main() from /tmp/DependencyInstaller-4gOeAz/googletest-1.17.0/googletest/src/gtest_main.cc
+Note: Google Test filter = TimingRepairIntegrationTest.DensityBackendFullSubsetAndReleaseSizes
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from TimingRepairIntegrationTest
+[ RUN      ] TimingRepairIntegrationTest.DensityBackendFullSubsetAndReleaseSizes
+[INFO ODB-0227] LEF file: /tmp/flasheda-gpl-timing/OpenROAD/test/Nangate45/Nangate45.lef, created 22 layers, 27 vias, 135 library cells
+[INFO ODB-0127] Reading DEF file: /tmp/flasheda-gpl-timing/OpenROAD/src/gpl/test/simple01-td-repair.def
+[INFO ODB-0128] Design: gcd
+[INFO ODB-0130]     Created 54 pins.
+[INFO ODB-0131]     Created 286 components and 1624 component-terminals.
+[INFO ODB-0133]     Created 356 nets and 1052 connections.
+[INFO ODB-0134] Finished DEF file: /tmp/flasheda-gpl-timing/OpenROAD/src/gpl/test/simple01-td-repair.def
+[INFO GPL-0001] ---- Initialize GPL Main Data Structures
+[INFO GPL-0002] DBU: 2000
+[INFO GPL-0003] SiteSize: (  0.190  1.400 ) um
+[INFO GPL-0004] CoreBBox: (  0.000  0.000 ) ( 30.970 30.800 ) um
+[INFO GPL-0016] Core area:                     953.876 um^2
+[INFO GPL-0036] Movable instances area:        605.150 um^2
+[INFO GPL-0037] Total instances area:          605.150 um^2
+[INFO GPL-0035] Pin density area adjust:        59.175 um^2
+[INFO GPL-0032] ---- Initialize Region: Top-level
+[INFO GPL-0006] Number of instances:               351
+[INFO GPL-0007] Movable instances:                 351
+[INFO GPL-0008] Fixed instances:                     0
+[INFO GPL-0009] Dummy instances:                     0
+[INFO GPL-0010] Number of nets:                    421
+[INFO GPL-0011] Number of pins:                   1364
+[INFO GPL-0012] Die BBox:       (  0.000  0.000 ) ( 30.970 30.800 ) um
+[INFO GPL-0013] Placement BBox: (  0.000  0.000 ) ( 30.970 30.800 ) um
+[INFO GPL-0014] Region name: top-level.
+[INFO GPL-0015] Region area:                   953.876 um^2
+[INFO GPL-0017] Fixed instances area:            0.000 um^2
+[INFO GPL-0018] Movable instances area:        664.325 um^2
+[INFO GPL-0019] Utilization:                    69.645 %
+[INFO GPL-0020] Standard cells area:           664.325 um^2
+[INFO GPL-0021] Large instances area:            0.000 um^2
+[INFO GPL-0033] ---- Initialize Nesterov Region: Top-level
+[INFO GPL-0023] Placement target density:       0.7800
+[INFO GPL-0024] Movable insts average area:      1.893 um^2
+[INFO GPL-0025] Ideal bin area:                  2.426 um^2
+[INFO GPL-0026] Ideal bin count:                   393
+[INFO GPL-0027] Total bin area:                953.876 um^2
+[INFO GPL-0028] Bin count (X, Y):          16 ,     16
+[INFO GPL-0029] Bin size (W * H):       1.936 *  1.925 um
+[INFO GPL-0030] Number of bins:                    256
+[       OK ] TimingRepairIntegrationTest.DensityBackendFullSubsetAndReleaseSizes (703 ms)
+[----------] 1 test from TimingRepairIntegrationTest (703 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (703 ms total)
+[  PASSED  ] 1 test.
+

@@ -46,12 +46,8 @@ class CpuWirelengthGradientBackend : public WirelengthGradientBackend
                         PointColumns& out) override
   {
     assert(out.size() == gCells.size());
-#pragma omp parallel for num_threads(static_cast<int>(nbc_->getNumThreads()))
-    for (std::size_t i = 0; i < gCells.size(); ++i) {
-      const GCell* gCell = gCells[i];
-      out[i] = nbc_->getWireLengthGradientWA(
-          gCell, last_wl_coef_x_, last_wl_coef_y_);
-    }
+    nbc_->getWireLengthGradientsWA_cpu(
+        gCells, out, last_wl_coef_x_, last_wl_coef_y_);
   }
 
   FloatPoint getCellGradient(const GCell* gCell) override

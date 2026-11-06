@@ -3,8 +3,10 @@
 
 // Density gradient backends + dispatch. Mirrors wirelengthGradient.cpp.
 
+#include <cassert>
 #include <cstddef>
 #include <memory>
+#include <stdexcept>
 #include <vector>
 
 #include "backendContext.h"
@@ -31,11 +33,18 @@ class CpuDensityGradientBackend : public DensityGradientBackend
   void getCellGradients(const std::vector<GCellHandle>& gCells,
                         PointColumns& out) override
   {
-#pragma omp parallel for num_threads( \
-        static_cast<int>(nb_->getNbc()->getNumThreads()))
-    for (std::size_t i = 0; i < gCells.size(); ++i) {
-      const GCell* c = gCells[i];
-      out[i] = nb_->getDensityGradient(c);
+    if (out.size() != gCells.size()) {
+      throw std::invalid_argument(
+          "density gradient output size differs from cells");
+    }
+    if (&gCells == &nb_->getGCells()) {
+      nb_->getDensityGradientsColumns(out);
+      return;
+    }
+    // The backend contract accepts subsets as well as the owning region.
+#pragma omp parallel for num_threads(nb_->getNbc()->getNumThreads())
+    for (size_t i = 0; i < gCells.size(); ++i) {
+      out[i] = nb_->getDensityGradient(gCells[i]);
     }
   }
 

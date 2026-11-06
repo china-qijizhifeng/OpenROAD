@@ -18,6 +18,7 @@
 
 #include "backendContext.h"
 #include "fftBackend.h"
+#include "omp.h"
 
 #ifdef ENABLE_GPU
 #include "gpu/gpuFftBackend.h"
@@ -29,8 +30,8 @@ namespace gpl {
 namespace {
 
 // CPU FFT backend: the Ooura DCT Poisson solver. Owns the cos/sin and
-// wavenumber tables; the solve body is byte-identical to the pre-GPU
-// FFT::doFFT().
+// wavenumber tables. Independent row/column transforms run in parallel while
+// retaining the native one-dimensional arithmetic.
 class CpuFftBackend : public FftBackend
 {
  public:
@@ -45,8 +46,12 @@ class CpuFftBackend : public FftBackend
              BinGridSpan field_y) override;
 
   const char* name() const override { return "CPU (Ooura DCT)"; }
+  void setNumThreads(int threads) override { num_threads_ = threads; }
 
  private:
+  void transform(float** rows, int sign, bool sine_x, bool sine_y);
+  int num_threads_ = 1;
+  std::vector<float> transform_scratch_;
   int bin_cnt_x_;
   int bin_cnt_y_;
 
@@ -104,6 +109,69 @@ std::vector<float*> makeRowPtrs(BinGridSpan g)
 }
 }  // namespace
 
+void CpuFftBackend::transform(float** rows, int sign, bool sine_x, bool sine_y)
+{
+  // Keep the original library path for one worker and small grids. Batched
+  // 1D transforms have identical arithmetic; only independent rows/columns
+  // are scheduled concurrently. Ooura tables must be initialized serially.
+  if (num_threads_ == 1 || bin_cnt_x_ * bin_cnt_y_ < 4096) {
+    auto transform2d = sine_x ? ddsct2d : sine_y ? ddcst2d : ddct2d;
+    transform2d(bin_cnt_x_,
+                bin_cnt_y_,
+                sign,
+                rows,
+                nullptr,
+                work_area_.data(),
+                cs_table_.data());
+    return;
+  }
+  const int n = std::max(bin_cnt_x_, bin_cnt_y_);
+  if (n > (work_area_[0] << 2)) {
+    makewt(n >> 2, work_area_.data(), cs_table_.data());
+  }
+  if (n > work_area_[1]) {
+    makect(n, work_area_.data(), cs_table_.data() + work_area_[0]);
+  }
+  transform_scratch_.resize(static_cast<size_t>(num_threads_) * 4 * bin_cnt_x_);
+  auto row_transform = sine_y ? ddst : ddct;
+  auto column_transform = sine_x ? ddst : ddct;
+#pragma omp parallel num_threads(num_threads_)
+  {
+#pragma omp for
+    for (int x = 0; x < bin_cnt_x_; ++x) {
+      row_transform(
+          bin_cnt_y_, sign, rows[x], work_area_.data(), cs_table_.data());
+    }
+    float* scratch
+        = transform_scratch_.data()
+          + static_cast<size_t>(omp_get_thread_num()) * 4 * bin_cnt_x_;
+    // The library processes four columns at a time. Retain that batching for
+    // contiguous grid access, with private scratch per worker and a barrier
+    // after the row stage. The shared ip/w tables are now read-only.
+#pragma omp for
+    for (int j = 0; j < bin_cnt_y_; j += 4) {
+      const int width = std::min(4, bin_cnt_y_ - j);
+      for (int x = 0; x < bin_cnt_x_; ++x) {
+        for (int k = 0; k < width; ++k) {
+          scratch[k * bin_cnt_x_ + x] = rows[x][j + k];
+        }
+      }
+      for (int k = 0; k < width; ++k) {
+        column_transform(bin_cnt_x_,
+                         sign,
+                         scratch + k * bin_cnt_x_,
+                         work_area_.data(),
+                         cs_table_.data());
+      }
+      for (int x = 0; x < bin_cnt_x_; ++x) {
+        for (int k = 0; k < width; ++k) {
+          rows[x][j + k] = scratch[k * bin_cnt_x_ + x];
+        }
+      }
+    }
+  }
+}
+
 void CpuFftBackend::solve(BinGridSpan density,
                           BinGridSpan phi,
                           BinGridSpan field_x,
@@ -118,13 +186,7 @@ void CpuFftBackend::solve(BinGridSpan density,
   float** field_x_p = field_x_rows.data();
   float** field_y_p = field_y_rows.data();
 
-  ddct2d(bin_cnt_x_,
-         bin_cnt_y_,
-         -1,
-         density_p,
-         nullptr,
-         work_area_.data(),
-         cs_table_.data());
+  transform(density_p, -1, false, false);
 
   // Normalizations required to perform the inverse operation
   for (int i = 1; i < bin_cnt_x_; i++) {
@@ -140,6 +202,8 @@ void CpuFftBackend::solve(BinGridSpan density,
   }
 
   // Solve the PDE in the new basis
+#pragma omp parallel for num_threads(num_threads_) if (bin_cnt_x_ * bin_cnt_y_ \
+                                                           >= 4096)
   for (int i = 0; i < bin_cnt_x_; i++) {
     float wx = wx_[i];
     float wx2 = wx_square_[i];
@@ -168,27 +232,9 @@ void CpuFftBackend::solve(BinGridSpan density,
   }
 
   // Inverse DCT
-  ddct2d(bin_cnt_x_,
-         bin_cnt_y_,
-         1,
-         phi_p,
-         nullptr,
-         work_area_.data(),
-         cs_table_.data());
-  ddsct2d(bin_cnt_x_,
-          bin_cnt_y_,
-          1,
-          field_x_p,
-          nullptr,
-          work_area_.data(),
-          cs_table_.data());
-  ddcst2d(bin_cnt_x_,
-          bin_cnt_y_,
-          1,
-          field_y_p,
-          nullptr,
-          work_area_.data(),
-          cs_table_.data());
+  transform(phi_p, 1, false, false);
+  transform(field_x_p, 1, true, false);
+  transform(field_y_p, 1, false, true);
 }
 
 }  // namespace

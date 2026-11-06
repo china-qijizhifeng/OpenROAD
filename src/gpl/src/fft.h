@@ -25,6 +25,7 @@ class FFT
       float bin_size_y,
       RegionDensityField* region_field = nullptr);
   ~FFT();
+  void setNumThreads(int threads) { backend_->setNumThreads(threads); }
 
   // input func
   void updateDensity(int x, int y, float density);

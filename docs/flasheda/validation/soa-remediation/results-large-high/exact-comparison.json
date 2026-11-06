@@ -1,0 +1,71 @@
+{
+  "configs": {
+    "large01": {
+      "runs": 12,
+      "threads": [
+        1,
+        8
+      ],
+      "repetitions": [
+        0,
+        1,
+        2
+      ],
+      "placement_hash": "ff758d89a7cb6cf2ff64b0c65109d34051f9272201aacb74fd839f00235f0025",
+      "state_hash": "d699fb04fd1e7ea66dbd45f3a0e96ff2f3f06405f927fa65fd10d3b4d4484531",
+      "area_um2": 524710.802,
+      "hpwl_um": 5127831.0295,
+      "cells": 274700,
+      "state_rows": 566905
+    },
+    "large02": {
+      "runs": 12,
+      "threads": [
+        1,
+        8
+      ],
+      "repetitions": [
+        0,
+        1,
+        2
+      ],
+      "placement_hash": "028fa195112b8992d77e36e30643b634cbe28d5d29304c015445d84196f4658d",
+      "state_hash": "436d57469dd060f4f93867856a5f16f5001561e7a57105014db3cd800d70c646",
+      "area_um2": 755282.794,
+      "hpwl_um": 4481905.8655,
+      "cells": 312529,
+      "state_rows": 719776
+    },
+    "large01-rd": {
+      "runs": 12,
+      "threads": [
+        1,
+        8
+      ],
+      "repetitions": [
+        0,
+        1,
+        2
+      ],
+      "placement_hash": "5f7b1afc1dc166b13adc2c982240248e8b0c44f444e51c6c71ae75d62fdcb53f",
+      "state_hash": "026814631c11da2070f87e3eefd666c3e53ed7da53705b14f6dc230620616845",
+      "area_um2": 524710.802,
+      "hpwl_um": 5705538.1555,
+      "cells": 274700,
+      "state_rows": 566905
+    }
+  },
+  "job": "job-bb6ab222440c-20261106125349",
+  "binary_sha256": {
+    "baseline": "d3e694dc50bde8d8c848fe153ff7d64e55ce6a96d9d9b4548cc6484ab07f1c0f",
+    "candidate": "4d627682245a2896c22ce73248c5e122ad5b6f01b3f73b387f8bb5f1c07a4252"
+  },
+  "complete": true,
+  "runs": 36,
+  "source_manifest": "source-sha256-v3.json",
+  "evidence_sha256": "1afc610b120df0280a6c982b36ea32c0118d39b78d76bf60995c5693d21fec0e",
+  "evidence_bytes": 292534034,
+  "total_run_wall_seconds": 7880.862794235349,
+  "local_evidence_path": "/Users/shom/Downloads/openroad-gpl-soa/build/soa/remediation-large-high/evidence.tar.gz",
+  "remote_evidence_path": "/gpfs/users/linlizhi/flasheda-soa-large-high-remediation-20261106/evidence.tar.gz"
+}

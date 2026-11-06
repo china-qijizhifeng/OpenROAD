@@ -51,6 +51,8 @@ class FftBackend
                      BinGridSpan field_x,
                      BinGridSpan field_y) = 0;
 
+  virtual void setNumThreads(int /*threads*/) {}
+
   // Short label for diagnostic logging; constructed-once factory choice.
   virtual const char* name() const = 0;
 

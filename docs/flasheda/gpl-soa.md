@@ -105,3 +105,21 @@ not a SoA kernel limitation. Setting more threads can lose on small designs beca
 barriers and private-grid reduction remain real work.
 
 Measured results and exact comparison coverage: [验收报告](validation/RESULTS.md).
+
+## Diagnosis remediation (2026-11-06)
+
+The iteration kernels now use topology-boundary pool/row maps for coordinates,
+center and pin synchronization, density and preconditioning. Bin overflow is
+computed in contiguous FFT order with a separate native-order scalar reduction.
+Density overlap uses separable rounded edge arrays. CPU Ooura transforms can
+parallelize independent rows and columns with the configured GPL worker count.
+The cached cell lock flag is refreshed after incremental phase 2 unlocks physical
+instances. Optimizer membership changes go through append, swap-remove and
+rebind helpers; the consistency debug channel checks the row maps and cached
+flags against live instances. WA intermediate columns use net-CSR slots while
+pin geometry retains stable rows, and are cleared only at topology rebuilds.
+CPU density gather and preconditioning share a traversal. The measured IPO/ISA
+experiment regressed and its options were removed from the final source.
+See [remediation and acceptance](validation/SOA_REMEDIATION.md) for scope,
+build experiments and differential results. AES measurements are specific to
+that configuration; larger designs are validated separately.

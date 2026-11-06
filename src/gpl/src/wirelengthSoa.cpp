@@ -3,6 +3,7 @@
 #include "wirelengthSoa.h"
 
 #include <algorithm>
+#include <cassert>
 #include <numeric>
 #include <span>
 #include <vector>
@@ -61,23 +62,33 @@ void NesterovBaseCommon::rebuildSoaTopology()
           = pin.getGNet()->numericRow().slot();
     }
   }
+  resetPinWaColumns(*pin_columns_, net_pin_rows_);
+}
+
+void NesterovBaseCommon::updateDensityPinLocations(const GCellRowList& cells)
+{
+  const auto& c = *cells.columns;
+  const auto& lx = c.column<GCellColumns::dLx>();
+  const auto& ly = c.column<GCellColumns::dLy>();
+  const auto& ux = c.column<GCellColumns::dUx>();
+  const auto& uy = c.column<GCellColumns::dUy>();
+  auto& px = pin_columns_->column<GPinColumns::cx>();
+  auto& py = pin_columns_->column<GPinColumns::cy>();
+  const auto& ox = pin_columns_->column<GPinColumns::offsetCx>();
+  const auto& oy = pin_columns_->column<GPinColumns::offsetCy>();
+#pragma omp parallel for num_threads(num_threads_)
+  for (size_t r : cells.rows) {
+    const int x = (ux[r] + lx[r]) / 2, y = (uy[r] + ly[r]) / 2;
+    for (size_t i = cell_pin_offsets_[r]; i < cell_pin_offsets_[r + 1]; ++i) {
+      const size_t p = cell_pin_rows_[i];
+      px[p] = x + ox[p];
+      py[p] = y + oy[p];
+    }
+  }
 }
 
 void NesterovBaseCommon::updateWireLengthForceWA_soa(float coef_x, float coef_y)
 {
-  // Disconnected pins retain the native cleared-WA state. Clearing columns
-  // also covers holes left by swap-remove; no per-pin object pass is needed.
-  auto clear = []<typename T>(std::vector<T>& column) {
-    std::fill(column.begin(), column.end(), T{});
-  };
-  clear(pin_columns_->column<GPinColumns::minExpSumX>());
-  clear(pin_columns_->column<GPinColumns::maxExpSumX>());
-  clear(pin_columns_->column<GPinColumns::minExpSumY>());
-  clear(pin_columns_->column<GPinColumns::maxExpSumY>());
-  clear(pin_columns_->column<GPinColumns::hasMinExpSumX>());
-  clear(pin_columns_->column<GPinColumns::hasMaxExpSumX>());
-  clear(pin_columns_->column<GPinColumns::hasMinExpSumY>());
-  clear(pin_columns_->column<GPinColumns::hasMaxExpSumY>());
 #pragma omp parallel for num_threads(num_threads_)
   for (size_t i = 0; i < net_rows_.size(); ++i) {
     const size_t n = net_rows_[i];
@@ -92,6 +103,21 @@ void NesterovBaseCommon::updateWireLengthForceWA_soa(float coef_x, float coef_y)
                           coef_x,
                           coef_y,
                           nbVars_.minWireLengthForceBar);
+  }
+}
+
+void NesterovBaseCommon::getWireLengthGradientsWA_cpu(
+    const std::vector<GCellHandle>& cells,
+    PointColumns& out,
+    float coef_x,
+    float coef_y)
+{
+  const bool debug = log_->debugCheck(utl::GPL, "getGradientWA", 1)
+                     || log_->debugCheck(utl::GPL, "getGradientWAPin", 1);
+#pragma omp parallel for num_threads(num_threads_)
+  for (size_t i = 0; i < cells.size(); ++i) {
+    out[i] = debug ? getWireLengthGradientWA(cells[i], coef_x, coef_y)
+                   : getWireLengthGradientWA_soa(cells[i], coef_x, coef_y);
   }
 }
 

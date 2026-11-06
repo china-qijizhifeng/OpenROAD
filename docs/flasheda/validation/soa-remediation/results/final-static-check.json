@@ -1,0 +1,8 @@
+{
+  "source_manifest": "source-sha256-v3.json",
+  "source_files": 20,
+  "manifest_match": true,
+  "clang_format": true,
+  "script_syntax": true,
+  "git_diff_check": true
+}

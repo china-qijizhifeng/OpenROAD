@@ -23,6 +23,13 @@ enum class CellAreaChange : uint8_t
   kResizeNoChange
 };
 
+enum class CellKind : uint8_t
+{
+  kFiller,
+  kStandard,
+  kMacro
+};
+
 struct GCellColumns
 {
   enum Field : size_t
@@ -41,6 +48,8 @@ struct GCellColumns
     insts,
     gPins,
     change,
+    kind,
+    locked,
   };
   using Store = SoaStorage<int,
                            int,
@@ -55,8 +64,19 @@ struct GCellColumns
                            float,
                            std::vector<Instance*>,
                            std::vector<GPin*>,
-                           CellAreaChange>;
+                           CellAreaChange,
+                           CellKind,
+                           uint8_t>;
 };
+// Stable row/optimizer-index maps, rebuilt only when the region topology
+// changes. They own no numerical copies or pointers into reallocatable columns.
+struct GCellRowList
+{
+  GCellColumns::Store* columns = nullptr;
+  std::vector<size_t> rows;
+  std::vector<size_t> indices;
+};
+
 struct GNetColumns
 {
   enum Field : size_t
@@ -118,6 +138,8 @@ struct GPinColumns
     gCell,
     gNet,
     pins,
+    // WA intermediates are indexed in net CSR order; geometry keeps its row.
+    waSlot,
   };
   using Store = SoaStorage<int,
                            int,
@@ -133,7 +155,8 @@ struct GPinColumns
                            uint8_t,
                            GCell*,
                            GNet*,
-                           std::vector<Pin*>>;
+                           std::vector<Pin*>,
+                           size_t>;
 };
 struct BinColumns
 {

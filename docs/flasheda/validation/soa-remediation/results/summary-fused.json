@@ -1,0 +1,665 @@
+{
+  "benchmark": {
+    "runs": [
+      {
+        "placement_ms": 62857.236,
+        "wns_ns": 3.8813953150141347,
+        "tns_ns": 0.0,
+        "area_um2": 23367.834,
+        "hpwl_um": 440574.9175,
+        "placement_hash": "bc141af641d8db860dde7e3cee05047e037fb9b43171f0e8ee4b49d2ee903f92",
+        "legal": true,
+        "timers": [],
+        "categories_ms": {},
+        "rudy_ms": 0,
+        "iterations": [
+          "Nesterov Region: Top-level",
+          "Nesterov Global Placement.",
+          "Nesterov momentum.",
+          "Nesterov momentum."
+        ],
+        "binary": "soa-final-openroad",
+        "threads": 1,
+        "repetition": 0
+      },
+      {
+        "placement_ms": 62037.386,
+        "wns_ns": 3.8813953150141347,
+        "tns_ns": 0.0,
+        "area_um2": 23367.834,
+        "hpwl_um": 440574.9175,
+        "placement_hash": "bc141af641d8db860dde7e3cee05047e037fb9b43171f0e8ee4b49d2ee903f92",
+        "legal": true,
+        "timers": [],
+        "categories_ms": {},
+        "rudy_ms": 0,
+        "iterations": [
+          "Nesterov Region: Top-level",
+          "Nesterov Global Placement.",
+          "Nesterov momentum.",
+          "Nesterov momentum."
+        ],
+        "binary": "soa-fused-openroad",
+        "threads": 1,
+        "repetition": 0
+      },
+      {
+        "placement_ms": 30378.078,
+        "wns_ns": 3.8813953150141347,
+        "tns_ns": 0.0,
+        "area_um2": 23367.834,
+        "hpwl_um": 440574.9175,
+        "placement_hash": "bc141af641d8db860dde7e3cee05047e037fb9b43171f0e8ee4b49d2ee903f92",
+        "legal": true,
+        "timers": [],
+        "categories_ms": {},
+        "rudy_ms": 0,
+        "iterations": [
+          "Nesterov Region: Top-level",
+          "Nesterov Global Placement.",
+          "Nesterov momentum.",
+          "Nesterov momentum."
+        ],
+        "binary": "soa-final-openroad",
+        "threads": 8,
+        "repetition": 0
+      },
+      {
+        "placement_ms": 30236.584,
+        "wns_ns": 3.8813953150141347,
+        "tns_ns": 0.0,
+        "area_um2": 23367.834,
+        "hpwl_um": 440574.9175,
+        "placement_hash": "bc141af641d8db860dde7e3cee05047e037fb9b43171f0e8ee4b49d2ee903f92",
+        "legal": true,
+        "timers": [],
+        "categories_ms": {},
+        "rudy_ms": 0,
+        "iterations": [
+          "Nesterov Region: Top-level",
+          "Nesterov Global Placement.",
+          "Nesterov momentum.",
+          "Nesterov momentum."
+        ],
+        "binary": "soa-fused-openroad",
+        "threads": 8,
+        "repetition": 0
+      },
+      {
+        "placement_ms": 61731.448,
+        "wns_ns": 3.8813953150141347,
+        "tns_ns": 0.0,
+        "area_um2": 23367.834,
+        "hpwl_um": 440574.9175,
+        "placement_hash": "bc141af641d8db860dde7e3cee05047e037fb9b43171f0e8ee4b49d2ee903f92",
+        "legal": true,
+        "timers": [],
+        "categories_ms": {},
+        "rudy_ms": 0,
+        "iterations": [
+          "Nesterov Region: Top-level",
+          "Nesterov Global Placement.",
+          "Nesterov momentum.",
+          "Nesterov momentum."
+        ],
+        "binary": "soa-fused-openroad",
+        "threads": 1,
+        "repetition": 1
+      },
+      {
+        "placement_ms": 62419.608,
+        "wns_ns": 3.8813953150141347,
+        "tns_ns": 0.0,
+        "area_um2": 23367.834,
+        "hpwl_um": 440574.9175,
+        "placement_hash": "bc141af641d8db860dde7e3cee05047e037fb9b43171f0e8ee4b49d2ee903f92",
+        "legal": true,
+        "timers": [],
+        "categories_ms": {},
+        "rudy_ms": 0,
+        "iterations": [
+          "Nesterov Region: Top-level",
+          "Nesterov Global Placement.",
+          "Nesterov momentum.",
+          "Nesterov momentum."
+        ],
+        "binary": "soa-final-openroad",
+        "threads": 1,
+        "repetition": 1
+      },
+      {
+        "placement_ms": 30417.411,
+        "wns_ns": 3.8813953150141347,
+        "tns_ns": 0.0,
+        "area_um2": 23367.834,
+        "hpwl_um": 440574.9175,
+        "placement_hash": "bc141af641d8db860dde7e3cee05047e037fb9b43171f0e8ee4b49d2ee903f92",
+        "legal": true,
+        "timers": [],
+        "categories_ms": {},
+        "rudy_ms": 0,
+        "iterations": [
+          "Nesterov Region: Top-level",
+          "Nesterov Global Placement.",
+          "Nesterov momentum.",
+          "Nesterov momentum."
+        ],
+        "binary": "soa-fused-openroad",
+        "threads": 8,
+        "repetition": 1
+      },
+      {
+        "placement_ms": 30084.287,
+        "wns_ns": 3.8813953150141347,
+        "tns_ns": 0.0,
+        "area_um2": 23367.834,
+        "hpwl_um": 440574.9175,
+        "placement_hash": "bc141af641d8db860dde7e3cee05047e037fb9b43171f0e8ee4b49d2ee903f92",
+        "legal": true,
+        "timers": [],
+        "categories_ms": {},
+        "rudy_ms": 0,
+        "iterations": [
+          "Nesterov Region: Top-level",
+          "Nesterov Global Placement.",
+          "Nesterov momentum.",
+          "Nesterov momentum."
+        ],
+        "binary": "soa-final-openroad",
+        "threads": 8,
+        "repetition": 1
+      },
+      {
+        "placement_ms": 62497.437,
+        "wns_ns": 3.8813953150141347,
+        "tns_ns": 0.0,
+        "area_um2": 23367.834,
+        "hpwl_um": 440574.9175,
+        "placement_hash": "bc141af641d8db860dde7e3cee05047e037fb9b43171f0e8ee4b49d2ee903f92",
+        "legal": true,
+        "timers": [],
+        "categories_ms": {},
+        "rudy_ms": 0,
+        "iterations": [
+          "Nesterov Region: Top-level",
+          "Nesterov Global Placement.",
+          "Nesterov momentum.",
+          "Nesterov momentum."
+        ],
+        "binary": "soa-final-openroad",
+        "threads": 1,
+        "repetition": 2
+      },
+      {
+        "placement_ms": 61885.528,
+        "wns_ns": 3.8813953150141347,
+        "tns_ns": 0.0,
+        "area_um2": 23367.834,
+        "hpwl_um": 440574.9175,
+        "placement_hash": "bc141af641d8db860dde7e3cee05047e037fb9b43171f0e8ee4b49d2ee903f92",
+        "legal": true,
+        "timers": [],
+        "categories_ms": {},
+        "rudy_ms": 0,
+        "iterations": [
+          "Nesterov Region: Top-level",
+          "Nesterov Global Placement.",
+          "Nesterov momentum.",
+          "Nesterov momentum."
+        ],
+        "binary": "soa-fused-openroad",
+        "threads": 1,
+        "repetition": 2
+      },
+      {
+        "placement_ms": 30553.601,
+        "wns_ns": 3.8813953150141347,
+        "tns_ns": 0.0,
+        "area_um2": 23367.834,
+        "hpwl_um": 440574.9175,
+        "placement_hash": "bc141af641d8db860dde7e3cee05047e037fb9b43171f0e8ee4b49d2ee903f92",
+        "legal": true,
+        "timers": [],
+        "categories_ms": {},
+        "rudy_ms": 0,
+        "iterations": [
+          "Nesterov Region: Top-level",
+          "Nesterov Global Placement.",
+          "Nesterov momentum.",
+          "Nesterov momentum."
+        ],
+        "binary": "soa-final-openroad",
+        "threads": 8,
+        "repetition": 2
+      },
+      {
+        "placement_ms": 30328.125,
+        "wns_ns": 3.8813953150141347,
+        "tns_ns": 0.0,
+        "area_um2": 23367.834,
+        "hpwl_um": 440574.9175,
+        "placement_hash": "bc141af641d8db860dde7e3cee05047e037fb9b43171f0e8ee4b49d2ee903f92",
+        "legal": true,
+        "timers": [],
+        "categories_ms": {},
+        "rudy_ms": 0,
+        "iterations": [
+          "Nesterov Region: Top-level",
+          "Nesterov Global Placement.",
+          "Nesterov momentum.",
+          "Nesterov momentum."
+        ],
+        "binary": "soa-fused-openroad",
+        "threads": 8,
+        "repetition": 2
+      }
+    ],
+    "summary": {
+      "soa-final-openroad-1": {
+        "median_ms": 62497.437,
+        "min_ms": 62419.608,
+        "max_ms": 62857.236,
+        "samples": 3
+      },
+      "soa-fused-openroad-1": {
+        "median_ms": 61885.528,
+        "min_ms": 61731.448,
+        "max_ms": 62037.386,
+        "samples": 3
+      },
+      "soa-final-openroad-8": {
+        "median_ms": 30378.078,
+        "min_ms": 30084.287,
+        "max_ms": 30553.601,
+        "samples": 3
+      },
+      "soa-fused-openroad-8": {
+        "median_ms": 30328.125,
+        "min_ms": 30236.584,
+        "max_ms": 30417.411,
+        "samples": 3
+      }
+    },
+    "binary_sha256": {
+      "soa-final-openroad": "8a74dff0cc156cfdf85c67aee18953d28a519fb8dcd062b89996c0c53f20c431",
+      "soa-fused-openroad": "1bd73d9033dd39d6fc69c603d4835e6c28c2ab315a2b1f4d7b725b52015f57d1"
+    },
+    "complete": true
+  },
+  "fused": {
+    "gcd-1": {
+      "placement_ms": 1044.818,
+      "wns_ns": 9.367916485469012,
+      "tns_ns": 0.0,
+      "area_um2": 621.908,
+      "hpwl_um": 7410.6845,
+      "placement_hash": "9be9539f832cde322ee7a73eda5cad62b737708692cf2f34bb194a5b408883f8",
+      "legal": true,
+      "timers": [],
+      "categories_ms": {},
+      "rudy_ms": 0,
+      "iterations": [
+        "Nesterov Region: Top-level",
+        "Nesterov Global Placement.",
+        "Nesterov momentum.",
+        "Nesterov momentum."
+      ]
+    },
+    "aes_cipher_top-1": {
+      "placement_ms": 61850.033,
+      "wns_ns": 3.8813953150141347,
+      "tns_ns": 0.0,
+      "area_um2": 23367.834,
+      "hpwl_um": 440574.9175,
+      "placement_hash": "bc141af641d8db860dde7e3cee05047e037fb9b43171f0e8ee4b49d2ee903f92",
+      "legal": true,
+      "timers": [],
+      "categories_ms": {},
+      "rudy_ms": 0,
+      "iterations": [
+        "Nesterov Region: Top-level",
+        "Nesterov Global Placement.",
+        "Nesterov momentum.",
+        "Nesterov momentum."
+      ]
+    },
+    "gcd-8": {
+      "placement_ms": 861.197,
+      "wns_ns": 9.367916485469012,
+      "tns_ns": 0.0,
+      "area_um2": 621.908,
+      "hpwl_um": 7410.6845,
+      "placement_hash": "9be9539f832cde322ee7a73eda5cad62b737708692cf2f34bb194a5b408883f8",
+      "legal": true,
+      "timers": [],
+      "categories_ms": {},
+      "rudy_ms": 0,
+      "iterations": [
+        "Nesterov Region: Top-level",
+        "Nesterov Global Placement.",
+        "Nesterov momentum.",
+        "Nesterov momentum."
+      ]
+    },
+    "aes_cipher_top-8": {
+      "placement_ms": 30222.895,
+      "wns_ns": 3.8813953150141347,
+      "tns_ns": 0.0,
+      "area_um2": 23367.834,
+      "hpwl_um": 440574.9175,
+      "placement_hash": "bc141af641d8db860dde7e3cee05047e037fb9b43171f0e8ee4b49d2ee903f92",
+      "legal": true,
+      "timers": [],
+      "categories_ms": {},
+      "rudy_ms": 0,
+      "iterations": [
+        "Nesterov Region: Top-level",
+        "Nesterov Global Placement.",
+        "Nesterov momentum.",
+        "Nesterov momentum."
+      ]
+    }
+  },
+  "cases-fused": {
+    "incremental02": {
+      "1": {
+        "baseline": {
+          "hash": "a5798f7204ddbc8a10eb2d5c8a78002b23bffaafb112533be72bc7df8009fb08",
+          "rows": 47227,
+          "seconds": 34.33436979353428,
+          "reused_from": "/gpfs/users/linlizhi/flasheda-soa-remediation-20261106/fork-results/cases-final/incremental02/1/baseline"
+        },
+        "soa": {
+          "hash": "a5798f7204ddbc8a10eb2d5c8a78002b23bffaafb112533be72bc7df8009fb08",
+          "rows": 47227,
+          "seconds": 26.358941182494164
+        },
+        "exact": true
+      },
+      "8": {
+        "baseline": {
+          "hash": "a5798f7204ddbc8a10eb2d5c8a78002b23bffaafb112533be72bc7df8009fb08",
+          "rows": 47227,
+          "seconds": 14.48890270292759,
+          "reused_from": "/gpfs/users/linlizhi/flasheda-soa-remediation-20261106/fork-results/cases-final/incremental02/8/baseline"
+        },
+        "soa": {
+          "hash": "a5798f7204ddbc8a10eb2d5c8a78002b23bffaafb112533be72bc7df8009fb08",
+          "rows": 47227,
+          "seconds": 8.728706672787666
+        },
+        "exact": true
+      }
+    },
+    "incremental03": {
+      "1": {
+        "baseline": {
+          "hash": "97b2aceea9ff98ee2758fcfd48099e1d789c4e9a9324a4a9f1b6a38110e8a3c0",
+          "rows": 47227,
+          "seconds": 6.026609227061272,
+          "reused_from": "/gpfs/users/linlizhi/flasheda-soa-remediation-20261106/fork-results/cases-final/incremental03/1/baseline"
+        },
+        "soa": {
+          "hash": "97b2aceea9ff98ee2758fcfd48099e1d789c4e9a9324a4a9f1b6a38110e8a3c0",
+          "rows": 47227,
+          "seconds": 5.2761809676885605
+        },
+        "exact": true
+      },
+      "8": {
+        "baseline": {
+          "hash": "97b2aceea9ff98ee2758fcfd48099e1d789c4e9a9324a4a9f1b6a38110e8a3c0",
+          "rows": 47227,
+          "seconds": 3.621729150414467,
+          "reused_from": "/gpfs/users/linlizhi/flasheda-soa-remediation-20261106/fork-results/cases-final/incremental03/8/baseline"
+        },
+        "soa": {
+          "hash": "97b2aceea9ff98ee2758fcfd48099e1d789c4e9a9324a4a9f1b6a38110e8a3c0",
+          "rows": 47227,
+          "seconds": 3.020784854888916
+        },
+        "exact": true
+      }
+    },
+    "macro01": {
+      "1": {
+        "baseline": {
+          "hash": "37efe2bf44d3ae1f7dd7eaaf0a46a9ce449703e861536d2b175140fbd5f80786",
+          "rows": 165489,
+          "seconds": 177.6456382125616,
+          "reused_from": "/gpfs/users/linlizhi/flasheda-soa-remediation-20261106/fork-results/cases-final/macro01/1/baseline"
+        },
+        "soa": {
+          "hash": "37efe2bf44d3ae1f7dd7eaaf0a46a9ce449703e861536d2b175140fbd5f80786",
+          "rows": 165489,
+          "seconds": 118.92553091049194
+        },
+        "exact": true
+      },
+      "8": {
+        "baseline": {
+          "hash": "37efe2bf44d3ae1f7dd7eaaf0a46a9ce449703e861536d2b175140fbd5f80786",
+          "rows": 165489,
+          "seconds": 71.35652993619442,
+          "reused_from": "/gpfs/users/linlizhi/flasheda-soa-remediation-20261106/fork-results/cases-final/macro01/8/baseline"
+        },
+        "soa": {
+          "hash": "37efe2bf44d3ae1f7dd7eaaf0a46a9ce449703e861536d2b175140fbd5f80786",
+          "rows": 165489,
+          "seconds": 41.66407935321331
+        },
+        "exact": true
+      }
+    },
+    "macro02": {
+      "1": {
+        "baseline": {
+          "hash": "eb1824140ac42828530c66e140f024c0fde45c5a1b1e783832b3997ca9120002",
+          "rows": 99142,
+          "seconds": 60.20502258837223,
+          "reused_from": "/gpfs/users/linlizhi/flasheda-soa-remediation-20261106/fork-results/cases-final/macro02/1/baseline"
+        },
+        "soa": {
+          "hash": "eb1824140ac42828530c66e140f024c0fde45c5a1b1e783832b3997ca9120002",
+          "rows": 99142,
+          "seconds": 43.28224292397499
+        },
+        "exact": true
+      },
+      "8": {
+        "baseline": {
+          "hash": "eb1824140ac42828530c66e140f024c0fde45c5a1b1e783832b3997ca9120002",
+          "rows": 99142,
+          "seconds": 30.081714272499084,
+          "reused_from": "/gpfs/users/linlizhi/flasheda-soa-remediation-20261106/fork-results/cases-final/macro02/8/baseline"
+        },
+        "soa": {
+          "hash": "eb1824140ac42828530c66e140f024c0fde45c5a1b1e783832b3997ca9120002",
+          "rows": 99142,
+          "seconds": 17.371500238776207
+        },
+        "exact": true
+      }
+    },
+    "region01": {
+      "1": {
+        "baseline": {
+          "hash": "c2fb63773bb370a75ef342a848cc48b1b44c55490bb9a624195b3061be01327d",
+          "rows": 1358,
+          "seconds": 1.2555873394012451,
+          "reused_from": "/gpfs/users/linlizhi/flasheda-soa-remediation-20261106/fork-results/cases-final/region01/1/baseline"
+        },
+        "soa": {
+          "hash": "c2fb63773bb370a75ef342a848cc48b1b44c55490bb9a624195b3061be01327d",
+          "rows": 1358,
+          "seconds": 1.146045908331871
+        },
+        "exact": true
+      },
+      "8": {
+        "baseline": {
+          "hash": "c2fb63773bb370a75ef342a848cc48b1b44c55490bb9a624195b3061be01327d",
+          "rows": 1358,
+          "seconds": 0.9972088932991028,
+          "reused_from": "/gpfs/users/linlizhi/flasheda-soa-remediation-20261106/fork-results/cases-final/region01/8/baseline"
+        },
+        "soa": {
+          "hash": "c2fb63773bb370a75ef342a848cc48b1b44c55490bb9a624195b3061be01327d",
+          "rows": 1358,
+          "seconds": 0.9471246898174286
+        },
+        "exact": true
+      }
+    },
+    "cluster_place01": {
+      "1": {
+        "baseline": {
+          "hash": "ee28ce68279911219617090c2c40434ef035cc152b52a13086211043b9cc0d92",
+          "rows": 712,
+          "seconds": 0.2899285852909088,
+          "reused_from": "/gpfs/users/linlizhi/flasheda-soa-remediation-20261106/fork-results/cases-final/cluster_place01/1/baseline"
+        },
+        "soa": {
+          "hash": "ee28ce68279911219617090c2c40434ef035cc152b52a13086211043b9cc0d92",
+          "rows": 712,
+          "seconds": 0.3397892713546753
+        },
+        "exact": true
+      },
+      "8": {
+        "baseline": {
+          "hash": "ee28ce68279911219617090c2c40434ef035cc152b52a13086211043b9cc0d92",
+          "rows": 712,
+          "seconds": 0.3407081514596939,
+          "reused_from": "/gpfs/users/linlizhi/flasheda-soa-remediation-20261106/fork-results/cases-final/cluster_place01/8/baseline"
+        },
+        "soa": {
+          "hash": "ee28ce68279911219617090c2c40434ef035cc152b52a13086211043b9cc0d92",
+          "rows": 712,
+          "seconds": 0.34046511352062225
+        },
+        "exact": true
+      }
+    },
+    "simple01-td-repair": {
+      "1": {
+        "baseline": {
+          "hash": "5cf8856e1fc365075c324f28484660098af17e3b5fd59670fca13bc32ea57ad0",
+          "rows": 804,
+          "seconds": 1.3936447501182556,
+          "reused_from": "/gpfs/users/linlizhi/flasheda-soa-remediation-20261106/fork-results/cases-final/simple01-td-repair/1/baseline"
+        },
+        "soa": {
+          "hash": "5cf8856e1fc365075c324f28484660098af17e3b5fd59670fca13bc32ea57ad0",
+          "rows": 804,
+          "seconds": 1.3506066352128983
+        },
+        "exact": true
+      },
+      "8": {
+        "baseline": {
+          "hash": "5cf8856e1fc365075c324f28484660098af17e3b5fd59670fca13bc32ea57ad0",
+          "rows": 804,
+          "seconds": 1.3426313251256943,
+          "reused_from": "/gpfs/users/linlizhi/flasheda-soa-remediation-20261106/fork-results/cases-final/simple01-td-repair/8/baseline"
+        },
+        "soa": {
+          "hash": "5cf8856e1fc365075c324f28484660098af17e3b5fd59670fca13bc32ea57ad0",
+          "rows": 804,
+          "seconds": 1.34212164580822
+        },
+        "exact": true
+      }
+    },
+    "place_ios_td": {
+      "1": {
+        "baseline": {
+          "hash": "1a56fed0251b61e6706361a2520796169f0af59a5f6d0fd813597dac21ef6a66",
+          "rows": 790,
+          "seconds": 1.3933189809322357,
+          "reused_from": "/gpfs/users/linlizhi/flasheda-soa-remediation-20261106/fork-results/cases-final/place_ios_td/1/baseline"
+        },
+        "soa": {
+          "hash": "1a56fed0251b61e6706361a2520796169f0af59a5f6d0fd813597dac21ef6a66",
+          "rows": 790,
+          "seconds": 1.3416687995195389
+        },
+        "exact": true
+      },
+      "8": {
+        "baseline": {
+          "hash": "1a56fed0251b61e6706361a2520796169f0af59a5f6d0fd813597dac21ef6a66",
+          "rows": 790,
+          "seconds": 1.3427548706531525,
+          "reused_from": "/gpfs/users/linlizhi/flasheda-soa-remediation-20261106/fork-results/cases-final/place_ios_td/8/baseline"
+        },
+        "soa": {
+          "hash": "1a56fed0251b61e6706361a2520796169f0af59a5f6d0fd813597dac21ef6a66",
+          "rows": 790,
+          "seconds": 1.3415711671113968
+        },
+        "exact": true
+      }
+    },
+    "place_ios_rd": {
+      "1": {
+        "baseline": {
+          "hash": "98f183e934a2d06d470de2db19dfaa8a821d0419836df12d986c0d1fa46027c7",
+          "rows": 712,
+          "seconds": 1.1943593919277191,
+          "reused_from": "/gpfs/users/linlizhi/flasheda-soa-remediation-20261106/fork-results/cases-final/place_ios_rd/1/baseline"
+        },
+        "soa": {
+          "hash": "98f183e934a2d06d470de2db19dfaa8a821d0419836df12d986c0d1fa46027c7",
+          "rows": 712,
+          "seconds": 1.1924989223480225
+        },
+        "exact": true
+      },
+      "8": {
+        "baseline": {
+          "hash": "98f183e934a2d06d470de2db19dfaa8a821d0419836df12d986c0d1fa46027c7",
+          "rows": 712,
+          "seconds": 1.1930087804794312,
+          "reused_from": "/gpfs/users/linlizhi/flasheda-soa-remediation-20261106/fork-results/cases-final/place_ios_rd/8/baseline"
+        },
+        "soa": {
+          "hash": "98f183e934a2d06d470de2db19dfaa8a821d0419836df12d986c0d1fa46027c7",
+          "rows": 712,
+          "seconds": 1.1915936172008514
+        },
+        "exact": true
+      }
+    },
+    "incremental01": {
+      "1": {
+        "baseline": {
+          "hash": "9439e1abdd664a7cb5b642e4223580bb1b51cb92cede48168b3110e1517d42a3",
+          "rows": 712,
+          "seconds": 0.28977908194065094,
+          "reused_from": "/gpfs/users/linlizhi/flasheda-soa-remediation-20261106/fork-results/cases-final/incremental01/1/baseline"
+        },
+        "soa": {
+          "hash": "9439e1abdd664a7cb5b642e4223580bb1b51cb92cede48168b3110e1517d42a3",
+          "rows": 712,
+          "seconds": 0.28944380581378937
+        },
+        "exact": true
+      },
+      "8": {
+        "baseline": {
+          "hash": "9439e1abdd664a7cb5b642e4223580bb1b51cb92cede48168b3110e1517d42a3",
+          "rows": 712,
+          "seconds": 0.24002192914485931,
+          "reused_from": "/gpfs/users/linlizhi/flasheda-soa-remediation-20261106/fork-results/cases-final/incremental01/8/baseline"
+        },
+        "soa": {
+          "hash": "9439e1abdd664a7cb5b642e4223580bb1b51cb92cede48168b3110e1517d42a3",
+          "rows": 712,
+          "seconds": 0.2393098622560501
+        },
+        "exact": true
+      }
+    }
+  }
+}

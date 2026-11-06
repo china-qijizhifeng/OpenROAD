@@ -163,6 +163,7 @@ class GCell
   void print(utl::Logger* logger, bool print_only_name) const;
   void writeAttributesToCSV(std::ostream& out) const;
 
+  SoaRow<NumericStore>& numericRow() { return data_; }
   const SoaRow<NumericStore>& numericRow() const { return data_; }
 
  private:
@@ -509,15 +510,47 @@ class GPin
   void setMinExpSumX(float minExpSumX);
   void setMinExpSumY(float minExpSumY);
 
-  float maxExpSumX() const { return data_.get<GPinColumns::maxExpSumX>(); }
-  float maxExpSumY() const { return data_.get<GPinColumns::maxExpSumY>(); }
-  float minExpSumX() const { return data_.get<GPinColumns::minExpSumX>(); }
-  float minExpSumY() const { return data_.get<GPinColumns::minExpSumY>(); }
+  float maxExpSumX() const
+  {
+    return data_.storage().at<GPinColumns::maxExpSumX>(
+        data_.get<GPinColumns::waSlot>());
+  }
+  float maxExpSumY() const
+  {
+    return data_.storage().at<GPinColumns::maxExpSumY>(
+        data_.get<GPinColumns::waSlot>());
+  }
+  float minExpSumX() const
+  {
+    return data_.storage().at<GPinColumns::minExpSumX>(
+        data_.get<GPinColumns::waSlot>());
+  }
+  float minExpSumY() const
+  {
+    return data_.storage().at<GPinColumns::minExpSumY>(
+        data_.get<GPinColumns::waSlot>());
+  }
 
-  bool hasMaxExpSumX() const { return data_.get<GPinColumns::hasMaxExpSumX>(); }
-  bool hasMaxExpSumY() const { return data_.get<GPinColumns::hasMaxExpSumY>(); }
-  bool hasMinExpSumX() const { return data_.get<GPinColumns::hasMinExpSumX>(); }
-  bool hasMinExpSumY() const { return data_.get<GPinColumns::hasMinExpSumY>(); }
+  bool hasMaxExpSumX() const
+  {
+    return data_.storage().at<GPinColumns::hasMaxExpSumX>(
+        data_.get<GPinColumns::waSlot>());
+  }
+  bool hasMaxExpSumY() const
+  {
+    return data_.storage().at<GPinColumns::hasMaxExpSumY>(
+        data_.get<GPinColumns::waSlot>());
+  }
+  bool hasMinExpSumX() const
+  {
+    return data_.storage().at<GPinColumns::hasMinExpSumX>(
+        data_.get<GPinColumns::waSlot>());
+  }
+  bool hasMinExpSumY() const
+  {
+    return data_.storage().at<GPinColumns::hasMinExpSumY>(
+        data_.get<GPinColumns::waSlot>());
+  }
 
   void setCenterLocation(int cx, int cy);
   void updateLocation(const GCell* gCell);
@@ -735,10 +768,10 @@ class BinGrid
   void setBinCnt(int binCntX, int binCntY);
   void setBinTargetDensity(float density);
   void updateBinsGCellDensityArea(const std::vector<GCellHandle>& cells,
+                                  const std::vector<GCellRowList>& row_lists,
                                   int parallel_threads = 1);
-  void scatterDensityAreaInPlace(const std::vector<GCellHandle>& cells,
+  void scatterDensityAreaInPlace(const std::vector<GCellRowList>& row_lists,
                                  int parallel_threads);
-  void setNumThreads(int num_threads) { num_threads_ = num_threads; }
 
   void initBins();
 
@@ -792,6 +825,8 @@ class BinGrid
   // Reused integer grids avoid atomics and preserve per-contribution
   // truncation.
   std::vector<int64_t> scatter_scratch_;
+  std::vector<float> overflow_, overflow_unscaled_;
+  std::vector<int> x_edges_, y_edges_;
   std::shared_ptr<PlacerBase> pb_;
   utl::Logger* log_ = nullptr;
   int lx_ = 0;
@@ -806,7 +841,6 @@ class BinGrid
   int64_t sumOverflowArea_ = 0;
   int64_t sumOverflowAreaUnscaled_ = 0;
   bool isSetBinCnt_ = false;
-  int num_threads_ = 1;
 };
 
 inline std::vector<Bin>& BinGrid::getBins()
@@ -990,6 +1024,12 @@ class NesterovBaseCommon
   void resizeGCell(odb::dbInst* db_inst);
   void moveGCell(odb::dbInst* db_inst);
   void fixPointers();
+  void updateDensityPinLocations(const GCellRowList& cells);
+  void refreshCellLocks();
+  void getWireLengthGradientsWA_cpu(const std::vector<GCellHandle>& cells,
+                                    PointColumns& out,
+                                    float coef_x,
+                                    float coef_y);
 
   // Device-side sync for the timing-driven boundary; no-ops on CPU builds
   // and on the CPU runtime path. Non-virtual TD iterations create, destroy
@@ -1213,6 +1253,7 @@ class NesterovBase
   FloatPoint getDensityPreconditioner(const GCell* gCell) const;
 
   FloatPoint getDensityGradient(const GCell* gCell) const;
+  void getDensityGradientsColumns(PointColumns& out);
 
   // Fill out[i] with the density gradient for every filler cell in gCells, in
   // parallel. Used by the GPU density backend, whose per-inst gradients come
@@ -1371,6 +1412,11 @@ class NesterovBase
  private:
   friend class TimingRepairIntegrationTest;
 
+  template <bool GatherDensity>
+  void combineGradientsColumns(PointColumns& sumGrads,
+                               const PointColumns& wireLengthGrads,
+                               PointColumns& densityGrads);
+
   NesterovBaseVars nbVars_;
   std::shared_ptr<PlacerBase> pb_;
   std::shared_ptr<NesterovBaseCommon> nbc_;
@@ -1433,6 +1479,15 @@ class NesterovBase
       = std::make_shared<GCell::NumericStore>();
   std::vector<GCell> fillerStor_;
   std::vector<GCellHandle> nb_gcells_;
+  std::vector<GCellRowList> kernel_rows_;
+  bool kernel_rows_dirty_ = true;
+  PointColumns distance_scratch_;
+  void appendCellHandle(GCellHandle handle);
+  void eraseCellHandle(size_t index);
+  void rebindCellHandle(size_t index, GCellHandle handle);
+  void checkColumnState();
+  const std::vector<GCellRowList>& kernelRows();
+  void updateNextCoordinatesColumns(float coeff);
 
   std::unordered_map<odb::dbInst*, size_t> db_inst_to_nb_index_;
   std::unordered_map<size_t, size_t> filler_stor_index_to_nb_index_;

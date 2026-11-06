@@ -352,3 +352,19 @@ cc_library(
     includes = ["src"],
     deps = [":soa_storage"],
 )
+
+cc_library(
+    name = "fft_cpu",
+    srcs = ["src/fft.cpp", "src/fftsg.cpp", "src/fftsg2d.cpp"],
+    hdrs = ["src/fft.h", "src/fftBackend.h", "src/backendContext.h"],
+    includes = ["src"],
+    copts = ["-fopenmp"],
+    deps = ["@openmp"],
+)
+
+cc_library(
+    name = "wirelength_soa",
+    hdrs = ["src/wirelengthSoa.h"],
+    includes = ["src"],
+    deps = [":placement_columns", ":point_columns"],
+)

@@ -3,9 +3,6 @@
 
 include("openroad")
 
-# For Multithread
-# set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DUSE_FFT2D_PTHREADS=1 -DFFT_2D_MAX_THREADS=16 -O3 ${OpenMP_CXX_FLAGS}")
-
 set(THREADS_PREFER_PTHREAD_FLAG ON)
 
 find_package(Eigen3 REQUIRED)
@@ -51,6 +48,9 @@ add_library(gpl_lib
   src/solver.cpp
   src/mbff.cpp
 )
+
+# Preserve native floating-point evaluation across CPU kernels.
+target_compile_options(gpl_lib PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-ffp-contract=off>)
 
 # --- HPWL & FFT backends: runtime switch (Strategy + Factory) ---
 # The CPU backends (CpuHpwlBackend in src/hpwl.cpp, CpuFftBackend in

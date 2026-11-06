@@ -1,0 +1,11 @@
+[
+  {
+    "name": "job-317d12d0424e-20261106090444",
+    "user_def_name": "flasheda-soa-remediation-20261106",
+    "status": "Completed",
+    "ready_status": "0/1",
+    "namespace": "qiji",
+    "job_creator": "linlizhi",
+    "user_gpu": 0
+  }
+]

@@ -3,7 +3,7 @@
 
 // DensityGradientBackend — Strategy interface for the density gradient
 // (per-cell electric field gather). CpuDensityGradientBackend wraps the
-// existing getDensityGradient per-cell loop; GpuDensityGradientBackend runs a
+// resident-column bulk gather; GpuDensityGradientBackend runs a
 // Kokkos kernel reading device-resident field Views from the FFT solve.
 //
 // NB-level (NesterovBase), not NBC-level — the BinGrid and FFT are per-NB.
@@ -35,8 +35,7 @@ class DensityGradientBackend
   DensityGradientBackend& operator=(DensityGradientBackend&&) = delete;
 
   virtual void getCellGradients(const std::vector<GCellHandle>& gCells,
-                                PointColumns& out)
-      = 0;
+                                PointColumns& out) = 0;
 
   virtual FloatPoint getCellGradient(const GCell* gCell) = 0;
 
