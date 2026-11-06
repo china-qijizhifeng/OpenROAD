@@ -62,29 +62,28 @@ class NesterovDeviceContext
   int numCells() const { return num_cells_; }
 
   // Push host Nesterov vectors to device.
-  void syncCoordsToDevice(const std::vector<FloatPoint>& curSLP,
-                          const std::vector<FloatPoint>& prevSLP,
-                          const std::vector<FloatPoint>& cur,
-                          const std::vector<FloatPoint>& curSumGrads,
-                          const std::vector<FloatPoint>& prevSumGrads);
+  void syncCoordsToDevice(const PointColumns& curSLP,
+                          const PointColumns& prevSLP,
+                          const PointColumns& cur,
+                          const PointColumns& curSumGrads,
+                          const PointColumns& prevSumGrads);
 
   // Pull device coords to host (reverse sync for density scatter).
-  void syncCoordsToHost(std::vector<FloatPoint>& nextSLP,
-                        std::vector<FloatPoint>& next);
+  void syncCoordsToHost(PointColumns& nextSLP, PointColumns& next);
 
   // Pull prevSLP coords to host (for density center update after
   // updateInitialPrevSLPCoordi).
-  void syncPrevSLPToHost(std::vector<FloatPoint>& prevSLP);
+  void syncPrevSLPToHost(PointColumns& prevSLP);
 
   // Pull curSLP sum-grads from device to host. Needed before saveSnapshot:
   // on the GPU path, updateGradients writes sum-grads only to device, so
   // the host vector stays at zero unless explicitly synced.
-  void syncCurSumGradsToHost(std::vector<FloatPoint>& curSumGrads);
+  void syncCurSumGradsToHost(PointColumns& curSumGrads);
 
   // Pull prevSLP sum-grads from device to host. Parallel to
   // syncCurSumGradsToHost; saveSnapshot uses both so revertToSnapshot can
   // push real values back instead of zombie host data.
-  void syncPrevSumGradsToHost(std::vector<FloatPoint>& prevSumGrads);
+  void syncPrevSumGradsToHost(PointColumns& prevSumGrads);
 
   // GPU kernel: updateGradients loop body.
   void gradCombine(float density_penalty,
@@ -114,7 +113,7 @@ class NesterovDeviceContext
   // Push complete density gradient vector (inst + filler) from host to device.
   // Required because GPU density backend only computes inst grads on device;
   // filler grads are CPU-computed and must be explicitly pushed.
-  void pushDensityGradsFromHost(const std::vector<FloatPoint>& densityGrads);
+  void pushDensityGradsFromHost(const PointColumns& densityGrads);
 
   // ---- Device-resident density pipeline ----
   //
@@ -153,8 +152,7 @@ class NesterovDeviceContext
 
   // Pull current-slot coords to host (curSLP + cur). Used to refresh the
   // host vectors lazily when the hot loop no longer syncs every iteration.
-  void syncCurCoordsToHost(std::vector<FloatPoint>& curSLP,
-                           std::vector<FloatPoint>& cur);
+  void syncCurCoordsToHost(PointColumns& curSLP, PointColumns& cur);
 
   // Device-side pointer rotation matching NesterovBase::updateNextIter swaps.
   void rotateForNextIter();

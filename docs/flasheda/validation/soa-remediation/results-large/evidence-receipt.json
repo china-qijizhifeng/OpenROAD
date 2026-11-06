@@ -1,0 +1,12 @@
+{
+  "archive_sha256": "7fb8afe60631c643aaf17754b23b516d0758a7f95406d81ab08f70da90d6c4ef",
+  "archive_bytes": 271107980,
+  "archive_members": 318,
+  "final_runs": 48,
+  "all_worker_command_exits": 0,
+  "local_verified": true,
+  "binary_sha256": {
+    "baseline": "d3e694dc50bde8d8c848fe153ff7d64e55ce6a96d9d9b4548cc6484ab07f1c0f",
+    "candidate-final": "4d627682245a2896c22ce73248c5e122ad5b6f01b3f73b387f8bb5f1c07a4252"
+  }
+}

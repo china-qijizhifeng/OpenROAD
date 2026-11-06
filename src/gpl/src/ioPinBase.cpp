@@ -200,9 +200,9 @@ void IoPinBase::reportMoves(const int iter) const
 
 void IoPinBase::placeGPins(const Iterate iterate)
 {
-  const std::vector<FloatPoint>& at = iterate == Iterate::kPrev   ? prev_
-                                      : iterate == Iterate::kNext ? next_
-                                                                  : cur_;
+  const PointColumns& at = iterate == Iterate::kPrev   ? prev_
+                           : iterate == Iterate::kNext ? next_
+                                                       : cur_;
   for (size_t i = 0; i < gpins_.size(); ++i) {
     if (gpins_[i] != nullptr) {
       gpins_[i]->setCenterLocation(static_cast<int>(at[i].x),
@@ -697,7 +697,7 @@ FloatPoint IoPinBase::mirrorOf(size_t master_io, const FloatPoint& p) const
 }
 
 // Serial: masters must already be positioned.
-void IoPinBase::applyMirrorConstraints(std::vector<FloatPoint>& coordi) const
+void IoPinBase::applyMirrorConstraints(PointColumns& coordi) const
 {
   for (const auto& [master_io, follower_io] : mirror_pairs_) {
     coordi[follower_io] = mirrorOf(master_io, coordi[master_io]);
@@ -901,7 +901,7 @@ FloatPoint IoPinBase::ringPointAt(const std::vector<RingSlot>& ring,
 }
 
 // Mirrored pairs are spaced by separateMirrored(), so only the others.
-void IoPinBase::separate(std::vector<FloatPoint>& coordi) const
+void IoPinBase::separate(PointColumns& coordi) const
 {
   // -1: not on the perimeter.
   std::vector<float> ring_index(bterms_.size(), -1);
@@ -955,7 +955,7 @@ void IoPinBase::separate(std::vector<FloatPoint>& coordi) const
   }
 }
 
-void IoPinBase::separateMirrored(std::vector<FloatPoint>& coordi) const
+void IoPinBase::separateMirrored(PointColumns& coordi) const
 {
   std::array<std::vector<std::pair<float, size_t>>, 2> axis_pins;
   for (size_t i = 0; i < bterms_.size(); ++i) {

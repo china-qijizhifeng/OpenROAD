@@ -1,0 +1,30 @@
+{
+  "alias": "flasheda-soa-large-high-remediation-20261106",
+  "identity": "job-bb6ab222440c-20261106125349",
+  "project": "WeaverRSI",
+  "queue": "proj-32",
+  "namespace": "qiji",
+  "cpu": 24,
+  "memory": "64Gi",
+  "gpu": 0,
+  "image": "harbor.local.clusters/bp/weaver-trainer-megatron-bridge:v1.14.30@sha256:8e310d0cb124813a25683448b41df67331951aae06e17bddcfd3f7692f71520e",
+  "configs": [
+    "large01",
+    "large02",
+    "large01-rd"
+  ],
+  "samples_per_binary_threads": 3,
+  "expected_runs": 36,
+  "baseline_sha256": "d3e694dc50bde8d8c848fe153ff7d64e55ce6a96d9d9b4548cc6484ab07f1c0f",
+  "candidate_sha256": "4d627682245a2896c22ce73248c5e122ad5b6f01b3f73b387f8bb5f1c07a4252",
+  "submission_request_id": "ReqID-20261106-125349-2627-646e",
+  "final_status": "Completed",
+  "deleted": true,
+  "after_delete": [],
+  "evidence_sha256": "1afc610b120df0280a6c982b36ea32c0118d39b78d76bf60995c5693d21fec0e",
+  "evidence_bytes": 292534034,
+  "cpu_model": "Intel(R) Xeon(R) Gold 6330 CPU @ 2.00GHz",
+  "total_run_wall_seconds": 7880.862794235349,
+  "local_evidence_path": "/Users/shom/Downloads/openroad-gpl-soa/build/soa/remediation-large-high/evidence.tar.gz",
+  "remote_evidence_path": "/gpfs/users/linlizhi/flasheda-soa-large-high-remediation-20261106/evidence.tar.gz"
+}

@@ -1,0 +1,154 @@
+{
+  "incremental02": {
+    "1": {
+      "baseline": {
+        "hash": "b87b3b36d4a67b73edaed37cf49074fb00e4b78bd39814fec61e204f6c451f18",
+        "rows": 47227,
+        "seconds": 29.618692979216576,
+        "quality": [],
+        "placement_ms": null,
+        "reused_from": "/gpfs/users/linlizhi/flasheda-soa-merge-local-20261106/results/differential/incremental02/1/baseline"
+      },
+      "soa": {
+        "hash": "b87b3b36d4a67b73edaed37cf49074fb00e4b78bd39814fec61e204f6c451f18",
+        "rows": 47227,
+        "seconds": 24.6604615598917,
+        "quality": [],
+        "placement_ms": null
+      },
+      "exact": true
+    },
+    "8": {
+      "baseline": {
+        "hash": "b87b3b36d4a67b73edaed37cf49074fb00e4b78bd39814fec61e204f6c451f18",
+        "rows": 47227,
+        "seconds": 18.95061756670475,
+        "quality": [],
+        "placement_ms": null,
+        "reused_from": "/gpfs/users/linlizhi/flasheda-soa-merge-local-20261106/results/differential/incremental02/8/baseline"
+      },
+      "soa": {
+        "hash": "b87b3b36d4a67b73edaed37cf49074fb00e4b78bd39814fec61e204f6c451f18",
+        "rows": 47227,
+        "seconds": 19.953030824661255,
+        "quality": [],
+        "placement_ms": null
+      },
+      "exact": true
+    }
+  },
+  "incremental03": {
+    "1": {
+      "baseline": {
+        "hash": "604ea92e2794c55f35bed6a330c6e49f4e43b9d453568c81d632eb5776e7fcd0",
+        "rows": 47227,
+        "seconds": 4.734177201986313,
+        "quality": [],
+        "placement_ms": null,
+        "reused_from": "/gpfs/users/linlizhi/flasheda-soa-merge-local-20261106/results/differential/incremental03/1/baseline"
+      },
+      "soa": {
+        "hash": "604ea92e2794c55f35bed6a330c6e49f4e43b9d453568c81d632eb5776e7fcd0",
+        "rows": 47227,
+        "seconds": 4.64406681060791,
+        "quality": [],
+        "placement_ms": null
+      },
+      "exact": true
+    },
+    "8": {
+      "baseline": {
+        "hash": "604ea92e2794c55f35bed6a330c6e49f4e43b9d453568c81d632eb5776e7fcd0",
+        "rows": 47227,
+        "seconds": 3.581956312060356,
+        "quality": [],
+        "placement_ms": null,
+        "reused_from": "/gpfs/users/linlizhi/flasheda-soa-merge-local-20261106/results/differential/incremental03/8/baseline"
+      },
+      "soa": {
+        "hash": "604ea92e2794c55f35bed6a330c6e49f4e43b9d453568c81d632eb5776e7fcd0",
+        "rows": 47227,
+        "seconds": 3.825702488422394,
+        "quality": [],
+        "placement_ms": null
+      },
+      "exact": true
+    }
+  },
+  "place_ios_td": {
+    "1": {
+      "baseline": {
+        "hash": "0c14337c54811f50c86c074de3bbc15077fdfed58ce30527043cd9a73aa805fb",
+        "rows": 784,
+        "seconds": 1.3476489335298538,
+        "quality": [],
+        "placement_ms": null,
+        "reused_from": "/gpfs/users/linlizhi/flasheda-soa-merge-local-20261106/results/differential/place_ios_td/1/baseline"
+      },
+      "soa": {
+        "hash": "0c14337c54811f50c86c074de3bbc15077fdfed58ce30527043cd9a73aa805fb",
+        "rows": 784,
+        "seconds": 1.345129743218422,
+        "quality": [],
+        "placement_ms": null
+      },
+      "exact": true
+    },
+    "8": {
+      "baseline": {
+        "hash": "0c14337c54811f50c86c074de3bbc15077fdfed58ce30527043cd9a73aa805fb",
+        "rows": 784,
+        "seconds": 1.5920286923646927,
+        "quality": [],
+        "placement_ms": null,
+        "reused_from": "/gpfs/users/linlizhi/flasheda-soa-merge-local-20261106/results/differential/place_ios_td/8/baseline"
+      },
+      "soa": {
+        "hash": "0c14337c54811f50c86c074de3bbc15077fdfed58ce30527043cd9a73aa805fb",
+        "rows": 784,
+        "seconds": 1.6501405388116837,
+        "quality": [],
+        "placement_ms": null
+      },
+      "exact": true
+    }
+  },
+  "place_ios_rd": {
+    "1": {
+      "baseline": {
+        "hash": "21a9ca6bf60b7160de1a73f0ed9d956c277ec9b4053eab2b13e31eca8c21910d",
+        "rows": 712,
+        "seconds": 1.0915267169475555,
+        "quality": [],
+        "placement_ms": null,
+        "reused_from": "/gpfs/users/linlizhi/flasheda-soa-merge-local-20261106/results/differential/place_ios_rd/1/baseline"
+      },
+      "soa": {
+        "hash": "21a9ca6bf60b7160de1a73f0ed9d956c277ec9b4053eab2b13e31eca8c21910d",
+        "rows": 712,
+        "seconds": 1.094111755490303,
+        "quality": [],
+        "placement_ms": null
+      },
+      "exact": true
+    },
+    "8": {
+      "baseline": {
+        "hash": "21a9ca6bf60b7160de1a73f0ed9d956c277ec9b4053eab2b13e31eca8c21910d",
+        "rows": 712,
+        "seconds": 1.69376240670681,
+        "quality": [],
+        "placement_ms": null,
+        "reused_from": "/gpfs/users/linlizhi/flasheda-soa-merge-local-20261106/results/differential/place_ios_rd/8/baseline"
+      },
+      "soa": {
+        "hash": "21a9ca6bf60b7160de1a73f0ed9d956c277ec9b4053eab2b13e31eca8c21910d",
+        "rows": 712,
+        "seconds": 2.245319664478302,
+        "quality": [],
+        "placement_ms": null
+      },
+      "exact": true
+    }
+  }
+}

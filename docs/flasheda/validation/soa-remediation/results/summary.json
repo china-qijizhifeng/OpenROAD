@@ -1,0 +1,153 @@
+{
+  "benchmark": {
+    "summary": {
+      "baseline-1": {
+        "median_ms": 79870.001,
+        "min_ms": 78925.226,
+        "max_ms": 80005.13,
+        "samples": 3
+      },
+      "previous-soa-openroad-1": {
+        "median_ms": 75265.931,
+        "min_ms": 74728.59,
+        "max_ms": 76128.793,
+        "samples": 3
+      },
+      "soa-final-openroad-1": {
+        "median_ms": 62621.016,
+        "min_ms": 62418.243,
+        "max_ms": 62915.078,
+        "samples": 3
+      },
+      "baseline-8": {
+        "median_ms": 44033.006,
+        "min_ms": 43810.761,
+        "max_ms": 49563.233,
+        "samples": 3
+      },
+      "previous-soa-openroad-8": {
+        "median_ms": 41549.441,
+        "min_ms": 41527.164,
+        "max_ms": 41729.382,
+        "samples": 3
+      },
+      "soa-final-openroad-8": {
+        "median_ms": 30323.322,
+        "min_ms": 30286.191,
+        "max_ms": 30337.3,
+        "samples": 3
+      }
+    },
+    "binary_sha256": {
+      "baseline": "d3e694dc50bde8d8c848fe153ff7d64e55ce6a96d9d9b4548cc6484ab07f1c0f",
+      "previous-soa-openroad": "dc13bc53c11cf6443b6c1efa618e8a4108e022905099bb03b274e151c584f167",
+      "soa-final-openroad": "8a74dff0cc156cfdf85c67aee18953d28a519fb8dcd062b89996c0c53f20c431"
+    },
+    "resources": {},
+    "hashes": [
+      "bc141af641d8db860dde7e3cee05047e037fb9b43171f0e8ee4b49d2ee903f92"
+    ]
+  },
+  "benchmark-tuned": {
+    "summary": {
+      "soa-final-openroad-1": {
+        "median_ms": 62433.961,
+        "min_ms": 62391.098,
+        "max_ms": 62441.828,
+        "samples": 3
+      },
+      "tuned-openroad-1": {
+        "median_ms": 73683.25,
+        "min_ms": 73459.656,
+        "max_ms": 73728.303,
+        "samples": 3
+      },
+      "soa-final-openroad-8": {
+        "median_ms": 30658.828,
+        "min_ms": 30284.203,
+        "max_ms": 30723.655,
+        "samples": 3
+      },
+      "tuned-openroad-8": {
+        "median_ms": 34866.356,
+        "min_ms": 34767.86,
+        "max_ms": 35133.858,
+        "samples": 3
+      }
+    },
+    "binary_sha256": {
+      "soa-final-openroad": "8a74dff0cc156cfdf85c67aee18953d28a519fb8dcd062b89996c0c53f20c431",
+      "tuned-openroad": "70426e6d2918881b79a1e12ecd0f3ed9ce8e75aefe4ce8f2ce3881a1a7ef0dd5"
+    },
+    "resources": {},
+    "hashes": [
+      "bc141af641d8db860dde7e3cee05047e037fb9b43171f0e8ee4b49d2ee903f92"
+    ]
+  },
+  "replay": {
+    "2": {
+      "previous": {
+        "scatter_ms": 7.12404,
+        "gather_ms": 6.52884
+      },
+      "separable": {
+        "scatter_ms": 5.72816,
+        "gather_ms": 5.73948
+      }
+    },
+    "400": {
+      "previous": {
+        "scatter_ms": 7.03144,
+        "gather_ms": 6.48338
+      },
+      "separable": {
+        "scatter_ms": 5.72454,
+        "gather_ms": 5.72769
+      }
+    },
+    "1100": {
+      "previous": {
+        "scatter_ms": 6.7528,
+        "gather_ms": 6.29309
+      },
+      "separable": {
+        "scatter_ms": 5.54729,
+        "gather_ms": 5.55153
+      }
+    }
+  },
+  "cases": {
+    "cases-final": {
+      "designs": [
+        "incremental02",
+        "incremental03",
+        "macro01",
+        "macro02",
+        "region01",
+        "cluster_place01",
+        "simple01-td-repair",
+        "place_ios_td",
+        "place_ios_rd",
+        "incremental01"
+      ],
+      "comparisons": 20,
+      "exact": true
+    },
+    "cases-tuned": {
+      "designs": [
+        "incremental02",
+        "incremental03",
+        "macro01",
+        "macro02",
+        "region01",
+        "cluster_place01",
+        "simple01-td-repair",
+        "place_ios_td",
+        "place_ios_rd",
+        "incremental01"
+      ],
+      "comparisons": 20,
+      "exact": true
+    }
+  }
+}

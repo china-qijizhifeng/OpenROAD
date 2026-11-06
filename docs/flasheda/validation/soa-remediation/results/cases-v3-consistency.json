@@ -1,0 +1,92 @@
+{
+  "incremental02": {
+    "1": {
+      "baseline": {
+        "hash": "a5798f7204ddbc8a10eb2d5c8a78002b23bffaafb112533be72bc7df8009fb08",
+        "rows": 47227,
+        "seconds": 34.33436979353428,
+        "reused_from": "/gpfs/users/linlizhi/flasheda-soa-remediation-20261106/fork-results/cases-final/incremental02/1/baseline"
+      },
+      "soa": {
+        "hash": "a5798f7204ddbc8a10eb2d5c8a78002b23bffaafb112533be72bc7df8009fb08",
+        "rows": 47227,
+        "seconds": 30.212877973914146
+      },
+      "exact": true
+    },
+    "8": {
+      "baseline": {
+        "hash": "a5798f7204ddbc8a10eb2d5c8a78002b23bffaafb112533be72bc7df8009fb08",
+        "rows": 47227,
+        "seconds": 14.48890270292759,
+        "reused_from": "/gpfs/users/linlizhi/flasheda-soa-remediation-20261106/fork-results/cases-final/incremental02/8/baseline"
+      },
+      "soa": {
+        "hash": "a5798f7204ddbc8a10eb2d5c8a78002b23bffaafb112533be72bc7df8009fb08",
+        "rows": 47227,
+        "seconds": 12.386420592665672
+      },
+      "exact": true
+    }
+  },
+  "incremental03": {
+    "1": {
+      "baseline": {
+        "hash": "97b2aceea9ff98ee2758fcfd48099e1d789c4e9a9324a4a9f1b6a38110e8a3c0",
+        "rows": 47227,
+        "seconds": 6.026609227061272,
+        "reused_from": "/gpfs/users/linlizhi/flasheda-soa-remediation-20261106/fork-results/cases-final/incremental03/1/baseline"
+      },
+      "soa": {
+        "hash": "97b2aceea9ff98ee2758fcfd48099e1d789c4e9a9324a4a9f1b6a38110e8a3c0",
+        "rows": 47227,
+        "seconds": 5.7791937738657
+      },
+      "exact": true
+    },
+    "8": {
+      "baseline": {
+        "hash": "97b2aceea9ff98ee2758fcfd48099e1d789c4e9a9324a4a9f1b6a38110e8a3c0",
+        "rows": 47227,
+        "seconds": 3.621729150414467,
+        "reused_from": "/gpfs/users/linlizhi/flasheda-soa-remediation-20261106/fork-results/cases-final/incremental03/8/baseline"
+      },
+      "soa": {
+        "hash": "97b2aceea9ff98ee2758fcfd48099e1d789c4e9a9324a4a9f1b6a38110e8a3c0",
+        "rows": 47227,
+        "seconds": 3.471766024827957
+      },
+      "exact": true
+    }
+  },
+  "simple01-td-repair": {
+    "1": {
+      "baseline": {
+        "hash": "5cf8856e1fc365075c324f28484660098af17e3b5fd59670fca13bc32ea57ad0",
+        "rows": 804,
+        "seconds": 1.3936447501182556,
+        "reused_from": "/gpfs/users/linlizhi/flasheda-soa-remediation-20261106/fork-results/cases-final/simple01-td-repair/1/baseline"
+      },
+      "soa": {
+        "hash": "5cf8856e1fc365075c324f28484660098af17e3b5fd59670fca13bc32ea57ad0",
+        "rows": 804,
+        "seconds": 1.3894233703613281
+      },
+      "exact": true
+    },
+    "8": {
+      "baseline": {
+        "hash": "5cf8856e1fc365075c324f28484660098af17e3b5fd59670fca13bc32ea57ad0",
+        "rows": 804,
+        "seconds": 1.3426313251256943,
+        "reused_from": "/gpfs/users/linlizhi/flasheda-soa-remediation-20261106/fork-results/cases-final/simple01-td-repair/8/baseline"
+      },
+      "soa": {
+        "hash": "5cf8856e1fc365075c324f28484660098af17e3b5fd59670fca13bc32ea57ad0",
+        "rows": 804,
+        "seconds": 1.3422487825155258
+      },
+      "exact": true
+    }
+  }
+}

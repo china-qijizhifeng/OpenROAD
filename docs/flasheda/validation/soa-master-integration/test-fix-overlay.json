@@ -1,0 +1,7 @@
+{
+  "base_commit": "8bc1c3e674f49b93ae2bf8d04cbb8954c76a81b9",
+  "test_only_commit": "268276e3d1",
+  "file": "src/gpl/test/soa/storage_test.cpp",
+  "original_sha256": "0d81e75bd02956516ccd78c9a03a8eddc38abd26b9b00cd0d0fd1e901a89436e",
+  "fixed_sha256": "babcd0e1ec24c4cec33d48fd30f786ae79553be64eb9e8a15ff88fdddac27134"
+}

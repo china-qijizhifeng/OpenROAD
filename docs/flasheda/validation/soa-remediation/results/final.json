@@ -1,0 +1,74 @@
+{
+  "gcd-1": {
+    "placement_ms": 1079.285,
+    "wns_ns": 9.367916485469012,
+    "tns_ns": 0.0,
+    "area_um2": 621.908,
+    "hpwl_um": 7410.6845,
+    "placement_hash": "9be9539f832cde322ee7a73eda5cad62b737708692cf2f34bb194a5b408883f8",
+    "legal": true,
+    "timers": [],
+    "categories_ms": {},
+    "rudy_ms": 0,
+    "iterations": [
+      "Nesterov Region: Top-level",
+      "Nesterov Global Placement.",
+      "Nesterov momentum.",
+      "Nesterov momentum."
+    ]
+  },
+  "aes_cipher_top-1": {
+    "placement_ms": 62394.476,
+    "wns_ns": 3.8813953150141347,
+    "tns_ns": 0.0,
+    "area_um2": 23367.834,
+    "hpwl_um": 440574.9175,
+    "placement_hash": "bc141af641d8db860dde7e3cee05047e037fb9b43171f0e8ee4b49d2ee903f92",
+    "legal": true,
+    "timers": [],
+    "categories_ms": {},
+    "rudy_ms": 0,
+    "iterations": [
+      "Nesterov Region: Top-level",
+      "Nesterov Global Placement.",
+      "Nesterov momentum.",
+      "Nesterov momentum."
+    ]
+  },
+  "gcd-8": {
+    "placement_ms": 864.193,
+    "wns_ns": 9.367916485469012,
+    "tns_ns": 0.0,
+    "area_um2": 621.908,
+    "hpwl_um": 7410.6845,
+    "placement_hash": "9be9539f832cde322ee7a73eda5cad62b737708692cf2f34bb194a5b408883f8",
+    "legal": true,
+    "timers": [],
+    "categories_ms": {},
+    "rudy_ms": 0,
+    "iterations": [
+      "Nesterov Region: Top-level",
+      "Nesterov Global Placement.",
+      "Nesterov momentum.",
+      "Nesterov momentum."
+    ]
+  },
+  "aes_cipher_top-8": {
+    "placement_ms": 30447.478,
+    "wns_ns": 3.8813953150141347,
+    "tns_ns": 0.0,
+    "area_um2": 23367.834,
+    "hpwl_um": 440574.9175,
+    "placement_hash": "bc141af641d8db860dde7e3cee05047e037fb9b43171f0e8ee4b49d2ee903f92",
+    "legal": true,
+    "timers": [],
+    "categories_ms": {},
+    "rudy_ms": 0,
+    "iterations": [
+      "Nesterov Region: Top-level",
+      "Nesterov Global Placement.",
+      "Nesterov momentum.",
+      "Nesterov momentum."
+    ]
+  }
+}

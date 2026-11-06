@@ -1,0 +1,30 @@
+apiVersion: batch.volcano.sh/v1alpha1
+kind: Job
+metadata:
+  name: flasheda-soa-large-high-remediation-20261106
+  namespace: qiji
+  annotations: {JobAlias: flasheda-soa-large-high-remediation-20261106, project: WeaverRSI}
+spec:
+  minAvailable: 1
+  schedulerName: volcano
+  queue: proj-32
+  tasks:
+  - replicas: 1
+    name: profile
+    template:
+      spec:
+        tolerations:
+        - {key: task-type, operator: Equal, value: rsi-weaver, effect: NoSchedule}
+        activeDeadlineSeconds: 14400
+        restartPolicy: Never
+        volumes:
+        - {name: gpfs, hostPath: {path: /gpfs, type: Directory}}
+        containers:
+        - name: profile
+          image: harbor.local.clusters/bp/weaver-trainer-megatron-bridge:v1.14.30@sha256:8e310d0cb124813a25683448b41df67331951aae06e17bddcfd3f7692f71520e
+          resources:
+            requests: {cpu: '24', memory: 64Gi}
+            limits: {cpu: '24', memory: 64Gi}
+          volumeMounts:
+          - {name: gpfs, mountPath: /gpfs}
+          command: [bash, /gpfs/users/linlizhi/flasheda-soa-large-high-remediation-20261106/worker.sh]

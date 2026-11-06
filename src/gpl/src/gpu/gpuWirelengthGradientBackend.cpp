@@ -100,7 +100,7 @@ void GpuWirelengthGradientBackend::materializeHostGrad()
 
 void GpuWirelengthGradientBackend::getCellGradients(
     const std::vector<GCellHandle>& gCells,
-    std::vector<FloatPoint>& out)
+    PointColumns& out)
 {
   materializeHostGrad();
   KokkosDeviceState& ds = impl_->device_state->kokkos();

@@ -30,7 +30,7 @@ class GpuDensityGradientBackend : public DensityGradientBackend
   ~GpuDensityGradientBackend() override;
 
   void getCellGradients(const std::vector<GCellHandle>& gCells,
-                        std::vector<FloatPoint>& out) override;
+                        PointColumns& out) override;
   FloatPoint getCellGradient(const GCell* gCell) override;
 
   const char* name() const override { return "GPU (Kokkos)"; }

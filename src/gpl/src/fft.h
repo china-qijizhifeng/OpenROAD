@@ -25,12 +25,21 @@ class FFT
       float bin_size_y,
       RegionDensityField* region_field = nullptr);
   ~FFT();
+  void setNumThreads(int threads) { backend_->setNumThreads(threads); }
 
   // input func
   void updateDensity(int x, int y, float density);
 
   // do FFT
   void doFFT();
+
+  // Write directly into resident bin columns. Density is copied only to the
+  // destructive DCT scratch buffer; fields are never copied through Bin
+  // objects.
+  void solveColumns(const std::vector<float>& density,
+                    std::vector<float>& phi,
+                    std::vector<float>& field_x,
+                    std::vector<float>& field_y);
 
   // returning func
   std::pair<float, float> getElectroField(int x, int y) const;

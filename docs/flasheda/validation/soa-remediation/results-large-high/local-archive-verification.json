@@ -1,0 +1,7 @@
+{
+  "verified": true,
+  "sha256": "1afc610b120df0280a6c982b36ea32c0118d39b78d76bf60995c5693d21fec0e",
+  "bytes": 292534034,
+  "local_evidence_path": "/Users/shom/Downloads/openroad-gpl-soa/build/soa/remediation-large-high/evidence.tar.gz",
+  "remote_evidence_path": "/gpfs/users/linlizhi/flasheda-soa-large-high-remediation-20261106/evidence.tar.gz"
+}

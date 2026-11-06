@@ -1,0 +1,21 @@
+{
+  "command": [
+    "bazelisk",
+    "test",
+    "//src/gpl/test/soa/..."
+  ],
+  "cwd": "/Users/shom/Downloads/openroad-gpl-soa",
+  "platform": "macOS-14.4-arm64-arm-64bit-Mach-O",
+  "bazelisk": null,
+  "bazel": null,
+  "free_bytes": 3515052032,
+  "executed": false,
+  "blocker": "[Errno 2] No such file or directory: 'bazelisk'",
+  "outcome": "unavailable: neither bazelisk nor bazel is installed on PATH; no Bazel tests executed",
+  "bp_dev_host": {
+    "bazelisk": null,
+    "bazel": null,
+    "probe": "command -v bazelisk; command -v bazel",
+    "outcome": "neither command found on existing SSH host PATH; no jobs started or modified"
+  }
+}

@@ -148,7 +148,7 @@ class IoPinBase
 
   // Mirroring
   FloatPoint mirrorOf(size_t master_io, const FloatPoint& p) const;
-  void applyMirrorConstraints(std::vector<FloatPoint>& coordi) const;
+  void applyMirrorConstraints(PointColumns& coordi) const;
   bool isMirrorFollower(size_t io_index) const
   {
     return follower_to_master_[io_index] != kNoMirrorPartner;
@@ -161,8 +161,8 @@ class IoPinBase
   // Spacing on the slots
   float ringIndexAt(DieEdge edge, float pos) const;
   FloatPoint ringPointAt(const std::vector<RingSlot>& ring, float r) const;
-  void separate(std::vector<FloatPoint>& coordi) const;
-  void separateMirrored(std::vector<FloatPoint>& coordi) const;
+  void separate(PointColumns& coordi) const;
+  void separateMirrored(PointColumns& coordi) const;
 
   // Db write
   odb::dbTechLayer* pinLayer(DieEdge edge, float pos, int nth) const;
@@ -182,10 +182,10 @@ class IoPinBase
   std::vector<odb::Point> pin_size_;
 
   // Positions at the Nesterov iterates
-  std::vector<FloatPoint> prev_;
-  std::vector<FloatPoint> cur_;
-  std::vector<FloatPoint> next_;
-  std::vector<FloatPoint> snapshot_;
+  PointColumns prev_;
+  PointColumns cur_;
+  PointColumns next_;
+  PointColumns snapshot_;
 
   // Locus
   std::vector<PerimSegment> free_segments_;
@@ -215,7 +215,7 @@ class IoPinBase
   int top_pin_height_ = 0;
 
   // For debug: the last optima before the spacing.
-  std::vector<FloatPoint> optimum_;
+  PointColumns optimum_;
 };
 
 // Slot index arithmetic. A pin is a (slot index, IO pin index).

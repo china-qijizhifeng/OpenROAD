@@ -53,15 +53,19 @@ static int64_t getOverlapWithCoreArea(Die& die, Instance& inst);
 ////////////////////////////////////////////////////////
 // Instance
 
-Instance::Instance() = default;
+Instance::Instance(std::shared_ptr<Store> storage) : data_(std::move(storage))
+{
+  data_.get<InstanceColumns::extId>() = INT_MIN;
+}
 
 // for movable real instances
 Instance::Instance(odb::dbInst* db_inst,
                    PlacerBaseCommon* pbc,
-                   utl::Logger* logger)
-    : Instance()
+                   utl::Logger* logger,
+                   std::shared_ptr<Store> storage)
+    : Instance(std::move(storage))
 {
-  inst_ = db_inst;
+  data_.get<InstanceColumns::inst>() = db_inst;
   copyDbLocation(pbc);
 
   // Masters more than row_limit rows tall are treated as macros
@@ -69,9 +73,9 @@ Instance::Instance(odb::dbInst* db_inst,
   dbBox* bbox = db_inst->getBBox();
 
   if (db_inst->getMaster()->getType().isBlock()) {
-    is_macro_ = true;
+    data_.get<InstanceColumns::is_macro>() = true;
   } else if (bbox->getDY() > row_limit * pbc->siteSizeY()) {
-    is_macro_ = true;
+    data_.get<InstanceColumns::is_macro>() = true;
     logger->warn(GPL,
                  134,
                  "Master {} is not marked as a BLOCK in LEF but is more "
@@ -82,33 +86,33 @@ Instance::Instance(odb::dbInst* db_inst,
 }
 
 // for dummy instances
-Instance::Instance(int lx, int ly, int ux, int uy) : Instance()
+Instance::Instance(int lx,
+                   int ly,
+                   int ux,
+                   int uy,
+                   std::shared_ptr<Store> storage)
+    : Instance(std::move(storage))
 {
-  inst_ = nullptr;
-  lx_ = lx;
-  ly_ = ly;
-  ux_ = ux;
-  uy_ = uy;
-}
-
-Instance::~Instance()
-{
-  inst_ = nullptr;
-  lx_ = ly_ = 0;
-  ux_ = uy_ = 0;
-  pins_.clear();
+  data_.get<InstanceColumns::inst>() = nullptr;
+  data_.get<InstanceColumns::lx>() = lx;
+  data_.get<InstanceColumns::ly>() = ly;
+  data_.get<InstanceColumns::ux>() = ux;
+  data_.get<InstanceColumns::uy>() = uy;
 }
 
 void Instance::copyDbLocation(PlacerBaseCommon* pbc)
 {
-  dbBox* bbox = inst_->getBBox();
-  inst_->getLocation(lx_, ly_);
-  ux_ = lx_ + bbox->getDX();
-  uy_ = ly_ + bbox->getDY();
+  dbBox* bbox = data_.get<InstanceColumns::inst>()->getBBox();
+  data_.get<InstanceColumns::inst>()->getLocation(
+      data_.get<InstanceColumns::lx>(), data_.get<InstanceColumns::ly>());
+  data_.get<InstanceColumns::ux>()
+      = data_.get<InstanceColumns::lx>() + bbox->getDX();
+  data_.get<InstanceColumns::uy>()
+      = data_.get<InstanceColumns::ly>() + bbox->getDY();
 
   if (isPlaceInstance()) {
-    lx_ -= pbc->getPadLeft() * pbc->siteSizeX();
-    ux_ += pbc->getPadRight() * pbc->siteSizeX();
+    data_.get<InstanceColumns::lx>() -= pbc->getPadLeft() * pbc->siteSizeX();
+    data_.get<InstanceColumns::ux>() += pbc->getPadRight() * pbc->siteSizeX();
   }
 }
 
@@ -119,12 +123,12 @@ bool Instance::isFixed() const
     return true;
   }
 
-  return inst_->getPlacementStatus().isFixed();
+  return data_.get<InstanceColumns::inst>()->getPlacementStatus().isFixed();
 }
 
 bool Instance::isInstance() const
 {
-  return (inst_ != nullptr);
+  return (data_.get<InstanceColumns::inst>() != nullptr);
 }
 
 bool Instance::isPlaceInstance() const
@@ -134,51 +138,61 @@ bool Instance::isPlaceInstance() const
 
 bool Instance::isDummy() const
 {
-  return (inst_ == nullptr);
+  return (data_.get<InstanceColumns::inst>() == nullptr);
 }
 
 void Instance::setLocation(int x, int y)
 {
-  ux_ = x + (ux_ - lx_);
-  uy_ = y + (uy_ - ly_);
+  data_.get<InstanceColumns::ux>()
+      = x
+        + (data_.get<InstanceColumns::ux>() - data_.get<InstanceColumns::lx>());
+  data_.get<InstanceColumns::uy>()
+      = y
+        + (data_.get<InstanceColumns::uy>() - data_.get<InstanceColumns::ly>());
 
-  lx_ = x;
-  ly_ = y;
+  data_.get<InstanceColumns::lx>() = x;
+  data_.get<InstanceColumns::ly>() = y;
 
   // pins update
-  for (auto& pin : pins_) {
+  for (auto& pin : data_.get<InstanceColumns::pins>()) {
     pin->updateLocation(this);
   }
 }
 
 void Instance::setCenterLocation(int x, int y)
 {
-  const int halfX = (ux_ - lx_) / 2;
-  const int halfY = (uy_ - ly_) / 2;
-  lx_ = x - halfX;
-  ly_ = y - halfY;
-  ux_ = x + halfX;
-  uy_ = y + halfY;
+  const int halfX
+      = (data_.get<InstanceColumns::ux>() - data_.get<InstanceColumns::lx>())
+        / 2;
+  const int halfY
+      = (data_.get<InstanceColumns::uy>() - data_.get<InstanceColumns::ly>())
+        / 2;
+  data_.get<InstanceColumns::lx>() = x - halfX;
+  data_.get<InstanceColumns::ly>() = y - halfY;
+  data_.get<InstanceColumns::ux>() = x + halfX;
+  data_.get<InstanceColumns::uy>() = y + halfY;
 
   // pins update
-  for (auto& pin : pins_) {
+  for (auto& pin : data_.get<InstanceColumns::pins>()) {
     pin->updateLocation(this);
   }
 }
 
 void Instance::dbSetPlaced()
 {
-  inst_->setPlacementStatus(dbPlacementStatus::PLACED);
+  data_.get<InstanceColumns::inst>()->setPlacementStatus(
+      dbPlacementStatus::PLACED);
 }
 
 void Instance::dbSetPlacementStatus(const dbPlacementStatus& ps)
 {
-  inst_->setPlacementStatus(ps);
+  data_.get<InstanceColumns::inst>()->setPlacementStatus(ps);
 }
 
 void Instance::dbSetLocation()
 {
-  inst_->setLocation(lx_, ly_);
+  data_.get<InstanceColumns::inst>()->setLocation(
+      data_.get<InstanceColumns::lx>(), data_.get<InstanceColumns::ly>());
 }
 
 void Instance::dbSetLocation(int x, int y)
@@ -195,42 +209,44 @@ void Instance::dbSetCenterLocation(int x, int y)
 
 int Instance::lx() const
 {
-  return lx_;
+  return data_.get<InstanceColumns::lx>();
 }
 
 int Instance::ly() const
 {
-  return ly_;
+  return data_.get<InstanceColumns::ly>();
 }
 
 int Instance::ux() const
 {
-  return ux_;
+  return data_.get<InstanceColumns::ux>();
 }
 
 int Instance::uy() const
 {
-  return uy_;
+  return data_.get<InstanceColumns::uy>();
 }
 
 int Instance::cx() const
 {
-  return (lx_ + ux_) / 2;
+  return (data_.get<InstanceColumns::lx>() + data_.get<InstanceColumns::ux>())
+         / 2;
 }
 
 int Instance::cy() const
 {
-  return (ly_ + uy_) / 2;
+  return (data_.get<InstanceColumns::ly>() + data_.get<InstanceColumns::uy>())
+         / 2;
 }
 
 int Instance::dx() const
 {
-  return (ux_ - lx_);
+  return (data_.get<InstanceColumns::ux>() - data_.get<InstanceColumns::lx>());
 }
 
 int Instance::dy() const
 {
-  return (uy_ - ly_);
+  return (data_.get<InstanceColumns::uy>() - data_.get<InstanceColumns::ly>());
 }
 
 int64_t Instance::getArea() const
@@ -240,32 +256,32 @@ int64_t Instance::getArea() const
 
 void Instance::addPin(Pin* pin)
 {
-  pins_.push_back(pin);
+  data_.get<InstanceColumns::pins>().push_back(pin);
 }
 
 void Instance::setExtId(int extId)
 {
-  extId_ = extId;
+  data_.get<InstanceColumns::extId>() = extId;
 }
 
 bool Instance::isMacro() const
 {
-  return is_macro_;
+  return data_.get<InstanceColumns::is_macro>();
 }
 
 bool Instance::isLocked() const
 {
-  return is_locked_;
+  return data_.get<InstanceColumns::is_locked>();
 }
 
 void Instance::lock()
 {
-  is_locked_ = true;
+  data_.get<InstanceColumns::is_locked>() = true;
 }
 
 void Instance::unlock()
 {
-  is_locked_ = false;
+  data_.get<InstanceColumns::is_locked>() = false;
 }
 
 static int snapDown(int value, int origin, int step)
@@ -280,10 +296,14 @@ static int snapUp(int value, int origin, int step)
 
 void Instance::snapOutward(const odb::Point& origin, int step_x, int step_y)
 {
-  lx_ = snapDown(lx_, origin.x(), step_x);
-  ly_ = snapDown(ly_, origin.y(), step_y);
-  ux_ = snapUp(ux_, origin.x(), step_x);
-  uy_ = snapUp(uy_, origin.y(), step_y);
+  data_.get<InstanceColumns::lx>()
+      = snapDown(data_.get<InstanceColumns::lx>(), origin.x(), step_x);
+  data_.get<InstanceColumns::ly>()
+      = snapDown(data_.get<InstanceColumns::ly>(), origin.y(), step_y);
+  data_.get<InstanceColumns::ux>()
+      = snapUp(data_.get<InstanceColumns::ux>(), origin.x(), step_x);
+  data_.get<InstanceColumns::uy>()
+      = snapUp(data_.get<InstanceColumns::uy>(), origin.y(), step_y);
 }
 
 int64_t Instance::extendSizeByScale(double scale, utl::Logger* logger)
@@ -295,13 +315,17 @@ int64_t Instance::extendSizeByScale(double scale, utl::Logger* logger)
 
   int center_x = cx();
   int center_y = cy();
-  int new_dx = static_cast<int>((ux_ - lx_) * scale);
-  int new_dy = static_cast<int>((uy_ - ly_) * scale);
+  int new_dx = static_cast<int>(
+      (data_.get<InstanceColumns::ux>() - data_.get<InstanceColumns::lx>())
+      * scale);
+  int new_dy = static_cast<int>(
+      (data_.get<InstanceColumns::uy>() - data_.get<InstanceColumns::ly>())
+      * scale);
 
-  lx_ = center_x - new_dx / 2;
-  ux_ = center_x + new_dx / 2;
-  ly_ = center_y - new_dy / 2;
-  uy_ = center_y + new_dy / 2;
+  data_.get<InstanceColumns::lx>() = center_x - new_dx / 2;
+  data_.get<InstanceColumns::ux>() = center_x + new_dx / 2;
+  data_.get<InstanceColumns::ly>() = center_y - new_dy / 2;
+  data_.get<InstanceColumns::uy>() = center_y + new_dy / 2;
 
   return getArea() - old_area;
 }
@@ -309,33 +333,32 @@ int64_t Instance::extendSizeByScale(double scale, utl::Logger* logger)
 ////////////////////////////////////////////////////////
 // Pin
 
-Pin::Pin()
-    : iTermField_(0),
-      bTermField_(0),
-      minPinXField_(0),
-      minPinYField_(0),
-      maxPinXField_(0),
-      maxPinYField_(0)
+Pin::Pin(std::shared_ptr<Store> storage) : data_(std::move(storage))
 {
 }
 
-Pin::Pin(odb::dbITerm* iTerm) : Pin()
+Pin::Pin(odb::dbITerm* iTerm, std::shared_ptr<Store> storage)
+    : Pin(std::move(storage))
 {
   setITerm();
-  term_ = iTerm;
+  data_.get<PinColumns::term>() = iTerm;
   updateCoordi(iTerm);
 }
 
-Pin::Pin(odb::dbBTerm* bTerm, utl::Logger* logger, bool placeIosMode) : Pin()
+Pin::Pin(odb::dbBTerm* bTerm,
+         utl::Logger* logger,
+         bool placeIosMode,
+         std::shared_ptr<Store> storage)
+    : Pin(std::move(storage))
 {
   setBTerm();
-  term_ = bTerm;
+  data_.get<PinColumns::term>() = bTerm;
   updateCoordi(bTerm, logger, placeIosMode);
 }
 
 std::string Pin::getName() const
 {
-  if (!term_) {
+  if (!data_.get<PinColumns::term>()) {
     return "DUMMY";
   }
   if (isITerm()) {
@@ -346,111 +369,111 @@ std::string Pin::getName() const
 
 void Pin::setITerm()
 {
-  iTermField_ = 1;
+  data_.get<PinColumns::iTermField>() = 1;
 }
 
 void Pin::setBTerm()
 {
-  bTermField_ = 1;
+  data_.get<PinColumns::bTermField>() = 1;
 }
 
 void Pin::setMinPinX()
 {
-  minPinXField_ = 1;
+  data_.get<PinColumns::minPinXField>() = 1;
 }
 
 void Pin::setMinPinY()
 {
-  minPinYField_ = 1;
+  data_.get<PinColumns::minPinYField>() = 1;
 }
 
 void Pin::setMaxPinX()
 {
-  maxPinXField_ = 1;
+  data_.get<PinColumns::maxPinXField>() = 1;
 }
 
 void Pin::setMaxPinY()
 {
-  maxPinYField_ = 1;
+  data_.get<PinColumns::maxPinYField>() = 1;
 }
 
 void Pin::unsetMinPinX()
 {
-  minPinXField_ = 0;
+  data_.get<PinColumns::minPinXField>() = 0;
 }
 
 void Pin::unsetMinPinY()
 {
-  minPinYField_ = 0;
+  data_.get<PinColumns::minPinYField>() = 0;
 }
 
 void Pin::unsetMaxPinX()
 {
-  maxPinXField_ = 0;
+  data_.get<PinColumns::maxPinXField>() = 0;
 }
 
 void Pin::unsetMaxPinY()
 {
-  maxPinYField_ = 0;
+  data_.get<PinColumns::maxPinYField>() = 0;
 }
 
 bool Pin::isITerm() const
 {
-  return (iTermField_ == 1);
+  return (data_.get<PinColumns::iTermField>() == 1);
 }
 
 bool Pin::isBTerm() const
 {
-  return (bTermField_ == 1);
+  return (data_.get<PinColumns::bTermField>() == 1);
 }
 
 bool Pin::isMinPinX() const
 {
-  return (minPinXField_ == 1);
+  return (data_.get<PinColumns::minPinXField>() == 1);
 }
 
 bool Pin::isMinPinY() const
 {
-  return (minPinYField_ == 1);
+  return (data_.get<PinColumns::minPinYField>() == 1);
 }
 
 bool Pin::isMaxPinX() const
 {
-  return (maxPinXField_ == 1);
+  return (data_.get<PinColumns::maxPinXField>() == 1);
 }
 
 bool Pin::isMaxPinY() const
 {
-  return (maxPinYField_ == 1);
+  return (data_.get<PinColumns::maxPinYField>() == 1);
 }
 
 int Pin::cx() const
 {
-  return cx_;
+  return data_.get<PinColumns::cx>();
 }
 
 int Pin::cy() const
 {
-  return cy_;
+  return data_.get<PinColumns::cy>();
 }
 
 int Pin::getOffsetCx() const
 {
-  return offsetCx_;
+  return data_.get<PinColumns::offsetCx>();
 }
 
 int Pin::getOffsetCy() const
 {
-  return offsetCy_;
+  return data_.get<PinColumns::offsetCy>();
 }
 
 odb::dbITerm* Pin::getDbITerm() const
 {
-  return (isITerm()) ? (odb::dbITerm*) term_ : nullptr;
+  return (isITerm()) ? (odb::dbITerm*) data_.get<PinColumns::term>() : nullptr;
 }
 odb::dbBTerm* Pin::getDbBTerm() const
 {
-  return (isBTerm()) ? (odb::dbBTerm*) term_ : nullptr;
+  return (isBTerm()) ? (odb::dbBTerm*) data_.get<PinColumns::term>() : nullptr;
 }
 
 void Pin::updateCoordi(odb::dbITerm* iTerm)
@@ -474,7 +497,8 @@ void Pin::updateCoordi(odb::dbITerm* iTerm)
 
   // Pin has no shapes (rare/odd)
   if (pin_bbox.isInverted()) {
-    offsetCx_ = offsetCy_ = 0;  // offset is center of the instance
+    data_.get<PinColumns::offsetCx>() = data_.get<PinColumns::offsetCy>()
+        = 0;  // offset is center of the instance
   } else {
     // Rotate the pin's bbox in correspondence to the instance's orientation.
     // Rotation consists of (1) shift the instance center to the origin
@@ -491,12 +515,14 @@ void Pin::updateCoordi(odb::dbITerm* iTerm)
     // from (origin: 0,0)
     // to (origin: instCenterX, instCenterY)
     //
-    offsetCx_ = pin_bbox.xCenter() - instCenterX;
-    offsetCy_ = pin_bbox.yCenter() - instCenterY;
+    data_.get<PinColumns::offsetCx>() = pin_bbox.xCenter() - instCenterX;
+    data_.get<PinColumns::offsetCy>() = pin_bbox.yCenter() - instCenterY;
   }
 
-  cx_ = lx + instCenterX + offsetCx_;
-  cy_ = ly + instCenterY + offsetCy_;
+  data_.get<PinColumns::cx>()
+      = lx + instCenterX + data_.get<PinColumns::offsetCx>();
+  data_.get<PinColumns::cy>()
+      = ly + instCenterY + data_.get<PinColumns::offsetCy>();
 }
 
 //
@@ -515,120 +541,121 @@ void Pin::updateCoordi(odb::dbBTerm* bTerm,
   }
 
   // Just center
-  offsetCx_ = offsetCy_ = 0;
+  data_.get<PinColumns::offsetCx>() = data_.get<PinColumns::offsetCy>() = 0;
 
-  cx_ = bbox.xCenter();
-  cy_ = bbox.yCenter();
+  data_.get<PinColumns::cx>() = bbox.xCenter();
+  data_.get<PinColumns::cy>() = bbox.yCenter();
 }
 
 void Pin::updateLocation(const Instance* inst)
 {
-  cx_ = inst->cx() + offsetCx_;
-  cy_ = inst->cy() + offsetCy_;
+  data_.get<PinColumns::cx>() = inst->cx() + data_.get<PinColumns::offsetCx>();
+  data_.get<PinColumns::cy>() = inst->cy() + data_.get<PinColumns::offsetCy>();
 }
 
 void Pin::setInstance(Instance* inst)
 {
-  inst_ = inst;
+  data_.get<PinColumns::inst>() = inst;
 }
 
 void Pin::setNet(Net* net)
 {
-  net_ = net;
+  data_.get<PinColumns::net>() = net;
 }
 
 bool Pin::isPlaceInstConnected() const
 {
-  if (!inst_) {
+  if (!data_.get<PinColumns::inst>()) {
     return false;
   }
-  return inst_->isPlaceInstance();
-}
-
-Pin::~Pin()
-{
-  term_ = nullptr;
-  inst_ = nullptr;
-  net_ = nullptr;
+  return data_.get<PinColumns::inst>()->isPlaceInstance();
 }
 
 ////////////////////////////////////////////////////////
 // Net
 
-Net::Net() = default;
-
-Net::Net(odb::dbNet* net, bool skipIoMode) : Net()
+Net::Net(std::shared_ptr<Store> storage) : data_(std::move(storage))
 {
-  net_ = net;
-  updateBox(skipIoMode);
 }
 
-Net::~Net()
+Net::Net(odb::dbNet* net, bool skipIoMode, std::shared_ptr<Store> storage)
+    : Net(std::move(storage))
 {
-  net_ = nullptr;
-  lx_ = ly_ = ux_ = uy_ = 0;
+  data_.get<NetColumns::net>() = net;
+  updateBox(skipIoMode);
 }
 
 int Net::lx() const
 {
-  return lx_;
+  return data_.get<NetColumns::lx>();
 }
 
 int Net::ly() const
 {
-  return ly_;
+  return data_.get<NetColumns::ly>();
 }
 
 int Net::ux() const
 {
-  return ux_;
+  return data_.get<NetColumns::ux>();
 }
 
 int Net::uy() const
 {
-  return uy_;
+  return data_.get<NetColumns::uy>();
 }
 
 int Net::cx() const
 {
-  return (lx_ + ux_) / 2;
+  return (data_.get<NetColumns::lx>() + data_.get<NetColumns::ux>()) / 2;
 }
 
 int Net::cy() const
 {
-  return (ly_ + uy_) / 2;
+  return (data_.get<NetColumns::ly>() + data_.get<NetColumns::uy>()) / 2;
 }
 
 int64_t Net::getHpwl() const
 {
-  if (ux_ < lx_) {  // dangling net
+  if (data_.get<NetColumns::ux>()
+      < data_.get<NetColumns::lx>()) {  // dangling net
     return 0;
   }
-  return static_cast<int64_t>(ux_ - lx_) + (uy_ - ly_);
+  return static_cast<int64_t>(data_.get<NetColumns::ux>()
+                              - data_.get<NetColumns::lx>())
+         + (data_.get<NetColumns::uy>() - data_.get<NetColumns::ly>());
 }
 
 void Net::updateBox(bool skipIoMode)
 {
-  lx_ = INT_MAX;
-  ly_ = INT_MAX;
-  ux_ = INT_MIN;
-  uy_ = INT_MIN;
-  for (dbITerm* iTerm : net_->getITerms()) {
+  data_.get<NetColumns::lx>() = INT_MAX;
+  data_.get<NetColumns::ly>() = INT_MAX;
+  data_.get<NetColumns::ux>() = INT_MIN;
+  data_.get<NetColumns::uy>() = INT_MIN;
+  for (dbITerm* iTerm : data_.get<NetColumns::net>()->getITerms()) {
     dbBox* box = iTerm->getInst()->getBBox();
-    lx_ = std::min(box->xMin(), lx_);
-    ly_ = std::min(box->yMin(), ly_);
-    ux_ = std::max(box->xMax(), ux_);
-    uy_ = std::max(box->yMax(), uy_);
+    data_.get<NetColumns::lx>()
+        = std::min(box->xMin(), data_.get<NetColumns::lx>());
+    data_.get<NetColumns::ly>()
+        = std::min(box->yMin(), data_.get<NetColumns::ly>());
+    data_.get<NetColumns::ux>()
+        = std::max(box->xMax(), data_.get<NetColumns::ux>());
+    data_.get<NetColumns::uy>()
+        = std::max(box->yMax(), data_.get<NetColumns::uy>());
   }
 
   if (!skipIoMode) {
-    for (dbBTerm* bTerm : net_->getBTerms()) {
+    for (dbBTerm* bTerm : data_.get<NetColumns::net>()->getBTerms()) {
       for (dbBPin* bPin : bTerm->getBPins()) {
         Rect bbox = bPin->getBBox();
-        lx_ = std::min(bbox.xMin(), lx_);
-        ly_ = std::min(bbox.yMin(), ly_);
-        ux_ = std::max(bbox.xMax(), ux_);
-        uy_ = std::max(bbox.yMax(), uy_);
+        data_.get<NetColumns::lx>()
+            = std::min(bbox.xMin(), data_.get<NetColumns::lx>());
+        data_.get<NetColumns::ly>()
+            = std::min(bbox.yMin(), data_.get<NetColumns::ly>());
+        data_.get<NetColumns::ux>()
+            = std::max(bbox.xMax(), data_.get<NetColumns::ux>());
+        data_.get<NetColumns::uy>()
+            = std::max(bbox.yMax(), data_.get<NetColumns::uy>());
       }
     }
   }
@@ -636,12 +663,12 @@ void Net::updateBox(bool skipIoMode)
 
 void Net::addPin(Pin* pin)
 {
-  pins_.push_back(pin);
+  data_.get<NetColumns::pins>().push_back(pin);
 }
 
 odb::dbSigType Net::getSigType() const
 {
-  return net_->getSigType();
+  return data_.get<NetColumns::net>()->getSigType();
 }
 
 ////////////////////////////////////////////////////////
@@ -815,7 +842,7 @@ void PlacerBaseCommon::init()
       continue;
     }
 
-    Instance temp_inst(db_inst, this, log_);
+    Instance temp_inst(db_inst, this, log_, instance_columns_);
     odb::dbBox* inst_bbox = db_inst->getBBox();
     if (inst_bbox->getDY() > die_.coreDy()) {
       log_->error(GPL,
@@ -939,25 +966,25 @@ void PlacerBaseCommon::init()
 
     // escape nets with VDD/VSS/reset nets
     if (net_type == dbSigType::SIGNAL || net_type == dbSigType::CLOCK) {
-      Net temp_net(db_net, pbVars_.skipIoMode);
-      netStor_.push_back(temp_net);
+      Net temp_net(db_net, pbVars_.skipIoMode, net_columns_);
+      netStor_.push_back(std::move(temp_net));
 
       // this is safe because of "reserve"
       Net* temp_net_ptr = &netStor_[netStor_.size() - 1];
       netMap_[db_net] = temp_net_ptr;
 
       for (dbITerm* iTerm : db_net->getITerms()) {
-        Pin temp_pin(iTerm);
+        Pin temp_pin(iTerm, pin_columns_);
         temp_pin.setNet(temp_net_ptr);
         temp_pin.setInstance(dbToPb(iTerm->getInst()));
-        pinStor_.push_back(temp_pin);
+        pinStor_.push_back(std::move(temp_pin));
       }
 
       if (!pbVars_.skipIoMode) {
         for (dbBTerm* bTerm : db_net->getBTerms()) {
-          Pin temp_pin(bTerm, log_, pbVars_.placeIosMode);
+          Pin temp_pin(bTerm, log_, pbVars_.placeIosMode, pin_columns_);
           temp_pin.setNet(temp_net_ptr);
-          pinStor_.push_back(temp_pin);
+          pinStor_.push_back(std::move(temp_pin));
         }
       }
     }
@@ -1478,8 +1505,9 @@ void PlacerBase::initInstsForUnusableSites()
         Instance dummy_gcell(region_bbox_.xMin() + (siteSizeX_ * startX),
                              region_bbox_.yMin() + (siteSizeY_ * j),
                              region_bbox_.xMin() + (siteSizeX_ * endX),
-                             region_bbox_.yMin() + (siteSizeY_ * endY));
-        instStor_.push_back(dummy_gcell);
+                             region_bbox_.yMin() + (siteSizeY_ * endY),
+                             instance_columns_);
+        instStor_.push_back(std::move(dummy_gcell));
       }
     }
   }

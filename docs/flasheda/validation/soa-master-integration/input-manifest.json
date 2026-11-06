@@ -1,0 +1,25 @@
+{
+  "baseline_commit": "a6e7f507a1e24b12f3b2689ca7b159d36f825876",
+  "candidate_commit": "8bc1c3e674f49b93ae2bf8d04cbb8954c76a81b9",
+  "opensta_commit": "deeff1dc0603b19ef808a567edb6175bff72a642",
+  "archives": {
+    "candidate.tar.gz": "bb3de094436f01ad1b83b2ae7cc6a543e04f4fe8382a6e54e8058b182eece7d2",
+    "opensta.tar.gz": "6903bf9192720fecd6e5ca6546db2a5c2df2030757a164fc137deabdcc3692e7",
+    "baseline.tar.gz": "2b63cdc3e3ccbe38230250cfcc841ef24f825182fadfec658d29026a8e7fa915"
+  },
+  "job_alias": "flasheda-soa-merge-local-20261106",
+  "job_identity": null,
+  "bazel": "9.2.0",
+  "bazelisk": "1.30.0",
+  "build_args": [
+    "--nosystem_rc",
+    "--nohome_rc",
+    "--config=opt",
+    "--jobs=16",
+    "--local_resources=memory=48000"
+  ],
+  "cache_policy": "default repository read-only remote cache; new isolated local action/repository cache",
+  "image": "harbor.local.clusters/bp/weaver-trainer-megatron-bridge:v1.14.30@sha256:8e310d0cb124813a25683448b41df67331951aae06e17bddcfd3f7692f71520e",
+  "preparation_replaces": "job-4f4f89c06dc1-20261106184220",
+  "storage": "fixed archives and evidence GPFS; source and all Bazel caches/output worker-local /tmp"
+}

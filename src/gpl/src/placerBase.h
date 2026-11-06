@@ -12,6 +12,7 @@
 
 #include "boost/unordered/unordered_flat_map.hpp"
 #include "odb/geom.h"
+#include "soaStorage.h"
 
 namespace odb {
 class dbDatabase;
@@ -45,15 +46,99 @@ class GCell;
 class PlacerBaseCommon;
 struct PlaceOptions;
 
+class Instance;
+struct InstanceColumns
+{
+  enum Field : size_t
+  {
+    inst,
+    pins,
+    lx,
+    ly,
+    ux,
+    uy,
+    extId,
+    is_macro,
+    is_locked
+  };
+  using Store = SoaStorage<odb::dbInst*,
+                           std::vector<Pin*>,
+                           int,
+                           int,
+                           int,
+                           int,
+                           int,
+                           uint8_t,
+                           uint8_t>;
+};
+struct PinColumns
+{
+  enum Field : size_t
+  {
+    term,
+    inst,
+    net,
+    cx,
+    cy,
+    offsetCx,
+    offsetCy,
+    iTermField,
+    bTermField,
+    minPinXField,
+    minPinYField,
+    maxPinXField,
+    maxPinYField
+  };
+  using Store = SoaStorage<odb::dbObject*,
+                           Instance*,
+                           Net*,
+                           int,
+                           int,
+                           int,
+                           int,
+                           uint8_t,
+                           uint8_t,
+                           uint8_t,
+                           uint8_t,
+                           uint8_t,
+                           uint8_t>;
+};
+struct NetColumns
+{
+  enum Field : size_t
+  {
+    net,
+    pins,
+    lx,
+    ly,
+    ux,
+    uy
+  };
+  using Store = SoaStorage<odb::dbNet*, std::vector<Pin*>, int, int, int, int>;
+};
+
 class Instance
 {
  public:
-  Instance();
-  Instance(odb::dbInst* inst, PlacerBaseCommon* pbc, utl::Logger* logger);
-  Instance(int lx, int ly, int ux, int uy);  // dummy instance
-  ~Instance();
+  using Store = InstanceColumns::Store;
+  explicit Instance(std::shared_ptr<Store> storage = std::make_shared<Store>());
+  Instance(odb::dbInst* inst,
+           PlacerBaseCommon* pbc,
+           utl::Logger* logger,
+           std::shared_ptr<Store> storage = std::make_shared<Store>());
+  Instance(int lx,
+           int ly,
+           int ux,
+           int uy,
+           std::shared_ptr<Store> storage
+           = std::make_shared<Store>());  // dummy instance
+  ~Instance() = default;
+  Instance(const Instance&) = default;
+  Instance(Instance&&) noexcept = default;
+  Instance& operator=(const Instance&) = default;
+  Instance& operator=(Instance&&) noexcept = default;
 
-  odb::dbInst* dbInst() const { return inst_; }
+  odb::dbInst* dbInst() const { return data_.get<InstanceColumns::inst>(); }
 
   // a cell that no need to be moved.
   bool isFixed() const;
@@ -97,32 +182,36 @@ class Instance
   int64_t getArea() const;
 
   void setExtId(int extId);
-  int getExtId() const { return extId_; }
+  int getExtId() const { return data_.get<InstanceColumns::extId>(); }
 
   void addPin(Pin* pin);
-  const std::vector<Pin*>& getPins() const { return pins_; }
+  const std::vector<Pin*>& getPins() const
+  {
+    return data_.get<InstanceColumns::pins>();
+  }
   void snapOutward(const odb::Point& origin, int step_x, int step_y);
   int64_t extendSizeByScale(double scale, utl::Logger* logger);
 
  private:
-  odb::dbInst* inst_ = nullptr;
-  std::vector<Pin*> pins_;
-  int lx_ = 0;
-  int ly_ = 0;
-  int ux_ = 0;
-  int uy_ = 0;
-  int extId_ = INT_MIN;
-  bool is_macro_ = false;
-  bool is_locked_ = false;
+  SoaRow<Store> data_;
 };
 
 class Pin
 {
  public:
-  Pin();
-  Pin(odb::dbITerm* iTerm);
-  Pin(odb::dbBTerm* bTerm, utl::Logger* logger, bool placeIosMode = false);
-  ~Pin();
+  using Store = PinColumns::Store;
+  explicit Pin(std::shared_ptr<Store> storage = std::make_shared<Store>());
+  Pin(odb::dbITerm* iTerm,
+      std::shared_ptr<Store> storage = std::make_shared<Store>());
+  Pin(odb::dbBTerm* bTerm,
+      utl::Logger* logger,
+      bool placeIosMode = false,
+      std::shared_ptr<Store> storage = std::make_shared<Store>());
+  ~Pin() = default;
+  Pin(const Pin&) = default;
+  Pin(Pin&&) noexcept = default;
+  Pin& operator=(const Pin&) = default;
+  Pin& operator=(Pin&&) noexcept = default;
 
   odb::dbITerm* getDbITerm() const;
   odb::dbBTerm* getDbBTerm() const;
@@ -158,35 +247,22 @@ class Pin
 
   bool isPlaceInstConnected() const;
 
-  Instance* getInstance() const { return inst_; }
-  Net* getNet() const { return net_; }
+  Instance* getInstance() const { return data_.get<PinColumns::inst>(); }
+  Net* getNet() const { return data_.get<PinColumns::net>(); }
   std::string getName() const;
 
   void updateCoordi(odb::dbITerm* iTerm);
 
  private:
-  odb::dbObject* term_ = nullptr;
-  Instance* inst_ = nullptr;
-  Net* net_ = nullptr;
+  SoaRow<Store> data_;
 
   // pin center coordinate is enough
   // Pins' placed location.
-  int cx_ = 0;
-  int cy_ = 0;
 
   // offset coordinates inside instance.
   // origin point is center point of instance.
   // (e.g. (DX/2,DY/2) )
   // This will increase efficiency for bloating
-  int offsetCx_ = 0;
-  int offsetCy_ = 0;
-
-  unsigned char iTermField_ : 1;
-  unsigned char bTermField_ : 1;
-  unsigned char minPinXField_ : 1;
-  unsigned char minPinYField_ : 1;
-  unsigned char maxPinXField_ : 1;
-  unsigned char maxPinYField_ : 1;
 
   void updateCoordi(odb::dbBTerm* bTerm,
                     utl::Logger* logger,
@@ -196,9 +272,16 @@ class Pin
 class Net
 {
  public:
-  Net();
-  Net(odb::dbNet* net, bool skipIoMode);
-  ~Net();
+  using Store = NetColumns::Store;
+  explicit Net(std::shared_ptr<Store> storage = std::make_shared<Store>());
+  Net(odb::dbNet* net,
+      bool skipIoMode,
+      std::shared_ptr<Store> storage = std::make_shared<Store>());
+  ~Net() = default;
+  Net(const Net&) = default;
+  Net(Net&&) noexcept = default;
+  Net& operator=(const Net&) = default;
+  Net& operator=(Net&&) noexcept = default;
 
   int lx() const;
   int ly() const;
@@ -212,20 +295,18 @@ class Net
 
   void updateBox(bool skipIoMode = false);
 
-  const std::vector<Pin*>& getPins() const { return pins_; }
+  const std::vector<Pin*>& getPins() const
+  {
+    return data_.get<NetColumns::pins>();
+  }
 
-  odb::dbNet* getDbNet() const { return net_; }
+  odb::dbNet* getDbNet() const { return data_.get<NetColumns::net>(); }
   odb::dbSigType getSigType() const;
 
   void addPin(Pin* pin);
 
  private:
-  odb::dbNet* net_ = nullptr;
-  std::vector<Pin*> pins_;
-  int lx_ = 0;
-  int ly_ = 0;
-  int ux_ = 0;
-  int uy_ = 0;
+  SoaRow<Store> data_;
 };
 
 class Die
@@ -286,6 +367,10 @@ struct PlacerBaseVars
 class PlacerBaseCommon
 {
  public:
+  auto instanceColumns() const { return instance_columns_; }
+  auto pinColumns() const { return pin_columns_; }
+  auto netColumns() const { return net_columns_; }
+
   // temp padLeft/Right before OpenDB supporting...
   PlacerBaseCommon(odb::dbDatabase* db,
                    PlacerBaseVars pbVars,
@@ -329,7 +414,11 @@ class PlacerBaseCommon
 
   Die die_;
 
+  std::shared_ptr<Instance::Store> instance_columns_
+      = std::make_shared<Instance::Store>();
   std::vector<Instance> instStor_;
+  std::shared_ptr<Pin::Store> pin_columns_ = std::make_shared<Pin::Store>();
+  std::shared_ptr<Net::Store> net_columns_ = std::make_shared<Net::Store>();
   std::vector<Pin> pinStor_;
   std::vector<Net> netStor_;
 
@@ -407,6 +496,8 @@ class PlacerBase
   int64_t region_area_;
   odb::Rect region_bbox_;
 
+  std::shared_ptr<Instance::Store> instance_columns_
+      = std::make_shared<Instance::Store>();
   std::vector<Instance> instStor_;
 
   std::vector<Instance*> pb_insts_;

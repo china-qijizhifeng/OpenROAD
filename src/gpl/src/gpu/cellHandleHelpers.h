@@ -34,7 +34,7 @@ template <typename NbcLookup, typename FillerFallback>
 inline void mapNbcGrads(const std::vector<GCellHandle>& gCells,
                         NbcLookup nbcLookup,
                         FillerFallback fillerFallback,
-                        std::vector<FloatPoint>& out)
+                        PointColumns& out)
 {
   for (std::size_t i = 0; i < gCells.size(); ++i) {
     if (!gCells[i].isNesterovBaseCommon()) {

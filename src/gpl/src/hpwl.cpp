@@ -31,24 +31,17 @@ namespace {
 class CpuHpwlBackend : public HpwlBackend
 {
  public:
-  explicit CpuHpwlBackend(int num_threads) : num_threads_(num_threads) {}
+  explicit CpuHpwlBackend(NesterovBaseCommon* nbc) : nbc_(nbc) {}
 
   int64_t computeHpwl(std::vector<GNet>& nets) override
   {
-    assert(omp_get_thread_num() == 0);
-    int64_t hpwl = 0;
-#pragma omp parallel for num_threads(num_threads_) reduction(+ : hpwl)
-    for (auto& gNet : nets) {
-      gNet.updateBox();
-      hpwl += gNet.getHpwl();
-    }
-    return hpwl;
+    return nbc_->getHpwlColumns();
   }
 
   const char* name() const override { return "CPU (OpenMP)"; }
 
  private:
-  int num_threads_;
+  NesterovBaseCommon* nbc_;
 };
 
 }  // namespace
@@ -63,7 +56,7 @@ std::unique_ptr<HpwlBackend> makeHpwlBackend(const BackendContext& ctx)
     return std::make_unique<GpuHpwlBackend>(ctx.device_state, ctx.num_threads);
   }
 #endif
-  return std::make_unique<CpuHpwlBackend>(ctx.num_threads);
+  return std::make_unique<CpuHpwlBackend>(ctx.nbc);
 }
 
 #ifdef ENABLE_GPU

@@ -1,0 +1,35 @@
+{
+  "functional_acceptance_complete": true,
+  "production_commit": "8bc1c3e674f49b93ae2bf8d04cbb8954c76a81b9",
+  "candidate_test_only_fix": "268276e3d1",
+  "native_master_commit": "a6e7f507a1e24b12f3b2689ca7b159d36f825876",
+  "source_manifest_fixed_sha256": "711d39449f9726bfc888af022082f1813928afe47be00f70b3cab469802d8f14",
+  "source_files": {
+    "baseline": 12994,
+    "candidate": 13175
+  },
+  "binary_sha256": {
+    "baseline": "9eedbe284a9330f4269c1c1c557ae869f2d9c8472ae0610b3f7dc0f98b6b3fc4",
+    "candidate": "bf95389f331b53e91cc3942d3c32a38aa2dcdfcaa57a6d520e43ca7e944a2edd"
+  },
+  "standalone_soa_tests": 6,
+  "cpu_math_tests": 3,
+  "real_differential_runs": 32,
+  "candidate_debug_consistency_runs": 8,
+  "all_observable_state_and_qor_exact": true,
+  "extra_timing_repetitions": 0,
+  "formal_timing_policy": "one sample per configuration; no sampler; no statistical speedup claim",
+  "profile_complete": false,
+  "job_cleanup_complete": false,
+  "evidence_files": {
+    "input-manifest.json": "33cde753409ccfcac4d46824d61b412f3b103a2728226940d3f009a69f17a1bd",
+    "large-differential-summary.json": "afc5f6c027be46626ec2ebd56cf5d61bb5e39079a813856e6231602f29a5a460",
+    "debug-consistency-summary.json": "ce240126c7dadc721951cd9e87be6f731f272cd19b9b2a20885f554b0d87de48",
+    "runtime-capabilities.json": "58b6c321ce75216ce17ef4403f23212056b455eaa381ac49285cef07e181ae58",
+    "test-fix-overlay.json": "877d05c2d98e20256848b48206a4cef2c6afbac48be50323eb0dd4749e636839",
+    "differential-summary.json": "ba294fd0e8910d40a036bd9eb2cb3a38ddc1cd5121cea5b75006d56a32e50136",
+    "progress.json": "0195d4b188c3d5703e1f9957e9ce4c3193ff31202f2af9ffbd630fd2d2460b64",
+    "cpu-units.log": "3b050726d288cb08133bf645d5384259252428e8ab4b913484e2c06070bb8398",
+    "lscpu.txt": "28fc66d9c2a941b688401c3b46ce71cc82db4463754c8f563a2428fa92c9e512"
+  }
+}
