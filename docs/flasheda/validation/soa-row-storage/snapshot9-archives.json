@@ -1,0 +1,44 @@
+{
+  "snapshot": "snapshot9",
+  "checked_utc": "2026-11-06T17:13:53.543383+00:00",
+  "files": {
+    "manifest.json": {
+      "sha256": "fedf2b2bdc718060bc693ef17eca4756af48f2400eed166c8807082deb7c5942",
+      "bytes": 12216
+    },
+    "new-elf-receipt.json": {
+      "sha256": "a330e0221b8e7646916373cc23c945d127603ccbb97d7611dc0bb906be0ef909",
+      "bytes": 5470
+    },
+    "gpl-test-receipt.json": {
+      "sha256": "fe7bcaecfbf9c2e9a04bb43678cf7df95d7e8fcaa236af3602c9e4196ec94d13",
+      "bytes": 6396
+    },
+    "tests-evidence.tar.gz": {
+      "sha256": "30f40bf0e1772d006d031bf022fa65a4bce81c410bd3eef90e3db42ba7a36f31",
+      "bytes": 23927
+    },
+    "openroad-build.log": {
+      "sha256": "648b0a27806abbc46b265f9fa20b83cee32e8e0ec0af6af5a6f6a07b456bf7c2",
+      "bytes": 4123
+    },
+    "wirelength-action-receipt.json": {
+      "sha256": "b7494864490cbc96d32be49eb1a437765f2a67004420bfed05b77cf6ba169fe0",
+      "bytes": 43674
+    },
+    "wirelength-compile-aquery.json": {
+      "sha256": "133ef59c03a28d33c24c6825673e6eb6835f6331d07feab97ce24d051a2a0a32",
+      "bytes": 2157780
+    },
+    "new-snapshot9.gz": {
+      "sha256": "05a6d2f9df850e41efe246299d2f9882bf4fb4b9cee81444fc457995b45195e6",
+      "bytes": 48074865,
+      "decompressed_sha256": "d7ddd6f2280b9842076ce6f9c38edf40e6351945d1515c8d5621fc8968392e7f",
+      "decompressed_bytes": 124450848
+    }
+  },
+  "all_42_source_files_exact": true,
+  "snapshot8a_formal_elf_retained": true,
+  "snapshot8a_elf_sha256": "2f2c1364cc30d33cd76a9b7bf8d898d590b16e9bc1d928691fd5311bf7c15c03",
+  "official_uninstrumented": true
+}

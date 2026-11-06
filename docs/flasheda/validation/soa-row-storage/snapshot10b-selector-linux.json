@@ -1,0 +1,29 @@
+{
+  "snapshot": "snapshot10b",
+  "binary_sha256": "00a770cff0422a8bcc9f64e5cefa69faec8f7a2d4f2165d4c511d4d1a166b4e0",
+  "independent_processes": 3,
+  "results": [
+    {
+      "mode": "unset",
+      "hardware_avx2": true,
+      "selected": false,
+      "expected": false,
+      "exact": true
+    },
+    {
+      "mode": "avx2",
+      "hardware_avx2": true,
+      "selected": true,
+      "expected": true,
+      "exact": true
+    },
+    {
+      "mode": "unsupportedstring",
+      "hardware_avx2": true,
+      "selected": false,
+      "expected": false,
+      "exact": true
+    }
+  ],
+  "passed": true
+}

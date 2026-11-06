@@ -1,0 +1,25 @@
+{
+  "snapshot": "snapshot9",
+  "checked_utc": "2026-11-06T17:28:42.283963+00:00",
+  "source_head": "2847efec57c70e532ca40cf7969e044541a25a94",
+  "file_count": 42,
+  "all_source_sha256_match_snapshot9": true,
+  "source_unchanged_during_check": true,
+  "mismatches": [],
+  "clang_format": {
+    "tool": "/opt/homebrew/Cellar/llvm@21/21.1.8/bin/clang-format",
+    "version": "Homebrew clang-format version 21.1.8",
+    "checked_files": 42,
+    "passed": true,
+    "failures": []
+  },
+  "git_diff_check": {
+    "command": "git diff --check",
+    "exit": 0,
+    "output": ""
+  },
+  "head_unchanged": true,
+  "index_unchanged": true,
+  "policy": "Read-only static checks; no build/tests rerun, no source/index/HEAD edits",
+  "passed": true
+}

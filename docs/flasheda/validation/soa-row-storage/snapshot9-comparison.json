@@ -1,0 +1,571 @@
+{
+  "complete": true,
+  "scope": "Final snapshot9 eliminates intermediate GCell Object conversion only. AES current/8a/9 balanced repeat run and big-design paired checks are new independent measurements in the same existing design sandboxes. Earlier snapshot8a formal round remains separate; no cross-round baseline substitution.",
+  "states": [
+    {
+      "design": "aes",
+      "complete": true,
+      "runs": 18,
+      "manifest_sha256": "bed52f18b9adf16467785ec3194af35297d0e1505e76ee4052d3e9fa64d452ff"
+    },
+    {
+      "design": "large01",
+      "complete": true,
+      "runs": 4,
+      "manifest_sha256": "bed52f18b9adf16467785ec3194af35297d0e1505e76ee4052d3e9fa64d452ff"
+    },
+    {
+      "design": "large02",
+      "complete": true,
+      "runs": 4,
+      "manifest_sha256": "bed52f18b9adf16467785ec3194af35297d0e1505e76ee4052d3e9fa64d452ff"
+    }
+  ],
+  "pending_large01_supplement": false,
+  "comparisons": [
+    {
+      "design": "aes",
+      "threads": 1,
+      "repeats_per_role": 3,
+      "metrics": {
+        "current": {
+          "placement_ms": {
+            "median": 36578.987,
+            "min": 35922.993,
+            "max": 37009.566
+          },
+          "wall_s": {
+            "median": 39.43,
+            "min": 38.71,
+            "max": 39.87
+          },
+          "user_s": {
+            "median": 39.0,
+            "min": 38.26,
+            "max": 39.42
+          },
+          "sys_s": {
+            "median": 0.44,
+            "min": 0.42,
+            "max": 0.44
+          },
+          "max_rss_bytes": {
+            "median": 579129344,
+            "min": 575561728,
+            "max": 579629056
+          }
+        },
+        "snapshot8a": {
+          "placement_ms": {
+            "median": 36517.432,
+            "min": 36153.586,
+            "max": 36595.171
+          },
+          "wall_s": {
+            "median": 39.35,
+            "min": 39.0,
+            "max": 39.57
+          },
+          "user_s": {
+            "median": 38.94,
+            "min": 38.55,
+            "max": 39.2
+          },
+          "sys_s": {
+            "median": 0.4,
+            "min": 0.36,
+            "max": 0.43
+          },
+          "max_rss_bytes": {
+            "median": 554717184,
+            "min": 550998016,
+            "max": 555257856
+          }
+        },
+        "snapshot9": {
+          "placement_ms": {
+            "median": 36497.316,
+            "min": 35920.083,
+            "max": 36555.943
+          },
+          "wall_s": {
+            "median": 39.37,
+            "min": 38.82,
+            "max": 39.37
+          },
+          "user_s": {
+            "median": 38.97,
+            "min": 38.36,
+            "max": 38.99
+          },
+          "sys_s": {
+            "median": 0.39,
+            "min": 0.37,
+            "max": 0.44
+          },
+          "max_rss_bytes": {
+            "median": 550989824,
+            "min": 550318080,
+            "max": 551227392
+          }
+        }
+      },
+      "all_placement_ms": {
+        "current": [
+          35922.993,
+          37009.566,
+          36578.987
+        ],
+        "snapshot8a": [
+          36153.586,
+          36595.171,
+          36517.432
+        ],
+        "snapshot9": [
+          36555.943,
+          35920.083,
+          36497.316
+        ]
+      },
+      "snapshot9_speedup_vs_8a": 1.0005511638170874,
+      "timing_evidence": "three balanced repeats",
+      "snapshot9_speedup_vs_current": 1.0022377261933453,
+      "per_round_ms": [
+        {
+          "repeat": 1,
+          "current": 35922.993,
+          "snapshot8a": 36153.586,
+          "snapshot9": 36555.943
+        },
+        {
+          "repeat": 2,
+          "current": 37009.566,
+          "snapshot8a": 36595.171,
+          "snapshot9": 35920.083
+        },
+        {
+          "repeat": 3,
+          "current": 36578.987,
+          "snapshot8a": 36517.432,
+          "snapshot9": 36497.316
+        }
+      ]
+    },
+    {
+      "design": "aes",
+      "threads": 4,
+      "repeats_per_role": 3,
+      "metrics": {
+        "current": {
+          "placement_ms": {
+            "median": 27527.058,
+            "min": 27397.586,
+            "max": 28686.274
+          },
+          "wall_s": {
+            "median": 30.39,
+            "min": 30.19,
+            "max": 31.66
+          },
+          "user_s": {
+            "median": 54.52,
+            "min": 53.98,
+            "max": 57.26
+          },
+          "sys_s": {
+            "median": 1.51,
+            "min": 1.37,
+            "max": 1.6
+          },
+          "max_rss_bytes": {
+            "median": 580796416,
+            "min": 577286144,
+            "max": 583090176
+          }
+        },
+        "snapshot8a": {
+          "placement_ms": {
+            "median": 25880.492,
+            "min": 25795.635,
+            "max": 26637.514
+          },
+          "wall_s": {
+            "median": 28.78,
+            "min": 28.66,
+            "max": 29.48
+          },
+          "user_s": {
+            "median": 55.46,
+            "min": 54.86,
+            "max": 57.15
+          },
+          "sys_s": {
+            "median": 1.62,
+            "min": 1.49,
+            "max": 1.63
+          },
+          "max_rss_bytes": {
+            "median": 563937280,
+            "min": 562855936,
+            "max": 565108736
+          }
+        },
+        "snapshot9": {
+          "placement_ms": {
+            "median": 26150.482,
+            "min": 25103.895,
+            "max": 26387.707
+          },
+          "wall_s": {
+            "median": 29.0,
+            "min": 27.97,
+            "max": 29.3
+          },
+          "user_s": {
+            "median": 55.61,
+            "min": 52.57,
+            "max": 55.77
+          },
+          "sys_s": {
+            "median": 1.46,
+            "min": 1.4,
+            "max": 1.5
+          },
+          "max_rss_bytes": {
+            "median": 560734208,
+            "min": 558501888,
+            "max": 564432896
+          }
+        }
+      },
+      "all_placement_ms": {
+        "current": [
+          27397.586,
+          28686.274,
+          27527.058
+        ],
+        "snapshot8a": [
+          26637.514,
+          25880.492,
+          25795.635
+        ],
+        "snapshot9": [
+          26387.707,
+          26150.482,
+          25103.895
+        ]
+      },
+      "snapshot9_speedup_vs_8a": 0.9896755249100188,
+      "timing_evidence": "three balanced repeats",
+      "snapshot9_speedup_vs_current": 1.0526405593594794,
+      "per_round_ms": [
+        {
+          "repeat": 1,
+          "current": 27397.586,
+          "snapshot8a": 26637.514,
+          "snapshot9": 26387.707
+        },
+        {
+          "repeat": 2,
+          "current": 28686.274,
+          "snapshot8a": 25880.492,
+          "snapshot9": 26150.482
+        },
+        {
+          "repeat": 3,
+          "current": 27527.058,
+          "snapshot8a": 25795.635,
+          "snapshot9": 25103.895
+        }
+      ]
+    },
+    {
+      "design": "large01",
+      "threads": 1,
+      "repeats_per_role": 1,
+      "metrics": {
+        "snapshot8a": {
+          "placement_ms": {
+            "median": 92100.233,
+            "min": 92100.233,
+            "max": 92100.233
+          },
+          "wall_s": {
+            "median": 107.61,
+            "min": 107.61,
+            "max": 107.61
+          },
+          "user_s": {
+            "median": 105.49,
+            "min": 105.49,
+            "max": 105.49
+          },
+          "sys_s": {
+            "median": 2.09,
+            "min": 2.09,
+            "max": 2.09
+          },
+          "max_rss_bytes": {
+            "median": 974729216,
+            "min": 974729216,
+            "max": 974729216
+          }
+        },
+        "snapshot9": {
+          "placement_ms": {
+            "median": 90794.988,
+            "min": 90794.988,
+            "max": 90794.988
+          },
+          "wall_s": {
+            "median": 106.50999999999999,
+            "min": 106.50999999999999,
+            "max": 106.50999999999999
+          },
+          "user_s": {
+            "median": 104.44,
+            "min": 104.44,
+            "max": 104.44
+          },
+          "sys_s": {
+            "median": 2.05,
+            "min": 2.05,
+            "max": 2.05
+          },
+          "max_rss_bytes": {
+            "median": 974610432,
+            "min": 974610432,
+            "max": 974610432
+          }
+        }
+      },
+      "all_placement_ms": {
+        "snapshot8a": [
+          92100.233
+        ],
+        "snapshot9": [
+          90794.988
+        ]
+      },
+      "snapshot9_speedup_vs_8a": 1.0143757384493512,
+      "timing_evidence": "single paired observation; preliminary regression screening only"
+    },
+    {
+      "design": "large01",
+      "threads": 4,
+      "repeats_per_role": 3,
+      "metrics": {
+        "snapshot8a": {
+          "placement_ms": {
+            "median": 55784.222,
+            "min": 48453.454,
+            "max": 56702.245
+          },
+          "wall_s": {
+            "median": 71.95,
+            "min": 64.39,
+            "max": 72.94
+          },
+          "user_s": {
+            "median": 146.18,
+            "min": 131.57,
+            "max": 148.91
+          },
+          "sys_s": {
+            "median": 2.91,
+            "min": 2.9,
+            "max": 2.96
+          },
+          "max_rss_bytes": {
+            "median": 990605312,
+            "min": 990490624,
+            "max": 991113216
+          }
+        },
+        "snapshot9": {
+          "placement_ms": {
+            "median": 53767.786,
+            "min": 53493.748,
+            "max": 54414.039
+          },
+          "wall_s": {
+            "median": 69.95,
+            "min": 69.03999999999999,
+            "max": 70.28999999999999
+          },
+          "user_s": {
+            "median": 140.9,
+            "min": 140.47,
+            "max": 142.4
+          },
+          "sys_s": {
+            "median": 2.77,
+            "min": 2.75,
+            "max": 3.04
+          },
+          "max_rss_bytes": {
+            "median": 990035968,
+            "min": 990031872,
+            "max": 990318592
+          }
+        }
+      },
+      "all_placement_ms": {
+        "snapshot8a": [
+          48453.454,
+          56702.245,
+          55784.222
+        ],
+        "snapshot9": [
+          53767.786,
+          54414.039,
+          53493.748
+        ]
+      },
+      "snapshot9_speedup_vs_8a": 1.0375026786485126,
+      "timing_evidence": "original single pair plus two authorized balanced repeats for unresolved 4T regression"
+    },
+    {
+      "design": "large02",
+      "threads": 1,
+      "repeats_per_role": 1,
+      "metrics": {
+        "snapshot8a": {
+          "placement_ms": {
+            "median": 99114.186,
+            "min": 99114.186,
+            "max": 99114.186
+          },
+          "wall_s": {
+            "median": 120.98,
+            "min": 120.98,
+            "max": 120.98
+          },
+          "user_s": {
+            "median": 117.73,
+            "min": 117.73,
+            "max": 117.73
+          },
+          "sys_s": {
+            "median": 3.23,
+            "min": 3.23,
+            "max": 3.23
+          },
+          "max_rss_bytes": {
+            "median": 1175666688,
+            "min": 1175666688,
+            "max": 1175666688
+          }
+        },
+        "snapshot9": {
+          "placement_ms": {
+            "median": 99365.754,
+            "min": 99365.754,
+            "max": 99365.754
+          },
+          "wall_s": {
+            "median": 120.96,
+            "min": 120.96,
+            "max": 120.96
+          },
+          "user_s": {
+            "median": 117.79,
+            "min": 117.79,
+            "max": 117.79
+          },
+          "sys_s": {
+            "median": 3.13,
+            "min": 3.13,
+            "max": 3.13
+          },
+          "max_rss_bytes": {
+            "median": 1176637440,
+            "min": 1176637440,
+            "max": 1176637440
+          }
+        }
+      },
+      "all_placement_ms": {
+        "snapshot8a": [
+          99114.186
+        ],
+        "snapshot9": [
+          99365.754
+        ]
+      },
+      "snapshot9_speedup_vs_8a": 0.9974682625565343,
+      "timing_evidence": "single paired observation; preliminary regression screening only"
+    },
+    {
+      "design": "large02",
+      "threads": 4,
+      "repeats_per_role": 1,
+      "metrics": {
+        "snapshot8a": {
+          "placement_ms": {
+            "median": 57490.245,
+            "min": 57490.245,
+            "max": 57490.245
+          },
+          "wall_s": {
+            "median": 78.19,
+            "min": 78.19,
+            "max": 78.19
+          },
+          "user_s": {
+            "median": 154.8,
+            "min": 154.8,
+            "max": 154.8
+          },
+          "sys_s": {
+            "median": 3.65,
+            "min": 3.65,
+            "max": 3.65
+          },
+          "max_rss_bytes": {
+            "median": 1195040768,
+            "min": 1195040768,
+            "max": 1195040768
+          }
+        },
+        "snapshot9": {
+          "placement_ms": {
+            "median": 56049.511,
+            "min": 56049.511,
+            "max": 56049.511
+          },
+          "wall_s": {
+            "median": 76.47,
+            "min": 76.47,
+            "max": 76.47
+          },
+          "user_s": {
+            "median": 150.24,
+            "min": 150.24,
+            "max": 150.24
+          },
+          "sys_s": {
+            "median": 3.5,
+            "min": 3.5,
+            "max": 3.5
+          },
+          "max_rss_bytes": {
+            "median": 1189556224,
+            "min": 1189556224,
+            "max": 1189556224
+          }
+        }
+      },
+      "all_placement_ms": {
+        "snapshot8a": [
+          57490.245
+        ],
+        "snapshot9": [
+          56049.511
+        ]
+      },
+      "snapshot9_speedup_vs_8a": 1.0257046667186802,
+      "timing_evidence": "single paired observation; preliminary regression screening only"
+    }
+  ]
+}

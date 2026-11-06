@@ -1,0 +1,48 @@
+{
+  "complete": true,
+  "released_sandboxes": [
+    {
+      "task": "openroad-soa-opt2-20261107",
+      "design": "aes",
+      "sandbox_id": "iv59taw15bsdpyfjnlx84",
+      "kill_return": true,
+      "killed_utc": "2026-11-06T18:54:32.684267+00:00",
+      "all_evidence_downloaded_and_local_verified_before_cleanup": true,
+      "final_gate_count": 12,
+      "formal10b_timing_claimed": false,
+      "evidence_proof_sha256": "cb0fe9f6aa62f9a2d3219421301414dd36670843c91bfbb60e8360443a5849c0",
+      "template_id": "vshaqeiaoi96u3cp66t3",
+      "template_preserved": true
+    },
+    {
+      "task": "openroad-soa-opt2-20261107",
+      "design": "large01",
+      "sandbox_id": "ibswxsph34b6u2kmw0tpk",
+      "kill_return": true,
+      "killed_utc": "2026-11-06T18:54:32.682749+00:00",
+      "all_evidence_downloaded_and_local_verified_before_cleanup": true,
+      "final_gate_count": 12,
+      "formal10b_timing_claimed": false,
+      "evidence_proof_sha256": "cb0fe9f6aa62f9a2d3219421301414dd36670843c91bfbb60e8360443a5849c0",
+      "template_id": "vshaqeiaoi96u3cp66t3",
+      "template_preserved": true
+    },
+    {
+      "task": "openroad-soa-opt2-20261107",
+      "design": "large02",
+      "sandbox_id": "ifxwfashglw3cuw9lr6h2",
+      "kill_return": true,
+      "killed_utc": "2026-11-06T18:54:32.683665+00:00",
+      "all_evidence_downloaded_and_local_verified_before_cleanup": true,
+      "final_gate_count": 12,
+      "formal10b_timing_claimed": false,
+      "evidence_proof_sha256": "cb0fe9f6aa62f9a2d3219421301414dd36670843c91bfbb60e8360443a5849c0",
+      "template_id": "vshaqeiaoi96u3cp66t3",
+      "template_preserved": true
+    }
+  ],
+  "template_preserved": true,
+  "only_owned3_ids_targeted": true,
+  "hk_and_gpfs_evidence_preserved": true,
+  "completed_utc": "2026-11-06T18:54:32.685225+00:00"
+}

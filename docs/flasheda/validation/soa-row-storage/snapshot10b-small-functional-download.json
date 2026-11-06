@@ -1,0 +1,14 @@
+{
+  "path": "/gpfs/users/linlizhi/flasheda-soa-row-storage-20261106/row-acceptance-tools/snapshot10b/evidence/row-functional-snapshot10b-evidence.tar.gz",
+  "bytes": 29820985,
+  "sha256": "67ea1cb3f698d352e3bdd9db29dd9637efaf0dc7334dc06fc6c5c27975a2ce7e",
+  "members": 351,
+  "summary_sha256": "3cd8a9ff7ce25ac2206d32ae0e92725a4ac4d249f089425e8b8a25e096c7cde5",
+  "runs": 36,
+  "pairs": 18,
+  "status": "passed",
+  "snapshot": "snapshot10b",
+  "local_path": "/Users/shom/Downloads/openroad-gpl-soa/build/soa/row-acceptance-20261106/snapshot10b/row-functional-snapshot10b-evidence.tar.gz",
+  "local_sha256": "67ea1cb3f698d352e3bdd9db29dd9637efaf0dc7334dc06fc6c5c27975a2ce7e",
+  "verified": true
+}

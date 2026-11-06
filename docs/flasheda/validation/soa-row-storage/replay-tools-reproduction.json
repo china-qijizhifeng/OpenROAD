@@ -1,0 +1,23 @@
+{
+  "archive": "/gpfs/users/linlizhi/flasheda-soa-row-storage-20261106/replay-tools-complete-reproduction.tar.gz",
+  "archive_sha256": "f6ac077296c81c58b0c23b952fc1437416a4029629116861ae6ad39a944f5aa5",
+  "archive_bytes": 907526,
+  "manifest_sha256": "9858074e95cdf6984809cfd14a29470bce7b6b9f3daf708ef8e6fe3965300e5e",
+  "file_count": 27,
+  "source_sha256": {
+    "replay-benchmark.cpp": "c4ce29b8e66b5a61657566b8a85d71c92e68600beb87990a4c4e04588ee1562b",
+    "replay-verify.cpp": "b6eff106f71add224eb8b72805101a920a9d8b8439aec40b65ee545ea218a6d9"
+  },
+  "includes": [
+    "both C++ sources",
+    "two cc_binary BUILD rules",
+    "actual successful Bazel command and full wrapper",
+    "full compile/link/LTO aquery with param contents",
+    "four actual link parameter files",
+    "toolchain fingerprint",
+    "successful logs",
+    "binaries",
+    "native assembly and vectorization report"
+  ],
+  "no_rebuild_performed": true
+}

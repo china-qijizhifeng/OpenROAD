@@ -1,0 +1,502 @@
+{
+  "complete": true,
+  "pending": null,
+  "skill": "/Users/shom/.codex/skills/e2b-code-validation/SKILL.md",
+  "execution_host": "hk-linlizhi-jumpserver",
+  "sdk": "/root/code-harbor/.venv/bin/python E2B2.37.1",
+  "template": {
+    "id": "vshaqeiaoi96u3cp66t3",
+    "alias": "flasheda-r5-cpu8-t16-20261030",
+    "resources": "8logical/4physical16GiB; actual1/4T"
+  },
+  "resources": {
+    "task": "openroad-soa-opt2-20261107",
+    "sandboxes": {
+      "aes": "iv59taw15bsdpyfjnlx84",
+      "large01": "ibswxsph34b6u2kmw0tpk",
+      "large02": "ifxwfashglw3cuw9lr6h2"
+    },
+    "cleanup": {
+      "complete": true,
+      "released_sandboxes": [
+        {
+          "task": "openroad-soa-opt2-20261107",
+          "design": "aes",
+          "sandbox_id": "iv59taw15bsdpyfjnlx84",
+          "kill_return": true,
+          "killed_utc": "2026-11-06T18:54:32.684267+00:00",
+          "all_evidence_downloaded_and_local_verified_before_cleanup": true,
+          "final_gate_count": 12,
+          "formal10b_timing_claimed": false,
+          "evidence_proof_sha256": "cb0fe9f6aa62f9a2d3219421301414dd36670843c91bfbb60e8360443a5849c0",
+          "template_id": "vshaqeiaoi96u3cp66t3",
+          "template_preserved": true
+        },
+        {
+          "task": "openroad-soa-opt2-20261107",
+          "design": "large01",
+          "sandbox_id": "ibswxsph34b6u2kmw0tpk",
+          "kill_return": true,
+          "killed_utc": "2026-11-06T18:54:32.682749+00:00",
+          "all_evidence_downloaded_and_local_verified_before_cleanup": true,
+          "final_gate_count": 12,
+          "formal10b_timing_claimed": false,
+          "evidence_proof_sha256": "cb0fe9f6aa62f9a2d3219421301414dd36670843c91bfbb60e8360443a5849c0",
+          "template_id": "vshaqeiaoi96u3cp66t3",
+          "template_preserved": true
+        },
+        {
+          "task": "openroad-soa-opt2-20261107",
+          "design": "large02",
+          "sandbox_id": "ifxwfashglw3cuw9lr6h2",
+          "kill_return": true,
+          "killed_utc": "2026-11-06T18:54:32.683665+00:00",
+          "all_evidence_downloaded_and_local_verified_before_cleanup": true,
+          "final_gate_count": 12,
+          "formal10b_timing_claimed": false,
+          "evidence_proof_sha256": "cb0fe9f6aa62f9a2d3219421301414dd36670843c91bfbb60e8360443a5849c0",
+          "template_id": "vshaqeiaoi96u3cp66t3",
+          "template_preserved": true
+        }
+      ],
+      "template_preserved": true,
+      "only_owned3_ids_targeted": true,
+      "hk_and_gpfs_evidence_preserved": true,
+      "completed_utc": "2026-11-06T18:54:32.685225+00:00"
+    }
+  },
+  "source_head": "2847efec57c70e532ca40cf7969e044541a25a94",
+  "compiler_sha256": "2667f50297ef526c2a594fae811614d83e55a14ac2ac3ac4414b100b7d0d9642",
+  "formal_flags": "O3 ThinLTO C++20 ffp-contract-off no globalAVX/FMA/fastmath",
+  "snapshot8a": {
+    "scope": "independent full54formal/18phase round; baseline medians not substituted with later round",
+    "formal": "summary/formal-comparison.json",
+    "phase": "summary/observation-comparison.json",
+    "memory": "summary/production-memory.json",
+    "replay_ABC": "summary/replay-comparison.json",
+    "all_summary_and_raw_verified": "All3full54formal archives, all3phase/observation archives, real replay captures and A/B/C/D/E reproducible build/source archives saved and locally SHA verified"
+  },
+  "snapshot9": {
+    "scope": "current/8a/9 AESbalanced18; big paired plus authorizedlarge01t4supplement",
+    "report": "summary/snapshot9-comparison.json",
+    "regression_note": "AES ranges overlap in newround; cannot claim9 proved elimination of earlier2.07% regression"
+  },
+  "snapshot10a": {
+    "scope": "Formal9/10a uninstrumented placement has three valid same-design/same-sandbox repeats (original alternating protocol; one contaminated10a/large02/1T sample excluded and replaced once after all original jobs completed); designs parallel, roles serial, actual1/4T. Separate real captured replay D/E shares actual production SoA layout/helpers and isolates AVX2 vs scalar; A/B/C independent oracle retained; replay excludes setup and other placement work. No additional full-placement sampling.",
+    "report": "summary/snapshot10a-comparison.json",
+    "valid_formal_runs": 36,
+    "original_formal_runs": 36,
+    "replacement_runs": 1,
+    "excluded_original_runs": 1,
+    "correctness_gates": 6,
+    "all_state_algorithm_exact": true,
+    "decision": "Actual AVX2 candidate has large011T measured regression. Later10b defaultscalar explicitoptionalAVX2;10a timing evidence is not10b newELF timing",
+    "timing_exclusion": "snapshot10a-timing-exclusion.json",
+    "paired_resource_order_diagnosis": "summary/snapshot10a-pair-order-resources.json",
+    "diagnosis_prose": "snapshot10a-order-diagnosis.md",
+    "formal_table": [
+      {
+        "design": "aes",
+        "threads": 1,
+        "snapshot9_placement_s_raw": [
+          35.324134,
+          35.76666,
+          36.250063000000004
+        ],
+        "snapshot9_placement_s_median": 35.76666,
+        "snapshot9_placement_s_min": 35.324134,
+        "snapshot9_placement_s_max": 36.250063000000004,
+        "snapshot9_rss_bytes_raw": [
+          551460864,
+          551186432,
+          554373120
+        ],
+        "snapshot9_rss_bytes_median": 551460864,
+        "snapshot9_rss_bytes_min": 551186432,
+        "snapshot9_rss_bytes_max": 554373120,
+        "snapshot10a_placement_s_raw": [
+          35.372510000000005,
+          35.754972,
+          35.647013
+        ],
+        "snapshot10a_placement_s_median": 35.647013,
+        "snapshot10a_placement_s_min": 35.372510000000005,
+        "snapshot10a_placement_s_max": 35.754972,
+        "snapshot10a_rss_bytes_raw": [
+          551002112,
+          557522944,
+          556699648
+        ],
+        "snapshot10a_rss_bytes_median": 556699648,
+        "snapshot10a_rss_bytes_min": 551002112,
+        "snapshot10a_rss_bytes_max": 557522944,
+        "snapshot10a_speedup_vs_9": 1.003356438308029,
+        "snapshot10a_elapsed_change_pct": -0.33452103159758995,
+        "timing_ranges_overlap": true
+      },
+      {
+        "design": "aes",
+        "threads": 4,
+        "snapshot9_placement_s_raw": [
+          25.796915000000002,
+          26.669687999999997,
+          26.461042000000003
+        ],
+        "snapshot9_placement_s_median": 26.461042000000003,
+        "snapshot9_placement_s_min": 25.796915000000002,
+        "snapshot9_placement_s_max": 26.669687999999997,
+        "snapshot9_rss_bytes_raw": [
+          563331072,
+          557944832,
+          565641216
+        ],
+        "snapshot9_rss_bytes_median": 563331072,
+        "snapshot9_rss_bytes_min": 557944832,
+        "snapshot9_rss_bytes_max": 565641216,
+        "snapshot10a_placement_s_raw": [
+          25.381007,
+          26.242226,
+          26.362156
+        ],
+        "snapshot10a_placement_s_median": 26.242226,
+        "snapshot10a_placement_s_min": 25.381007,
+        "snapshot10a_placement_s_max": 26.362156,
+        "snapshot10a_rss_bytes_raw": [
+          562765824,
+          562933760,
+          563617792
+        ],
+        "snapshot10a_rss_bytes_median": 562933760,
+        "snapshot10a_rss_bytes_min": 562765824,
+        "snapshot10a_rss_bytes_max": 563617792,
+        "snapshot10a_speedup_vs_9": 1.0083383170314897,
+        "snapshot10a_elapsed_change_pct": -0.8269364449064454,
+        "timing_ranges_overlap": true
+      },
+      {
+        "design": "large01",
+        "threads": 1,
+        "snapshot9_placement_s_raw": [
+          90.1552,
+          89.719007,
+          88.49767200000001
+        ],
+        "snapshot9_placement_s_median": 89.719007,
+        "snapshot9_placement_s_min": 88.49767200000001,
+        "snapshot9_placement_s_max": 90.1552,
+        "snapshot9_rss_bytes_raw": [
+          974573568,
+          973025280,
+          974352384
+        ],
+        "snapshot9_rss_bytes_median": 974352384,
+        "snapshot9_rss_bytes_min": 973025280,
+        "snapshot9_rss_bytes_max": 974573568,
+        "snapshot10a_placement_s_raw": [
+          93.786282,
+          90.305463,
+          90.694874
+        ],
+        "snapshot10a_placement_s_median": 90.694874,
+        "snapshot10a_placement_s_min": 90.305463,
+        "snapshot10a_placement_s_max": 93.786282,
+        "snapshot10a_rss_bytes_raw": [
+          974331904,
+          974700544,
+          973832192
+        ],
+        "snapshot10a_rss_bytes_median": 974331904,
+        "snapshot10a_rss_bytes_min": 973832192,
+        "snapshot10a_rss_bytes_max": 974700544,
+        "snapshot10a_speedup_vs_9": 0.9892401085424078,
+        "snapshot10a_elapsed_change_pct": 1.0876926000752407,
+        "timing_ranges_overlap": false
+      },
+      {
+        "design": "large01",
+        "threads": 4,
+        "snapshot9_placement_s_raw": [
+          54.901296,
+          56.492925,
+          53.387595000000005
+        ],
+        "snapshot9_placement_s_median": 54.901296,
+        "snapshot9_placement_s_min": 53.387595000000005,
+        "snapshot9_placement_s_max": 56.492925,
+        "snapshot9_rss_bytes_raw": [
+          990097408,
+          989900800,
+          989900800
+        ],
+        "snapshot9_rss_bytes_median": 989900800,
+        "snapshot9_rss_bytes_min": 989900800,
+        "snapshot9_rss_bytes_max": 990097408,
+        "snapshot10a_placement_s_raw": [
+          54.804882,
+          53.259778,
+          55.836954
+        ],
+        "snapshot10a_placement_s_median": 54.804882,
+        "snapshot10a_placement_s_min": 53.259778,
+        "snapshot10a_placement_s_max": 55.836954,
+        "snapshot10a_rss_bytes_raw": [
+          990277632,
+          989822976,
+          990142464
+        ],
+        "snapshot10a_rss_bytes_median": 990142464,
+        "snapshot10a_rss_bytes_min": 989822976,
+        "snapshot10a_rss_bytes_max": 990277632,
+        "snapshot10a_speedup_vs_9": 1.0017592228371188,
+        "snapshot10a_elapsed_change_pct": -0.17561334071239942,
+        "timing_ranges_overlap": true
+      },
+      {
+        "design": "large02",
+        "threads": 1,
+        "snapshot9_placement_s_raw": [
+          97.061959,
+          101.39842900000001,
+          100.298633
+        ],
+        "snapshot9_placement_s_median": 100.298633,
+        "snapshot9_placement_s_min": 97.061959,
+        "snapshot9_placement_s_max": 101.39842900000001,
+        "snapshot9_rss_bytes_raw": [
+          1174753280,
+          1176969216,
+          1177370624
+        ],
+        "snapshot9_rss_bytes_median": 1176969216,
+        "snapshot9_rss_bytes_min": 1174753280,
+        "snapshot9_rss_bytes_max": 1177370624,
+        "snapshot10a_placement_s_raw": [
+          93.403746,
+          97.62477899999999,
+          96.228787
+        ],
+        "snapshot10a_placement_s_median": 96.228787,
+        "snapshot10a_placement_s_min": 93.403746,
+        "snapshot10a_placement_s_max": 97.62477899999999,
+        "snapshot10a_rss_bytes_raw": [
+          1173610496,
+          1174085632,
+          1175789568
+        ],
+        "snapshot10a_rss_bytes_median": 1174085632,
+        "snapshot10a_rss_bytes_min": 1173610496,
+        "snapshot10a_rss_bytes_max": 1175789568,
+        "snapshot10a_speedup_vs_9": 1.0422934355392008,
+        "snapshot10a_elapsed_change_pct": -4.057728284292761,
+        "timing_ranges_overlap": true
+      },
+      {
+        "design": "large02",
+        "threads": 4,
+        "snapshot9_placement_s_raw": [
+          57.048144,
+          59.13450099999999,
+          56.100919000000005
+        ],
+        "snapshot9_placement_s_median": 57.048144,
+        "snapshot9_placement_s_min": 56.100919000000005,
+        "snapshot9_placement_s_max": 59.13450099999999,
+        "snapshot9_rss_bytes_raw": [
+          1194303488,
+          1192251392,
+          1189068800
+        ],
+        "snapshot9_rss_bytes_median": 1192251392,
+        "snapshot9_rss_bytes_min": 1189068800,
+        "snapshot9_rss_bytes_max": 1194303488,
+        "snapshot10a_placement_s_raw": [
+          55.182017,
+          56.293422,
+          56.01415
+        ],
+        "snapshot10a_placement_s_median": 56.01415,
+        "snapshot10a_placement_s_min": 55.182017,
+        "snapshot10a_placement_s_max": 56.293422,
+        "snapshot10a_rss_bytes_raw": [
+          1190088704,
+          1191485440,
+          1194364928
+        ],
+        "snapshot10a_rss_bytes_median": 1191485440,
+        "snapshot10a_rss_bytes_min": 1190088704,
+        "snapshot10a_rss_bytes_max": 1194364928,
+        "snapshot10a_speedup_vs_9": 1.0184595142477393,
+        "snapshot10a_elapsed_change_pct": -1.8124936720114948,
+        "timing_ranges_overlap": true
+      }
+    ],
+    "all3_raw_archive_log_SHA_verified": true
+  },
+  "actual_SIMD_replay": {
+    "scope": "D/E actual matchingproductionSoA/helper AVX2/scalar, independentA/B/C oracle, capturedlarge02iter10/265/520 actual1/4T 6configs\u00d75routes\u00d79rotations; setup/otherplacementexcluded",
+    "report": "summary/replay-simd-comparison.json",
+    "build_evidence_archive": "../row-storage-20261106/replay-simd-bazel-evidence.tar.gz",
+    "build_evidence_sha256": "deaedae852dcf9de66d8f02273189acab1bd104cf231c94aa24985acea15b684",
+    "actual_replay_elf_sha256": "11c3d78132504d9bad1c8a748d5a6f87eeae4d7ce04881569f88ba9b8f38fb09",
+    "coverage": {
+      "four_pin_blocks": 145097,
+      "four_pin_blocks_pins": 580388,
+      "scalar_tail_pins": 819731,
+      "total_active_net_pins": 1400119,
+      "four_pin_pin_fraction": 0.4145276222949621,
+      "scalar_tail_pin_fraction": 0.5854723777050379,
+      "all_blocks_have_consumer": true,
+      "note": "Current helper batches four pins within each net, reusing that net terms. Short-net tails remain scalar. Cross-net batching would need per-lane differing net terms and explicit correct flags/consumer handling; tail lanes are not free zeros. This round keeps the four-pin threshold and per-net grouping unchanged; short-net batching is future investigation only."
+    },
+    "caution": "4T totalranges overlap; localmedians notwholeplacementspeedup",
+    "timing_table": [
+      {
+        "snapshot": "iter-10-owner-0",
+        "threads": 1,
+        "avx_blocks": 145097,
+        "avx_consumer_blocks": 145097,
+        "scalar_tail_pins": 819731,
+        "D_full_force_plus_gather_ms_median": 35.544238,
+        "D_full_force_plus_gather_ms_min": 35.358511,
+        "D_full_force_plus_gather_ms_max": 37.148599,
+        "E_full_force_plus_gather_ms_median": 36.870171,
+        "E_full_force_plus_gather_ms_min": 36.578946,
+        "E_full_force_plus_gather_ms_max": 46.957197,
+        "isolated_pin_scatter_ms_D_speedup_vs_E": 1.0862371425651522,
+        "force_or_fused_force_pin_ms_D_speedup_vs_E": 1.0380809054618654,
+        "full_force_plus_gather_ms_D_speedup_vs_E": 1.0373037396384752
+      },
+      {
+        "snapshot": "iter-10-owner-0",
+        "threads": 4,
+        "avx_blocks": 145097,
+        "avx_consumer_blocks": 145097,
+        "scalar_tail_pins": 819731,
+        "D_full_force_plus_gather_ms_median": 13.34603,
+        "D_full_force_plus_gather_ms_min": 12.780414,
+        "D_full_force_plus_gather_ms_max": 14.892024,
+        "E_full_force_plus_gather_ms_median": 17.948298,
+        "E_full_force_plus_gather_ms_min": 13.831807,
+        "E_full_force_plus_gather_ms_max": 20.221559,
+        "isolated_pin_scatter_ms_D_speedup_vs_E": 1.0278292485817133,
+        "force_or_fused_force_pin_ms_D_speedup_vs_E": 1.3155387092667208,
+        "full_force_plus_gather_ms_D_speedup_vs_E": 1.3448417244678754
+      },
+      {
+        "snapshot": "iter-265-owner-0",
+        "threads": 1,
+        "avx_blocks": 145097,
+        "avx_consumer_blocks": 145097,
+        "scalar_tail_pins": 819731,
+        "D_full_force_plus_gather_ms_median": 37.668096,
+        "D_full_force_plus_gather_ms_min": 37.489489,
+        "D_full_force_plus_gather_ms_max": 37.994804,
+        "E_full_force_plus_gather_ms_median": 39.341589,
+        "E_full_force_plus_gather_ms_min": 38.7465,
+        "E_full_force_plus_gather_ms_max": 40.820893,
+        "isolated_pin_scatter_ms_D_speedup_vs_E": 1.0931826586262823,
+        "force_or_fused_force_pin_ms_D_speedup_vs_E": 1.0453045236007688,
+        "full_force_plus_gather_ms_D_speedup_vs_E": 1.0444273318194792
+      },
+      {
+        "snapshot": "iter-265-owner-0",
+        "threads": 4,
+        "avx_blocks": 145097,
+        "avx_consumer_blocks": 145097,
+        "scalar_tail_pins": 819731,
+        "D_full_force_plus_gather_ms_median": 13.829664,
+        "D_full_force_plus_gather_ms_min": 13.738888,
+        "D_full_force_plus_gather_ms_max": 20.48311,
+        "E_full_force_plus_gather_ms_median": 17.775098,
+        "E_full_force_plus_gather_ms_min": 14.292317,
+        "E_full_force_plus_gather_ms_max": 21.874003,
+        "isolated_pin_scatter_ms_D_speedup_vs_E": 1.0285835238096592,
+        "force_or_fused_force_pin_ms_D_speedup_vs_E": 1.239980519000049,
+        "full_force_plus_gather_ms_D_speedup_vs_E": 1.285287769825789
+      },
+      {
+        "snapshot": "iter-520-owner-0",
+        "threads": 1,
+        "avx_blocks": 145097,
+        "avx_consumer_blocks": 145097,
+        "scalar_tail_pins": 819731,
+        "D_full_force_plus_gather_ms_median": 46.193232,
+        "D_full_force_plus_gather_ms_min": 44.956873,
+        "D_full_force_plus_gather_ms_max": 58.864513,
+        "E_full_force_plus_gather_ms_median": 49.202364,
+        "E_full_force_plus_gather_ms_min": 46.938438,
+        "E_full_force_plus_gather_ms_max": 60.032853,
+        "isolated_pin_scatter_ms_D_speedup_vs_E": 1.1445296342000706,
+        "force_or_fused_force_pin_ms_D_speedup_vs_E": 1.0665549243475583,
+        "full_force_plus_gather_ms_D_speedup_vs_E": 1.0651422701923088
+      },
+      {
+        "snapshot": "iter-520-owner-0",
+        "threads": 4,
+        "avx_blocks": 145097,
+        "avx_consumer_blocks": 145097,
+        "scalar_tail_pins": 819731,
+        "D_full_force_plus_gather_ms_median": 16.29236,
+        "D_full_force_plus_gather_ms_min": 15.724299,
+        "D_full_force_plus_gather_ms_max": 21.770797,
+        "E_full_force_plus_gather_ms_median": 19.370727,
+        "E_full_force_plus_gather_ms_min": 18.302086,
+        "E_full_force_plus_gather_ms_max": 21.711359,
+        "isolated_pin_scatter_ms_D_speedup_vs_E": 0.9976720342389969,
+        "force_or_fused_force_pin_ms_D_speedup_vs_E": 1.1567374826644023,
+        "full_force_plus_gather_ms_D_speedup_vs_E": 1.1889454320920971
+      }
+    ]
+  },
+  "nesterov_coordinate_analysis": {
+    "report": "nesterov-coordinate-vectorization.md",
+    "receipt": "nesterov-coordinate-vectorization-receipt.json",
+    "actual9and10aELF": "coordinate percellscalarstep+intra-cellclippingSLP, getDistance scratchalreadySSE4crosscell; orderedreductionkept",
+    "future_locked_contract": "mixedlockedblockunchangedscalarfallback; finalblendaloneinsufficient; fenvtestrequired"
+  },
+  "snapshot10b": {
+    "pending": false,
+    "scope": "12 correctness-only gates; no formal10b timing inference",
+    "report": "summary/snapshot10b-gates.json",
+    "manifest_sha256": "c761263e03f86fc9f52c7853c61aca674bcea6c9fc92ef7fd286a030a4ba9801",
+    "formal_elf_sha256": "2d4ea6220bcad8fc231478f04bff792dadb4657c3b271bce9404036e22e597d3",
+    "gate_count": 12,
+    "all_state_algorithm_exact": true,
+    "selector_independent_processes": 9,
+    "all_sandboxes_actual_avx2": true,
+    "env": "Default omitted GPL_WIRELENGTH_SIMD; explicit avx2; unsupported string scalar; selector cached per process so every role freshsubprocess",
+    "strategy": "Default scalar; optional hardware guarded AVX2; coreformula/threshold/tail identical10a",
+    "all3_raw_archive_log_env_manifest_SHA_verified": true
+  },
+  "final_evidence": {
+    "proof": "final-local-evidence-proof.json",
+    "proof_sha256": "cb0fe9f6aa62f9a2d3219421301414dd36670843c91bfbb60e8360443a5849c0",
+    "raw_archive_count": 16,
+    "all_local_and_HK_archive_sha256_verified_before_cleanup": true,
+    "archive_sha256": {
+      "aes-evidence.tar.gz": "3fa2faff4fdaf8773c013bc639a4da74583b2b73ca8821ef9ffd3c5772189e08",
+      "aes-all-evidence.tar.gz": "6c7a75b887288936330f420b4007bfe0fab7b9cf92e35cbf256ba7decad71f89",
+      "aes-snapshot9-evidence.tar.gz": "a6745764ccffba33c15c49036b7e8fee655e3e6868f35b554c368a9367c725ee",
+      "aes-snapshot10a-evidence.tar.gz": "e5b916c1df2225162fb20c2dc11dc486d6ea7b0d0c4ee0c11969d1da97bdb484",
+      "aes-snapshot10b-evidence.tar.gz": "9f6a7e6d2769a1c6beff851b9cc09239d2582f02cf15c20755ae07fd2167afa4",
+      "large01-evidence.tar.gz": "89624b8b99755225013d7147d1079fb172e9b888110da92ffc0696181def2a0d",
+      "large01-all-evidence.tar.gz": "b2e9961cf4df14aa13be52387a7a1dc72b506970f938afdc3c4a1ce7361fd64a",
+      "large01-snapshot9-evidence.tar.gz": "cb9d40f23ec573eaaa3e023a5a9f8113bfb2ae2231b0ea33eb6172bc2ea562af",
+      "large01-snapshot10a-evidence.tar.gz": "823acd17b566c4eb1dc825fc9ab0bccc1e175dfecfc5b4eeb701e3393058f9c8",
+      "large01-snapshot10b-evidence.tar.gz": "dde50beaf6e67f15bc8a89d92e85d838d452fd37644fa84b2968fad47527b541",
+      "large02-evidence.tar.gz": "4505cfecca484fef9786a12f445100c041cd3f75e548dd5cec14acf16ecbd554",
+      "large02-all-evidence.tar.gz": "e35e1705a81263cbda439546ddf11c7d6702e305882ede1ed9599d6900d7e359",
+      "large02-snapshot9-evidence.tar.gz": "192a601f9fbaafacf31734732445befb05c5eea5a9b81bbca48fdb2bd57c6ae0",
+      "large02-snapshot10a-evidence.tar.gz": "b2af57b7966cea011dcc4b1c926a3f9b13fa040edee5bac2111b7ca98066bf78",
+      "large02-snapshot10b-evidence.tar.gz": "9da4b8e27b9096989ed7f3d24b4fcaf51e48e807a8535c4fb15172662b7d05cb",
+      "large02-replay-simd-evidence.tar.gz": "56ecd4e7863b511e625ebb6551cc57282609118f3f52073dd76629f4b50335e8"
+    },
+    "source_and_compiler_provenance": "All44live source/ELF/gzip hashes verified before E2B dispatch; separate frozen9/10a/10b manifests and toolchain receipts; no global ISA/fastmath flags",
+    "evidence_locations": {
+      "local": "/Users/shom/Downloads/openroad-gpl-soa/build/soa/e2b-opt2-20261106",
+      "HK": "/root/openroad-soa-opt2-20261107",
+      "GPFS": "/gpfs/users/linlizhi/flasheda-soa-row-storage-20261106"
+    },
+    "cleanup": "summary/cleanup-owned-final.json"
+  }
+}

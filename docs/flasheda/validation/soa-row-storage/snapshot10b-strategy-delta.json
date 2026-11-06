@@ -1,0 +1,11 @@
+{
+  "snapshot": "snapshot10b",
+  "changed_strategy_only": true,
+  "scatter_scalar_intrinsics_formulas_dispatch_threshold_tail_bytes_identical_to_snapshot10a": true,
+  "kernel_source_suffix_sha256": "6254f70ef101b707e768be5fc348cfcaa237aedad445552343bcbb1afc2b81a1",
+  "selector_env": "GPL_WIRELENGTH_SIMD",
+  "selector_accepted_value": "avx2",
+  "process_static_cached": true,
+  "unsupported_hardware_fallback": true,
+  "performance_evidence_scope": "snapshot10a kernel measurements only; no new snapshot10b formal timing claimed"
+}

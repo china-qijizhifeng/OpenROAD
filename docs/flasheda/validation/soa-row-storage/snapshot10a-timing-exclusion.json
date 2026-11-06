@@ -1,0 +1,21 @@
+{
+  "affected_run": "large02/t1-r2-snapshot10a",
+  "affected_role": "snapshot10a",
+  "threads": 1,
+  "repeat": 2,
+  "timing_valid": false,
+  "output_correctness_still_valid": true,
+  "reason": "Premature D/E archive collection overlapped this run; keep raw sample but exclude timing from formal statistics",
+  "run_command_utc": "2026-11-06T18:12:24.039353+00:00",
+  "run_process_resource_end_utc": "2026-11-06T18:14:18.414886+00:00",
+  "archive_birth_utc": "2026-11-06T18:14:03.446947055+00:00",
+  "archive_final_mtime_utc": "2026-11-06T18:14:03.602946418+00:00",
+  "archive_written_seconds": 0.155999363,
+  "archive_bytes": 3985674,
+  "archive_sha256": "56ecd4e7863b511e625ebb6551cc57282609118f3f52073dd76629f4b50335e8",
+  "adjacent_before_process_end_utc": "2026-11-06T18:12:21.615363+00:00",
+  "adjacent_after_command_utc": "2026-11-06T18:14:20.774876+00:00",
+  "overlapping_run_count": 1,
+  "correction": "Exactly one same role/thread replacement after all existing formal jobs complete; root authorized; no other sample reruns",
+  "prevention": "replay-simd collect now calls idle_gate; never collect/compress sandbox files until its formal jobs finish"
+}

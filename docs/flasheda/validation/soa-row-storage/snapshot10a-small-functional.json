@@ -1,0 +1,93 @@
+{
+  "snapshot": "snapshot10a",
+  "status": "passed",
+  "purpose": "functional-differential-only",
+  "runs": 32,
+  "pairs": 16,
+  "requested_threads": [
+    1,
+    4
+  ],
+  "cases": [
+    "gcd",
+    "aes_cipher_top",
+    "incremental02",
+    "incremental03",
+    "place_ios_td",
+    "place_ios_rd",
+    "region01",
+    "simple01-td-repair"
+  ],
+  "source": {
+    "head": "2847efec57c70e532ca40cf7969e044541a25a94",
+    "overlay_sha256": "ec7b82baccf6804fc6d3111926e975618b8b64b3b74e76bcada8dd277682ae7a",
+    "formatted_diff_sha256": "8e976762a78503fd8eb4e126f95cc33aa1db690d51698cc42d376ec5bca5c523",
+    "frozen_files": 44,
+    "source_proof_sha256": "c544cb0ff938d49ee1c90573918ee61f69b4be0c9f8a78cb0a5dbdb8b0ecb5dc",
+    "source_and_input_gate_before_and_after": true
+  },
+  "binaries": {
+    "native": {
+      "path": "/gpfs/users/linlizhi/flasheda-soa-merge-local-20261106/binaries/baseline",
+      "sha256": "9eedbe284a9330f4269c1c1c557ae869f2d9c8472ae0610b3f7dc0f98b6b3fc4",
+      "bytes": 124296512
+    },
+    "new": {
+      "path": "/gpfs/users/linlizhi/flasheda-soa-row-storage-20261106/binaries/new-snapshot10a",
+      "sha256": "89f9d9777b01434c9d7c1a744148a16446bd3ea4490fa61fb1010ca21e6941f1",
+      "bytes": 124458344
+    }
+  },
+  "exact_observables": [
+    "cell/port/net state; master/orientation/status",
+    "area/HPWL/WNS/TNS/legalization where original flow supports",
+    "InitialPlace, Nesterov, every backtrack, step length, gradient sums, GPL info/warnings and routability traces"
+  ],
+  "coverage": {
+    "aes_each_thread": {
+      "filler_cut_calls": 11,
+      "positive_filler_cut": 11,
+      "filler_restore_calls": 1,
+      "positive_filler_restore": 1,
+      "backtrack": 1125,
+      "routability_revert": 12
+    },
+    "place_ios_rd_each_thread": {
+      "filler_cut_calls": 5,
+      "positive_filler_cut": 0,
+      "filler_restore_calls": 1,
+      "positive_filler_restore": 0,
+      "backtrack": 747,
+      "routability_revert": 6
+    },
+    "region01": "both voltage-domain solvers entered at 1T and 4T",
+    "original_assertions": "retained except hardcoded threads and toolchain-specific diff_files; exact native/new differential replaces golden"
+  },
+  "simd_unit_evidence": {
+    "path": "/Users/shom/Downloads/openroad-gpl-soa/build/soa/row-storage-20261106/snapshot10a/gpl-test-receipt.json",
+    "sha256": "3c59dd648be515403820b950c7f5ccc2931845c8010cdd065abb9bf27b9050db",
+    "actual_avx2_calls": 12230,
+    "native_oracle_bitwise_passed": true,
+    "FE_INVALID_and_FE_DIVBYZERO_absent_in_every_checked_kernel": true
+  },
+  "command": {
+    "path": "/gpfs/users/linlizhi/flasheda-soa-row-storage-20261106/commands/43-functional-snapshot10a.sh",
+    "exit": 0
+  },
+  "evidence": {
+    "path": "/gpfs/users/linlizhi/flasheda-soa-row-storage-20261106/row-acceptance-tools/snapshot10/evidence/row-functional-snapshot10a-evidence.tar.gz",
+    "bytes": 22578030,
+    "sha256": "97ad8bad3fe15758573dbccfa4a474d511f48f3c712eafcda6af4b8d9218152d",
+    "members": 309,
+    "summary_sha256": "66fd02b9461f516e19cce64998385a9b571f5842ab232d8a3d2218d987b61242",
+    "runs": 32,
+    "pairs": 16,
+    "status": "passed",
+    "snapshot": "snapshot10a",
+    "local_path": "/Users/shom/Downloads/openroad-gpl-soa/build/soa/row-acceptance-20261106/snapshot10/row-functional-snapshot10a-evidence.tar.gz",
+    "local_sha256": "97ad8bad3fe15758573dbccfa4a474d511f48f3c712eafcda6af4b8d9218152d",
+    "verified": true
+  },
+  "limitations": "debug and state export enabled; elapsed time/RSS are not formal performance evidence",
+  "resources": "worker queue idle; resident worker/cache retained for parent/watch_build; no resources created or deleted"
+}

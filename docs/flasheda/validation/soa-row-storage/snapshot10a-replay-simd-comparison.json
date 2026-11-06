@@ -1,0 +1,745 @@
+{
+  "complete": true,
+  "scope": "A/B/C portable independent local kernels; D/E identical actual production SoA layout and force/scatter helper with AVX2/scalar dispatch. Excludes setup/decoding/OpenROAD dispatch/other placement. D/E ratio isolates SIMD in matching layout, not full-placement speedup.",
+  "binary": {
+    "bytes": 1587176,
+    "sha256": "11c3d78132504d9bad1c8a748d5a6f87eeae4d7ce04881569f88ba9b8f38fb09"
+  },
+  "verification_receipt": {
+    "bytes": 23935,
+    "sha256": "b4f05b5c8176769686b243d7c5fad2ace638443d0e42ed0cd84f635bc2a534b5"
+  },
+  "runs": [
+    {
+      "snapshot": "iter-10-owner-0",
+      "threads": 1,
+      "all_five_routes_bitwise_exact": "all A/B/C plus actual production D AVX2 and E scalar, weighted pins, cells, reconstructed force bitwise exact",
+      "effective_threads": 1,
+      "production_avx_consumer_blocks": 145097,
+      "setup_ms": 100.80937,
+      "routes": {
+        "A": {
+          "force_or_fused_force_pin_ms": {
+            "median": 21.76554,
+            "min": 21.693231,
+            "max": 25.517654
+          },
+          "isolated_pin_scatter_ms": {
+            "median": 0,
+            "min": 0,
+            "max": 0
+          },
+          "gather_or_immediate_ms": {
+            "median": 89.776359,
+            "min": 89.474097,
+            "max": 100.829029
+          },
+          "full_force_plus_gather_ms": {
+            "median": 111.561639,
+            "min": 111.279516,
+            "max": 126.346793
+          }
+        },
+        "B": {
+          "force_or_fused_force_pin_ms": {
+            "median": 50.409953,
+            "min": 50.086949,
+            "max": 53.308008
+          },
+          "isolated_pin_scatter_ms": {
+            "median": 18.099404,
+            "min": 17.915498,
+            "max": 20.707827
+          },
+          "gather_or_immediate_ms": {
+            "median": 0.836532,
+            "min": 0.819537,
+            "max": 0.863943
+          },
+          "full_force_plus_gather_ms": {
+            "median": 51.232985,
+            "min": 50.906566,
+            "max": 54.164089
+          }
+        },
+        "C": {
+          "force_or_fused_force_pin_ms": {
+            "median": 21.761783,
+            "min": 21.713101,
+            "max": 21.974902
+          },
+          "isolated_pin_scatter_ms": {
+            "median": 0,
+            "min": 0,
+            "max": 0
+          },
+          "gather_or_immediate_ms": {
+            "median": 82.770626,
+            "min": 81.487337,
+            "max": 88.964865
+          },
+          "full_force_plus_gather_ms": {
+            "median": 104.5131,
+            "min": 103.21523,
+            "max": 110.678076
+          }
+        },
+        "D": {
+          "force_or_fused_force_pin_ms": {
+            "median": 34.844891,
+            "min": 34.661758,
+            "max": 36.44793
+          },
+          "isolated_pin_scatter_ms": {
+            "median": 15.479954,
+            "min": 14.811944,
+            "max": 16.249486
+          },
+          "gather_or_immediate_ms": {
+            "median": 0.696652,
+            "min": 0.686778,
+            "max": 0.701369
+          },
+          "full_force_plus_gather_ms": {
+            "median": 35.544238,
+            "min": 35.358511,
+            "max": 37.148599
+          }
+        },
+        "E": {
+          "force_or_fused_force_pin_ms": {
+            "median": 36.171816,
+            "min": 35.88664,
+            "max": 46.230308
+          },
+          "isolated_pin_scatter_ms": {
+            "median": 16.814901,
+            "min": 16.487271,
+            "max": 19.068615
+          },
+          "gather_or_immediate_ms": {
+            "median": 0.701461,
+            "min": 0.692196,
+            "max": 0.760077
+          },
+          "full_force_plus_gather_ms": {
+            "median": 36.870171,
+            "min": 36.578946,
+            "max": 46.957197
+          }
+        }
+      }
+    },
+    {
+      "snapshot": "iter-10-owner-0",
+      "threads": 4,
+      "all_five_routes_bitwise_exact": "all A/B/C plus actual production D AVX2 and E scalar, weighted pins, cells, reconstructed force bitwise exact",
+      "effective_threads": 4,
+      "production_avx_consumer_blocks": 145097,
+      "setup_ms": 99.022875,
+      "routes": {
+        "A": {
+          "force_or_fused_force_pin_ms": {
+            "median": 7.660353,
+            "min": 7.181055,
+            "max": 8.650193
+          },
+          "isolated_pin_scatter_ms": {
+            "median": 0,
+            "min": 0,
+            "max": 0
+          },
+          "gather_or_immediate_ms": {
+            "median": 27.004519,
+            "min": 26.618932,
+            "max": 29.686482
+          },
+          "full_force_plus_gather_ms": {
+            "median": 34.803199,
+            "min": 34.135429,
+            "max": 37.211872
+          }
+        },
+        "B": {
+          "force_or_fused_force_pin_ms": {
+            "median": 21.180274,
+            "min": 17.859055,
+            "max": 22.734461
+          },
+          "isolated_pin_scatter_ms": {
+            "median": 7.103099,
+            "min": 6.938242,
+            "max": 7.529527
+          },
+          "gather_or_immediate_ms": {
+            "median": 0.311665,
+            "min": 0.274461,
+            "max": 0.395021
+          },
+          "full_force_plus_gather_ms": {
+            "median": 21.470417,
+            "min": 18.133706,
+            "max": 23.046326
+          }
+        },
+        "C": {
+          "force_or_fused_force_pin_ms": {
+            "median": 7.241276,
+            "min": 7.135918,
+            "max": 11.836612
+          },
+          "isolated_pin_scatter_ms": {
+            "median": 0,
+            "min": 0,
+            "max": 0
+          },
+          "gather_or_immediate_ms": {
+            "median": 25.075442,
+            "min": 23.574576,
+            "max": 26.024763
+          },
+          "full_force_plus_gather_ms": {
+            "median": 32.949866,
+            "min": 30.816012,
+            "max": 37.335178
+          }
+        },
+        "D": {
+          "force_or_fused_force_pin_ms": {
+            "median": 13.101204,
+            "min": 12.524571,
+            "max": 14.557083
+          },
+          "isolated_pin_scatter_ms": {
+            "median": 7.454064,
+            "min": 7.207956,
+            "max": 7.699111
+          },
+          "gather_or_immediate_ms": {
+            "median": 0.244516,
+            "min": 0.229554,
+            "max": 0.334841
+          },
+          "full_force_plus_gather_ms": {
+            "median": 13.34603,
+            "min": 12.780414,
+            "max": 14.892024
+          }
+        },
+        "E": {
+          "force_or_fused_force_pin_ms": {
+            "median": 17.235141,
+            "min": 13.516535,
+            "max": 19.484487
+          },
+          "isolated_pin_scatter_ms": {
+            "median": 7.661505,
+            "min": 7.566182,
+            "max": 7.913281
+          },
+          "gather_or_immediate_ms": {
+            "median": 0.736972,
+            "min": 0.315192,
+            "max": 0.783462
+          },
+          "full_force_plus_gather_ms": {
+            "median": 17.948298,
+            "min": 13.831807,
+            "max": 20.221559
+          }
+        }
+      }
+    },
+    {
+      "snapshot": "iter-265-owner-0",
+      "threads": 1,
+      "all_five_routes_bitwise_exact": "all A/B/C plus actual production D AVX2 and E scalar, weighted pins, cells, reconstructed force bitwise exact",
+      "effective_threads": 1,
+      "production_avx_consumer_blocks": 145097,
+      "setup_ms": 100.40945,
+      "routes": {
+        "A": {
+          "force_or_fused_force_pin_ms": {
+            "median": 24.035666,
+            "min": 23.954666,
+            "max": 32.588736
+          },
+          "isolated_pin_scatter_ms": {
+            "median": 0,
+            "min": 0,
+            "max": 0
+          },
+          "gather_or_immediate_ms": {
+            "median": 90.05016,
+            "min": 88.423636,
+            "max": 92.221498
+          },
+          "full_force_plus_gather_ms": {
+            "median": 114.13525,
+            "min": 112.442677,
+            "max": 124.810354
+          }
+        },
+        "B": {
+          "force_or_fused_force_pin_ms": {
+            "median": 52.190066,
+            "min": 51.67161,
+            "max": 53.946744
+          },
+          "isolated_pin_scatter_ms": {
+            "median": 18.04971,
+            "min": 17.87658,
+            "max": 20.887605
+          },
+          "gather_or_immediate_ms": {
+            "median": 0.82201,
+            "min": 0.809392,
+            "max": 1.284111
+          },
+          "full_force_plus_gather_ms": {
+            "median": 53.093007,
+            "min": 52.481112,
+            "max": 54.797317
+          }
+        },
+        "C": {
+          "force_or_fused_force_pin_ms": {
+            "median": 24.022846,
+            "min": 23.953264,
+            "max": 24.084018
+          },
+          "isolated_pin_scatter_ms": {
+            "median": 0,
+            "min": 0,
+            "max": 0
+          },
+          "gather_or_immediate_ms": {
+            "median": 82.297629,
+            "min": 80.942089,
+            "max": 92.914767
+          },
+          "full_force_plus_gather_ms": {
+            "median": 106.308298,
+            "min": 105.007011,
+            "max": 116.998885
+          }
+        },
+        "D": {
+          "force_or_fused_force_pin_ms": {
+            "median": 36.954919,
+            "min": 36.78258,
+            "max": 37.267526
+          },
+          "isolated_pin_scatter_ms": {
+            "median": 15.111052,
+            "min": 14.866717,
+            "max": 16.788121
+          },
+          "gather_or_immediate_ms": {
+            "median": 0.716403,
+            "min": 0.697233,
+            "max": 0.731825
+          },
+          "full_force_plus_gather_ms": {
+            "median": 37.668096,
+            "min": 37.489489,
+            "max": 37.994804
+          }
+        },
+        "E": {
+          "force_or_fused_force_pin_ms": {
+            "median": 38.629144,
+            "min": 38.026843,
+            "max": 40.010581
+          },
+          "isolated_pin_scatter_ms": {
+            "median": 16.51914,
+            "min": 16.046561,
+            "max": 17.988017
+          },
+          "gather_or_immediate_ms": {
+            "median": 0.733157,
+            "min": 0.712365,
+            "max": 0.810232
+          },
+          "full_force_plus_gather_ms": {
+            "median": 39.341589,
+            "min": 38.7465,
+            "max": 40.820893
+          }
+        }
+      }
+    },
+    {
+      "snapshot": "iter-265-owner-0",
+      "threads": 4,
+      "all_five_routes_bitwise_exact": "all A/B/C plus actual production D AVX2 and E scalar, weighted pins, cells, reconstructed force bitwise exact",
+      "effective_threads": 4,
+      "production_avx_consumer_blocks": 145097,
+      "setup_ms": 99.455233,
+      "routes": {
+        "A": {
+          "force_or_fused_force_pin_ms": {
+            "median": 8.143766,
+            "min": 8.019451,
+            "max": 8.552237
+          },
+          "isolated_pin_scatter_ms": {
+            "median": 0,
+            "min": 0,
+            "max": 0
+          },
+          "gather_or_immediate_ms": {
+            "median": 26.349078,
+            "min": 26.179455,
+            "max": 27.580511
+          },
+          "full_force_plus_gather_ms": {
+            "median": 34.72382,
+            "min": 34.34949,
+            "max": 35.809064
+          }
+        },
+        "B": {
+          "force_or_fused_force_pin_ms": {
+            "median": 22.113881,
+            "min": 18.370649,
+            "max": 22.433129
+          },
+          "isolated_pin_scatter_ms": {
+            "median": 8.434672,
+            "min": 8.238869,
+            "max": 8.570495
+          },
+          "gather_or_immediate_ms": {
+            "median": 0.315801,
+            "min": 0.243985,
+            "max": 0.33443
+          },
+          "full_force_plus_gather_ms": {
+            "median": 22.436073,
+            "min": 18.617939,
+            "max": 22.754339
+          }
+        },
+        "C": {
+          "force_or_fused_force_pin_ms": {
+            "median": 8.088043,
+            "min": 7.984518,
+            "max": 12.090852
+          },
+          "isolated_pin_scatter_ms": {
+            "median": 0,
+            "min": 0,
+            "max": 0
+          },
+          "gather_or_immediate_ms": {
+            "median": 24.337338,
+            "min": 23.670921,
+            "max": 25.257685
+          },
+          "full_force_plus_gather_ms": {
+            "median": 33.12079,
+            "min": 32.278422,
+            "max": 35.951397
+          }
+        },
+        "D": {
+          "force_or_fused_force_pin_ms": {
+            "median": 13.582465,
+            "min": 13.447623,
+            "max": 20.206256
+          },
+          "isolated_pin_scatter_ms": {
+            "median": 7.743307,
+            "min": 7.349738,
+            "max": 9.312465
+          },
+          "gather_or_immediate_ms": {
+            "median": 0.252669,
+            "min": 0.244015,
+            "max": 0.291206
+          },
+          "full_force_plus_gather_ms": {
+            "median": 13.829664,
+            "min": 13.738888,
+            "max": 20.48311
+          }
+        },
+        "E": {
+          "force_or_fused_force_pin_ms": {
+            "median": 16.841992,
+            "min": 14.028012,
+            "max": 21.027275
+          },
+          "isolated_pin_scatter_ms": {
+            "median": 7.964638,
+            "min": 7.915064,
+            "max": 11.223415
+          },
+          "gather_or_immediate_ms": {
+            "median": 0.873147,
+            "min": 0.264215,
+            "max": 0.972385
+          },
+          "full_force_plus_gather_ms": {
+            "median": 17.775098,
+            "min": 14.292317,
+            "max": 21.874003
+          }
+        }
+      }
+    },
+    {
+      "snapshot": "iter-520-owner-0",
+      "threads": 1,
+      "all_five_routes_bitwise_exact": "all A/B/C plus actual production D AVX2 and E scalar, weighted pins, cells, reconstructed force bitwise exact",
+      "effective_threads": 1,
+      "production_avx_consumer_blocks": 145097,
+      "setup_ms": 98.834724,
+      "routes": {
+        "A": {
+          "force_or_fused_force_pin_ms": {
+            "median": 30.130046,
+            "min": 30.053862,
+            "max": 30.237255
+          },
+          "isolated_pin_scatter_ms": {
+            "median": 0,
+            "min": 0,
+            "max": 0
+          },
+          "gather_or_immediate_ms": {
+            "median": 87.578341,
+            "min": 86.547608,
+            "max": 92.528448
+          },
+          "full_force_plus_gather_ms": {
+            "median": 117.72411,
+            "min": 116.626407,
+            "max": 122.765814
+          }
+        },
+        "B": {
+          "force_or_fused_force_pin_ms": {
+            "median": 60.29219,
+            "min": 59.330491,
+            "max": 60.948802
+          },
+          "isolated_pin_scatter_ms": {
+            "median": 19.232639,
+            "min": 19.030857,
+            "max": 20.146566
+          },
+          "gather_or_immediate_ms": {
+            "median": 0.832216,
+            "min": 0.803082,
+            "max": 0.860227
+          },
+          "full_force_plus_gather_ms": {
+            "median": 61.095362,
+            "min": 60.147263,
+            "max": 61.759806
+          }
+        },
+        "C": {
+          "force_or_fused_force_pin_ms": {
+            "median": 30.078809,
+            "min": 30.017867,
+            "max": 30.316425
+          },
+          "isolated_pin_scatter_ms": {
+            "median": 0,
+            "min": 0,
+            "max": 0
+          },
+          "gather_or_immediate_ms": {
+            "median": 79.913001,
+            "min": 78.899313,
+            "max": 82.417097
+          },
+          "full_force_plus_gather_ms": {
+            "median": 110.015505,
+            "min": 109.034617,
+            "max": 112.694133
+          }
+        },
+        "D": {
+          "force_or_fused_force_pin_ms": {
+            "median": 45.234429,
+            "min": 44.258698,
+            "max": 57.303407
+          },
+          "isolated_pin_scatter_ms": {
+            "median": 16.485159,
+            "min": 15.670688,
+            "max": 19.511676
+          },
+          "gather_or_immediate_ms": {
+            "median": 0.78829,
+            "min": 0.698075,
+            "max": 1.560996
+          },
+          "full_force_plus_gather_ms": {
+            "median": 46.193232,
+            "min": 44.956873,
+            "max": 58.864513
+          }
+        },
+        "E": {
+          "force_or_fused_force_pin_ms": {
+            "median": 48.245003,
+            "min": 46.216037,
+            "max": 59.281799
+          },
+          "isolated_pin_scatter_ms": {
+            "median": 18.867753,
+            "min": 17.78288,
+            "max": 31.487006
+          },
+          "gather_or_immediate_ms": {
+            "median": 0.763361,
+            "min": 0.709913,
+            "max": 1.386754
+          },
+          "full_force_plus_gather_ms": {
+            "median": 49.202364,
+            "min": 46.938438,
+            "max": 60.032853
+          }
+        }
+      }
+    },
+    {
+      "snapshot": "iter-520-owner-0",
+      "threads": 4,
+      "all_five_routes_bitwise_exact": "all A/B/C plus actual production D AVX2 and E scalar, weighted pins, cells, reconstructed force bitwise exact",
+      "effective_threads": 4,
+      "production_avx_consumer_blocks": 145097,
+      "setup_ms": 99.705477,
+      "routes": {
+        "A": {
+          "force_or_fused_force_pin_ms": {
+            "median": 11.899966,
+            "min": 11.448721,
+            "max": 12.686964
+          },
+          "isolated_pin_scatter_ms": {
+            "median": 0,
+            "min": 0,
+            "max": 0
+          },
+          "gather_or_immediate_ms": {
+            "median": 27.174974,
+            "min": 26.208458,
+            "max": 29.311843
+          },
+          "full_force_plus_gather_ms": {
+            "median": 39.519497,
+            "min": 38.372409,
+            "max": 40.775667
+          }
+        },
+        "B": {
+          "force_or_fused_force_pin_ms": {
+            "median": 24.870555,
+            "min": 20.901646,
+            "max": 26.948976
+          },
+          "isolated_pin_scatter_ms": {
+            "median": 7.33736,
+            "min": 7.211421,
+            "max": 7.369968
+          },
+          "gather_or_immediate_ms": {
+            "median": 0.30751,
+            "min": 0.256384,
+            "max": 0.420149
+          },
+          "full_force_plus_gather_ms": {
+            "median": 25.161971,
+            "min": 21.225322,
+            "max": 27.369345
+          }
+        },
+        "C": {
+          "force_or_fused_force_pin_ms": {
+            "median": 11.464184,
+            "min": 11.384235,
+            "max": 15.395507
+          },
+          "isolated_pin_scatter_ms": {
+            "median": 0,
+            "min": 0,
+            "max": 0
+          },
+          "gather_or_immediate_ms": {
+            "median": 25.561729,
+            "min": 23.921816,
+            "max": 30.227612
+          },
+          "full_force_plus_gather_ms": {
+            "median": 39.133629,
+            "min": 36.656982,
+            "max": 41.802162
+          }
+        },
+        "D": {
+          "force_or_fused_force_pin_ms": {
+            "median": 16.006082,
+            "min": 15.455517,
+            "max": 21.395315
+          },
+          "isolated_pin_scatter_ms": {
+            "median": 8.474781,
+            "min": 7.760173,
+            "max": 12.413596
+          },
+          "gather_or_immediate_ms": {
+            "median": 0.282403,
+            "min": 0.260019,
+            "max": 0.453729
+          },
+          "full_force_plus_gather_ms": {
+            "median": 16.29236,
+            "min": 15.724299,
+            "max": 21.770797
+          }
+        },
+        "E": {
+          "force_or_fused_force_pin_ms": {
+            "median": 18.514835,
+            "min": 17.483162,
+            "max": 20.605634
+          },
+          "isolated_pin_scatter_ms": {
+            "median": 8.455052,
+            "min": 8.035303,
+            "max": 9.67007
+          },
+          "gather_or_immediate_ms": {
+            "median": 1.105615,
+            "min": 0.280209,
+            "max": 1.174168
+          },
+          "full_force_plus_gather_ms": {
+            "median": 19.370727,
+            "min": 18.302086,
+            "max": 21.711359
+          }
+        }
+      }
+    }
+  ],
+  "statistics_note": "Nine rotations per route/configuration; D/E identical production layout and helper except AVX2/scalar selection; full replay excludes setup and all other placement. Four-thread D/E total ranges overlap in every snapshot; report medians as this-run observations, not stable full-placement proof.",
+  "coverage": {
+    "four_pin_blocks": 145097,
+    "four_pin_blocks_pins": 580388,
+    "scalar_tail_pins": 819731,
+    "total_active_net_pins": 1400119,
+    "four_pin_pin_fraction": 0.4145276222949621,
+    "scalar_tail_pin_fraction": 0.5854723777050379,
+    "all_blocks_have_consumer": true,
+    "note": "Current helper batches four pins within each net, reusing that net terms. Short-net tails remain scalar. Cross-net batching would need per-lane differing net terms and explicit correct flags/consumer handling; tail lanes are not free zeros. This round keeps the four-pin threshold and per-net grouping unchanged; short-net batching is future investigation only."
+  }
+}

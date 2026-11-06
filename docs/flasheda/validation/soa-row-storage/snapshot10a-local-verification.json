@@ -1,0 +1,22 @@
+{
+  "snapshot": "snapshot10a",
+  "verified_utc": "2026-11-06T18:05:50.624356+00:00",
+  "archive_sha256": "fe6337a8c140b8cff204bb5875bbe46a976fd0329a2b0c4066020b60da914ea6",
+  "archive_bytes": 3892903,
+  "archive_sha256_exact": true,
+  "safe_unique_archive_members": true,
+  "archive_file_count": 77,
+  "member_hash_receipt": "/Users/shom/Downloads/openroad-gpl-soa/build/soa/row-storage-20261106/production-simd-snapshot10a-member-hashes.json",
+  "member_hash_receipt_sha256": "164b74514ac678d56b3cea7b289a7e4249eba4cbb603102b3e587eb902960071",
+  "frozen_source_files_verified": 44,
+  "test_log_and_XML_files_verified": 30,
+  "native_compile_assembly_and_remarks_verified": 2,
+  "final_linked_functions_verified": 8,
+  "gzip_sha256_exact": true,
+  "decompressed_formal_elf_sha256": "89f9d9777b01434c9d7c1a744148a16446bd3ea4490fa61fb1010ca21e6941f1",
+  "decompressed_formal_elf_bytes": 124458344,
+  "all_known_receipts_match_archive_members": true,
+  "no_build_or_tests_rerun": true,
+  "worker_cache_preserved": true,
+  "passed": true
+}

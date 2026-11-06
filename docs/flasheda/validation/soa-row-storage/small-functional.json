@@ -1,0 +1,562 @@
+{
+  "status": "passed",
+  "archived_utc": "2026-11-06T16:24:26.471199+00:00",
+  "functional_only": true,
+  "suites": {
+    "row-functional-gcd1": {
+      "summary_sha256": "142df534c07eb517adc5d7db27132125ab01a7be1e6134aee9ca257416895d66",
+      "input_manifest_sha256": "31ac380a90720848058908c140bc62b9fb8ec30be236a775be9e9528ec8989e7",
+      "cases": {
+        "gcd": {
+          "1": {
+            "exact": true,
+            "row_counts": {
+              "state": 953,
+              "quality": 4,
+              "trace": 3350
+            },
+            "observed_events": {
+              "filler_cut_calls": 0,
+              "positive_filler_cut": 0,
+              "filler_restore_calls": 0,
+              "positive_filler_restore": 0,
+              "backtrack": 339,
+              "routability_revert": 0
+            },
+            "native_events": {
+              "filler_cut_calls": 0,
+              "positive_filler_cut": 0,
+              "filler_restore_calls": 0,
+              "positive_filler_restore": 0,
+              "backtrack": 339,
+              "routability_revert": 0
+            },
+            "state_sha256": "7cb908c88cd798724f9fd1c12d7af7b6aee9f387591275449f4d142f0e2d7a8f",
+            "trace_sha256": "a9b7bb69f08269ac743c283a4714143de7b62723a0a1d8ec655018a6adf35b2b",
+            "quality": [
+              "FLASHEDA_LEGAL 1",
+              "FLASHEDA_QUALITY 9.367967999818811 0.0",
+              "ROW_AREA 621.908",
+              "ROW_HPWL 7434.7355"
+            ]
+          }
+        }
+      }
+    },
+    "row-functional-gcd4": {
+      "summary_sha256": "e5f8f017d20092e866f94cddb8e20679a62080f6cc7cfd5b971ea88ba3e3503a",
+      "input_manifest_sha256": "31ac380a90720848058908c140bc62b9fb8ec30be236a775be9e9528ec8989e7",
+      "cases": {
+        "gcd": {
+          "4": {
+            "exact": true,
+            "row_counts": {
+              "state": 953,
+              "quality": 4,
+              "trace": 3350
+            },
+            "observed_events": {
+              "filler_cut_calls": 0,
+              "positive_filler_cut": 0,
+              "filler_restore_calls": 0,
+              "positive_filler_restore": 0,
+              "backtrack": 339,
+              "routability_revert": 0
+            },
+            "native_events": {
+              "filler_cut_calls": 0,
+              "positive_filler_cut": 0,
+              "filler_restore_calls": 0,
+              "positive_filler_restore": 0,
+              "backtrack": 339,
+              "routability_revert": 0
+            },
+            "state_sha256": "7cb908c88cd798724f9fd1c12d7af7b6aee9f387591275449f4d142f0e2d7a8f",
+            "trace_sha256": "a9b7bb69f08269ac743c283a4714143de7b62723a0a1d8ec655018a6adf35b2b",
+            "quality": [
+              "FLASHEDA_LEGAL 1",
+              "FLASHEDA_QUALITY 9.367967999818811 0.0",
+              "ROW_AREA 621.908",
+              "ROW_HPWL 7434.7355"
+            ]
+          }
+        }
+      }
+    },
+    "row-functional-rest": {
+      "summary_sha256": "b933e3b7102982a2050a9a7a64a55d148ffa32212c3c53f1ae239e88987c3e0b",
+      "input_manifest_sha256": "31ac380a90720848058908c140bc62b9fb8ec30be236a775be9e9528ec8989e7",
+      "cases": {
+        "aes_cipher_top": {
+          "1": {
+            "exact": true,
+            "row_counts": {
+              "state": 39320,
+              "quality": 4,
+              "trace": 11067
+            },
+            "observed_events": {
+              "filler_cut_calls": 11,
+              "positive_filler_cut": 11,
+              "filler_restore_calls": 1,
+              "positive_filler_restore": 1,
+              "backtrack": 1125,
+              "routability_revert": 12
+            },
+            "native_events": {
+              "filler_cut_calls": 11,
+              "positive_filler_cut": 11,
+              "filler_restore_calls": 1,
+              "positive_filler_restore": 1,
+              "backtrack": 1125,
+              "routability_revert": 12
+            },
+            "state_sha256": "d8a36e2453b917d2f43f77c54bd3e075a0af94fc3ac52e1562885f5905e0fa41",
+            "trace_sha256": "8c4be5575452d45c387bca439e9bce83b0ad328229992019442ea47edfb53499",
+            "quality": [
+              "FLASHEDA_LEGAL 1",
+              "FLASHEDA_QUALITY 3.86154852357542 0.0",
+              "ROW_AREA 23358.79",
+              "ROW_HPWL 432841.18"
+            ]
+          },
+          "4": {
+            "exact": true,
+            "row_counts": {
+              "state": 39320,
+              "quality": 4,
+              "trace": 11067
+            },
+            "observed_events": {
+              "filler_cut_calls": 11,
+              "positive_filler_cut": 11,
+              "filler_restore_calls": 1,
+              "positive_filler_restore": 1,
+              "backtrack": 1125,
+              "routability_revert": 12
+            },
+            "native_events": {
+              "filler_cut_calls": 11,
+              "positive_filler_cut": 11,
+              "filler_restore_calls": 1,
+              "positive_filler_restore": 1,
+              "backtrack": 1125,
+              "routability_revert": 12
+            },
+            "state_sha256": "d8a36e2453b917d2f43f77c54bd3e075a0af94fc3ac52e1562885f5905e0fa41",
+            "trace_sha256": "8c4be5575452d45c387bca439e9bce83b0ad328229992019442ea47edfb53499",
+            "quality": [
+              "FLASHEDA_LEGAL 1",
+              "FLASHEDA_QUALITY 3.86154852357542 0.0",
+              "ROW_AREA 23358.79",
+              "ROW_HPWL 432841.18"
+            ]
+          }
+        },
+        "incremental02": {
+          "1": {
+            "exact": true,
+            "row_counts": {
+              "state": 47227,
+              "quality": 2,
+              "trace": 5184
+            },
+            "observed_events": {
+              "filler_cut_calls": 0,
+              "positive_filler_cut": 0,
+              "filler_restore_calls": 0,
+              "positive_filler_restore": 0,
+              "backtrack": 607,
+              "routability_revert": 0
+            },
+            "native_events": {
+              "filler_cut_calls": 0,
+              "positive_filler_cut": 0,
+              "filler_restore_calls": 0,
+              "positive_filler_restore": 0,
+              "backtrack": 607,
+              "routability_revert": 0
+            },
+            "state_sha256": "5c025fdde69b218736b49cbd3b408bd01f49751caab28ea590521afd75861d74",
+            "trace_sha256": "936e5db1715b143bd28696839e27fd6ea3470acd91e22e2acca98527322639f9",
+            "quality": [
+              "ROW_AREA 23168.334",
+              "ROW_HPWL 691781.618"
+            ]
+          },
+          "4": {
+            "exact": true,
+            "row_counts": {
+              "state": 47227,
+              "quality": 2,
+              "trace": 5184
+            },
+            "observed_events": {
+              "filler_cut_calls": 0,
+              "positive_filler_cut": 0,
+              "filler_restore_calls": 0,
+              "positive_filler_restore": 0,
+              "backtrack": 607,
+              "routability_revert": 0
+            },
+            "native_events": {
+              "filler_cut_calls": 0,
+              "positive_filler_cut": 0,
+              "filler_restore_calls": 0,
+              "positive_filler_restore": 0,
+              "backtrack": 607,
+              "routability_revert": 0
+            },
+            "state_sha256": "5c025fdde69b218736b49cbd3b408bd01f49751caab28ea590521afd75861d74",
+            "trace_sha256": "936e5db1715b143bd28696839e27fd6ea3470acd91e22e2acca98527322639f9",
+            "quality": [
+              "ROW_AREA 23168.334",
+              "ROW_HPWL 691781.618"
+            ]
+          }
+        },
+        "incremental03": {
+          "1": {
+            "exact": true,
+            "row_counts": {
+              "state": 47227,
+              "quality": 2,
+              "trace": 546
+            },
+            "observed_events": {
+              "filler_cut_calls": 0,
+              "positive_filler_cut": 0,
+              "filler_restore_calls": 0,
+              "positive_filler_restore": 0,
+              "backtrack": 39,
+              "routability_revert": 0
+            },
+            "native_events": {
+              "filler_cut_calls": 0,
+              "positive_filler_cut": 0,
+              "filler_restore_calls": 0,
+              "positive_filler_restore": 0,
+              "backtrack": 39,
+              "routability_revert": 0
+            },
+            "state_sha256": "f13bc093983a73f74db18e72076da868db28951d5551b3ab4ce747800073431f",
+            "trace_sha256": "21d347246626283176583ee9068e35bce1c53155bff758791366e3d936aa937d",
+            "quality": [
+              "ROW_AREA 23168.334",
+              "ROW_HPWL 2226945.5905"
+            ]
+          },
+          "4": {
+            "exact": true,
+            "row_counts": {
+              "state": 47227,
+              "quality": 2,
+              "trace": 546
+            },
+            "observed_events": {
+              "filler_cut_calls": 0,
+              "positive_filler_cut": 0,
+              "filler_restore_calls": 0,
+              "positive_filler_restore": 0,
+              "backtrack": 39,
+              "routability_revert": 0
+            },
+            "native_events": {
+              "filler_cut_calls": 0,
+              "positive_filler_cut": 0,
+              "filler_restore_calls": 0,
+              "positive_filler_restore": 0,
+              "backtrack": 39,
+              "routability_revert": 0
+            },
+            "state_sha256": "f13bc093983a73f74db18e72076da868db28951d5551b3ab4ce747800073431f",
+            "trace_sha256": "21d347246626283176583ee9068e35bce1c53155bff758791366e3d936aa937d",
+            "quality": [
+              "ROW_AREA 23168.334",
+              "ROW_HPWL 2226945.5905"
+            ]
+          }
+        },
+        "place_ios_td": {
+          "1": {
+            "exact": true,
+            "row_counts": {
+              "state": 784,
+              "quality": 3,
+              "trace": 3464
+            },
+            "observed_events": {
+              "filler_cut_calls": 0,
+              "positive_filler_cut": 0,
+              "filler_restore_calls": 0,
+              "positive_filler_restore": 0,
+              "backtrack": 350,
+              "routability_revert": 0
+            },
+            "native_events": {
+              "filler_cut_calls": 0,
+              "positive_filler_cut": 0,
+              "filler_restore_calls": 0,
+              "positive_filler_restore": 0,
+              "backtrack": 350,
+              "routability_revert": 0
+            },
+            "state_sha256": "b1165dc4c340153da7769108ff5a283b218b5def8d1560dc524e9de838c111bf",
+            "trace_sha256": "0018225187410cb0f99e8ee46638b5d8ef48f269f5fbf9ac4ff795470c012ff7",
+            "quality": [
+              "worst slack max -0.01",
+              "ROW_AREA 610.736",
+              "ROW_HPWL 1938.373"
+            ]
+          },
+          "4": {
+            "exact": true,
+            "row_counts": {
+              "state": 784,
+              "quality": 3,
+              "trace": 3464
+            },
+            "observed_events": {
+              "filler_cut_calls": 0,
+              "positive_filler_cut": 0,
+              "filler_restore_calls": 0,
+              "positive_filler_restore": 0,
+              "backtrack": 350,
+              "routability_revert": 0
+            },
+            "native_events": {
+              "filler_cut_calls": 0,
+              "positive_filler_cut": 0,
+              "filler_restore_calls": 0,
+              "positive_filler_restore": 0,
+              "backtrack": 350,
+              "routability_revert": 0
+            },
+            "state_sha256": "b1165dc4c340153da7769108ff5a283b218b5def8d1560dc524e9de838c111bf",
+            "trace_sha256": "0018225187410cb0f99e8ee46638b5d8ef48f269f5fbf9ac4ff795470c012ff7",
+            "quality": [
+              "worst slack max -0.01",
+              "ROW_AREA 610.736",
+              "ROW_HPWL 1938.373"
+            ]
+          }
+        },
+        "place_ios_rd": {
+          "1": {
+            "exact": true,
+            "row_counts": {
+              "state": 712,
+              "quality": 2,
+              "trace": 8386
+            },
+            "observed_events": {
+              "filler_cut_calls": 5,
+              "positive_filler_cut": 0,
+              "filler_restore_calls": 1,
+              "positive_filler_restore": 0,
+              "backtrack": 747,
+              "routability_revert": 6
+            },
+            "native_events": {
+              "filler_cut_calls": 5,
+              "positive_filler_cut": 0,
+              "filler_restore_calls": 1,
+              "positive_filler_restore": 0,
+              "backtrack": 747,
+              "routability_revert": 6
+            },
+            "state_sha256": "d4e345c56ec00dc8e4f7bb1aefda3eb228c45a5236f6403717542bd21b77de62",
+            "trace_sha256": "8bcce4ec884c8b78fe281f6e06f75eac54955b3a3815830cb4b8d1f287363d2b",
+            "quality": [
+              "ROW_AREA 569.772",
+              "ROW_HPWL 1904.743"
+            ]
+          },
+          "4": {
+            "exact": true,
+            "row_counts": {
+              "state": 712,
+              "quality": 2,
+              "trace": 8386
+            },
+            "observed_events": {
+              "filler_cut_calls": 5,
+              "positive_filler_cut": 0,
+              "filler_restore_calls": 1,
+              "positive_filler_restore": 0,
+              "backtrack": 747,
+              "routability_revert": 6
+            },
+            "native_events": {
+              "filler_cut_calls": 5,
+              "positive_filler_cut": 0,
+              "filler_restore_calls": 1,
+              "positive_filler_restore": 0,
+              "backtrack": 747,
+              "routability_revert": 6
+            },
+            "state_sha256": "d4e345c56ec00dc8e4f7bb1aefda3eb228c45a5236f6403717542bd21b77de62",
+            "trace_sha256": "8bcce4ec884c8b78fe281f6e06f75eac54955b3a3815830cb4b8d1f287363d2b",
+            "quality": [
+              "ROW_AREA 569.772",
+              "ROW_HPWL 1904.743"
+            ]
+          }
+        },
+        "region01": {
+          "1": {
+            "exact": true,
+            "row_counts": {
+              "state": 1358,
+              "quality": 2,
+              "trace": 6270
+            },
+            "observed_events": {
+              "filler_cut_calls": 0,
+              "positive_filler_cut": 0,
+              "filler_restore_calls": 0,
+              "positive_filler_restore": 0,
+              "backtrack": 429,
+              "routability_revert": 0
+            },
+            "native_events": {
+              "filler_cut_calls": 0,
+              "positive_filler_cut": 0,
+              "filler_restore_calls": 0,
+              "positive_filler_restore": 0,
+              "backtrack": 429,
+              "routability_revert": 0
+            },
+            "state_sha256": "e6384f3b0ae0dddc94b0341ae9e14b55625a78a669101de538cc5719c9eea890",
+            "trace_sha256": "5cf5f55333f20bb2a2463135094d6370090b07bb69c81f951b266a56f8109c73",
+            "quality": [
+              "ROW_AREA 6974.1888",
+              "ROW_HPWL 12638.124"
+            ]
+          },
+          "4": {
+            "exact": true,
+            "row_counts": {
+              "state": 1358,
+              "quality": 2,
+              "trace": 6270
+            },
+            "observed_events": {
+              "filler_cut_calls": 0,
+              "positive_filler_cut": 0,
+              "filler_restore_calls": 0,
+              "positive_filler_restore": 0,
+              "backtrack": 429,
+              "routability_revert": 0
+            },
+            "native_events": {
+              "filler_cut_calls": 0,
+              "positive_filler_cut": 0,
+              "filler_restore_calls": 0,
+              "positive_filler_restore": 0,
+              "backtrack": 429,
+              "routability_revert": 0
+            },
+            "state_sha256": "e6384f3b0ae0dddc94b0341ae9e14b55625a78a669101de538cc5719c9eea890",
+            "trace_sha256": "5cf5f55333f20bb2a2463135094d6370090b07bb69c81f951b266a56f8109c73",
+            "quality": [
+              "ROW_AREA 6974.1888",
+              "ROW_HPWL 12638.124"
+            ]
+          }
+        },
+        "simple01-td-repair": {
+          "1": {
+            "exact": true,
+            "row_counts": {
+              "state": 804,
+              "quality": 3,
+              "trace": 3390
+            },
+            "observed_events": {
+              "filler_cut_calls": 0,
+              "positive_filler_cut": 0,
+              "filler_restore_calls": 0,
+              "positive_filler_restore": 0,
+              "backtrack": 364,
+              "routability_revert": 0
+            },
+            "native_events": {
+              "filler_cut_calls": 0,
+              "positive_filler_cut": 0,
+              "filler_restore_calls": 0,
+              "positive_filler_restore": 0,
+              "backtrack": 364,
+              "routability_revert": 0
+            },
+            "state_sha256": "f2526b0adc1dea997883761d44a773ea5bf54cb71f6ca2a5f81f3027debf1471",
+            "trace_sha256": "95d379ff3e06fbab53f321906c1a0a99c749e212eea00650c339c4017b75a2a9",
+            "quality": [
+              "worst slack max -0.02",
+              "ROW_AREA 618.45",
+              "ROW_HPWL 2704.6635"
+            ]
+          },
+          "4": {
+            "exact": true,
+            "row_counts": {
+              "state": 804,
+              "quality": 3,
+              "trace": 3390
+            },
+            "observed_events": {
+              "filler_cut_calls": 0,
+              "positive_filler_cut": 0,
+              "filler_restore_calls": 0,
+              "positive_filler_restore": 0,
+              "backtrack": 364,
+              "routability_revert": 0
+            },
+            "native_events": {
+              "filler_cut_calls": 0,
+              "positive_filler_cut": 0,
+              "filler_restore_calls": 0,
+              "positive_filler_restore": 0,
+              "backtrack": 364,
+              "routability_revert": 0
+            },
+            "state_sha256": "f2526b0adc1dea997883761d44a773ea5bf54cb71f6ca2a5f81f3027debf1471",
+            "trace_sha256": "95d379ff3e06fbab53f321906c1a0a99c749e212eea00650c339c4017b75a2a9",
+            "quality": [
+              "worst slack max -0.02",
+              "ROW_AREA 618.45",
+              "ROW_HPWL 2704.6635"
+            ]
+          }
+        }
+      }
+    }
+  },
+  "paired_configurations": 16,
+  "runs": 32,
+  "commands": {
+    "23-functional-gcd1.sh": {
+      "exit": 0,
+      "sha256": "97a9abaab53a752bebba267560441a892541f1455fdb7cc788c496ede2615bce",
+      "log_sha256": "9bb64557b1a5ddd677fad3b516092149e34954117a7f79b6c1e92936228c6479"
+    },
+    "24-functional-rest.sh": {
+      "exit": 0,
+      "sha256": "48c1770e71dca3b65963344046efc20d88da770e726efcbbdf9e3a31301cacd3",
+      "log_sha256": "1e3f2af58e5d98921d4f9e9389d3289d1480c5803dcae8d9e8e97d251bd3742e"
+    }
+  },
+  "production_source_verified_before_after": true,
+  "binary_sha256": {
+    "native": {
+      "path": "/gpfs/users/linlizhi/flasheda-soa-merge-local-20261106/binaries/baseline",
+      "sha256": "9eedbe284a9330f4269c1c1c557ae869f2d9c8472ae0610b3f7dc0f98b6b3fc4",
+      "bytes": 124296512
+    },
+    "new": {
+      "path": "/gpfs/users/linlizhi/flasheda-soa-row-storage-20261106/binaries/new-snapshot8a",
+      "sha256": "2f2c1364cc30d33cd76a9b7bf8d898d590b16e9bc1d928691fd5311bf7c15c03",
+      "bytes": 124452824
+    }
+  }
+}

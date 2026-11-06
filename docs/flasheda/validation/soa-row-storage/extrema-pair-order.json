@@ -1,0 +1,13 @@
+{
+  "seed": 20261106,
+  "cases": 13444,
+  "contributing_pairs_compared": 1646790,
+  "exact": true,
+  "coverage": [
+    "empty/single pin",
+    "0..4 distinct extrema, every subset n<=13",
+    "all 4 role positions with duplicates n<=8",
+    "random fanout up to599, shared-instance skips, axis event order"
+  ],
+  "script_sha256": "63312f4d9c27841ee133bc8272930f35d2d49cfc331a283ea98206d15fa127df"
+}

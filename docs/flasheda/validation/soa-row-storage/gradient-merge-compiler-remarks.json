@@ -1,0 +1,19 @@
+{
+  "snapshot": "snapshot10a",
+  "scope": "Actual production CppCompile flags; separate pre-link diagnostic native assembly. Formal ELF remains uninstrumented.",
+  "formal_elf_unchanged": true,
+  "source": "src/gpl/src/nesterovBase.cpp",
+  "source_sha256": "ba6fe6f877e7013badfbeb1c85a730a1d93b9b5ab9f42ce69dc8c2fa8a4149d5",
+  "remarks_path": "/Users/shom/Downloads/openroad-gpl-soa/build/soa/row-storage-20261106/snapshot10a/nesterovBase-vectorization.log",
+  "remarks_sha256": "7b5c537ace049d70591e927541d06f2542e82d19c7e621f5740f51990abae6c2",
+  "selected_remarks": [
+    "src/gpl/src/nesterovBase.cpp:3882:3: remark: loop not vectorized [-Rpass-missed=loop-vectorize]",
+    "src/gpl/src/nesterovBase.cpp:3766:1: remark: loop not vectorized: call instruction cannot be vectorized [-Rpass-analysis=loop-vectorize]",
+    "src/gpl/src/nesterovBase.cpp:3766:1: remark: loop not vectorized: call instruction cannot be vectorized [-Rpass-analysis=loop-vectorize]",
+    "src/gpl/src/nesterovBase.cpp:3766:1: remark: loop not vectorized: instruction cannot be vectorized [-Rpass-analysis=loop-vectorize]",
+    "src/gpl/src/nesterovBase.cpp:3748:3: remark: loop not vectorized [-Rpass-missed=loop-vectorize]",
+    "src/gpl/src/nesterovBase.cpp:3766:1: remark: loop not vectorized: Cannot vectorize early exit loop [-Rpass-analysis=loop-vectorize]",
+    "src/gpl/src/nesterovBase.cpp:3766:1: remark: loop not vectorized [-Rpass-missed=loop-vectorize]"
+  ],
+  "interpretation": "Actual pre-link diagnostic reports call instructions/early exits as loop-vectorization blockers; not a proof of final ThinLTO optimization decisions. Final-ELF scalar arithmetic independently verified in instruction digest."
+}

@@ -1,0 +1,21 @@
+{
+  "snapshot": "snapshot10a",
+  "binary": "/gpfs/users/linlizhi/flasheda-soa-row-storage-20261106/replay-tools/simd/replay-benchmark-simd",
+  "binary_sha256": "11c3d78132504d9bad1c8a748d5a6f87eeae4d7ce04881569f88ba9b8f38fb09",
+  "binary_bytes": 1587176,
+  "compiler_sha256": "2667f50297ef526c2a594fae811614d83e55a14ac2ac3ac4414b100b7d0d9642",
+  "production_header": "src/gpl/src/wirelengthSimd.h",
+  "production_header_sha256": "83dbae575f9694231260d3b2e1748ca249d59e669a1393438e457dfcf3c44c81",
+  "source_sha256": "8fe4173fe9d541d107a2442de7055fd07e8c851c920d65220b1ec147266490fb",
+  "temporary_build_sha256": "91459ef47bf5937128edea9ef06fdf5b232a0ee0f8603f4553219e8f1d6cbab9",
+  "actual_build_command": "bash \"$TASK/bazel.sh\" build --keep_going //flasheda_replay_simd_tools:replay_benchmark_simd",
+  "all_actions_sha256": "c482f84df38615e8fcf24244ff972d3251293cc63ef551619c9f4ebc4e306ac7",
+  "assembly_sha256": "34ac297275d2b7e7f431bfff3b65ef5925c8714d66cdd7655881671bca6d7169",
+  "linked_assembly_sha256": "459deaa5c09b867a241ea1a2c747d171b2a5090544277aaeb00a5c811bac3ea4",
+  "scope": "Independent Bazel replay tool using frozen production header; no replay/performance execution in build worker.",
+  "archive": "/gpfs/users/linlizhi/flasheda-soa-row-storage-20261106/replay-simd-bazel-evidence.tar.gz",
+  "archive_sha256": "deaedae852dcf9de66d8f02273189acab1bd104cf231c94aa24985acea15b684",
+  "archive_bytes": 3403341,
+  "link_and_lto_actions": 2,
+  "actual_parameter_files": 2
+}

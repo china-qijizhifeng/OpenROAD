@@ -1,0 +1,84 @@
+{
+  "snapshot": "snapshot9",
+  "status": "passed",
+  "purpose": "functional-differential-only",
+  "runs": 32,
+  "pairs": 16,
+  "cases": [
+    "gcd",
+    "aes_cipher_top",
+    "incremental02",
+    "incremental03",
+    "place_ios_td",
+    "place_ios_rd",
+    "region01",
+    "simple01-td-repair"
+  ],
+  "requested_threads": [
+    1,
+    4
+  ],
+  "source": {
+    "head": "2847efec57c70e532ca40cf7969e044541a25a94",
+    "overlay_sha256": "a863040105312f0018b03006bb3db4df681ee6ee9994c798fb8c40ff34233527",
+    "final_formatted_diff_sha256": "73faeb1b4320fce7dc3ab5fe58e728d84a1220a894c45986cebe187e9eace60e",
+    "frozen_files": 42,
+    "source_proof_sha256": "ef4170af71458c9b5379ef425634a6af86a6d7c04d6df04b6ce85db002b1f4a1",
+    "files_verified_before_and_after": true,
+    "regression_inputs_unchanged": true
+  },
+  "binaries": {
+    "native": {
+      "path": "/gpfs/users/linlizhi/flasheda-soa-merge-local-20261106/binaries/baseline",
+      "sha256": "9eedbe284a9330f4269c1c1c557ae869f2d9c8472ae0610b3f7dc0f98b6b3fc4",
+      "bytes": 124296512
+    },
+    "new": {
+      "path": "/gpfs/users/linlizhi/flasheda-soa-row-storage-20261106/binaries/new-snapshot9",
+      "sha256": "d7ddd6f2280b9842076ce6f9c38edf40e6351945d1515c8d5621fc8968392e7f",
+      "bytes": 124450848
+    }
+  },
+  "exact_observables": [
+    "cell/port/net state; master/orientation/status",
+    "area/HPWL/WNS/TNS/legalization where original flow supports",
+    "InitialPlace, Nesterov, per-backtrack, step length, gradient sums, GPL info/warnings and routability traces"
+  ],
+  "coverage": {
+    "aes_each_thread": {
+      "filler_cut_calls": 11,
+      "positive_filler_cut": 11,
+      "filler_restore_calls": 1,
+      "positive_filler_restore": 1,
+      "backtrack": 1125,
+      "routability_revert": 12
+    },
+    "place_ios_rd_each_thread": {
+      "filler_cut_calls": 5,
+      "positive_filler_cut": 0,
+      "filler_restore_calls": 1,
+      "positive_filler_restore": 0,
+      "backtrack": 747,
+      "routability_revert": 6
+    },
+    "region01": "both voltage-domain solvers entered at 1T and 4T",
+    "original_tcl_assertions": "retained except hardcoded threads and toolchain-specific diff_files, replaced by native/new exact comparison"
+  },
+  "command": {
+    "path": "/gpfs/users/linlizhi/flasheda-soa-row-storage-20261106/commands/37-functional-snapshot9.sh",
+    "exit": 0
+  },
+  "evidence": {
+    "path": "/gpfs/users/linlizhi/flasheda-soa-row-storage-20261106/row-acceptance-tools/evidence-snapshot9/row-functional-snapshot9-evidence.tar.gz",
+    "bytes": 22576375,
+    "sha256": "7dc931d2d6da8fc01cf7a3e638c932864a64a4ac7842d61123b77e9789b8d518",
+    "members": 309,
+    "summary_sha256": "9ba1f069ced48883d639a17d339380b2786f411650a6fc9f832be1d6bbe4a911",
+    "runs": 32,
+    "pairs": 16,
+    "status": "passed",
+    "snapshot": "snapshot9"
+  },
+  "limitations": "debug and state export enabled; elapsed time and RSS are not formal performance evidence",
+  "resources": "worker queue idle; resident worker/cache retained for parent/watch_build; no resource created or deleted"
+}

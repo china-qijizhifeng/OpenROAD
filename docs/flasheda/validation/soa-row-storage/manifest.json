@@ -1,0 +1,375 @@
+{
+  "scope": "Complete: row pools/capacity/initial placement, snapshot8a/9 acceptance, optional SIMD10a experiment and final10b build/15targets/36 functional/12 E2B modes/9 selectors; three SIMD analyses; owned E2B sandboxes and Northjob worker/cache released after verified evidence transfer",
+  "files": {
+    "final-source.json": {
+      "bytes": 5167,
+      "sha256": "6db39f45b212a8adc9a937156f077ed830d81d50692b848e9a9877b086c0b0c7",
+      "local_source": "build/soa/row-storage-20261106/snapshot8a/final-source-receipt.json"
+    },
+    "formal-elf.json": {
+      "bytes": 5472,
+      "sha256": "4253227a57fd32354adba406b127693d05286424f7eb54ff3d929139e462b0a2",
+      "local_source": "build/soa/row-storage-20261106/new-elf-receipt.json"
+    },
+    "toolchain.json": {
+      "bytes": 2888,
+      "sha256": "d62d888fe636e2a5a372e56f585be1a369edcc93c12f92532107fabf4c754514",
+      "local_source": "build/soa/row-storage-20261106/toolchain-fingerprint.json"
+    },
+    "compiler-action.json": {
+      "bytes": 43674,
+      "sha256": "b7494864490cbc96d32be49eb1a437765f2a67004420bfed05b77cf6ba169fe0",
+      "local_source": "build/soa/row-storage-20261106/wirelength-action-receipt.json"
+    },
+    "linux-tests.json": {
+      "bytes": 6685,
+      "sha256": "d964c8b87ab99b156a14370acc14efe6b5f96e7f918b6b3d42dcfc46b988c441",
+      "local_source": "build/soa/row-storage-20261106/snapshot8a/gpl-test-receipt-enriched.json"
+    },
+    "local-header-sanitizer.json": {
+      "bytes": 5193,
+      "sha256": "6e0641f213fb5d489bb28515fbc8e19de4b843493881fd9c87e0b89ea6dcbde5",
+      "local_source": "build/soa/row-storage-20261106/snapshot8a/local-header-receipt.json"
+    },
+    "extrema-pair-order.json": {
+      "bytes": 400,
+      "sha256": "84e9645bb0b335631355da6dde23e1fe7d9ea433cf50c99b38f051c85706b73c",
+      "local_source": "build/soa/row-storage-20261106/check-extrema-pair-order.json"
+    },
+    "small-functional.json": {
+      "bytes": 19457,
+      "sha256": "2f9337eb35b940788bba0b9cda3073b779ed8b3b5e5716d6bd0ae57507b4bc0a",
+      "local_source": "build/soa/row-acceptance-20261106/row-functional-combined.json"
+    },
+    "small-functional-archive.json": {
+      "bytes": 390,
+      "sha256": "79ed5c54fe4a4dfb7d007d3a92134cbaf184503d08d9967f79b44af8595a0676",
+      "local_source": "build/soa/row-acceptance-20261106/row-functional-archive.json"
+    },
+    "matrix-differential.json": {
+      "bytes": 3532,
+      "sha256": "96e6d40d68d85748b594bc5b47db7edb836ce30a577d4a0f2563dcd071c6f71d",
+      "local_source": "build/soa/row-storage-20261106/matrix-differential-compact-summary.json"
+    },
+    "matrix-replay-archives.json": {
+      "bytes": 5521,
+      "sha256": "2416199f99de6af3dd14f7cd740ff588861345dbeb32e8551f32b4fd702c587f",
+      "local_source": "build/soa/row-storage-20261106/matrix-and-repro-archive-receipt.json"
+    },
+    "matrix-final-restoration.json": {
+      "bytes": 5038,
+      "sha256": "579513ca3eabb0d76e8b0d37fe0e660228877b4defdf8dc5c8f5b92fe2eedcdd",
+      "local_source": "build/soa/row-storage-20261106/matrix-final-restoration-receipt.json"
+    },
+    "snapshot8a-formal-comparison.json": {
+      "bytes": 17254,
+      "sha256": "39d63a8c9bd848a719b781bca620c35b14e75eda2d3b3ca98e20716ca5dc0390",
+      "local_source": "build/soa/e2b-opt2-20261106/summary/formal-comparison.json"
+    },
+    "snapshot8a-formal-comparison.csv": {
+      "bytes": 796,
+      "sha256": "2ec21c24f75b472a5c97cfee2918c5230fa0473d420d28c0fb025cfd74e698d7",
+      "local_source": "build/soa/e2b-opt2-20261106/summary/formal-comparison.csv"
+    },
+    "snapshot8a-aes-cycles-attribution.json": {
+      "bytes": 690352,
+      "sha256": "d64e5e1c4ca184bb4c68c634a013d9d37bf8cbd2b5bfaed0531d5a1b7bd0c297",
+      "local_source": "build/soa/e2b-opt2-20261106/summary/targeted-aes-attribution.json"
+    },
+    "snapshot9-formal-elf.json": {
+      "bytes": 5470,
+      "sha256": "a330e0221b8e7646916373cc23c945d127603ccbb97d7611dc0bb906be0ef909",
+      "local_source": "build/soa/row-storage-20261106/snapshot9/new-elf-receipt.json"
+    },
+    "snapshot9-final-source.json": {
+      "bytes": 5166,
+      "sha256": "ef4170af71458c9b5379ef425634a6af86a6d7c04d6df04b6ce85db002b1f4a1",
+      "local_source": "build/soa/row-storage-20261106/snapshot9/final-source-receipt.json"
+    },
+    "snapshot9-linux-tests.json": {
+      "bytes": 6396,
+      "sha256": "fe7bcaecfbf9c2e9a04bb43678cf7df95d7e8fcaa236af3602c9e4196ec94d13",
+      "local_source": "build/soa/row-storage-20261106/snapshot9/gpl-test-receipt.json"
+    },
+    "snapshot9-local-header-sanitizer.json": {
+      "bytes": 5174,
+      "sha256": "b3a105cd651d1eb8d22c6e20d1ef543d6cce2f329ea2cde776ed1a9779de70ed",
+      "local_source": "build/soa/row-storage-20261106/snapshot9/local-header-receipt.json"
+    },
+    "snapshot9-compiler-action.json": {
+      "bytes": 43674,
+      "sha256": "b7494864490cbc96d32be49eb1a437765f2a67004420bfed05b77cf6ba169fe0",
+      "local_source": "build/soa/row-storage-20261106/snapshot9/wirelength-action-receipt.json"
+    },
+    "snapshot9-archives.json": {
+      "bytes": 1592,
+      "sha256": "ec19770af0ab119fa1377fc751a7775ce98e4432f7fc7147dd98e9a6d1eaab16",
+      "local_source": "build/soa/row-storage-20261106/snapshot9/archive-receipt.json"
+    },
+    "snapshot9-local-verification.json": {
+      "bytes": 409,
+      "sha256": "49b8e9deb351a2be2d7c1f835b5343fdcf6c9fe1b4c4a8350cf3ed2f8bdaefaa",
+      "local_source": "build/soa/row-storage-20261106/snapshot9/local-verification-receipt.json"
+    },
+    "snapshot9-small-functional.json": {
+      "bytes": 3066,
+      "sha256": "727e802e1b797d0623b2a5b699aed7e6e5cad428c1cc2894e9209fd1fd113a39",
+      "local_source": "build/soa/row-acceptance-20261106/snapshot9-functional-handoff.json"
+    },
+    "snapshot8a-phase-comparison.json": {
+      "bytes": 31114,
+      "sha256": "444d8d9c8c8e35174cbe7631f1995880703e88c6f372b1c0da75406d5406cc6a",
+      "local_source": "build/soa/e2b-opt2-20261106/summary/observation-comparison.json"
+    },
+    "snapshot8a-phase-comparison.csv": {
+      "bytes": 6402,
+      "sha256": "1e222bb35e526b74e53a753a29a8af0741908e6bb2523fcff83075c4e09e3029",
+      "local_source": "build/soa/e2b-opt2-20261106/summary/observation-comparison.csv"
+    },
+    "snapshot9-worktree-check.json": {
+      "bytes": 736,
+      "sha256": "64570a5d3e745daf720ccbb06c21a47772155cc24efb94d5e718bd0f20818980",
+      "local_source": "build/soa/row-storage-20261106/final-worktree-check.json"
+    },
+    "snapshot8a-formal-raw-verification.json": {
+      "bytes": 1039,
+      "sha256": "a17445ef8a482720f9b28ca997fc4918351c18983bd796075744650f69c10f69",
+      "local_source": "build/soa/e2b-opt2-20261106/formal-local-verified.json"
+    },
+    "replay-tools-reproduction.json": {
+      "bytes": 931,
+      "sha256": "93e87e0a06d4bb5cd52ec2ae9f630311dc25857b825cbda319b13c4d7477b412",
+      "local_source": "build/soa/row-storage-20261106/replay-tools-complete-reproduction-receipt.json"
+    },
+    "replay-tools-manifest.json": {
+      "bytes": 5129,
+      "sha256": "9858074e95cdf6984809cfd14a29470bce7b6b9f3daf708ef8e6fe3965300e5e",
+      "local_source": "build/soa/row-storage-20261106/replay-tools-complete-reproduction-manifest.json"
+    },
+    "snapshot8a-production-memory.json": {
+      "bytes": 2793,
+      "sha256": "2ccaaf6b47e74c6f269c26019b24e1088c3c70e1bf13b65d9742014895149443",
+      "local_source": "build/soa/e2b-opt2-20261106/summary/production-memory.json"
+    },
+    "snapshot8a-replay-comparison.json": {
+      "bytes": 14154,
+      "sha256": "e73aaa1325c190786bc87022a6cbbc803c209e8108f955fda84ccc683b87437c",
+      "local_source": "build/soa/e2b-opt2-20261106/summary/replay-comparison.json"
+    },
+    "snapshot8a-replay-isa.json": {
+      "bytes": 5339,
+      "sha256": "84b0148b54fc2617c5df741696d4ac9efa489778f14a1dc0ce55752a58568007",
+      "local_source": "build/soa/e2b-opt2-20261106/summary/replay-isa.json"
+    },
+    "snapshot8a-replay-reproduction.json": {
+      "bytes": 2113,
+      "sha256": "b7c1ad67f16db366683b55186a1b9c226c6cb0c20aac350697e41b5fa68ee778",
+      "local_source": "build/soa/e2b-opt2-20261106/summary/replay-reproduction.json"
+    },
+    "snapshot10a-final-source.json": {
+      "bytes": 5369,
+      "sha256": "c544cb0ff938d49ee1c90573918ee61f69b4be0c9f8a78cb0a5dbdb8b0ecb5dc",
+      "local_source": "build/soa/row-storage-20261106/snapshot10a/final-source-receipt.json"
+    },
+    "snapshot10a-formal-elf.json": {
+      "bytes": 5667,
+      "sha256": "4976fd9ac0a8ded8ad3062a1971a00eb3132b86a18461950341a22787f722958",
+      "local_source": "build/soa/row-storage-20261106/snapshot10a/new-elf-receipt.json"
+    },
+    "snapshot10a-linux-tests.json": {
+      "bytes": 6570,
+      "sha256": "3c59dd648be515403820b950c7f5ccc2931845c8010cdd065abb9bf27b9050db",
+      "local_source": "build/soa/row-storage-20261106/snapshot10a/gpl-test-receipt.json"
+    },
+    "snapshot10a-local-header-sanitizer.json": {
+      "bytes": 5212,
+      "sha256": "7f2325488602ac08e6ff644a5496fd55c30a7dcde798f75f09e8c3789dd90c25",
+      "local_source": "build/soa/row-storage-20261106/snapshot10a/local-header-receipt.json"
+    },
+    "snapshot10a-assembly-actions.json": {
+      "bytes": 184751,
+      "sha256": "de63ef8576e6f4b6762bfb5dfb3fb34e4558443beb6654a16105d67b95d4c4c7",
+      "local_source": "build/soa/row-storage-20261106/snapshot10a/production-action-assembly-receipt.json"
+    },
+    "snapshot10a-loop-disassembly.json": {
+      "bytes": 9884,
+      "sha256": "d105aef16852b9087da27d82c1612b84580b518b76ac6bd64407c387c1313a82",
+      "local_source": "build/soa/row-storage-20261106/snapshot10a-loop-disassembly/receipt.json"
+    },
+    "snapshot10a-gradient-merge-instructions.json": {
+      "bytes": 1797,
+      "sha256": "d3e0879e3f1a106e448ecd796adfe35108d2d168815fde6b3ae788faf5116ff8",
+      "local_source": "build/soa/row-acceptance-20261106/snapshot10/gradient-merge-instruction-digest.json"
+    },
+    "snapshot9-comparison.json": {
+      "bytes": 13845,
+      "sha256": "0cfe267cf5becfed296ac8941d85979a7e50a798a418f6128b146b1597a2a2af",
+      "local_source": "build/soa/e2b-opt2-20261106/summary/snapshot9-comparison.json"
+    },
+    "snapshot10a-simd-isa.json": {
+      "bytes": 1557,
+      "sha256": "d3dee769ca5eaff2042aa8d6f69b99c3d20dd1f7c81952c050b59e53348f3926",
+      "local_source": "build/soa/row-storage-20261106/snapshot10a/simd-isa-receipt.json"
+    },
+    "getdistance-simd-analysis.json": {
+      "bytes": 3911,
+      "sha256": "3100758520141bdf7fd0464a5d6943d64b4779a78c39dd1c3f2334118cecaf32",
+      "local_source": "build/soa/row-storage-20261106/getdistance-simd-analysis.json"
+    },
+    "gradient-merge-simd-analysis.md": {
+      "bytes": 9495,
+      "sha256": "23c4c54574e7dda1731084d6dcbc59d04d2e70f500695e961013dff9f96aece0",
+      "local_source": "build/soa/row-acceptance-20261106/snapshot10/gradient-merge-simd-analysis.md"
+    },
+    "gradient-merge-compiler-remarks.json": {
+      "bytes": 1698,
+      "sha256": "93f3bd53aa63f974827c400f8995c8edeff32ae705dd8f623c9da5d33615e1e0",
+      "local_source": "build/soa/row-acceptance-20261106/snapshot10/gradient-merge-compiler-remarks.json"
+    },
+    "nesterov-coordinate-vectorization.md": {
+      "bytes": 9207,
+      "sha256": "365460ef9301964f7c95dc3efde7edc0262a2055ec237a0cab68f42d941fbcb6",
+      "local_source": "build/soa/e2b-opt2-20261106/nesterov-coordinate-vectorization.md"
+    },
+    "snapshot10a-small-functional.json": {
+      "bytes": 3673,
+      "sha256": "03c548005f3873103583f169f9bd788adaa562734cf56a3d9a07b398a9be3ba6",
+      "local_source": "build/soa/row-acceptance-20261106/snapshot10/functional-handoff.json"
+    },
+    "snapshot10a-local-verification.json": {
+      "bytes": 1036,
+      "sha256": "ee5216ad0a33bf7b57c1b242289ff94fa70a529df8188cc71c29067a5aedbb22",
+      "local_source": "build/soa/row-storage-20261106/snapshot10a/local-verification.json"
+    },
+    "snapshot10a-replay-tool-build.json": {
+      "bytes": 1487,
+      "sha256": "635175ce826501370ab10dada6a08d74516fb556fe6a4608d030fa47e669728b",
+      "local_source": "build/soa/row-storage-20261106/replay-simd-build-compact.json"
+    },
+    "snapshot10a-gradient-merge-analysis-receipt.json": {
+      "bytes": 1311,
+      "sha256": "2653f851fb083067cdce24f75f9e6c1009f9ffe60f410b04d7f0f5f4ab3c1fa0",
+      "local_source": "build/soa/row-acceptance-20261106/snapshot10/gradient-merge-analysis-receipt.json"
+    },
+    "snapshot10a-replay-simd-comparison.json": {
+      "bytes": 21489,
+      "sha256": "bebad72d28811737f8eeef063019467933f4ea0256e567e43187fd22f3d4ec27",
+      "local_source": "build/soa/e2b-opt2-20261106/summary/replay-simd-comparison.json"
+    },
+    "snapshot10a-formal-comparison.json": {
+      "bytes": 32136,
+      "sha256": "0311d0f60c64f1abc822195871fab1768f5a0bf06c893148b9ec2729a5d50e12",
+      "local_source": "build/soa/e2b-opt2-20261106/summary/snapshot10a-comparison.json"
+    },
+    "snapshot10a-formal-comparison.csv": {
+      "bytes": 2638,
+      "sha256": "1ea5f9ba65c4cc09779460c3287f71b48959dfdd5c983d2d83faa92503c63089",
+      "local_source": "build/soa/e2b-opt2-20261106/summary/snapshot10a-formal-comparison.csv"
+    },
+    "snapshot10a-timing-exclusion.json": {
+      "bytes": 1162,
+      "sha256": "f1328d8e73ca56e57fdbff3510dc8b5169befec70fc5c7d7e597b6fb30547ad3",
+      "local_source": "build/soa/e2b-opt2-20261106/snapshot10a-timing-exclusion.json"
+    },
+    "snapshot10a-pair-order-resources.json": {
+      "bytes": 39341,
+      "sha256": "0ee9680800c4afbfd05ea277d999389c08939382f3a8485abcd6dd5f90a0fabf",
+      "local_source": "build/soa/e2b-opt2-20261106/summary/snapshot10a-pair-order-resources.json"
+    },
+    "snapshot10a-order-diagnosis.md": {
+      "bytes": 4366,
+      "sha256": "4419e47cbc38642a470265b1881622a00a9e66792c3f3d49a88523488dd940e6",
+      "local_source": "build/soa/e2b-opt2-20261106/snapshot10a-order-diagnosis.md"
+    },
+    "snapshot10b-final-source.json": {
+      "bytes": 5369,
+      "sha256": "397f506249a4e7aeed61153aa5c326fb9e53a34802f938710a3842edf13a0fa3",
+      "local_source": "build/soa/row-storage-20261106/snapshot10b/final-source-receipt.json"
+    },
+    "snapshot10b-formal-elf.json": {
+      "bytes": 5667,
+      "sha256": "e05a8c8ba1b3d54e8adfe13ae6bbe1ca5618b729e5a5845ca906748d3a652c09",
+      "local_source": "build/soa/row-storage-20261106/snapshot10b/new-elf-receipt.json"
+    },
+    "snapshot10b-linux-tests.json": {
+      "bytes": 6570,
+      "sha256": "2cabaafb6349b7a616f7cacf555f6df5f075436468d4abe0bb0b24266fa9d2e7",
+      "local_source": "build/soa/row-storage-20261106/snapshot10b/gpl-test-receipt.json"
+    },
+    "snapshot10b-local-header-sanitizer.json": {
+      "bytes": 5212,
+      "sha256": "301fd3c412a31f6bf3e21f7bc72624abfc15183e4fbfb1443789e04b2fc3dcb0",
+      "local_source": "build/soa/row-storage-20261106/snapshot10b/local-header-receipt.json"
+    },
+    "snapshot10b-selector-linux.json": {
+      "bytes": 600,
+      "sha256": "95315f678ff97ee14bac669eaea92fe6201129c87ef2dae0b75e46a9f32adc44",
+      "local_source": "build/soa/row-storage-20261106/snapshot10b/selector-linux-receipt.json"
+    },
+    "snapshot10b-selector-arm.json": {
+      "bytes": 605,
+      "sha256": "be44811fcf0af109f823434f2949c73d632d1376545f76b1d6d50b1ead36ae60",
+      "local_source": "build/soa/row-storage-20261106/snapshot10b/selector-arm-receipt.json"
+    },
+    "snapshot10b-strategy-delta.json": {
+      "bytes": 533,
+      "sha256": "edfb33eb9770c7a192ee34d36607072c94849860779fe13c025e09a5f4c7cc80",
+      "local_source": "build/soa/row-storage-20261106/snapshot10b/strategy-delta-receipt.json"
+    },
+    "snapshot10b-assembly-actions.json": {
+      "bytes": 184751,
+      "sha256": "4a54e98a1ee6597343f12e1fb098bdc9a4d2093521bb659baef3b52431efd343",
+      "local_source": "build/soa/row-storage-20261106/snapshot10b/production-action-assembly-receipt.json"
+    },
+    "snapshot10b-simd-isa.json": {
+      "bytes": 3324,
+      "sha256": "c505443b7e80c17bbb10989bdac77412197e87261059cad616fee2bc3ae311e1",
+      "local_source": "build/soa/row-storage-20261106/snapshot10b/simd-isa-receipt.json"
+    },
+    "snapshot10b-local-verification.json": {
+      "bytes": 1232,
+      "sha256": "461fc179f25c25f96552ecd688c69e2d9230a19b676d13418b43c4b17587e6d7",
+      "local_source": "build/soa/row-storage-20261106/snapshot10b/local-verification.json"
+    },
+    "snapshot10b-build-handoff.json": {
+      "bytes": 3884,
+      "sha256": "55f0a36386febe68545b63fa73d4ad2d29ebc1c0f94c684f727afa00e05df636",
+      "local_source": "build/soa/row-storage-20261106/snapshot10b/handoff.json"
+    },
+    "snapshot10b-small-functional.json": {
+      "bytes": 5111,
+      "sha256": "060f685df0e0c345d9aa10449672e1613aafdc16e9dbdb16f543b2b953a9c32f",
+      "local_source": "build/soa/row-acceptance-20261106/snapshot10b/functional-handoff.json"
+    },
+    "snapshot10b-small-functional-download.json": {
+      "bytes": 696,
+      "sha256": "1ec82f0a532f62372b1455351b41758fdf93607d127ab607adbbea2f5b4dea20",
+      "local_source": "build/soa/row-acceptance-20261106/snapshot10b/download-receipt.json"
+    },
+    "snapshot10b-e2b-gates.json": {
+      "bytes": 6461,
+      "sha256": "51f78ffa5767ec4cd7f5f4c9371a28238224174ec2561b07b2da800f56f57dce",
+      "local_source": "build/soa/e2b-opt2-20261106/summary/snapshot10b-gates.json"
+    },
+    "e2b-final-compact.json": {
+      "bytes": 22081,
+      "sha256": "b5999d7b243699cb79ad91786c6eed3565dae5d269bfad0fbbabcb20af98809a",
+      "local_source": "build/soa/e2b-opt2-20261106/summary/e2b-final-compact.json"
+    },
+    "e2b-cleanup.json": {
+      "bytes": 1811,
+      "sha256": "fc3d2ac3978886f2aa9d6bb1b27426ce7aefbf022337b466cb64a3a7f515aead",
+      "local_source": "build/soa/e2b-opt2-20261106/summary/cleanup-owned-final.json"
+    },
+    "e2b-final-local-evidence.json": {
+      "bytes": 5806,
+      "sha256": "cb0fe9f6aa62f9a2d3219421301414dd36670843c91bfbb60e8360443a5849c0",
+      "local_source": "build/soa/e2b-opt2-20261106/final-local-evidence-proof.json"
+    },
+    "northjob-cleanup.json": {
+      "bytes": 1035,
+      "sha256": "1e2894bc47a259c334807abfe1b494f2f8f3f5799b3a5987c89e5122029f0d24",
+      "local_source": "build/soa/row-storage-20261106/cleanup-compact.json"
+    }
+  }
+}

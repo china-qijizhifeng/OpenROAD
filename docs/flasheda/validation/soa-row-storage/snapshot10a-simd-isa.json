@@ -1,0 +1,37 @@
+{
+  "snapshot": "snapshot10a",
+  "formal_elf_sha256": "89f9d9777b01434c9d7c1a744148a16446bd3ea4490fa61fb1010ca21e6941f1",
+  "production_header_sha256": "83dbae575f9694231260d3b2e1748ca249d59e669a1393438e457dfcf3c44c81",
+  "linux_actual_AVX2_helper_calls": 12230,
+  "native_oracle_bitwise_passed": true,
+  "FE_INVALID_and_FE_DIVBYZERO_absent": true,
+  "ARM_fallback_passed": true,
+  "actual_production_compile_flags_verified": [
+    "O3",
+    "ThinLTO",
+    "C++20",
+    "ffp-contract off",
+    "Werror"
+  ],
+  "no_global_isa_or_fastmath_flags": true,
+  "runtime_dispatch_final_elf": {
+    "cpu_model_read_present": true,
+    "AVX2_helper_call_present": true,
+    "generic_parent_and_openmp_outline_have_no_AVX_instructions": true,
+    "source_dispatch": {
+      "file": "src/gpl/src/wirelengthSimd.h",
+      "condition": "runtime AVX2 support and rows.size() >= 4"
+    }
+  },
+  "helper_final_elf": {
+    "symbol": "_ZN3gpl26scatterNetPinGradientsAvx2ERKNS_16NetGradientTermsERKNS_10SoaStorageIJiiiiffffhhhhNS_6SoaRefINS_5GCellEEENS4_INS_4GNetEEENS_7SoaRowsINS_3PinEEEmjEEENSt3__14spanIKjLm18446744073709551615EEERNS_12PointColumnsEfff",
+    "assembly": "/Users/shom/Downloads/openroad-gpl-soa/build/soa/row-storage-20261106/snapshot10a-loop-disassembly/5.s",
+    "assembly_sha256": "1565dddeaea5b066d0782afc5b7f91ce868d43dc235af96eaa2c71cc0ee27852",
+    "ymm_operands_present": true,
+    "packed_double_divides": 4,
+    "packed_float_multiplies": 14,
+    "four_independent_pin_lanes": true,
+    "FMA_absent": true
+  },
+  "formal_elf_uninstrumented": true
+}

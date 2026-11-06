@@ -1,0 +1,35 @@
+{
+  "aes": {
+    "sha256": "3fa2faff4fdaf8773c013bc639a4da74583b2b73ca8821ef9ffd3c5772189e08",
+    "bytes": 31522620,
+    "all_archive_members_read": true,
+    "regular_members": 177,
+    "logs_sha256_verified": 24,
+    "gate_runs": 6,
+    "formal_runs": 18,
+    "all_exact_receipts": true,
+    "explicit_uninstrumented_environment": true
+  },
+  "large01": {
+    "sha256": "89624b8b99755225013d7147d1079fb172e9b888110da92ffc0696181def2a0d",
+    "bytes": 172719657,
+    "all_archive_members_read": true,
+    "regular_members": 129,
+    "logs_sha256_verified": 24,
+    "gate_runs": 6,
+    "formal_runs": 18,
+    "all_exact_receipts": true,
+    "explicit_uninstrumented_environment": true
+  },
+  "large02": {
+    "sha256": "4505cfecca484fef9786a12f445100c041cd3f75e548dd5cec14acf16ecbd554",
+    "bytes": 215216897,
+    "all_archive_members_read": true,
+    "regular_members": 129,
+    "logs_sha256_verified": 24,
+    "gate_runs": 6,
+    "formal_runs": 18,
+    "all_exact_receipts": true,
+    "explicit_uninstrumented_environment": true
+  }
+}

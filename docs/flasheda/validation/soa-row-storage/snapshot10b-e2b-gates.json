@@ -1,0 +1,165 @@
+{
+  "complete": true,
+  "scope": "12 correctness gates only, same frozen10b ELF in fresh default-unset/explicit-avx2 processes at actual1/4threads in each existing design sandbox;9 matched native accepted state/algorithm as oracle. Durations in raw logs are incidental and are not formal10b benchmark evidence.",
+  "gate_count": 12,
+  "selector_process_count": 9,
+  "manifest_sha256": "c761263e03f86fc9f52c7853c61aca674bcea6c9fc92ef7fd286a030a4ba9801",
+  "binary": {
+    "path": "/workspace/soa-opt2/snapshot10b/openroad",
+    "sha256": "2d4ea6220bcad8fc231478f04bff792dadb4657c3b271bce9404036e22e597d3",
+    "bytes": 124458944
+  },
+  "wirelength_simd_header_sha256": "e891c16b7204a8c3e6e474c8d14be722bda9d4533f5e7196b83d6026921d9027",
+  "selector_probes": [
+    {
+      "design": "aes",
+      "receipt": "aes-snapshot10b-selector-e2b-receipt.json",
+      "hardware_avx2": true,
+      "independent_processes": 3,
+      "unset_selects_scalar": true,
+      "avx2_selects_avx2": true,
+      "unsupported_selects_scalar": true
+    },
+    {
+      "design": "large01",
+      "receipt": "large01-snapshot10b-selector-e2b-receipt.json",
+      "hardware_avx2": true,
+      "independent_processes": 3,
+      "unset_selects_scalar": true,
+      "avx2_selects_avx2": true,
+      "unsupported_selects_scalar": true
+    },
+    {
+      "design": "large02",
+      "receipt": "large02-snapshot10b-selector-e2b-receipt.json",
+      "hardware_avx2": true,
+      "independent_processes": 3,
+      "unset_selects_scalar": true,
+      "avx2_selects_avx2": true,
+      "unsupported_selects_scalar": true
+    }
+  ],
+  "cases": [
+    {
+      "design": "aes",
+      "threads": 1,
+      "role": "snapshot10b_default",
+      "GPL_WIRELENGTH_SIMD": null,
+      "intended_dispatch": "scalar",
+      "binary_sha256": "2d4ea6220bcad8fc231478f04bff792dadb4657c3b271bce9404036e22e597d3",
+      "all_state_algorithm_exact": true,
+      "log_sha256": "67d7e94546eb21ae903a200b459a3aaa157ba354bffb16ee1ab954a3f748c9fc"
+    },
+    {
+      "design": "aes",
+      "threads": 1,
+      "role": "snapshot10b_avx2",
+      "GPL_WIRELENGTH_SIMD": "avx2",
+      "intended_dispatch": "avx2",
+      "binary_sha256": "2d4ea6220bcad8fc231478f04bff792dadb4657c3b271bce9404036e22e597d3",
+      "all_state_algorithm_exact": true,
+      "log_sha256": "2626268b7a6bac0cd3aae5d906da88cf48d903d39b4c6fd5b1a39cc50db399b5"
+    },
+    {
+      "design": "aes",
+      "threads": 4,
+      "role": "snapshot10b_avx2",
+      "GPL_WIRELENGTH_SIMD": "avx2",
+      "intended_dispatch": "avx2",
+      "binary_sha256": "2d4ea6220bcad8fc231478f04bff792dadb4657c3b271bce9404036e22e597d3",
+      "all_state_algorithm_exact": true,
+      "log_sha256": "588a956927cd521e63e22bdd60ff8f9a24565679e68158e7c6d478ab035f340f"
+    },
+    {
+      "design": "aes",
+      "threads": 4,
+      "role": "snapshot10b_default",
+      "GPL_WIRELENGTH_SIMD": null,
+      "intended_dispatch": "scalar",
+      "binary_sha256": "2d4ea6220bcad8fc231478f04bff792dadb4657c3b271bce9404036e22e597d3",
+      "all_state_algorithm_exact": true,
+      "log_sha256": "bc3eb9750889da327d2091dd0357e759e52f7b0d7aa74e0910b1f398142a6acf"
+    },
+    {
+      "design": "large01",
+      "threads": 1,
+      "role": "snapshot10b_default",
+      "GPL_WIRELENGTH_SIMD": null,
+      "intended_dispatch": "scalar",
+      "binary_sha256": "2d4ea6220bcad8fc231478f04bff792dadb4657c3b271bce9404036e22e597d3",
+      "all_state_algorithm_exact": true,
+      "log_sha256": "f9a4c08656b682de1327d1dbbabbdeecf19221b6c6a0f3e3dfd8eba096edbade"
+    },
+    {
+      "design": "large01",
+      "threads": 1,
+      "role": "snapshot10b_avx2",
+      "GPL_WIRELENGTH_SIMD": "avx2",
+      "intended_dispatch": "avx2",
+      "binary_sha256": "2d4ea6220bcad8fc231478f04bff792dadb4657c3b271bce9404036e22e597d3",
+      "all_state_algorithm_exact": true,
+      "log_sha256": "a798728732c32ba53727384481d6fe4e1a6e2ee32d970b1d357ffabd7c14bb26"
+    },
+    {
+      "design": "large01",
+      "threads": 4,
+      "role": "snapshot10b_avx2",
+      "GPL_WIRELENGTH_SIMD": "avx2",
+      "intended_dispatch": "avx2",
+      "binary_sha256": "2d4ea6220bcad8fc231478f04bff792dadb4657c3b271bce9404036e22e597d3",
+      "all_state_algorithm_exact": true,
+      "log_sha256": "406b52066a8ba9e57e19865af059cf6e44078f33be89286d23ae8c3c8c0b4a4f"
+    },
+    {
+      "design": "large01",
+      "threads": 4,
+      "role": "snapshot10b_default",
+      "GPL_WIRELENGTH_SIMD": null,
+      "intended_dispatch": "scalar",
+      "binary_sha256": "2d4ea6220bcad8fc231478f04bff792dadb4657c3b271bce9404036e22e597d3",
+      "all_state_algorithm_exact": true,
+      "log_sha256": "68aeac03baa1152fb380b7d0db32b3a3c31bad52ff502cac95be28050de8833c"
+    },
+    {
+      "design": "large02",
+      "threads": 1,
+      "role": "snapshot10b_default",
+      "GPL_WIRELENGTH_SIMD": null,
+      "intended_dispatch": "scalar",
+      "binary_sha256": "2d4ea6220bcad8fc231478f04bff792dadb4657c3b271bce9404036e22e597d3",
+      "all_state_algorithm_exact": true,
+      "log_sha256": "08cd8df0a2199f12464c133be5471460cd9a93afdfa7d8aa18e8c269ca1d5e99"
+    },
+    {
+      "design": "large02",
+      "threads": 1,
+      "role": "snapshot10b_avx2",
+      "GPL_WIRELENGTH_SIMD": "avx2",
+      "intended_dispatch": "avx2",
+      "binary_sha256": "2d4ea6220bcad8fc231478f04bff792dadb4657c3b271bce9404036e22e597d3",
+      "all_state_algorithm_exact": true,
+      "log_sha256": "035205d9b6fcded434e8acf4c4b4d883aa80733f59afe9f93c0a99cfa1f70f39"
+    },
+    {
+      "design": "large02",
+      "threads": 4,
+      "role": "snapshot10b_avx2",
+      "GPL_WIRELENGTH_SIMD": "avx2",
+      "intended_dispatch": "avx2",
+      "binary_sha256": "2d4ea6220bcad8fc231478f04bff792dadb4657c3b271bce9404036e22e597d3",
+      "all_state_algorithm_exact": true,
+      "log_sha256": "46d5290d075f13470b54fa91ad94c815f564142a02e6ef4b607e63fa563afed8"
+    },
+    {
+      "design": "large02",
+      "threads": 4,
+      "role": "snapshot10b_default",
+      "GPL_WIRELENGTH_SIMD": null,
+      "intended_dispatch": "scalar",
+      "binary_sha256": "2d4ea6220bcad8fc231478f04bff792dadb4657c3b271bce9404036e22e597d3",
+      "all_state_algorithm_exact": true,
+      "log_sha256": "fbe0a347ae3a2e97942f74dfc35d03d4d577f825b45bb0b7de70a4f91dab75ab"
+    }
+  ],
+  "production_scope": "10b changes only opt-in selector; core SIMD/scalar formula, per-net threshold and tails byte-identical to10a;10a performance evidence retains measuredlarge011Tregression and is not transplanted to10bELF."
+}

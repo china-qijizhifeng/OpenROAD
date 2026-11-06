@@ -1,0 +1,10 @@
+{
+  "path": "/gpfs/users/linlizhi/flasheda-soa-row-storage-20261106/row-acceptance-tools/evidence/row-functional-evidence.tar.gz",
+  "bytes": 26239204,
+  "sha256": "e36688ad630c8ce9e796a0c846a7217359e852c5b1d742cfc7883644e64b64b6",
+  "members": 310,
+  "summary_sha256": "2f9337eb35b940788bba0b9cda3073b779ed8b3b5e5716d6bd0ae57507b4bc0a",
+  "runs": 32,
+  "pairs": 16,
+  "status": "passed"
+}

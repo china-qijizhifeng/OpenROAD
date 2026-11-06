@@ -1,0 +1,125 @@
+{
+  "packaged_utc": "2026-11-06T17:31:41.285119+00:00",
+  "policy": "Read-only packaging of existing successful build artifacts; no compile, profiling or timing executed.",
+  "files": {
+    "replay-tools/replay-benchmark.cpp": {
+      "sha256": "c4ce29b8e66b5a61657566b8a85d71c92e68600beb87990a4c4e04588ee1562b",
+      "bytes": 16846
+    },
+    "replay-tools/replay-verify.cpp": {
+      "sha256": "b6eff106f71add224eb8b72805101a920a9d8b8439aec40b65ee545ea218a6d9",
+      "bytes": 7656
+    },
+    "replay-tools/bazel/BUILD": {
+      "sha256": "7d21880f5ed35614c3263883f53602cc135c1531c9e4e9321e3e5f83ae42d363",
+      "bytes": 342
+    },
+    "replay-tools/bazel/all-actions-aquery.json": {
+      "sha256": "7dfdadaea6ccbb89be8cd791428618736be7f553e23c2bfad9f9be7ffa318adf",
+      "bytes": 219395
+    },
+    "replay-tools/bazel/all-actions-aquery.log": {
+      "sha256": "46be121d265a57f35f3a58edb6bcac07547cb70b0455e99686fb61aca4e7bac5",
+      "bytes": 751
+    },
+    "replay-tools/bazel/build.json": {
+      "sha256": "9709b28378a5c6d9114176c8e92623a8f537f7934ec3da556c8fea479a425954",
+      "bytes": 13583
+    },
+    "replay-tools/bazel/build.log": {
+      "sha256": "ea6b865462a76cb0574489ed3782003d543d4587f6efca0a71a1d2467fc35802",
+      "bytes": 34831
+    },
+    "replay-tools/bazel/compile-aquery.json": {
+      "sha256": "8b7d5c7ab7ae752f422e73613cdac5792dfc5a49c368b599929be8b91b926c73",
+      "bytes": 20319
+    },
+    "replay-tools/bazel/compile-aquery.log": {
+      "sha256": "d7361c47b3f4341ea342f3a9c3db59381a8880e5ba94d37d92d286ebae26b780",
+      "bytes": 476
+    },
+    "replay-tools/bazel/parameter-files/replay_benchmark-0.params": {
+      "sha256": "134953ab0ad0df0c85c8e2cc30783d0f5414f57ae4fdc27facd8dcf48a6d27e6",
+      "bytes": 1416
+    },
+    "replay-tools/bazel/parameter-files/replay_benchmark-lto-final.params": {
+      "sha256": "3429ecc8e82a844b0ddbd76f04b7bc1f084e0623d155ca04780b252cf516697c",
+      "bytes": 3608
+    },
+    "replay-tools/bazel/parameter-files/replay_verify-0.params": {
+      "sha256": "6ad7821e83fc1aa273caff54a3e82c2323ec8317e36682b99f8cfc6ecb954986",
+      "bytes": 1407
+    },
+    "replay-tools/bazel/parameter-files/replay_verify-lto-final.params": {
+      "sha256": "8ff76408e8d79d2c4e2531c67a94d93a3b661523e6b3b633025dbdedf5eedb2c",
+      "bytes": 144
+    },
+    "replay-tools/bazel/replay-benchmark": {
+      "sha256": "74f1d800815d943a72d303511fee07e6e6eaddf4ae6463a30cd94a11d92769ac",
+      "bytes": 1543760
+    },
+    "replay-tools/bazel/replay-benchmark.s": {
+      "sha256": "73b38f0808a463e19a087230817cd05614f8168b2f369b1e0021a336b6db2a25",
+      "bytes": 513447
+    },
+    "replay-tools/bazel/replay-verify": {
+      "sha256": "17a1bae56f8822c560461942b73a460e14a22984d1e253c37048d8f77969de57",
+      "bytes": 809080
+    },
+    "replay-tools/bazel/reproduction-receipt.json": {
+      "sha256": "1ec8ce757a8ba9e8c158d990241781368add4b7c91f486172b95f0c83dc499ba",
+      "bytes": 18956
+    },
+    "replay-tools/bazel/vectorization.log": {
+      "sha256": "dfeecb70c8f3169ed04046a9fa1cc64ff8bd108f6ea760728875a7bed85fe3b5",
+      "bytes": 82237
+    },
+    "commands/28b-bazel-replay-tools.sh": {
+      "sha256": "bba48827c7aacc7db1a2e1c34a774a7704eb07851001f03886656c107f46c1e2",
+      "bytes": 1906
+    },
+    "commands/28b-bazel-replay-tools.sh.log": {
+      "sha256": "2607e5febe92e49bb323ebab2f54aa9d8e396c83e0f9b8584cff210426aede23",
+      "bytes": 7905
+    },
+    "commands/28b-bazel-replay-tools.sh.exit": {
+      "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+      "bytes": 2
+    },
+    "commands/31-replay-repro-receipt.sh": {
+      "sha256": "cdf48dd113089c2e59ad6986c0fc646e25341cc64de94b49bfcd6fe30bdf8c70",
+      "bytes": 1713
+    },
+    "commands/31-replay-repro-receipt.sh.log": {
+      "sha256": "4a2b5601869a8f88f902a3f954234293c77e40de4510bfa0186b55c852f5f132",
+      "bytes": 633
+    },
+    "commands/31-replay-repro-receipt.sh.exit": {
+      "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+      "bytes": 2
+    },
+    "bazel.sh": {
+      "sha256": "71f77c1845e2e26a6916c8288109e0363f4156b3d4a4e321f44be228b3bddb8b",
+      "bytes": 571
+    },
+    "export-replay-assembly.py": {
+      "sha256": "7fdf336dd8a93efe68091b8d3f1cff548ef70cd53b07d566dad25dd6548fbb2f",
+      "bytes": 2365
+    },
+    "toolchain-fingerprint.json": {
+      "sha256": "d62d888fe636e2a5a372e56f585be1a369edcc93c12f92532107fabf4c754514",
+      "bytes": 2888
+    }
+  },
+  "actual_build_driver": "commands/28b-bazel-replay-tools.sh",
+  "actual_build_command": "bash \"$TASK/bazel.sh\" build --keep_going //flasheda_replay_tools:replay_benchmark //flasheda_replay_tools:replay_verify",
+  "full_wrapper": "bazel.sh",
+  "build_file": "replay-tools/bazel/BUILD",
+  "all_actions_with_param_files": "replay-tools/bazel/all-actions-aquery.json",
+  "link_and_lto_index_actions": 4,
+  "actual_parameter_files": 4,
+  "source_sha256": {
+    "replay-benchmark.cpp": "c4ce29b8e66b5a61657566b8a85d71c92e68600beb87990a4c4e04588ee1562b",
+    "replay-verify.cpp": "b6eff106f71add224eb8b72805101a920a9d8b8439aec40b65ee545ea218a6d9"
+  }
+}

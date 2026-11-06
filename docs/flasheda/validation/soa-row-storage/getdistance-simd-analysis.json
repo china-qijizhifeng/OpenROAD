@@ -1,0 +1,75 @@
+{
+  "snapshot": "snapshot10a",
+  "formal_elf_sha256": "89f9d9777b01434c9d7c1a744148a16446bd3ea4490fa61fb1010ca21e6941f1",
+  "source": "src/gpl/src/nesterovBase.cpp",
+  "source_sha256": "ba6fe6f877e7013badfbeb1c85a730a1d93b9b5ab9f42ce69dc8c2fa8a4149d5",
+  "square_loop": {
+    "line": 5812,
+    "already_vectorized": true,
+    "baseline_isa": "SSE",
+    "float_lanes": 4,
+    "interleave": 1,
+    "instructions": [
+      "movups",
+      "subps",
+      "mulps"
+    ],
+    "runtime_alias_checks": true,
+    "vector_path_chunk_threshold_points": 24,
+    "assembly_file": "/Users/shom/Downloads/openroad-gpl-soa/build/soa/row-storage-20261106/snapshot10a-loop-disassembly/7.s",
+    "symbol": "_ZN3gplL11getDistanceERKNS_12PointColumnsES2_RS0_i.omp_outlined.llvm.797801669723168793"
+  },
+  "ordered_sum": {
+    "line": 5819,
+    "vectorized": false,
+    "final_elf_instructions": "single accumulator addss chain, four points unrolled",
+    "order": "x0,y0,x1,y1,x2,y2,x3,y3, then next four; scalar tail same order",
+    "cannot_reassociate": true,
+    "compiler_reason": "cannot prove it is safe to reorder floating-point operations",
+    "assembly_file": "/Users/shom/Downloads/openroad-gpl-soa/build/soa/row-storage-20261106/snapshot10a-loop-disassembly/6.s",
+    "symbol": "_ZN3gplL11getDistanceERKNS_12PointColumnsES2_RS0_i.llvm.797801669723168793"
+  },
+  "flags": {
+    "O3": true,
+    "ThinLTO": true,
+    "CXX20": true,
+    "fp_contract": "off",
+    "fastmath": false,
+    "global_march_AVX2": false,
+    "FMA_observed": false
+  },
+  "call_sites": [
+    {
+      "line": 3722,
+      "values": "coordinate difference"
+    },
+    {
+      "line": 3724,
+      "values": "gradient difference"
+    }
+  ],
+  "minimal_followup": {
+    "scope": "Only independent difference/square map may use a runtime-dispatched AVX2 helper with eight float lanes, scalar/SSE fallback and identical mul/sub order. Keep serial accumulation and final double divide/sqrt unchanged.",
+    "alias": "Scratch is separate private distance_scratch_ at both callers; a and b may alias each other as read-only inputs. Prove output/input nonalias at wrapper before restricting stores. Current compiler already emits alias-guarded vector versioning.",
+    "not_implemented": true,
+    "needs_measured_case": "Measure fraction f of getDistance time in square map before adding helper; no full GPL rerun performed for analysis."
+  },
+  "performance_limit": {
+    "current_to_AVX2_compute_width_bound": "at most 2x for square-map arithmetic, not a measured speedup",
+    "whole_function_upper_bound": "1/(1-f/2), f = square-map fraction; f has not been measured",
+    "nominal_bytes_per_point": "32 bytes across compute and ordered sum (16 input read + 8 scratch write + 8 scratch reread), excluding cache write allocation",
+    "other_limits": [
+      "two OpenMP fork/join operations per getStepLength",
+      "serial two-add dependency chain per point",
+      "memory bandwidth and per-thread chunk length",
+      "AVX2 ISA does not vectorize the required ordered sum"
+    ]
+  },
+  "remarks": [
+    "src/gpl/src/nesterovBase.cpp:5820:17: remark: loop not vectorized: cannot prove it is safe to reorder floating-point operations; allow reordering by specifying '#pragma clang loop vectorize(enable)' before the loop or by providing the compiler option '-ffast-math' [-Rpass-analysis=loop-vectorize]",
+    "src/gpl/src/nesterovBase.cpp:5819:3: remark: loop not vectorized [-Rpass-missed=loop-vectorize]",
+    "src/gpl/src/nesterovBase.cpp:5811:1: remark: the cost-model indicates that interleaving is not beneficial [-Rpass-analysis=loop-vectorize]",
+    "src/gpl/src/nesterovBase.cpp:5811:1: remark: vectorized loop (vectorization width: 4, interleaved count: 1) [-Rpass=loop-vectorize]"
+  ],
+  "policy": "Read-only analysis of actual final ELF and isolated diagnostic assembly from production action; no production edits or performance claims."
+}

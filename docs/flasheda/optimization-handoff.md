@@ -1,5 +1,9 @@
 # GPL 优化 handoff
 
+> 历史快照（2026-11-06 11:10 CST）。分支合并、构建方式和资源状态以下方时间为准；
+> 后续行存储、初始布局与线长 gather 的实现及验收见
+> [SOA_ROW_STORAGE.md](validation/SOA_ROW_STORAGE.md)。
+
 更新时间：2026-11-06 11:10 CST。面向下一位接手 OpenROAD GPL 性能工作的 agent 或工程师。
 本文只汇总状态和下一步；数据与论证见下列文档，数字以它们为准：
 

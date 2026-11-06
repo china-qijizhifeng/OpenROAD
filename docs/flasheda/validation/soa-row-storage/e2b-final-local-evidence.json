@@ -1,0 +1,125 @@
+{
+  "complete": true,
+  "all_evidence_verified_before_cleanup": true,
+  "verified_utc": "2026-11-06T18:54:26.798082+00:00",
+  "owned_sandbox_ids": {
+    "aes": "iv59taw15bsdpyfjnlx84",
+    "large01": "ibswxsph34b6u2kmw0tpk",
+    "large02": "ifxwfashglw3cuw9lr6h2"
+  },
+  "raw_archive_count": 16,
+  "raw_archives_sha256": {
+    "aes-evidence.tar.gz": "3fa2faff4fdaf8773c013bc639a4da74583b2b73ca8821ef9ffd3c5772189e08",
+    "aes-all-evidence.tar.gz": "6c7a75b887288936330f420b4007bfe0fab7b9cf92e35cbf256ba7decad71f89",
+    "aes-snapshot9-evidence.tar.gz": "a6745764ccffba33c15c49036b7e8fee655e3e6868f35b554c368a9367c725ee",
+    "aes-snapshot10a-evidence.tar.gz": "e5b916c1df2225162fb20c2dc11dc486d6ea7b0d0c4ee0c11969d1da97bdb484",
+    "aes-snapshot10b-evidence.tar.gz": "9f6a7e6d2769a1c6beff851b9cc09239d2582f02cf15c20755ae07fd2167afa4",
+    "large01-evidence.tar.gz": "89624b8b99755225013d7147d1079fb172e9b888110da92ffc0696181def2a0d",
+    "large01-all-evidence.tar.gz": "b2e9961cf4df14aa13be52387a7a1dc72b506970f938afdc3c4a1ce7361fd64a",
+    "large01-snapshot9-evidence.tar.gz": "cb9d40f23ec573eaaa3e023a5a9f8113bfb2ae2231b0ea33eb6172bc2ea562af",
+    "large01-snapshot10a-evidence.tar.gz": "823acd17b566c4eb1dc825fc9ab0bccc1e175dfecfc5b4eeb701e3393058f9c8",
+    "large01-snapshot10b-evidence.tar.gz": "dde50beaf6e67f15bc8a89d92e85d838d452fd37644fa84b2968fad47527b541",
+    "large02-evidence.tar.gz": "4505cfecca484fef9786a12f445100c041cd3f75e548dd5cec14acf16ecbd554",
+    "large02-all-evidence.tar.gz": "e35e1705a81263cbda439546ddf11c7d6702e305882ede1ed9599d6900d7e359",
+    "large02-snapshot9-evidence.tar.gz": "192a601f9fbaafacf31734732445befb05c5eea5a9b81bbca48fdb2bd57c6ae0",
+    "large02-snapshot10a-evidence.tar.gz": "b2af57b7966cea011dcc4b1c926a3f9b13fa040edee5bac2111b7ca98066bf78",
+    "large02-snapshot10b-evidence.tar.gz": "9da4b8e27b9096989ed7f3d24b4fcaf51e48e807a8535c4fb15172662b7d05cb",
+    "large02-replay-simd-evidence.tar.gz": "56ecd4e7863b511e625ebb6551cc57282609118f3f52073dd76629f4b50335e8"
+  },
+  "snapshot10a_and10b_raw_proofs": {
+    "aes-snapshot10a": {
+      "design": "aes",
+      "archive": "aes-snapshot10a-evidence.tar.gz",
+      "archive_sha256": "e5b916c1df2225162fb20c2dc11dc486d6ea7b0d0c4ee0c11969d1da97bdb484",
+      "all_archived_files_streamed": 113,
+      "exact_result_log_sha_matches": 14,
+      "gate_formal_repair": {
+        "gate": 2,
+        "formal": 12,
+        "repair": 0
+      },
+      "timing_exclusion": null
+    },
+    "aes-snapshot10b": {
+      "design": "aes",
+      "archive": "aes-snapshot10b-evidence.tar.gz",
+      "sha256": "9f6a7e6d2769a1c6beff851b9cc09239d2582f02cf15c20755ae07fd2167afa4",
+      "bytes": 5499484,
+      "whole_archive_sha256_verified": true,
+      "all_archived_files_streamed": 46,
+      "uncompressed_bytes": 31766985,
+      "exact_result_log_sha_matches": 4,
+      "actual_env_unset_or_avx2_exact": true,
+      "selector_processes": 3,
+      "actual_hardware_avx2": true,
+      "input_manifest_allSHA_verified": true,
+      "scope": "Correctness-only gates; no formal10b timing inference",
+      "verified_utc": "2026-11-06T18:50:28.189074+00:00"
+    },
+    "large01-snapshot10a": {
+      "design": "large01",
+      "archive": "large01-snapshot10a-evidence.tar.gz",
+      "archive_sha256": "823acd17b566c4eb1dc825fc9ab0bccc1e175dfecfc5b4eeb701e3393058f9c8",
+      "all_archived_files_streamed": 85,
+      "exact_result_log_sha_matches": 14,
+      "gate_formal_repair": {
+        "gate": 2,
+        "formal": 12,
+        "repair": 0
+      },
+      "timing_exclusion": null
+    },
+    "large01-snapshot10b": {
+      "design": "large01",
+      "archive": "large01-snapshot10b-evidence.tar.gz",
+      "sha256": "dde50beaf6e67f15bc8a89d92e85d838d452fd37644fa84b2968fad47527b541",
+      "bytes": 29034192,
+      "whole_archive_sha256_verified": true,
+      "all_archived_files_streamed": 38,
+      "uncompressed_bytes": 172524910,
+      "exact_result_log_sha_matches": 4,
+      "actual_env_unset_or_avx2_exact": true,
+      "selector_processes": 3,
+      "actual_hardware_avx2": true,
+      "input_manifest_allSHA_verified": true,
+      "scope": "Correctness-only gates; no formal10b timing inference",
+      "verified_utc": "2026-11-06T18:53:11.163962+00:00"
+    },
+    "large02-snapshot10a": {
+      "design": "large02",
+      "archive": "large02-snapshot10a-evidence.tar.gz",
+      "archive_sha256": "b2af57b7966cea011dcc4b1c926a3f9b13fa040edee5bac2111b7ca98066bf78",
+      "all_archived_files_streamed": 94,
+      "exact_result_log_sha_matches": 15,
+      "gate_formal_repair": {
+        "gate": 2,
+        "formal": 12,
+        "repair": 1
+      },
+      "timing_exclusion": "large02/t1-r2-snapshot10a remains in raw archive; excluded from statistics and replaced by repair exactly once"
+    },
+    "large02-snapshot10b": {
+      "design": "large02",
+      "archive": "large02-snapshot10b-evidence.tar.gz",
+      "sha256": "9da4b8e27b9096989ed7f3d24b4fcaf51e48e807a8535c4fb15172662b7d05cb",
+      "bytes": 36112407,
+      "whole_archive_sha256_verified": true,
+      "all_archived_files_streamed": 38,
+      "uncompressed_bytes": 253985620,
+      "exact_result_log_sha_matches": 4,
+      "actual_env_unset_or_avx2_exact": true,
+      "selector_processes": 3,
+      "actual_hardware_avx2": true,
+      "input_manifest_allSHA_verified": true,
+      "scope": "Correctness-only gates; no formal10b timing inference",
+      "verified_utc": "2026-11-06T18:53:11.530726+00:00"
+    }
+  },
+  "formal10a_valid": 36,
+  "formal10a_original_excluded": 1,
+  "formal10a_replacement": 1,
+  "gate10b_count": 12,
+  "selector10b_actual_processes": 9,
+  "cleanup_authorization": "Parent explicitly authorized after12gates pass and raw evidence local verified; no new performance run required",
+  "template_to_preserve": "vshaqeiaoi96u3cp66t3"
+}

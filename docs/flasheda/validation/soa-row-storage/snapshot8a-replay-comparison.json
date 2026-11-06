@@ -1,0 +1,496 @@
+{
+  "complete": true,
+  "input": "Real large02 snapshot8a Nesterov iteration10/265/520, same algorithm/layout as9 except temporary Object elimination",
+  "scope": "local reconstructed force/gather kernels only; excludes OpenROAD dispatch and all other placement work. Not full-placement speedup.",
+  "layout_limitation": "Portable local cache/out use Point AoS and uint64 mapping/CSR; production uses PointColumns SoA and uint32 slots. Local times and byte counts are not production kernel timings/storage.",
+  "isa": "Clang23.1.2 native pre-link routeC outlined loop unrolled eight scalar original() calls. addps packs x/y of one Point, not eight-cell vectorized gradient. Loop vectorizer explicitly missed C control flow/calls. No cross-cell SIMD claim.",
+  "rows": [
+    {
+      "snapshot": "iter-10-owner-0",
+      "threads": 1,
+      "repeats_per_route": 9,
+      "correctness": "all routes, weighted pins, cells, reconstructed force bitwise exact",
+      "mapping_ms": 8.322591,
+      "mapping_bytes": 11200952,
+      "cache_bytes": 11198288,
+      "sell_build_ms": 18.75544,
+      "sell_mapping_bytes": 3080832,
+      "sell_pin_bytes": 11255744,
+      "sell_padding_bytes": 57456,
+      "routes": {
+        "A": {
+          "force_or_fused_force_pin_ms": {
+            "median": 21.52234,
+            "min": 21.472485,
+            "max": 21.607507
+          },
+          "isolated_pin_scatter_ms": {
+            "median": 0,
+            "min": 0,
+            "max": 0
+          },
+          "gather_or_immediate_ms": {
+            "median": 96.223131,
+            "min": 94.34487,
+            "max": 122.692372
+          },
+          "full_force_plus_gather_ms": {
+            "median": 117.749436,
+            "min": 115.826219,
+            "max": 144.299999
+          }
+        },
+        "B": {
+          "force_or_fused_force_pin_ms": {
+            "median": 48.306031,
+            "min": 46.570153,
+            "max": 50.315177
+          },
+          "isolated_pin_scatter_ms": {
+            "median": 18.509383,
+            "min": 18.141291,
+            "max": 20.587241
+          },
+          "gather_or_immediate_ms": {
+            "median": 0.879155,
+            "min": 0.821669,
+            "max": 0.934688
+          },
+          "full_force_plus_gather_ms": {
+            "median": 49.192577,
+            "min": 47.39611,
+            "max": 51.223536
+          }
+        },
+        "C": {
+          "force_or_fused_force_pin_ms": {
+            "median": 21.545083,
+            "min": 21.424743,
+            "max": 22.034906
+          },
+          "isolated_pin_scatter_ms": {
+            "median": 0,
+            "min": 0,
+            "max": 0
+          },
+          "gather_or_immediate_ms": {
+            "median": 87.477737,
+            "min": 85.619637,
+            "max": 108.177666
+          },
+          "full_force_plus_gather_ms": {
+            "median": 109.02291,
+            "min": 107.078141,
+            "max": 129.759584
+          }
+        }
+      }
+    },
+    {
+      "snapshot": "iter-10-owner-0",
+      "threads": 4,
+      "repeats_per_route": 9,
+      "correctness": "all routes, weighted pins, cells, reconstructed force bitwise exact",
+      "mapping_ms": 8.053208,
+      "mapping_bytes": 11200952,
+      "cache_bytes": 11198288,
+      "sell_build_ms": 17.153043,
+      "sell_mapping_bytes": 3080832,
+      "sell_pin_bytes": 11255744,
+      "sell_padding_bytes": 57456,
+      "routes": {
+        "A": {
+          "force_or_fused_force_pin_ms": {
+            "median": 12.356176,
+            "min": 6.715408,
+            "max": 14.318793
+          },
+          "isolated_pin_scatter_ms": {
+            "median": 0,
+            "min": 0,
+            "max": 0
+          },
+          "gather_or_immediate_ms": {
+            "median": 29.927575,
+            "min": 28.42711,
+            "max": 34.988957
+          },
+          "full_force_plus_gather_ms": {
+            "median": 41.180922,
+            "min": 36.693097,
+            "max": 49.30786
+          }
+        },
+        "B": {
+          "force_or_fused_force_pin_ms": {
+            "median": 23.371747,
+            "min": 20.891036,
+            "max": 25.364378
+          },
+          "isolated_pin_scatter_ms": {
+            "median": 8.888979,
+            "min": 7.661623,
+            "max": 9.453835
+          },
+          "gather_or_immediate_ms": {
+            "median": 0.433508,
+            "min": 0.270525,
+            "max": 0.456172
+          },
+          "full_force_plus_gather_ms": {
+            "median": 23.805345,
+            "min": 21.258074,
+            "max": 25.820851
+          }
+        },
+        "C": {
+          "force_or_fused_force_pin_ms": {
+            "median": 6.776178,
+            "min": 6.707776,
+            "max": 14.072253
+          },
+          "isolated_pin_scatter_ms": {
+            "median": 0,
+            "min": 0,
+            "max": 0
+          },
+          "gather_or_immediate_ms": {
+            "median": 28.42718,
+            "min": 25.80082,
+            "max": 35.126814
+          },
+          "full_force_plus_gather_ms": {
+            "median": 36.480178,
+            "min": 33.093011,
+            "max": 46.605868
+          }
+        }
+      }
+    },
+    {
+      "snapshot": "iter-265-owner-0",
+      "threads": 1,
+      "repeats_per_route": 9,
+      "correctness": "all routes, weighted pins, cells, reconstructed force bitwise exact",
+      "mapping_ms": 7.166051,
+      "mapping_bytes": 11200952,
+      "cache_bytes": 11198288,
+      "sell_build_ms": 17.173052,
+      "sell_mapping_bytes": 3080832,
+      "sell_pin_bytes": 11255744,
+      "sell_padding_bytes": 57456,
+      "routes": {
+        "A": {
+          "force_or_fused_force_pin_ms": {
+            "median": 21.50219,
+            "min": 21.451042,
+            "max": 21.547526
+          },
+          "isolated_pin_scatter_ms": {
+            "median": 0,
+            "min": 0,
+            "max": 0
+          },
+          "gather_or_immediate_ms": {
+            "median": 92.393071,
+            "min": 91.4572,
+            "max": 97.484137
+          },
+          "full_force_plus_gather_ms": {
+            "median": 113.844203,
+            "min": 112.959511,
+            "max": 119.031764
+          }
+        },
+        "B": {
+          "force_or_fused_force_pin_ms": {
+            "median": 46.992316,
+            "min": 46.784816,
+            "max": 47.570651
+          },
+          "isolated_pin_scatter_ms": {
+            "median": 18.265718,
+            "min": 18.0272,
+            "max": 18.70837
+          },
+          "gather_or_immediate_ms": {
+            "median": 0.831094,
+            "min": 0.824204,
+            "max": 0.894077
+          },
+          "full_force_plus_gather_ms": {
+            "median": 47.865952,
+            "min": 47.6103,
+            "max": 48.427053
+          }
+        },
+        "C": {
+          "force_or_fused_force_pin_ms": {
+            "median": 21.481098,
+            "min": 21.446676,
+            "max": 21.567968
+          },
+          "isolated_pin_scatter_ms": {
+            "median": 0,
+            "min": 0,
+            "max": 0
+          },
+          "gather_or_immediate_ms": {
+            "median": 84.65917,
+            "min": 83.715177,
+            "max": 88.07435
+          },
+          "full_force_plus_gather_ms": {
+            "median": 106.134038,
+            "min": 105.173621,
+            "max": 109.521167
+          }
+        }
+      }
+    },
+    {
+      "snapshot": "iter-265-owner-0",
+      "threads": 4,
+      "repeats_per_route": 9,
+      "correctness": "all routes, weighted pins, cells, reconstructed force bitwise exact",
+      "mapping_ms": 8.426007,
+      "mapping_bytes": 11200952,
+      "cache_bytes": 11198288,
+      "sell_build_ms": 17.77274,
+      "sell_mapping_bytes": 3080832,
+      "sell_pin_bytes": 11255744,
+      "sell_padding_bytes": 57456,
+      "routes": {
+        "A": {
+          "force_or_fused_force_pin_ms": {
+            "median": 12.749685,
+            "min": 6.498813,
+            "max": 13.310053
+          },
+          "isolated_pin_scatter_ms": {
+            "median": 0,
+            "min": 0,
+            "max": 0
+          },
+          "gather_or_immediate_ms": {
+            "median": 36.575521,
+            "min": 35.280944,
+            "max": 39.066588
+          },
+          "full_force_plus_gather_ms": {
+            "median": 48.591087,
+            "min": 43.103959,
+            "max": 51.637015
+          }
+        },
+        "B": {
+          "force_or_fused_force_pin_ms": {
+            "median": 24.20999,
+            "min": 23.706627,
+            "max": 24.970779
+          },
+          "isolated_pin_scatter_ms": {
+            "median": 9.439432,
+            "min": 9.278873,
+            "max": 9.853802
+          },
+          "gather_or_immediate_ms": {
+            "median": 0.452929,
+            "min": 0.439588,
+            "max": 0.474109
+          },
+          "full_force_plus_gather_ms": {
+            "median": 24.677419,
+            "min": 24.154628,
+            "max": 25.422916
+          }
+        },
+        "C": {
+          "force_or_fused_force_pin_ms": {
+            "median": 6.910418,
+            "min": 6.523259,
+            "max": 13.007441
+          },
+          "isolated_pin_scatter_ms": {
+            "median": 0,
+            "min": 0,
+            "max": 0
+          },
+          "gather_or_immediate_ms": {
+            "median": 33.58034,
+            "min": 31.392236,
+            "max": 34.83672
+          },
+          "full_force_plus_gather_ms": {
+            "median": 41.407961,
+            "min": 40.103899,
+            "max": 46.056505
+          }
+        }
+      }
+    },
+    {
+      "snapshot": "iter-520-owner-0",
+      "threads": 1,
+      "repeats_per_route": 9,
+      "correctness": "all routes, weighted pins, cells, reconstructed force bitwise exact",
+      "mapping_ms": 6.629498,
+      "mapping_bytes": 11200952,
+      "cache_bytes": 11198288,
+      "sell_build_ms": 17.1246,
+      "sell_mapping_bytes": 3080832,
+      "sell_pin_bytes": 11255744,
+      "sell_padding_bytes": 57456,
+      "routes": {
+        "A": {
+          "force_or_fused_force_pin_ms": {
+            "median": 29.144644,
+            "min": 28.780198,
+            "max": 29.238695
+          },
+          "isolated_pin_scatter_ms": {
+            "median": 0,
+            "min": 0,
+            "max": 0
+          },
+          "gather_or_immediate_ms": {
+            "median": 91.578692,
+            "min": 90.84824,
+            "max": 93.038696
+          },
+          "full_force_plus_gather_ms": {
+            "median": 120.697346,
+            "min": 120.080053,
+            "max": 121.870172
+          }
+        },
+        "B": {
+          "force_or_fused_force_pin_ms": {
+            "median": 56.078429,
+            "min": 55.127096,
+            "max": 56.499451
+          },
+          "isolated_pin_scatter_ms": {
+            "median": 19.525523,
+            "min": 19.222888,
+            "max": 20.003036
+          },
+          "gather_or_immediate_ms": {
+            "median": 0.862249,
+            "min": 0.813248,
+            "max": 0.879155
+          },
+          "full_force_plus_gather_ms": {
+            "median": 56.950884,
+            "min": 55.963147,
+            "max": 57.378706
+          }
+        },
+        "C": {
+          "force_or_fused_force_pin_ms": {
+            "median": 29.196141,
+            "min": 28.818596,
+            "max": 29.274067
+          },
+          "isolated_pin_scatter_ms": {
+            "median": 0,
+            "min": 0,
+            "max": 0
+          },
+          "gather_or_immediate_ms": {
+            "median": 83.763228,
+            "min": 82.345558,
+            "max": 84.245432
+          },
+          "full_force_plus_gather_ms": {
+            "median": 112.674222,
+            "min": 111.609099,
+            "max": 113.111237
+          }
+        }
+      }
+    },
+    {
+      "snapshot": "iter-520-owner-0",
+      "threads": 4,
+      "repeats_per_route": 9,
+      "correctness": "all routes, weighted pins, cells, reconstructed force bitwise exact",
+      "mapping_ms": 6.715446,
+      "mapping_bytes": 11200952,
+      "cache_bytes": 11198288,
+      "sell_build_ms": 17.233694,
+      "sell_mapping_bytes": 3080832,
+      "sell_pin_bytes": 11255744,
+      "sell_padding_bytes": 57456,
+      "routes": {
+        "A": {
+          "force_or_fused_force_pin_ms": {
+            "median": 15.58679,
+            "min": 10.216525,
+            "max": 15.859988
+          },
+          "isolated_pin_scatter_ms": {
+            "median": 0,
+            "min": 0,
+            "max": 0
+          },
+          "gather_or_immediate_ms": {
+            "median": 37.68408,
+            "min": 35.662264,
+            "max": 38.674931
+          },
+          "full_force_plus_gather_ms": {
+            "median": 52.151855,
+            "min": 48.623015,
+            "max": 54.365144
+          }
+        },
+        "B": {
+          "force_or_fused_force_pin_ms": {
+            "median": 26.583893,
+            "min": 26.450463,
+            "max": 27.207395
+          },
+          "isolated_pin_scatter_ms": {
+            "median": 9.005143,
+            "min": 8.832764,
+            "max": 9.193384
+          },
+          "gather_or_immediate_ms": {
+            "median": 0.452147,
+            "min": 0.413378,
+            "max": 0.463433
+          },
+          "full_force_plus_gather_ms": {
+            "median": 27.028988,
+            "min": 26.864161,
+            "max": 27.659882
+          }
+        },
+        "C": {
+          "force_or_fused_force_pin_ms": {
+            "median": 10.282855,
+            "min": 10.194542,
+            "max": 15.911115
+          },
+          "isolated_pin_scatter_ms": {
+            "median": 0,
+            "min": 0,
+            "max": 0
+          },
+          "gather_or_immediate_ms": {
+            "median": 34.718523,
+            "min": 34.08222,
+            "max": 40.92664
+          },
+          "full_force_plus_gather_ms": {
+            "median": 45.919361,
+            "min": 44.699885,
+            "max": 51.215924
+          }
+        }
+      }
+    }
+  ],
+  "raw_summary_sha256": "7b18c5d775bc0c0235e7ed72cc4a08a64875bfaf7fa636ac7676e90402c79090"
+}

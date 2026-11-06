@@ -1,0 +1,73 @@
+{
+  "complete": true,
+  "source": "large02 snapshot8a real replay with soaMemory debug1; same column layout as snapshot9",
+  "scope": "Actual SoaStorage::allocatedBytes includes scalar columns, SoaRows nested adjacency capacities and Store free-list. Pool index bytes were reported only for GCell/GPin/GNet; physical Instance/Pin/Net owning pool row indices were passed as zero and are not accounted here. The category sum is not all storage or full RSS; excludes Bin/allocator/DB/hash/region/kernel/optimizer allocations and other unreported state.",
+  "stores": [
+    {
+      "store": "Instance",
+      "slots": 312529,
+      "live_rows": 312529,
+      "capacity": 312529,
+      "column_bytes": 28785050,
+      "index_bytes": 0
+    },
+    {
+      "store": "Pin",
+      "slots": 1400119,
+      "live_rows": 1400119,
+      "capacity": 1400119,
+      "column_bytes": 58804998,
+      "index_bytes": 0
+    },
+    {
+      "store": "Net",
+      "slots": 406912,
+      "live_rows": 406912,
+      "capacity": 406912,
+      "column_bytes": 30015196,
+      "index_bytes": 0
+    },
+    {
+      "store": "GCell",
+      "slots": 312529,
+      "live_rows": 312529,
+      "capacity": 312529,
+      "column_bytes": 44040211,
+      "index_bytes": 2500232
+    },
+    {
+      "store": "GPin",
+      "slots": 1400119,
+      "live_rows": 1400119,
+      "capacity": 1400119,
+      "column_bytes": 134411424,
+      "index_bytes": 5600476
+    },
+    {
+      "store": "GNet",
+      "slots": 406912,
+      "live_rows": 406912,
+      "capacity": 406912,
+      "column_bytes": 59719772,
+      "index_bytes": 1627648
+    }
+  ],
+  "buffers": {
+    "consumer_pins": 1399786,
+    "gradient_bytes": 11198288,
+    "physical_row_map_bytes": 8478240
+  },
+  "reported_column_bytes_sum": 355776651,
+  "reported_pool_index_bytes_sum": 9728356,
+  "tcl_sha256": "29b16b36a6958d3177de89dad76b56a4bcfc39bd3370387d6e0e751c69a929f4",
+  "memory_lines": [
+    "[DEBUG GPL-soaMemory] Instance slots=312529 live_rows=312529 capacity=312529 column_bytes=28785050 index_bytes=0",
+    "[DEBUG GPL-soaMemory] Pin slots=1400119 live_rows=1400119 capacity=1400119 column_bytes=58804998 index_bytes=0",
+    "[DEBUG GPL-soaMemory] Net slots=406912 live_rows=406912 capacity=406912 column_bytes=30015196 index_bytes=0",
+    "[DEBUG GPL-soaMemory] GCell slots=312529 live_rows=312529 capacity=312529 column_bytes=44040211 index_bytes=2500232",
+    "[DEBUG GPL-soaMemory] GPin slots=1400119 live_rows=1400119 capacity=1400119 column_bytes=134411424 index_bytes=5600476",
+    "[DEBUG GPL-soaMemory] GNet slots=406912 live_rows=406912 capacity=406912 column_bytes=59719772 index_bytes=1627648",
+    "[DEBUG GPL-soaMemory] consumer_pins=1399786 gradient_bytes=11198288 physical_row_map_bytes=8478240"
+  ],
+  "reported_categories_total_bytes": 385181535
+}

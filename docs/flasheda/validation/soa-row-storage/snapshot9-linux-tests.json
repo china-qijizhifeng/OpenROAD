@@ -1,0 +1,210 @@
+{
+  "snapshot": "snapshot9",
+  "target_count": 15,
+  "standalone_soa_target_count": 6,
+  "gpl_cpp_target_count": 9,
+  "gpl_gtest_case_count": 127,
+  "xml_testcase_count_total": 133,
+  "count_policy": "Bazel targets and XML testcase elements recorded separately; six pure-header local checks are not counted again",
+  "targets": {
+    "//src/gpl/test/soa:density_test": {
+      "files": {
+        "test.log": {
+          "bytes": 175,
+          "sha256": "cb725c308b567a4d2e9bae14ec732da07105fed780c82d61e2337b4770d32147"
+        },
+        "test.xml": {
+          "bytes": 568,
+          "sha256": "bcf98dd779a1a39849094aa21ca1ba37787db2916e53955dcdd9a3c24168351c"
+        }
+      },
+      "xml_testcase_count": 1
+    },
+    "//src/gpl/test/soa:fft_test": {
+      "files": {
+        "test.log": {
+          "bytes": 171,
+          "sha256": "71b30057d46a5ed51764970f0edfb372fe7bda685c42ca160b5244aab9877a95"
+        },
+        "test.xml": {
+          "bytes": 556,
+          "sha256": "34de6d8d74c04ca73cd28179fa57604e227d523c21b69d0f2e0f277eba29ef60"
+        }
+      },
+      "xml_testcase_count": 1
+    },
+    "//src/gpl/test/soa:metadata_test": {
+      "files": {
+        "test.log": {
+          "bytes": 176,
+          "sha256": "35a02fb888c769dd13fb0836e7bb6a547b81d6b63998e7452e16b237035d965a"
+        },
+        "test.xml": {
+          "bytes": 571,
+          "sha256": "106866ea72ddcd6092261aaa0452500d3f6390b5caff13569cf8face4e9a06d1"
+        }
+      },
+      "xml_testcase_count": 1
+    },
+    "//src/gpl/test/soa:point_test": {
+      "files": {
+        "test.log": {
+          "bytes": 173,
+          "sha256": "db99976cbf123cf8167376c47d7e5463d8c8b4bd4cc3a3b9d82998707acb9e83"
+        },
+        "test.xml": {
+          "bytes": 562,
+          "sha256": "294dbb2e44bc2c1a1c00c8e709e97f3f2572d3dd398d61331ac3ee6010f87bd6"
+        }
+      },
+      "xml_testcase_count": 1
+    },
+    "//src/gpl/test/soa:storage_test": {
+      "files": {
+        "test.log": {
+          "bytes": 175,
+          "sha256": "723b0dc79d422ddc46ff7b30a58150e08ac62e5d90aa3132bf9e46f1b45ace9a"
+        },
+        "test.xml": {
+          "bytes": 568,
+          "sha256": "58ab524ebfc56420ae6f80dd91b6f8c4bc4cdb8d45caa1b8d33b9020829e6cc5"
+        }
+      },
+      "xml_testcase_count": 1
+    },
+    "//src/gpl/test/soa:wirelength_test": {
+      "files": {
+        "test.log": {
+          "bytes": 178,
+          "sha256": "6fb1245f1fbe4fcb3166f09ad88360ec10620cc6058f155a3d5ccf612bbb1b94"
+        },
+        "test.xml": {
+          "bytes": 577,
+          "sha256": "a12c691419d07d636ff44b3db7bc7be9b38bd3bd43aa0a1e6e2502d59ea7a704"
+        }
+      },
+      "xml_testcase_count": 1
+    },
+    "//src/gpl/test:gpl_fft_unittest": {
+      "files": {
+        "test.log": {
+          "bytes": 2178,
+          "sha256": "d7ee103ec1573e8e90ca56e370e1873e5e4ccabdb7a458f3e88c97d7a3fe34a9"
+        },
+        "test.xml": {
+          "bytes": 3534,
+          "sha256": "64000c934bda7b233fcfe4aaf198c2d03db1aa0f965e0f596defa26b438ea545"
+        }
+      },
+      "xml_testcase_count": 13
+    },
+    "//src/gpl/test:overflow_test": {
+      "files": {
+        "test.log": {
+          "bytes": 8459,
+          "sha256": "f373421cb8a9568448369b2a59c8d41d7fcdfecf724d7450b3308d9f26032238"
+        },
+        "test.xml": {
+          "bytes": 1159,
+          "sha256": "33082d5eba727a4c3c67a05bc49cc56cf8043bd5bd79f3eaf008f0f20ba39b74"
+        }
+      },
+      "xml_testcase_count": 4
+    },
+    "//src/gpl/test:wirelength_gradient_test": {
+      "files": {
+        "test.log": {
+          "bytes": 2888,
+          "sha256": "751eafdfed9456270378253e21a1badc85d55120949620e9852d9e647a07a518"
+        },
+        "test.xml": {
+          "bytes": 1284,
+          "sha256": "82d72c3dc8602578eb9ff671f96eb75b23cb74e1125a2927a397c8c0e63d3dc7"
+        }
+      },
+      "xml_testcase_count": 4
+    },
+    "//src/gpl/test:placer_base_test": {
+      "files": {
+        "test.log": {
+          "bytes": 25852,
+          "sha256": "6c3ec4e75b219a2f1e6af3772fffe9f98da5b1400fdb9bbf537ea5d201f1da2a"
+        },
+        "test.xml": {
+          "bytes": 12644,
+          "sha256": "c5af4d3204677fadd102677bdf02ce1ce4ad07ea4a042927f5ca3a996c50b817"
+        }
+      },
+      "xml_testcase_count": 41
+    },
+    "//src/gpl/test:power_base_test": {
+      "files": {
+        "test.log": {
+          "bytes": 13585,
+          "sha256": "df8b346d9cfa3a7343457daa3549bbcb28b36eaaabe008cfa8f0e7c7e99046c5"
+        },
+        "test.xml": {
+          "bytes": 2205,
+          "sha256": "e0a77a04c2cf0de7a811ab67dae7a9babd84a989c8b761b00d77b744196bc52a"
+        }
+      },
+      "xml_testcase_count": 8
+    },
+    "//src/gpl/test:route_base_test": {
+      "files": {
+        "test.log": {
+          "bytes": 3902,
+          "sha256": "78585b57a9a0cd6c64f1ccad25d37393d4cb435fd455c31105d23a019f24e5a3"
+        },
+        "test.xml": {
+          "bytes": 1384,
+          "sha256": "12067ae69751609ce50889b679d5844b2b00a52b8e1db3f1558af0ee17e60e91"
+        }
+      },
+      "xml_testcase_count": 3
+    },
+    "//src/gpl/test:congestion_buffers_test": {
+      "files": {
+        "test.log": {
+          "bytes": 202312,
+          "sha256": "d26522e9a4d0c7112802842818978c7ffe30047266c1c1be576e2e81148da007"
+        },
+        "test.xml": {
+          "bytes": 15656,
+          "sha256": "202742a4710ca9fc999f569014391435d5f73644bc4fcaa2b44824112c604a75"
+        }
+      },
+      "xml_testcase_count": 49
+    },
+    "//src/gpl/test:estimate_target_density_test": {
+      "files": {
+        "test.log": {
+          "bytes": 20869,
+          "sha256": "b60cff5b294309ba2fa9fa13dd9a43bbf235815b148aee5ce0b25ad1487c625e"
+        },
+        "test.xml": {
+          "bytes": 1327,
+          "sha256": "06b809aa25a370cd9f6dd00d5294fa42c6c8f2ef14a7cb044a9a3f106230b25c"
+        }
+      },
+      "xml_testcase_count": 4
+    },
+    "//src/gpl/test:nesterov_divergence_test": {
+      "files": {
+        "test.log": {
+          "bytes": 14936,
+          "sha256": "003e7ed5978406b12c5f7bc9fcf32e2bcce827eb1899645137bc86fafe191967"
+        },
+        "test.xml": {
+          "bytes": 596,
+          "sha256": "820a9c4c6e12a94e808ee37ca69b96027954a13181613ac203da0c38f55a4e34"
+        }
+      },
+      "xml_testcase_count": 1
+    }
+  },
+  "build_log_sha256": {
+    "gpl-test-build.log": "4af4cb3bdd9d6c832a244035278000c39ba8803272cb480ed31ebdce88d417ef"
+  },
+  "passed": true
+}

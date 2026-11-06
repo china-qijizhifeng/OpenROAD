@@ -1,0 +1,55 @@
+{
+  "recorded_utc": "2026-11-06T15:41:30.379830+00:00",
+  "tools": {
+    "/tmp/soa-row-storage/bazel/9a2d2149383b50c10236079cd5499310/external/llvm++llvm_toolchain_minimal+llvm-toolchain-minimal-linux-amd64/bin/clang": {
+      "resolved": "/tmp/soa-row-storage/cache/repos/contents/ff74b7e0ddc87852787257bcadd93d0949a496014daadc43ab700d0b700bf128/a0d1e465-be1b-4736-854c-2b02c02bd8cc/bin/llvm",
+      "bytes": 152700480,
+      "sha256": "2667f50297ef526c2a594fae811614d83e55a14ac2ac3ac4414b100b7d0d9642",
+      "version": "clang version 23.1.2\nTarget: x86_64-unknown-linux-gnu\nThread model: posix\nInstalledDir: /tmp/soa-row-storage/cache/repos/contents/ff74b7e0ddc87852787257bcadd93d0949a496014daadc43ab700d0b700bf128/a0d1e465-be1b-4736-854c-2b02c02bd8cc/bin\n"
+    }
+  },
+  "build_inputs": {
+    ".bazelrc": "71cf6f0e586c01e4587b64348be65da7e73ef797c3e854c25a5a4b7f0c24194b",
+    ".bazelversion": "1b9487d55bea47fea50d226cc9c53bc548877ad2a318bac8fbc8b320f429e5c5",
+    "MODULE.bazel": "b7f15cd0ed8da9b7722f7af12c8d58228a120274c378dc1715f540c39b10bfa8",
+    "MODULE.bazel.lock": "9bb06d23d0928dca7547de582fb01c50a572306f95898306240a7dd8f62c8a37"
+  },
+  "old_elf_comment": {
+    "baseline": {
+      "sha256": "9eedbe284a9330f4269c1c1c557ae869f2d9c8472ae0610b3f7dc0f98b6b3fc4",
+      "comment": "\nString dump of section '.comment':\n  [     1]  Linker: LLD 23.1.2\n  [    14]  Intel Corporation\n  [    26]  clang version 23.1.2\n\n"
+    },
+    "candidate": {
+      "sha256": "bf95389f331b53e91cc3942d3c32a38aa2dcdfcaa57a6d520e43ca7e944a2edd",
+      "comment": "\nString dump of section '.comment':\n  [     1]  Linker: LLD 23.1.2\n  [    14]  Intel Corporation\n  [    26]  clang version 23.1.2\n\n"
+    }
+  },
+  "old_source_build_input_comparison": {
+    "baseline": {
+      ".bazelrc": true,
+      ".bazelversion": true,
+      "MODULE.bazel": true,
+      "MODULE.bazel.lock": true
+    },
+    "candidate": {
+      ".bazelrc": true,
+      ".bazelversion": true,
+      "MODULE.bazel": true,
+      "MODULE.bazel.lock": true
+    }
+  },
+  "same_compiler_contract_evidence": [
+    "Old native/current source manifests and new build agree byte-for-byte on .bazelrc, .bazelversion, MODULE.bazel and MODULE.bazel.lock",
+    "Old native/current ELF .comment both clang23.1.2 and LLD23.1.2",
+    "New actual hermetic clang reports23.1.2; binary SHA recorded",
+    "Old build scripts and new wrapper both --config=opt: O3 ThinLTO, C++20, ffp-contract=off; Werror source rules unchanged"
+  ],
+  "old_bazel_version_receipts": {
+    "baseline": "31ae3c45698f4e928e6ff2c0f96af09f064787330a8db8af2c3d70041dee6c19",
+    "candidate": "b6ae9c47c3cd47fa674f8305bf505f3eda4f05a31fa3c15e568863d63da44142"
+  },
+  "explicit_old_build_script_contract": {
+    "file": "build/soa/merge-master-local/12-build-local-cache.sh",
+    "sha256": "23ca350e373c3d21d3216b8f77f991c8f780c8a7d338b6862c9c8a64ae9a791c"
+  }
+}

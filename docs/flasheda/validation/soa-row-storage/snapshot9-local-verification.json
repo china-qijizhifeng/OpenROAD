@@ -1,0 +1,10 @@
+{
+  "snapshot": "snapshot9",
+  "all_downloaded_archive_members_verified": true,
+  "gzip_sha256": "05a6d2f9df850e41efe246299d2f9882bf4fb4b9cee81444fc457995b45195e6",
+  "decompressed_elf_sha256": "d7ddd6f2280b9842076ce6f9c38edf40e6351945d1515c8d5621fc8968392e7f",
+  "decompressed_elf_bytes": 124450848,
+  "all_42_live_local_files_exact": true,
+  "linux_tests": 15,
+  "local_header_and_sanitizer_passed": true
+}

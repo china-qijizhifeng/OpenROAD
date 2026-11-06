@@ -1,0 +1,116 @@
+{
+  "scope": "functional matrix bytes; no performance/RSS from these instrumented runs",
+  "case_pairs": 8,
+  "executions": 16,
+  "matrix_calls_per_role": 85,
+  "components_compared": 1020,
+  "all_matrix_bytes_exact": true,
+  "all_observables_exact": true,
+  "cases": [
+    {
+      "case": "gcd",
+      "threads": 1,
+      "matrix_calls_per_role": 5,
+      "component_count": 60,
+      "matrix_bytes_exact": true,
+      "observables_exact": true
+    },
+    {
+      "case": "gcd",
+      "threads": 4,
+      "matrix_calls_per_role": 5,
+      "component_count": 60,
+      "matrix_bytes_exact": true,
+      "observables_exact": true
+    },
+    {
+      "case": "aes_cipher_top",
+      "threads": 1,
+      "matrix_calls_per_role": 20,
+      "component_count": 240,
+      "matrix_bytes_exact": true,
+      "observables_exact": true
+    },
+    {
+      "case": "aes_cipher_top",
+      "threads": 4,
+      "matrix_calls_per_role": 20,
+      "component_count": 240,
+      "matrix_bytes_exact": true,
+      "observables_exact": true
+    },
+    {
+      "case": "incremental02",
+      "threads": 1,
+      "matrix_calls_per_role": 5,
+      "component_count": 60,
+      "matrix_bytes_exact": true,
+      "observables_exact": true
+    },
+    {
+      "case": "place_ios_rd",
+      "threads": 1,
+      "matrix_calls_per_role": 5,
+      "component_count": 60,
+      "matrix_bytes_exact": true,
+      "observables_exact": true
+    },
+    {
+      "case": "region01",
+      "threads": 1,
+      "matrix_calls_per_role": 5,
+      "component_count": 60,
+      "matrix_bytes_exact": true,
+      "observables_exact": true
+    },
+    {
+      "case": "large02",
+      "threads": 1,
+      "matrix_calls_per_role": 20,
+      "component_count": 240,
+      "matrix_bytes_exact": true,
+      "observables_exact": true
+    }
+  ],
+  "binaries": {
+    "native": {
+      "path": "/gpfs/users/linlizhi/flasheda-soa-row-storage-20261106/diagnostics/native-matrix/openroad",
+      "sha256": "15c10d84eacc71ac8f5fbcd5427f7097e5c082b2e7e056aaed6a20bc164307cf"
+    },
+    "new": {
+      "path": "/gpfs/users/linlizhi/flasheda-soa-row-storage-20261106/diagnostics/new-observation-matrix/openroad",
+      "sha256": "f38f174d3aca52ed26d6a3514c4cd31b5b19d41729e208fc42e84e74f4978966"
+    }
+  },
+  "restoration": {
+    "checked_utc": "2026-11-06T16:56:12.276775+00:00",
+    "source": "/tmp/soa-row-storage/source",
+    "snapshot": "snapshot8a",
+    "source_files_exact": true,
+    "official_elf_sha256": "2f2c1364cc30d33cd76a9b7bf8d898d590b16e9bc1d928691fd5311bf7c15c03",
+    "official_elf_bytes": 124452824,
+    "matrix_pairs": 8,
+    "matrix_calls_per_role": 85,
+    "matrix_components": 1020,
+    "observables_exact": true,
+    "policy": "Functional matrix and observable comparison only; diagnostic timings are not performance evidence."
+  },
+  "archives": {
+    "matrix-differential-evidence.tar.gz": {
+      "sha256": "b4c717104ac5228c531ecfc0b85ba1999dd34fe0222660bad6921cc2a12b1da8",
+      "bytes": 25082833
+    },
+    "replay-tools-bazel-reproduction-evidence.tar.gz": {
+      "sha256": "b9c7279890313b24ed016c1aa70a26c9068f39b3e0bcee6161dad1b8cd59164a",
+      "bytes": 895321
+    }
+  },
+  "replay_reproduction": {
+    "build_sha256": "7d21880f5ed35614c3263883f53602cc135c1531c9e4e9321e3e5f83ae42d363",
+    "aquery_sha256": "7dfdadaea6ccbb89be8cd791428618736be7f553e23c2bfad9f9be7ffa318adf",
+    "link_and_lto_index_actions": 4,
+    "actual_parameter_files": 4
+  },
+  "downloaded_archives_sha256_verified": true,
+  "all_downloaded_logs_and_scripts_sha256_verified": true
+}

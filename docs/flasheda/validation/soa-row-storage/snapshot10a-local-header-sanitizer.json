@@ -1,0 +1,133 @@
+{
+  "snapshot": "snapshot10a",
+  "production_overlay_sha256": "ec7b82baccf6804fc6d3111926e975618b8b64b3b74e76bcada8dd277682ae7a",
+  "scope": "local ARM standalone pure-header checks only, not Linux GPL validation",
+  "compiler": "/opt/homebrew/Cellar/llvm@21/21.1.8/bin/clang++",
+  "compiler_version": "Homebrew clang version 21.1.8\nTarget: arm64-apple-darwin23.4.0\nThread model: posix\nInstalledDir: /opt/homebrew/Cellar/llvm@21/21.1.8/bin\nConfiguration file: /opt/homebrew/etc/clang/arm64-apple-darwin23.cfg\n",
+  "results": [
+    {
+      "name": "density",
+      "compile_exit": 0,
+      "run_exit": 0,
+      "command": [
+        "/opt/homebrew/Cellar/llvm@21/21.1.8/bin/clang++",
+        "-std=c++20",
+        "-ffp-contract=off",
+        "-Wall",
+        "-Wextra",
+        "-Werror",
+        "-I",
+        "/Users/shom/Downloads/openroad-gpl-soa/build/soa/row-storage-20261106/snapshot10a/files/src/gpl/src",
+        "-O2",
+        "/Users/shom/Downloads/openroad-gpl-soa/build/soa/row-storage-20261106/snapshot10a/files/src/gpl/test/soa/density_test.cpp",
+        "-o",
+        "/Users/shom/Downloads/openroad-gpl-soa/build/soa/row-storage-20261106/snapshot10a/density_test"
+      ],
+      "binary_sha256": "167aa4e8a2992dd21ccfd0a3043e8bab4217f3bae5a29ca5f82c678f5705de22"
+    },
+    {
+      "name": "point",
+      "compile_exit": 0,
+      "run_exit": 0,
+      "command": [
+        "/opt/homebrew/Cellar/llvm@21/21.1.8/bin/clang++",
+        "-std=c++20",
+        "-ffp-contract=off",
+        "-Wall",
+        "-Wextra",
+        "-Werror",
+        "-I",
+        "/Users/shom/Downloads/openroad-gpl-soa/build/soa/row-storage-20261106/snapshot10a/files/src/gpl/src",
+        "-O2",
+        "/Users/shom/Downloads/openroad-gpl-soa/build/soa/row-storage-20261106/snapshot10a/files/src/gpl/test/soa/point_test.cpp",
+        "-o",
+        "/Users/shom/Downloads/openroad-gpl-soa/build/soa/row-storage-20261106/snapshot10a/point_test"
+      ],
+      "binary_sha256": "2336998db010a73b30b979f4c5913433e1f0767e439bf4c735a8eb3e56c5891f"
+    },
+    {
+      "name": "metadata",
+      "compile_exit": 0,
+      "run_exit": 0,
+      "command": [
+        "/opt/homebrew/Cellar/llvm@21/21.1.8/bin/clang++",
+        "-std=c++20",
+        "-ffp-contract=off",
+        "-Wall",
+        "-Wextra",
+        "-Werror",
+        "-I",
+        "/Users/shom/Downloads/openroad-gpl-soa/build/soa/row-storage-20261106/snapshot10a/files/src/gpl/src",
+        "-O2",
+        "/Users/shom/Downloads/openroad-gpl-soa/build/soa/row-storage-20261106/snapshot10a/files/src/gpl/test/soa/metadata_test.cpp",
+        "-o",
+        "/Users/shom/Downloads/openroad-gpl-soa/build/soa/row-storage-20261106/snapshot10a/metadata_test"
+      ],
+      "binary_sha256": "260e06095365dc47135293cf74a718bba240e3a29d3e0e2f15411aae03317a40"
+    },
+    {
+      "name": "storage",
+      "compile_exit": 0,
+      "run_exit": 0,
+      "command": [
+        "/opt/homebrew/Cellar/llvm@21/21.1.8/bin/clang++",
+        "-std=c++20",
+        "-ffp-contract=off",
+        "-Wall",
+        "-Wextra",
+        "-Werror",
+        "-I",
+        "/Users/shom/Downloads/openroad-gpl-soa/build/soa/row-storage-20261106/snapshot10a/files/src/gpl/src",
+        "-O2",
+        "/Users/shom/Downloads/openroad-gpl-soa/build/soa/row-storage-20261106/snapshot10a/files/src/gpl/test/soa/storage_test.cpp",
+        "-o",
+        "/Users/shom/Downloads/openroad-gpl-soa/build/soa/row-storage-20261106/snapshot10a/storage_test"
+      ],
+      "binary_sha256": "4ca499b652095057be9b7ed8b6af8ef6e3e37b1e4be98f5ece780199d574c97a"
+    },
+    {
+      "name": "wirelength",
+      "compile_exit": 0,
+      "run_exit": 0,
+      "command": [
+        "/opt/homebrew/Cellar/llvm@21/21.1.8/bin/clang++",
+        "-std=c++20",
+        "-ffp-contract=off",
+        "-Wall",
+        "-Wextra",
+        "-Werror",
+        "-I",
+        "/Users/shom/Downloads/openroad-gpl-soa/build/soa/row-storage-20261106/snapshot10a/files/src/gpl/src",
+        "-O2",
+        "/Users/shom/Downloads/openroad-gpl-soa/build/soa/row-storage-20261106/snapshot10a/files/src/gpl/test/soa/wirelength_test.cpp",
+        "-o",
+        "/Users/shom/Downloads/openroad-gpl-soa/build/soa/row-storage-20261106/snapshot10a/wirelength_test"
+      ],
+      "binary_sha256": "41195b10f047b3f6946f73cd4f8c8bbda126a453606406a55511dae75611f876"
+    },
+    {
+      "name": "storage-san",
+      "compile_exit": 0,
+      "run_exit": 0,
+      "command": [
+        "/opt/homebrew/Cellar/llvm@21/21.1.8/bin/clang++",
+        "-std=c++20",
+        "-ffp-contract=off",
+        "-Wall",
+        "-Wextra",
+        "-Werror",
+        "-I",
+        "/Users/shom/Downloads/openroad-gpl-soa/build/soa/row-storage-20261106/snapshot10a/files/src/gpl/src",
+        "-O1",
+        "-g",
+        "-fsanitize=address,undefined",
+        "-fno-omit-frame-pointer",
+        "/Users/shom/Downloads/openroad-gpl-soa/build/soa/row-storage-20261106/snapshot10a/files/src/gpl/test/soa/storage_test.cpp",
+        "-o",
+        "/Users/shom/Downloads/openroad-gpl-soa/build/soa/row-storage-20261106/snapshot10a/storage-san_test"
+      ],
+      "binary_sha256": "8d354e2b66442f17637793bc9ee32116a8cff747f42281d81ab3ffd5fb0734b6"
+    }
+  ],
+  "passed": true
+}

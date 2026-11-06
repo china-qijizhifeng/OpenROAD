@@ -1,0 +1,64 @@
+{
+  "snapshot": "snapshot10b",
+  "paths": {
+    "manifest.json": {
+      "path": "/Users/shom/Downloads/openroad-gpl-soa/build/soa/row-storage-20261106/snapshot10b/manifest.json",
+      "sha256": "72ae36a5368d190e6a326f48c78090f5e092419706bd844bd369d4f8b7261400"
+    },
+    "copyback-receipt.json": {
+      "path": "/Users/shom/Downloads/openroad-gpl-soa/build/soa/row-storage-20261106/snapshot10b/copyback-receipt.json",
+      "sha256": "e74f1c20e22610060b52c622bbbcb4f69db3cd22e2d81283ac318ac0d6fe2e84"
+    },
+    "final-source-receipt.json": {
+      "path": "/Users/shom/Downloads/openroad-gpl-soa/build/soa/row-storage-20261106/snapshot10b/final-source-receipt.json",
+      "sha256": "397f506249a4e7aeed61153aa5c326fb9e53a34802f938710a3842edf13a0fa3"
+    },
+    "local-header-receipt.json": {
+      "path": "/Users/shom/Downloads/openroad-gpl-soa/build/soa/row-storage-20261106/snapshot10b/local-header-receipt.json",
+      "sha256": "301fd3c412a31f6bf3e21f7bc72624abfc15183e4fbfb1443789e04b2fc3dcb0"
+    },
+    "gpl-test-receipt.json": {
+      "path": "/Users/shom/Downloads/openroad-gpl-soa/build/soa/row-storage-20261106/snapshot10b/gpl-test-receipt.json",
+      "sha256": "2cabaafb6349b7a616f7cacf555f6df5f075436468d4abe0bb0b24266fa9d2e7"
+    },
+    "selector-linux-receipt.json": {
+      "path": "/Users/shom/Downloads/openroad-gpl-soa/build/soa/row-storage-20261106/snapshot10b/selector-linux-receipt.json",
+      "sha256": "95315f678ff97ee14bac669eaea92fe6201129c87ef2dae0b75e46a9f32adc44"
+    },
+    "selector-arm-receipt.json": {
+      "path": "/Users/shom/Downloads/openroad-gpl-soa/build/soa/row-storage-20261106/snapshot10b/selector-arm-receipt.json",
+      "sha256": "be44811fcf0af109f823434f2949c73d632d1376545f76b1d6d50b1ead36ae60"
+    },
+    "new-elf-receipt.json": {
+      "path": "/Users/shom/Downloads/openroad-gpl-soa/build/soa/row-storage-20261106/snapshot10b/new-elf-receipt.json",
+      "sha256": "e05a8c8ba1b3d54e8adfe13ae6bbe1ca5618b729e5a5845ca906748d3a652c09"
+    },
+    "production-action-assembly-receipt.json": {
+      "path": "/Users/shom/Downloads/openroad-gpl-soa/build/soa/row-storage-20261106/snapshot10b/production-action-assembly-receipt.json",
+      "sha256": "4a54e98a1ee6597343f12e1fb098bdc9a4d2093521bb659baef3b52431efd343"
+    },
+    "simd-isa-receipt.json": {
+      "path": "/Users/shom/Downloads/openroad-gpl-soa/build/soa/row-storage-20261106/snapshot10b/simd-isa-receipt.json",
+      "sha256": "c505443b7e80c17bbb10989bdac77412197e87261059cad616fee2bc3ae311e1"
+    },
+    "strategy-delta-receipt.json": {
+      "path": "/Users/shom/Downloads/openroad-gpl-soa/build/soa/row-storage-20261106/snapshot10b/strategy-delta-receipt.json",
+      "sha256": "edfb33eb9770c7a192ee34d36607072c94849860779fe13c025e09a5f4c7cc80"
+    },
+    "local-verification.json": {
+      "path": "/Users/shom/Downloads/openroad-gpl-soa/build/soa/row-storage-20261106/snapshot10b/local-verification.json",
+      "sha256": "461fc179f25c25f96552ecd688c69e2d9230a19b676d13418b43c4b17587e6d7"
+    },
+    "final-worktree-check.json": {
+      "path": "/Users/shom/Downloads/openroad-gpl-soa/build/soa/row-storage-20261106/snapshot10b/final-worktree-check.json",
+      "sha256": "0f39c0feaabfc4197b9b41eea2217c98c64efa29ec117dccc2049c01de023947"
+    }
+  },
+  "archive_receipt": "/Users/shom/Downloads/openroad-gpl-soa/build/soa/row-storage-20261106/production-simd-snapshot10b-archive-receipt.json",
+  "formal_elf_sha256": "2d4ea6220bcad8fc231478f04bff792dadb4657c3b271bce9404036e22e597d3",
+  "archive_sha256": "b53a6ad72584f2aafc53c8995471fe52c041e350fde66d288f68df67b00f56eb",
+  "functional_gates": "E2B12+small36 pending independent acceptance agents",
+  "source_format_diff_check": "44 source SHA+43 C++format+gitdiffcheck passed; documentation local-source copy update awaits final sync",
+  "no_snapshot10b_formal_timing": true,
+  "worker_cache_preserved": true
+}

@@ -1,0 +1,215 @@
+{
+  "simd_execution": {
+    "actual_avx2_calls": 12230,
+    "native_oracle_bitwise_passed": true,
+    "FE_INVALID_and_FE_DIVBYZERO_absent_in_every_checked_kernel": true
+  },
+  "snapshot": "snapshot10b",
+  "target_count": 15,
+  "standalone_soa_target_count": 6,
+  "gpl_cpp_target_count": 9,
+  "gpl_gtest_case_count": 127,
+  "xml_testcase_count_total": 133,
+  "count_policy": "Bazel targets and XML testcase elements recorded separately; six pure-header local checks are not counted again",
+  "targets": {
+    "//src/gpl/test/soa:density_test": {
+      "files": {
+        "test.log": {
+          "bytes": 175,
+          "sha256": "cb725c308b567a4d2e9bae14ec732da07105fed780c82d61e2337b4770d32147"
+        },
+        "test.xml": {
+          "bytes": 568,
+          "sha256": "bcf98dd779a1a39849094aa21ca1ba37787db2916e53955dcdd9a3c24168351c"
+        }
+      },
+      "xml_testcase_count": 1
+    },
+    "//src/gpl/test/soa:fft_test": {
+      "files": {
+        "test.log": {
+          "bytes": 171,
+          "sha256": "71b30057d46a5ed51764970f0edfb372fe7bda685c42ca160b5244aab9877a95"
+        },
+        "test.xml": {
+          "bytes": 556,
+          "sha256": "34de6d8d74c04ca73cd28179fa57604e227d523c21b69d0f2e0f277eba29ef60"
+        }
+      },
+      "xml_testcase_count": 1
+    },
+    "//src/gpl/test/soa:metadata_test": {
+      "files": {
+        "test.log": {
+          "bytes": 176,
+          "sha256": "35a02fb888c769dd13fb0836e7bb6a547b81d6b63998e7452e16b237035d965a"
+        },
+        "test.xml": {
+          "bytes": 571,
+          "sha256": "106866ea72ddcd6092261aaa0452500d3f6390b5caff13569cf8face4e9a06d1"
+        }
+      },
+      "xml_testcase_count": 1
+    },
+    "//src/gpl/test/soa:point_test": {
+      "files": {
+        "test.log": {
+          "bytes": 173,
+          "sha256": "db99976cbf123cf8167376c47d7e5463d8c8b4bd4cc3a3b9d82998707acb9e83"
+        },
+        "test.xml": {
+          "bytes": 562,
+          "sha256": "294dbb2e44bc2c1a1c00c8e709e97f3f2572d3dd398d61331ac3ee6010f87bd6"
+        }
+      },
+      "xml_testcase_count": 1
+    },
+    "//src/gpl/test/soa:storage_test": {
+      "files": {
+        "test.log": {
+          "bytes": 175,
+          "sha256": "723b0dc79d422ddc46ff7b30a58150e08ac62e5d90aa3132bf9e46f1b45ace9a"
+        },
+        "test.xml": {
+          "bytes": 568,
+          "sha256": "58ab524ebfc56420ae6f80dd91b6f8c4bc4cdb8d45caa1b8d33b9020829e6cc5"
+        }
+      },
+      "xml_testcase_count": 1
+    },
+    "//src/gpl/test/soa:wirelength_test": {
+      "files": {
+        "test.log": {
+          "bytes": 231,
+          "sha256": "d21cc869ac4b3258946de76c050c04b4b750f5bb345f4bf28f584b5f31ad47ee"
+        },
+        "test.xml": {
+          "bytes": 630,
+          "sha256": "aae7dafcc74e94a2dcb296bc90ed622b55774832e82d705d2710ac888ba9288e"
+        }
+      },
+      "xml_testcase_count": 1
+    },
+    "//src/gpl/test:gpl_fft_unittest": {
+      "files": {
+        "test.log": {
+          "bytes": 2178,
+          "sha256": "d7ee103ec1573e8e90ca56e370e1873e5e4ccabdb7a458f3e88c97d7a3fe34a9"
+        },
+        "test.xml": {
+          "bytes": 3534,
+          "sha256": "64000c934bda7b233fcfe4aaf198c2d03db1aa0f965e0f596defa26b438ea545"
+        }
+      },
+      "xml_testcase_count": 13
+    },
+    "//src/gpl/test:overflow_test": {
+      "files": {
+        "test.log": {
+          "bytes": 8460,
+          "sha256": "954d9546b6564099bd7d04b6c7fe2473b2fa7e23ccb959f79610af01a0a11da4"
+        },
+        "test.xml": {
+          "bytes": 1159,
+          "sha256": "969f884df33464413f429d5d504722a66506e2be894724e5d3d586a995d638f0"
+        }
+      },
+      "xml_testcase_count": 4
+    },
+    "//src/gpl/test:wirelength_gradient_test": {
+      "files": {
+        "test.log": {
+          "bytes": 2888,
+          "sha256": "f02d4c1cf9d072256efb146c88924a828a192c2bdb44cb5707f4febb9ce3674f"
+        },
+        "test.xml": {
+          "bytes": 1284,
+          "sha256": "fcb4ce8705cd17cb41d26ea8997c9867d1d699793299dae3f9c3aa3ed27fcd37"
+        }
+      },
+      "xml_testcase_count": 4
+    },
+    "//src/gpl/test:placer_base_test": {
+      "files": {
+        "test.log": {
+          "bytes": 25852,
+          "sha256": "6c3ec4e75b219a2f1e6af3772fffe9f98da5b1400fdb9bbf537ea5d201f1da2a"
+        },
+        "test.xml": {
+          "bytes": 12644,
+          "sha256": "c5af4d3204677fadd102677bdf02ce1ce4ad07ea4a042927f5ca3a996c50b817"
+        }
+      },
+      "xml_testcase_count": 41
+    },
+    "//src/gpl/test:power_base_test": {
+      "files": {
+        "test.log": {
+          "bytes": 13634,
+          "sha256": "1d5c72e37f155d938a22ad6da05f469fc4450f765563e8cd2e61cb08c56ba7cc"
+        },
+        "test.xml": {
+          "bytes": 2205,
+          "sha256": "3efe4d90fb986b1b2aa3fcdb81e6b980137ef0550987ad17c147d59d92e3b231"
+        }
+      },
+      "xml_testcase_count": 8
+    },
+    "//src/gpl/test:route_base_test": {
+      "files": {
+        "test.log": {
+          "bytes": 3912,
+          "sha256": "36e2a12636e5586f683befc7875756839f84ac157c2382f7e06160638977811b"
+        },
+        "test.xml": {
+          "bytes": 1384,
+          "sha256": "ab1d57c4428f369248550faa9e9504ea028642c1145dea6f1a8f74990e74c55e"
+        }
+      },
+      "xml_testcase_count": 3
+    },
+    "//src/gpl/test:congestion_buffers_test": {
+      "files": {
+        "test.log": {
+          "bytes": 202594,
+          "sha256": "f40157678060a3c7606d2f334d87e07a58eae47c4d587cf407514d1ab19d02ec"
+        },
+        "test.xml": {
+          "bytes": 15655,
+          "sha256": "2f0a70bb6091fa8bdabb56b56ff9a48256c17b201c6107b8d40faba25f97277f"
+        }
+      },
+      "xml_testcase_count": 49
+    },
+    "//src/gpl/test:estimate_target_density_test": {
+      "files": {
+        "test.log": {
+          "bytes": 20869,
+          "sha256": "330f0accc8249d0710f9aea0b75eb1dfdd0281e07b432228b8d8f3cb1898d6b0"
+        },
+        "test.xml": {
+          "bytes": 1327,
+          "sha256": "8494d45dda68bc74ef0b239f833a88824921b6255b83590147335ba92ecf1e3d"
+        }
+      },
+      "xml_testcase_count": 4
+    },
+    "//src/gpl/test:nesterov_divergence_test": {
+      "files": {
+        "test.log": {
+          "bytes": 14936,
+          "sha256": "bed64cd76cafe2e860be393f6303472050208e6ed2ca22f1baac8ae83d7b3237"
+        },
+        "test.xml": {
+          "bytes": 599,
+          "sha256": "9d78ed694431f795cc07dbcdde9bc1e78b52884cef97bdff54e826b46a8372c3"
+        }
+      },
+      "xml_testcase_count": 1
+    }
+  },
+  "build_log_sha256": {
+    "gpl-test-build.log": "ca85fb54002b8e940bf9ec9e91a9ed4f78db541fb6fa5b1a2e4d1ef68e545c21"
+  },
+  "passed": true
+}

@@ -1,0 +1,98 @@
+{
+  "snapshot": "snapshot10b",
+  "formal_elf_sha256": "2d4ea6220bcad8fc231478f04bff792dadb4657c3b271bce9404036e22e597d3",
+  "production_header_sha256": "e891c16b7204a8c3e6e474c8d14be722bda9d4533f5e7196b83d6026921d9027",
+  "selector_env": "GPL_WIRELENGTH_SIMD",
+  "exact_opt_in_value": "avx2",
+  "default_selected": false,
+  "independent_process_selector_linux": {
+    "snapshot": "snapshot10b",
+    "binary_sha256": "00a770cff0422a8bcc9f64e5cefa69faec8f7a2d4f2165d4c511d4d1a166b4e0",
+    "independent_processes": 3,
+    "results": [
+      {
+        "mode": "unset",
+        "hardware_avx2": true,
+        "selected": false,
+        "expected": false,
+        "exact": true
+      },
+      {
+        "mode": "avx2",
+        "hardware_avx2": true,
+        "selected": true,
+        "expected": true,
+        "exact": true
+      },
+      {
+        "mode": "unsupportedstring",
+        "hardware_avx2": true,
+        "selected": false,
+        "expected": false,
+        "exact": true
+      }
+    ],
+    "passed": true
+  },
+  "independent_process_selector_ARM": {
+    "snapshot": "snapshot10b",
+    "binary_sha256": "89e3a5c49bed04b4d623ac0eb52569a94eb61046abb635c94a7a47a2e2b980d9",
+    "independent_processes": 3,
+    "results": [
+      {
+        "mode": "unset",
+        "hardware_avx2": false,
+        "selected": false,
+        "expected": false,
+        "exact": true
+      },
+      {
+        "mode": "avx2",
+        "hardware_avx2": false,
+        "selected": false,
+        "expected": false,
+        "exact": true
+      },
+      {
+        "mode": "unsupportedstring",
+        "hardware_avx2": false,
+        "selected": false,
+        "expected": false,
+        "exact": true
+      }
+    ],
+    "passed": true
+  },
+  "actual_production_compile_flags_verified": [
+    "O3",
+    "ThinLTO",
+    "C++20",
+    "ffp-contract off",
+    "Werror"
+  ],
+  "no_global_isa_or_fastmath_flags": true,
+  "final_elf_selector": {
+    "symbol": "_ZZN3gpl17useAvx2WirelengthEvENKUlvE_clEv",
+    "assembly": "/Users/shom/Downloads/openroad-gpl-soa/build/soa/row-storage-20261106/snapshot10b-loop-disassembly-selector-v2/8.s",
+    "sha256": "186af039baa8459e2efb52c1f0e416c3dad6c65181c2df1abf70bf43f9c5efb4",
+    "getenv_and_strcmp_then_cpu_capability_check": true,
+    "cached_selection_called_from_force": true,
+    "generic_selector_entry_outline_no_AVX_instructions": true
+  },
+  "AVX2_helper": {
+    "symbol": "_ZN3gpl26scatterNetPinGradientsAvx2ERKNS_16NetGradientTermsERKNS_10SoaStorageIJiiiiffffhhhhNS_6SoaRefINS_5GCellEEENS4_INS_4GNetEEENS_7SoaRowsINS_3PinEEEmjEEENSt3__14spanIKjLm18446744073709551615EEERNS_12PointColumnsEfff",
+    "assembly": "/Users/shom/Downloads/openroad-gpl-soa/build/soa/row-storage-20261106/snapshot10b-loop-disassembly-selector-v2/5.s",
+    "sha256": "0ad2446d43a69f65d21ad0ef7ae7ddf9e39e5d5b74bde23b49e5ea9cf128bf2e",
+    "packed_double_divides": 4,
+    "packed_float_multiplies": 14,
+    "FMA_absent": true
+  },
+  "kernel_oracle": {
+    "actual_avx2_calls": 12230,
+    "native_oracle_bitwise_passed": true,
+    "FE_INVALID_and_FE_DIVBYZERO_absent_in_every_checked_kernel": true
+  },
+  "strategy_only_delta_proof": "strategy-delta-receipt.json",
+  "formal_uninstrumented": true,
+  "formal_timing_scope": "snapshot10b gate acceptance pending; snapshot10a formal timing is historical kernel evidence only"
+}

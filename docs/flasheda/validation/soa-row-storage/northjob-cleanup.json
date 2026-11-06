@@ -1,0 +1,19 @@
+{
+  "status": "deleted_and_absent",
+  "finished_utc": "2026-11-06T18:57:57.540005+00:00",
+  "job_identity": "job-2851be22e507-20261106222912",
+  "exact_alias": "flasheda-soa-row-storage-20261106",
+  "namespace": "qiji",
+  "creator": "linlizhi",
+  "api_delete_success": true,
+  "delete_invocations": 1,
+  "exact_alias_absent": true,
+  "E2B12_and_small36_passed_and_local_archives_verified": true,
+  "GPFS_preserved_and_critical_archive_sha256_rechecked": true,
+  "GPFS_directory": "/gpfs/users/linlizhi/flasheda-soa-row-storage-20261106",
+  "ephemeral_cache_policy": "Only this exact job/container deleted; ephemeral overlay becomes unavailable and runtime reclamation is asynchronous. GPFS files are not removed.",
+  "receipt_path": "/Users/shom/Downloads/openroad-gpl-soa/build/soa/row-storage-20261106/cleanup-receipt.json",
+  "receipt_sha256": "36139fbbff3ce3b34f121dd1fdeadb105586bae60a66f5967d6157a0da8aa8e7",
+  "HEAD_index_source_modified_by_cleanup": false,
+  "implementation_HEAD": "eb4c976b51bc897826e468a9c4dc5fc2c7068241"
+}
