@@ -41,7 +41,7 @@
 
 // Plain-C++ PIMPL headers (no Kokkos) — included unconditionally so the
 // unique_ptr<DeviceState> / unique_ptr<NesterovDeviceContext> member
-// destructors see a complete type on CPU-only builds (ENABLE_GPU=OFF).
+// destructors see a complete type on CPU-only builds (without --config=gpu).
 #include "gpu/deviceState.h"
 #include "gpu/nesterovDeviceContext.h"
 #include "gpu/regionDensityField.h"
@@ -554,26 +554,33 @@ void GPin::setCenterLocation(int cx, int cy)
 void GPin::clearWaVars()
 {
   data_.storage().at<GPinColumns::hasMaxExpSumX>(
-      data_.get<GPinColumns::waSlot>()) = false;
+      data_.get<GPinColumns::waSlot>())
+      = false;
   data_.storage().at<GPinColumns::hasMaxExpSumY>(
-      data_.get<GPinColumns::waSlot>()) = false;
+      data_.get<GPinColumns::waSlot>())
+      = false;
   data_.storage().at<GPinColumns::hasMinExpSumX>(
-      data_.get<GPinColumns::waSlot>()) = false;
+      data_.get<GPinColumns::waSlot>())
+      = false;
   data_.storage().at<GPinColumns::hasMinExpSumY>(
-      data_.get<GPinColumns::waSlot>()) = false;
+      data_.get<GPinColumns::waSlot>())
+      = false;
 
   data_.storage().at<GPinColumns::maxExpSumX>(data_.get<GPinColumns::waSlot>())
       = data_.storage().at<GPinColumns::maxExpSumY>(
-          data_.get<GPinColumns::waSlot>()) = 0;
+          data_.get<GPinColumns::waSlot>())
+      = 0;
   data_.storage().at<GPinColumns::minExpSumX>(data_.get<GPinColumns::waSlot>())
       = data_.storage().at<GPinColumns::minExpSumY>(
-          data_.get<GPinColumns::waSlot>()) = 0;
+          data_.get<GPinColumns::waSlot>())
+      = 0;
 }
 
 void GPin::setMaxExpSumX(float maxExpSumX)
 {
   data_.storage().at<GPinColumns::hasMaxExpSumX>(
-      data_.get<GPinColumns::waSlot>()) = true;
+      data_.get<GPinColumns::waSlot>())
+      = true;
   data_.storage().at<GPinColumns::maxExpSumX>(data_.get<GPinColumns::waSlot>())
       = maxExpSumX;
 }
@@ -581,7 +588,8 @@ void GPin::setMaxExpSumX(float maxExpSumX)
 void GPin::setMaxExpSumY(float maxExpSumY)
 {
   data_.storage().at<GPinColumns::hasMaxExpSumY>(
-      data_.get<GPinColumns::waSlot>()) = true;
+      data_.get<GPinColumns::waSlot>())
+      = true;
   data_.storage().at<GPinColumns::maxExpSumY>(data_.get<GPinColumns::waSlot>())
       = maxExpSumY;
 }
@@ -589,7 +597,8 @@ void GPin::setMaxExpSumY(float maxExpSumY)
 void GPin::setMinExpSumX(float minExpSumX)
 {
   data_.storage().at<GPinColumns::hasMinExpSumX>(
-      data_.get<GPinColumns::waSlot>()) = true;
+      data_.get<GPinColumns::waSlot>())
+      = true;
   data_.storage().at<GPinColumns::minExpSumX>(data_.get<GPinColumns::waSlot>())
       = minExpSumX;
 }
@@ -597,7 +606,8 @@ void GPin::setMinExpSumX(float minExpSumX)
 void GPin::setMinExpSumY(float minExpSumY)
 {
   data_.storage().at<GPinColumns::hasMinExpSumY>(
-      data_.get<GPinColumns::waSlot>()) = true;
+      data_.get<GPinColumns::waSlot>())
+      = true;
   data_.storage().at<GPinColumns::minExpSumY>(data_.get<GPinColumns::waSlot>())
       = minExpSumY;
 }
@@ -1519,9 +1529,7 @@ NesterovBaseCommon::NesterovBaseCommon(
 
   // gCellStor_'s pins_ fill
 #pragma omp parallel for num_threads(num_threads_)
-  for (auto it = gCellStor_.begin(); it < gCellStor_.end(); ++it) {
-    auto& gCell = *it;  // old-style loop for old OpenMP
-
+  for (auto& gCell : gCellStor_) {
     if (gCell.isFiller()) {
       continue;
     }
@@ -1535,18 +1543,14 @@ NesterovBaseCommon::NesterovBaseCommon(
 
   // gPinStor_' GNet and GCell fill
 #pragma omp parallel for num_threads(num_threads_)
-  for (auto it = gPinStor_.begin(); it < gPinStor_.end(); ++it) {
-    auto& gPin = *it;  // old-style loop for old OpenMP
-
+  for (auto& gPin : gPinStor_) {
     gPin.setGCell(pbToNb(gPin.getPbPin()->getInstance()));
     gPin.setGNet(pbToNb(gPin.getPbPin()->getNet()));
   }
 
   // gNetStor_'s GPin fill
 #pragma omp parallel for num_threads(num_threads_)
-  for (auto it = gNetStor_.begin(); it < gNetStor_.end(); ++it) {
-    auto& gNet = *it;  // old-style loop for old OpenMP
-
+  for (auto& gNet : gNetStor_) {
     for (auto& pin : gNet.getPbNet()->getPins()) {
       gNet.addGPin(pbToNb(pin));
     }
@@ -1645,21 +1649,18 @@ void NesterovBaseCommon::updateWireLengthForceWA_native(float wlCoeffX,
   }
   // clear all WA variables.
 #pragma omp parallel for num_threads(num_threads_)
-  for (auto gPin = gPinStor_.begin(); gPin < gPinStor_.end(); ++gPin) {
-    // old-style loop for old OpenMP
-    gPin->clearWaVars();
+  for (auto& gPin : gPinStor_) {
+    gPin.clearWaVars();
   }
 
   // If checks are very expensive, so short circuit them if debug is not enabled
   bool debug_enabled = log_->debugCheck(GPL, "wlUpdateWA", 1);
 #pragma omp parallel for num_threads(num_threads_)
-  for (auto gNet = gNetStor_.begin(); gNet < gNetStor_.end(); ++gNet) {
-    // old-style loop for old OpenMP
+  for (auto& gNet : gNetStor_) {
+    gNet.clearWaVars();
+    gNet.updateBox();
 
-    gNet->clearWaVars();
-    gNet->updateBox();
-
-    for (auto& gPin : gNet->getGPins()) {
+    for (auto& gPin : gNet.getGPins()) {
       // The WA terms are shift invariant:
       //
       //   Sum(x_i * exp(x_i))    Sum(x_i * exp(x_i - C))
@@ -1667,16 +1668,16 @@ void NesterovBaseCommon::updateWireLengthForceWA_native(float wlCoeffX,
       //   Sum(exp(x_i))          Sum(exp(x_i - C))
       //
       // So we shift to keep the exponential from overflowing
-      float expMinX = (gNet->lx() - gPin->cx()) * wlCoeffX;
-      float expMaxX = (gPin->cx() - gNet->ux()) * wlCoeffX;
-      float expMinY = (gNet->ly() - gPin->cy()) * wlCoeffY;
-      float expMaxY = (gPin->cy() - gNet->uy()) * wlCoeffY;
+      float expMinX = (gNet.lx() - gPin->cx()) * wlCoeffX;
+      float expMaxX = (gPin->cx() - gNet.ux()) * wlCoeffX;
+      float expMinY = (gNet.ly() - gPin->cy()) * wlCoeffY;
+      float expMaxY = (gPin->cy() - gNet.uy()) * wlCoeffY;
 
       // min x
       if (expMinX > nbVars_.minWireLengthForceBar) {
         gPin->setMinExpSumX(fastExp(expMinX));
-        gNet->addWaExpMinSumX(gPin->minExpSumX());
-        gNet->addWaXExpMinSumX(gPin->cx() * gPin->minExpSumX());
+        gNet.addWaExpMinSumX(gPin->minExpSumX());
+        gNet.addWaXExpMinSumX(gPin->cx() * gPin->minExpSumX());
         if (debug_enabled && gPin->getGCell()
             && gPin->getGCell()->isInstance()) {
           debugPrint(log_,
@@ -1692,8 +1693,8 @@ void NesterovBaseCommon::updateWireLengthForceWA_native(float wlCoeffX,
       // max x
       if (expMaxX > nbVars_.minWireLengthForceBar) {
         gPin->setMaxExpSumX(fastExp(expMaxX));
-        gNet->addWaExpMaxSumX(gPin->maxExpSumX());
-        gNet->addWaXExpMaxSumX(gPin->cx() * gPin->maxExpSumX());
+        gNet.addWaExpMaxSumX(gPin->maxExpSumX());
+        gNet.addWaXExpMaxSumX(gPin->cx() * gPin->maxExpSumX());
         if (debug_enabled && gPin->getGCell()
             && gPin->getGCell()->isInstance()) {
           debugPrint(log_,
@@ -1709,8 +1710,8 @@ void NesterovBaseCommon::updateWireLengthForceWA_native(float wlCoeffX,
       // min y
       if (expMinY > nbVars_.minWireLengthForceBar) {
         gPin->setMinExpSumY(fastExp(expMinY));
-        gNet->addWaExpMinSumY(gPin->minExpSumY());
-        gNet->addWaYExpMinSumY(gPin->cy() * gPin->minExpSumY());
+        gNet.addWaExpMinSumY(gPin->minExpSumY());
+        gNet.addWaYExpMinSumY(gPin->cy() * gPin->minExpSumY());
         if (debug_enabled && gPin->getGCell()
             && gPin->getGCell()->isInstance()) {
           debugPrint(log_,
@@ -1726,8 +1727,8 @@ void NesterovBaseCommon::updateWireLengthForceWA_native(float wlCoeffX,
       // max y
       if (expMaxY > nbVars_.minWireLengthForceBar) {
         gPin->setMaxExpSumY(fastExp(expMaxY));
-        gNet->addWaExpMaxSumY(gPin->maxExpSumY());
-        gNet->addWaYExpMaxSumY(gPin->cy() * gPin->maxExpSumY());
+        gNet.addWaExpMaxSumY(gPin->maxExpSumY());
+        gNet.addWaYExpMaxSumY(gPin->cy() * gPin->maxExpSumY());
         if (debug_enabled && gPin->getGCell()
             && gPin->getGCell()->isInstance()) {
           debugPrint(log_,
@@ -2043,6 +2044,22 @@ void NesterovBaseCommon::fixPointers()
         if (isValidSigType(iterm->getSigType())) {
           auto it = db_iterm_to_index_map_.find(iterm);
           if (it != db_iterm_to_index_map_.end()) {
+            // Like the initial netlist, a gcell only has pins on nets with
+            // a GNet. The resizer only buffers nets that gpl places, so a
+            // new pin on any other net breaks that agreement.
+            odb::dbNet* db_net = iterm->getNet();
+            if (db_net == nullptr) {
+              continue;
+            }
+            if (!db_net_to_index_map_.contains(db_net)) {
+              log_->error(GPL,
+                          335,
+                          "Pin {} is on net {} ({}), which global placement "
+                          "does not place.",
+                          iterm->getName(),
+                          db_net->getName(),
+                          db_net->getSigType().getString());
+            }
             size_t gpin_index = it->second;
             gCell.addGPin(&gPinStor_[gpin_index]);
           } else {
@@ -2947,9 +2964,8 @@ void NesterovBase::setTargetDensity(float density)
   targetDensity_ = density;
   bg_.setBinTargetDensity(density);
 #pragma omp parallel for num_threads(nbc_->getNumThreads())
-  for (auto bin = getBins().begin(); bin < getBins().end(); ++bin) {
-    // old-style loop for old OpenMP
-    bin->setBinTargetDensity(density);
+  for (auto& bin : getBins()) {
+    bin.setBinTargetDensity(density);
   }
   // update nonPlaceArea's target denstiy
   bg_.updateBinsNonPlaceArea();
@@ -3221,8 +3237,7 @@ void NesterovBase::updateDensitySize()
 {
   assert(omp_get_thread_num() == 0);
 #pragma omp parallel for num_threads(nbc_->getNumThreads())
-  for (auto it = nb_gcells_.begin(); it < nb_gcells_.end(); ++it) {
-    auto& gCell = *it;  // old-style loop for old OpenMP
+  for (auto& gCell : nb_gcells_) {
     float scaleX = 0, scaleY = 0;
     float densitySizeX = 0, densitySizeY = 0;
     if (gCell->dx() < REPLACE_SQRT2 * bg_.getBinSizeX()) {
@@ -3300,7 +3315,7 @@ void NesterovBase::updateAreas()
   // stdInstsArea and macroInstsArea
   stdInstsArea_ = macroInstsArea_ = 0;
   for (auto it = nb_gcells_.begin(); it < nb_gcells_.end(); ++it) {
-    auto& gCell = *it;  // old-style loop for old OpenMP
+    auto& gCell = *it;
     if (!gCell) {
       continue;
     }
@@ -3474,10 +3489,10 @@ void NesterovBase::initDensity1()
   snapshotPrevSLPSumGrads_.resize(gCellSize, FloatPoint());
 
 #pragma omp parallel for num_threads(nbc_->getNumThreads())
-  for (auto it = nb_gcells_.begin(); it < nb_gcells_.end(); ++it) {
-    GCell* gCell = *it;  // old-style loop for old OpenMP
+  for (auto& gCell : nb_gcells_) {
     updateDensityCoordiLayoutInside(gCell);
-    int idx = it - nb_gcells_.begin();
+
+    size_t idx = &gCell - nb_gcells_.data();
     curSLPCoordi_[idx] = prevSLPCoordi_[idx] = curCoordi_[idx]
         = initCoordi_[idx] = FloatPoint(gCell->dCx(), gCell->dCy());
   }
@@ -4361,8 +4376,7 @@ bool NesterovBase::checkConvergence(int gpl_iter_count,
     }
 
 #pragma omp parallel for num_threads(nbc_->getNumThreads())
-    for (auto it = nb_gcells_.begin(); it < nb_gcells_.end(); ++it) {
-      auto& gCell = *it;  // old-style loop for old OpenMP
+    for (auto& gCell : nb_gcells_) {
       if (!gCell->isInstance()) {
         continue;
       }
