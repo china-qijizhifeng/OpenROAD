@@ -1,0 +1,35 @@
+# A and B can improve only by moving together in a completely occupied row.
+VERSION 5.8 ;
+DIVIDERCHAR "/" ;
+BUSBITCHARS "[]" ;
+DESIGN smt_local ;
+UNITS DISTANCE MICRONS 1000 ;
+DIEAREA ( 0 0 ) ( 8000 6000 ) ;
+ROW row0 smt_site 0 0 N DO 8 BY 1 STEP 1000 0 ;
+ROW row1 smt_site 0 2000 FS DO 8 BY 1 STEP 1000 0 ;
+ROW row2 smt_site 0 4000 N DO 8 BY 1 STEP 1000 0 ;
+COMPONENTS 6 ;
+  - L smt_buf + FIXED ( 0 0 ) N ;
+  - A smt_buf + PLACED ( 2000 0 ) N ;
+  - B smt_buf + PLACED ( 4000 0 ) N ;
+  - R smt_buf + FIXED ( 6000 0 ) N ;
+  - M smt_buf + PLACED ( 2000 2000 ) FS ;
+  - N smt_buf + PLACED ( 2000 4000 ) N ;
+END COMPONENTS
+PINS 4 ;
+  - left + NET left + DIRECTION INPUT + USE SIGNAL
+    + LAYER metal1 ( -50 -50 ) ( 50 50 ) + FIXED ( 0 1000 ) N ;
+  - right + NET right + DIRECTION INPUT + USE SIGNAL
+    + LAYER metal1 ( -50 -50 ) ( 50 50 ) + FIXED ( 8000 1000 ) N ;
+  - mirror1 + NET mirror1 + DIRECTION INPUT + USE SIGNAL
+    + LAYER metal1 ( -50 -50 ) ( 50 50 ) + FIXED ( 8000 3000 ) N ;
+  - mirror2 + NET mirror2 + DIRECTION INPUT + USE SIGNAL
+    + LAYER metal1 ( -50 -50 ) ( 50 50 ) + FIXED ( 8000 5000 ) N ;
+END PINS
+NETS 4 ;
+  - left ( PIN left ) ( B A ) ;
+  - right ( PIN right ) ( A A ) ;
+  - mirror1 ( PIN mirror1 ) ( M A ) ;
+  - mirror2 ( PIN mirror2 ) ( N A ) ;
+END NETS
+END DESIGN

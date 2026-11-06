@@ -13,6 +13,12 @@ engine. It supports:
 -   Fragmented rows
 -   Placement padding and filler insertion
 
+An optional [local CP-SAT placement Python API](../../docs/flasheda/constraint-local-placement.md)
+jointly chooses bounded same-row positions and horizontal mirrors after
+legalization. It validates the result with DPL before accepting a strict
+pin-centroid HPWL improvement. OR-Tools Python is an optional dependency; timing
+and routing validation remain part of the subsequent flow.
+
 ## Placement Engines
 
 DPL provides two options for legalization. Negotiation legalizer is the default and is slightly slower, but can handle dense designs. Diamond search is faster (linear runtime), although it is not able to handle dense designs. Diamond search is also used at the end of Negotiation for handling potential failed corner cases.

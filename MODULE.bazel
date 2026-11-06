@@ -374,6 +374,15 @@ pip.parse(
 )
 use_repo(pip, "openroad-black-pip")
 
+# Optional local constraint placement: keep OR-Tools Python out of the default runtime.
+pip.parse(
+    extra_pip_args = ["--index-url=https://pypi.org/simple"],
+    hub_name = "openroad-cp-sat-pip",
+    python_version = "3.13",
+    requirements_lock = "//bazel:requirements_cp_sat_lock.txt",
+)
+use_repo(pip, "openroad-cp-sat-pip")
+
 # rules_pycross's toolchain extension fails on Python
 # 3.8 (transitively registered via or-tools -> pybind11_abseil, dropped
 # from rules_python 2.0.0's MINOR_MAPPING). pycross.configure_environments
