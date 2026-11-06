@@ -884,8 +884,8 @@ void FastRouteCore::mazeRouteMSMDOrder3D(int expand,
           // source subtree
           const int curL = ind1 / (grid_hv_);
           const int remd = ind1 % (grid_hv_);
-          const int curX = remd % x_range_;
-          const int curY = remd / x_range_;
+          const int curX = remd % x_grid_;
+          const int curY = remd / x_grid_;
           removeMin3D(src_heap_3D_);
 
           // Cache the current cell's state. During relaxation of this popped
@@ -1232,8 +1232,8 @@ void FastRouteCore::mazeRouteMSMDOrder3D(int expand,
         // gridsY[] temporarily
 
         const int16_t crossL = ind1 / (grid_hv_);
-        const int16_t crossX = (ind1 % (grid_hv_)) % x_range_;
-        const int16_t crossY = (ind1 % (grid_hv_)) / x_range_;
+        const int16_t crossX = (ind1 % (grid_hv_)) % x_grid_;
+        const int16_t crossY = (ind1 % (grid_hv_)) / x_grid_;
 
         int cnt = 0;
         int16_t curX = crossX;
