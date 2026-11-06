@@ -1,0 +1,142 @@
+{
+  "complete": true,
+  "regressions": 7,
+  "binary_sha256": {
+    "baseline": "bf95389f331b53e91cc3942d3c32a38aa2dcdfcaa57a6d520e43ca7e944a2edd",
+    "candidate": "dcf3a4bdbcea0fabaf6a905f03af2b913aeb73f74a5b5fa2cffa809936940226"
+  },
+  "input_sha256": {
+    "aes-placed.def": "596b5a0b5a5f56604b411c525dd61e18034fcccfc331c38267dde3ce24840b86",
+    "Nangate45.lef": "caa4e9b45e081f93720ce2c4d581497321ddc6fbcb1ffe1b384e324bbd5d43a7"
+  },
+  "measurements": [
+    {
+      "threads": 1,
+      "runs": {
+        "baseline": {
+          "wall_s": [
+            2.060573,
+            2.058455,
+            2.067602,
+            2.073207
+          ],
+          "cpu_s": [
+            2.06,
+            2.05,
+            2.07,
+            2.0799999999999996
+          ],
+          "max_rss_kib": [
+            297868,
+            297768,
+            297852,
+            298044
+          ],
+          "median": {
+            "wall_s": 2.0640875000000003,
+            "cpu_s": 2.065,
+            "max_rss_kib": 297860.0
+          }
+        },
+        "candidate": {
+          "wall_s": [
+            2.008565,
+            2.018609,
+            2.076456,
+            2.086991
+          ],
+          "cpu_s": [
+            2.0,
+            2.02,
+            2.07,
+            2.0799999999999996
+          ],
+          "max_rss_kib": [
+            229544,
+            229732,
+            229840,
+            229680
+          ],
+          "median": {
+            "wall_s": 2.0475325,
+            "cpu_s": 2.045,
+            "max_rss_kib": 229706.0
+          }
+        }
+      },
+      "speedup": 1.0080853417467124,
+      "time_reduction_pct": 0.8020493317265065,
+      "rss_reduction_pct": 22.881219364802252
+    },
+    {
+      "threads": 8,
+      "runs": {
+        "baseline": {
+          "wall_s": [
+            2.140822,
+            2.24954,
+            2.021317,
+            2.107381
+          ],
+          "cpu_s": [
+            2.1399999999999997,
+            2.26,
+            2.03,
+            2.12
+          ],
+          "max_rss_kib": [
+            298168,
+            298264,
+            298488,
+            298336
+          ],
+          "median": {
+            "wall_s": 2.1241015,
+            "cpu_s": 2.13,
+            "max_rss_kib": 298300.0
+          }
+        },
+        "candidate": {
+          "wall_s": [
+            2.069382,
+            2.109005,
+            2.100123,
+            2.089709
+          ],
+          "cpu_s": [
+            2.07,
+            2.1199999999999997,
+            2.0999999999999996,
+            2.09
+          ],
+          "max_rss_kib": [
+            229352,
+            229724,
+            230112,
+            229792
+          ],
+          "median": {
+            "wall_s": 2.094916,
+            "cpu_s": 2.0949999999999998,
+            "max_rss_kib": 229758.0
+          }
+        }
+      },
+      "speedup": 1.0139315848463615,
+      "time_reduction_pct": 1.3740162605223927,
+      "rss_reduction_pct": 22.977539389875968
+    }
+  ],
+  "guide_sha256": [
+    "c5ab71af58d920660e8c63379472efc183ba8349f3f7ca5778a8eaa065596b2a"
+  ],
+  "odb_sha256": [
+    "bbf4b338fcc5c611d3914cd0b791c7e1255760f3464246fcf4e0ab94923bfc43"
+  ],
+  "wirelength_um": [
+    655594
+  ],
+  "vias": [
+    152307
+  ]
+}

@@ -12,6 +12,46 @@ size is approximately `12.125 × layers × x_grid × y_grid` bytes. The remainin
 2D scratch arrays are unchanged. The reduction depends on the design's grid
 dimensions; a square grid with a side of at least 1000 does not shrink.
 
+## Results
+
+Measured on 2026-11-07 in one isolated 8-vCPU / 16-GiB AMD EPYC E2B guest.
+Both Linux executables use Clang/LLD 23.1.2, `-O3`, and ThinLTO. Production
+source is commit `93e61040ff2d05eb9d36bce09f7af4c48c873214`; later commits add
+only this reproduction material and evidence.
+
+Each variant/configuration has one excluded warmup and four measured runs in
+two ABBA sequences. Table values are medians. Peak RSS covers the entire
+OpenROAD process, while wall time covers only `global_route`.
+
+| Threads | Baseline peak RSS | Candidate peak RSS | RSS reduction | Baseline GRT | Candidate GRT |
+|---|---:|---:|---:|---:|---:|
+| 1 | 297,860 KiB | 229,706 KiB | 22.88% | 2.064088 s | 2.047533 s |
+| 8 | 298,300 KiB | 229,758 KiB | 22.98% | 2.124102 s | 2.094916 s |
+
+The demonstrated benefit is approximately 67 MiB less peak memory on this
+AES fixture. The 0.8% / 1.4% wall-time differences are small relative to run
+variation; these measurements do not establish a significant speedup or
+improved thread scaling.
+
+All 20 AES runs, including warmups, produced byte-identical guides and ODBs
+across baseline/candidate and 1/8 threads. All had zero overflow, wirelength
+655,594 µm, and 152,307 vias.
+
+- Eleven native Bazel GRT targets passed on the final candidate, including
+  `TestMaze3D` with its 3 × 4 grid and `TestResistanceMode`.
+- Seven native Tcl cases were run with both executables in E2B. Five cases
+  emitted guides and matched byte-for-byte. `incremental_from_odb` is checked
+  by exit/log only; `snapshot_batched_incremental_state` uses its native
+  assertions. Neither is counted as a file-equivalence check.
+- Clang-format 23.1.2 and Tcl formatter/linter 0.7.0 passed.
+
+`measurements.json` contains every measured time, CPU total, and peak RSS;
+`e2e.json` also includes warmups, output hashes, and per-case checks.
+`verification.json` pins the two ELF hashes and records the native test and
+toolchain checks. `source-verification.json` verifies the final two-file
+production diff against all 11,507 files in the baseline archive.
+`environment.txt` records the measurement guest resources.
+
 ## Reproduce
 
 Build the baseline commit `2847efec57c70e532ca40cf7969e044541a25a94` and the PR
@@ -66,3 +106,20 @@ Compare the actual `route.guide` and `routed.odb` files for every run, not only
 the final wirelength. Existing native GRT regressions additionally cover
 rectangular search grids, recovery after heap exhaustion, colocated pins,
 overlapping tree edges, resistance-aware routing, and incremental rerouting.
+
+Run the native regression set with:
+
+```sh
+bazelisk test --config=opt --test_output=errors \
+  //src/grt/test:TestMaze3D \
+  //src/grt/test:TestResistanceMode \
+  //src/grt/test:gcd-tcl_test \
+  //src/grt/test:colocated_pins-tcl_test \
+  //src/grt/test:overlapping_edges-tcl_test \
+  //src/grt/test:resistance_aware_asap7_fr-tcl_test \
+  //src/grt/test:resistance_aware_asap7_fr_threads-tcl_test \
+  //src/grt/test:incremental_deleted_net-tcl_test \
+  //src/grt/test:incremental_update_net-tcl_test \
+  //src/grt/test:incremental_from_odb-tcl_test \
+  //src/grt/test:snapshot_batched_incremental_state-tcl_test
+```
