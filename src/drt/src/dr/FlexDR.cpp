@@ -803,13 +803,17 @@ void FlexDR::processWorkersBatchDistributed(
 }
 
 void FlexDR::endWorkersBatch(
-    std::vector<std::unique_ptr<FlexDRWorker>>& workers_batch)
+    std::vector<std::unique_ptr<FlexDRWorker>>& workers_batch,
+    std::vector<odb::Rect>* changed_regions)
 {
   ProfileTask profile("DR:end_batch");
   // single thread
   for (auto& worker : workers_batch) {
     if (worker->end(getDesign())) {
       numWorkUnits_ += 1;
+    }
+    if (changed_regions != nullptr && worker->hasChangedDesign()) {
+      changed_regions->push_back(worker->getExtBox());
     }
     if (worker->isCongested()) {
       increaseClipsize_ = true;
@@ -1469,41 +1473,21 @@ void FlexDR::optimizationFlow(const SearchRepairArgs& args,
   std::vector<std::vector<std::vector<std::unique_ptr<FlexDRWorker>>>> workers(
       batchStepX * batchStepY);
 
-  // The first iteration of an incremental run only needs the workers whose
-  // extended box sees a change made since the previous run.  Any other worker
-  // has no net to route and re-checks unchanged, violation-free geometry.
-  const std::vector<odb::Rect>* changed_regions = nullptr;
-  const auto& incremental_changed_regions
-      = router_->getIncrementalChangedRegions();
-  if (iter_ == 0 && args.ripupMode == RipUpMode::INCR && !dist_on_
-      && incremental_changed_regions.has_value()
-      && getDesign()->getTopBlock()->getNumMarkers() == 0) {
-    changed_regions = &incremental_changed_regions.value();
-  }
-  // Guides are stored between gcell centers; keep one gcell of margin on top
-  // of the region the worker reads.
-  const int change_margin
-      = router_cfg_->MTSAFEDIST
-        + static_cast<int>(std::max(xgp.getSpacing(), ygp.getSpacing()));
+  // In the incremental iterations a worker whose extended box sees no change
+  // and no violation has no net to route and would re-check unchanged,
+  // violation-free geometry, so it is skipped.  Workers are checked just
+  // before their batch runs, after the earlier batches' changes.
+  const bool skip_unaffected = args.ripupMode == RipUpMode::INCR && !dist_on_
+                               && incremental_changed_regions_.has_value();
+  std::vector<odb::Rect>* changed_regions
+      = skip_unaffected ? &incremental_changed_regions_.value() : nullptr;
+  const int num_workers = iter_prog.total_num_workers;
   int num_unaffected_workers = 0;
 
   int xIdx = 0, yIdx = 0;
   for (int i = offset; i < (int) xgp.getCount(); i += size) {
     for (int j = offset; j < (int) ygp.getCount(); j += size) {
       auto worker = createWorker(i, j, args);
-      if (changed_regions != nullptr) {
-        odb::Rect affected_box;
-        worker->getExtBox().bloat(change_margin, affected_box);
-        const bool affected = std::ranges::any_of(
-            *changed_regions, [&affected_box](const odb::Rect& region) {
-              return affected_box.intersects(region);
-            });
-        if (!affected) {
-          ++num_unaffected_workers;
-          yIdx++;
-          continue;
-        }
-      }
       int batch_idx = (xIdx % batchStepX) * batchStepY + yIdx % batchStepY;
       const bool create_new_batch
           = workers[batch_idx].empty()
@@ -1521,26 +1505,6 @@ void FlexDR::optimizationFlow(const SearchRepairArgs& args,
     xIdx++;
   }
 
-  if (changed_regions != nullptr) {
-    iter_prog.total_num_workers -= num_unaffected_workers;
-    debugPrint(logger_,
-               DRT,
-               "incremental",
-               1,
-               "Skipped {} of {} workers.",
-               num_unaffected_workers,
-               iter_prog.total_num_workers + num_unaffected_workers);
-    if (router_cfg_->VERBOSE > 0) {
-      logger_->info(DRT,
-                    629,
-                    "Skipped {} of {} workers unaffected by {} changed "
-                    "regions since the previous detailed routing.",
-                    num_unaffected_workers,
-                    iter_prog.total_num_workers + num_unaffected_workers,
-                    changed_regions->size());
-    }
-  }
-
   omp_set_num_threads(router_cfg_->MAX_THREADS);
   int version = 0;
   increaseClipsize_ = false;
@@ -1549,6 +1513,15 @@ void FlexDR::optimizationFlow(const SearchRepairArgs& args,
   for (auto& workerBatch : workers) {
     ProfileTask profile("DR:checkerboard");
     for (auto& workersInBatch : workerBatch) {
+      if (skip_unaffected) {
+        const int num_unaffected = std::erase_if(
+            workersInBatch,
+            [this](const std::unique_ptr<FlexDRWorker>& worker) {
+              return !isAffectedByChanges(*worker);
+            });
+        num_unaffected_workers += num_unaffected;
+        iter_prog.total_num_workers -= num_unaffected;
+      }
       {
         const std::string batch_name = std::string("DR:batch<")
                                        + std::to_string(workersInBatch.size())
@@ -1560,13 +1533,53 @@ void FlexDR::optimizationFlow(const SearchRepairArgs& args,
           processWorkersBatch(workersInBatch, iter_prog);
         }
       }
-      endWorkersBatch(workersInBatch);
+      endWorkersBatch(workersInBatch, changed_regions);
+    }
+  }
+
+  if (skip_unaffected) {
+    debugPrint(logger_,
+               DRT,
+               "incremental",
+               1,
+               "Skipped {} of {} workers.",
+               num_unaffected_workers,
+               num_workers);
+    if (router_cfg_->VERBOSE > 0) {
+      logger_->info(DRT,
+                    629,
+                    "Skipped {} of {} workers unaffected by changes since the "
+                    "previous detailed routing.",
+                    num_unaffected_workers,
+                    num_workers);
     }
   }
 
   if (!iter_) {
     removeGCell2BoundaryPin();
   }
+}
+
+bool FlexDR::isAffectedByChanges(const FlexDRWorker& worker) const
+{
+  // Guides are stored between gcell centers; keep one gcell of margin on top
+  // of the region the worker reads.
+  const auto& gcell_patterns = getDesign()->getTopBlock()->getGCellPatterns();
+  const int margin
+      = router_cfg_->MTSAFEDIST
+        + static_cast<int>(std::max(gcell_patterns[0].getSpacing(),
+                                    gcell_patterns[1].getSpacing()));
+  odb::Rect affected_box;
+  worker.getExtBox().bloat(margin, affected_box);
+  if (std::ranges::any_of(*incremental_changed_regions_,
+                          [&affected_box](const odb::Rect& region) {
+                            return affected_box.intersects(region);
+                          })) {
+    return true;
+  }
+  std::vector<frMarker*> markers;
+  getDesign()->getRegionQuery()->queryMarker(worker.getDrcBox(), markers);
+  return !markers.empty();
 }
 
 void FlexDR::searchRepair(const SearchRepairArgs& args)
@@ -2191,6 +2204,7 @@ int FlexDR::main()
       "detailed routing", std::min(64, router_cfg_->END_ITERATION), {});
 
   init();
+  incremental_changed_regions_ = router_->getIncrementalChangedRegions();
   frTime t;
   // If the loaded design already carries DRC markers (read from the database in
   // io::Parser::setMarkers), resume from the configured iteration, skipping the

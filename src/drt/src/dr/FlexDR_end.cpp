@@ -624,7 +624,7 @@ void FlexDRWorker::endAddNets(
   }
 }
 
-void FlexDRWorker::endRemoveMarkers(frDesign* design)
+int FlexDRWorker::endRemoveMarkers(frDesign* design)
 {
   auto regionQuery = design->getRegionQuery();
   auto topBlock = design->getTopBlock();
@@ -639,12 +639,14 @@ void FlexDRWorker::endRemoveMarkers(frDesign* design)
     regionQuery->removeMarker(mptr);
     topBlock->removeMarker(mptr);
   }
+  return result.size();
 }
 
-void FlexDRWorker::endAddMarkers(frDesign* design)
+int FlexDRWorker::endAddMarkers(frDesign* design)
 {
   auto regionQuery = design->getRegionQuery();
   auto topBlock = design->getTopBlock();
+  int num_added = 0;
   // for (auto &m: getMarkers()) {
   for (auto& m : getBestMarkers()) {
     if (getDrcBox().intersects(m.getBBox())) {
@@ -652,6 +654,7 @@ void FlexDRWorker::endAddMarkers(frDesign* design)
       auto ptr = uptr.get();
       regionQuery->addMarker(ptr);
       topBlock->addMarker(std::move(uptr));
+      ++num_added;
       if (save_updates_) {
         drUpdate update(drUpdate::ADD_SHAPE);
         update.setMarker(*ptr);
@@ -659,6 +662,7 @@ void FlexDRWorker::endAddMarkers(frDesign* design)
       }
     }
   }
+  return num_added;
 }
 
 void FlexDRWorker::cleanup()
@@ -709,8 +713,10 @@ bool FlexDRWorker::end(frDesign* design)
   endRemoveNets(design, modNets, boundPts);
   endAddNets(design, boundPts);  // if two subnets have diff isModified()
                                  // status, then should always write back
-  endRemoveMarkers(design);
-  endAddMarkers(design);
+  const int num_removed_markers = endRemoveMarkers(design);
+  const int num_added_markers = endAddMarkers(design);
+  changed_design_
+      = !modNets.empty() || num_removed_markers > 0 || num_added_markers > 0;
   // release lock
   return true;
 }
