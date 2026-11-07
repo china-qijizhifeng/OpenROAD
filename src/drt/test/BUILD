@@ -21,6 +21,7 @@ COMPULSORY_TESTS = [
     "drc_test",
     "ispd18_sample",
     "ispd18_sample_incr",
+    "ispd18_sample_incr_no_pin_access",
     "ispd18_sample_reroute",
     "ndr_vias1",
     "ndr_vias2",
@@ -119,6 +120,7 @@ filegroup(
             "ispd18_sample.defok",
         ] if test_name in [
             "ispd18_sample_incr",
+            "ispd18_sample_incr_no_pin_access",
             "single_step",
         ] else []) + ([
             "gf180/gf180mcu_5LM_1TM_9K_9t_tech.lef",

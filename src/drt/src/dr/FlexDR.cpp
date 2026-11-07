@@ -1469,10 +1469,41 @@ void FlexDR::optimizationFlow(const SearchRepairArgs& args,
   std::vector<std::vector<std::vector<std::unique_ptr<FlexDRWorker>>>> workers(
       batchStepX * batchStepY);
 
+  // The first iteration of an incremental run only needs the workers whose
+  // extended box sees a change made since the previous run.  Any other worker
+  // has no net to route and re-checks unchanged, violation-free geometry.
+  const std::vector<odb::Rect>* changed_regions = nullptr;
+  const auto& incremental_changed_regions
+      = router_->getIncrementalChangedRegions();
+  if (iter_ == 0 && args.ripupMode == RipUpMode::INCR && !dist_on_
+      && incremental_changed_regions.has_value()
+      && getDesign()->getTopBlock()->getNumMarkers() == 0) {
+    changed_regions = &incremental_changed_regions.value();
+  }
+  // Guides are stored between gcell centers; keep one gcell of margin on top
+  // of the region the worker reads.
+  const int change_margin
+      = router_cfg_->MTSAFEDIST
+        + static_cast<int>(std::max(xgp.getSpacing(), ygp.getSpacing()));
+  int num_unaffected_workers = 0;
+
   int xIdx = 0, yIdx = 0;
   for (int i = offset; i < (int) xgp.getCount(); i += size) {
     for (int j = offset; j < (int) ygp.getCount(); j += size) {
       auto worker = createWorker(i, j, args);
+      if (changed_regions != nullptr) {
+        odb::Rect affected_box;
+        worker->getExtBox().bloat(change_margin, affected_box);
+        const bool affected = std::ranges::any_of(
+            *changed_regions, [&affected_box](const odb::Rect& region) {
+              return affected_box.intersects(region);
+            });
+        if (!affected) {
+          ++num_unaffected_workers;
+          yIdx++;
+          continue;
+        }
+      }
       int batch_idx = (xIdx % batchStepX) * batchStepY + yIdx % batchStepY;
       const bool create_new_batch
           = workers[batch_idx].empty()
@@ -1488,6 +1519,26 @@ void FlexDR::optimizationFlow(const SearchRepairArgs& args,
     }
     yIdx = 0;
     xIdx++;
+  }
+
+  if (changed_regions != nullptr) {
+    iter_prog.total_num_workers -= num_unaffected_workers;
+    debugPrint(logger_,
+               DRT,
+               "incremental",
+               1,
+               "Skipped {} of {} workers.",
+               num_unaffected_workers,
+               iter_prog.total_num_workers + num_unaffected_workers);
+    if (router_cfg_->VERBOSE > 0) {
+      logger_->info(DRT,
+                    629,
+                    "Skipped {} of {} workers unaffected by {} changed "
+                    "regions since the previous detailed routing.",
+                    num_unaffected_workers,
+                    iter_prog.total_num_workers + num_unaffected_workers,
+                    changed_regions->size());
+    }
   }
 
   omp_set_num_threads(router_cfg_->MAX_THREADS);

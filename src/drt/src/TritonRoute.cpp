@@ -341,6 +341,7 @@ void TritonRoute::updateGlobals(const char* file_name)
 
 void TritonRoute::resetDb(const char* file_name)
 {
+  invalidateChangeTracking();
   std::ifstream stream;
   stream.open(file_name, std::ios::binary);
   try {
@@ -370,6 +371,7 @@ void TritonRoute::resetDb(const char* file_name)
 
 void TritonRoute::clearDesign()
 {
+  invalidateChangeTracking();
   design_ = std::make_unique<frDesign>(logger_, router_cfg_.get());
 }
 
@@ -400,6 +402,7 @@ static void deserializeUpdates(frDesign* design,
 void TritonRoute::updateDesign(const std::vector<std::string>& updatesStrs,
                                int num_threads)
 {
+  invalidateChangeTracking();
   omp_set_num_threads(num_threads);
   std::vector<std::vector<drUpdate>> updates(updatesStrs.size());
 #pragma omp parallel for schedule(dynamic)
@@ -411,6 +414,7 @@ void TritonRoute::updateDesign(const std::vector<std::string>& updatesStrs,
 
 void TritonRoute::updateDesign(const std::string& path, int num_threads)
 {
+  invalidateChangeTracking();
   omp_set_num_threads(num_threads);
   std::vector<std::vector<drUpdate>> updates;
   deserializeUpdates(design_.get(), path, updates);
@@ -651,6 +655,187 @@ void TritonRoute::initDesign()
   }
 }
 
+void TritonRoute::recordChangedRegion(const odb::Rect& region)
+{
+  if (change_tracking_valid_) {
+    changed_regions_.push_back(region);
+  }
+}
+
+namespace {
+
+TritonRoute::InstSnapshot makeInstSnapshot(odb::dbInst* inst)
+{
+  return {.bbox = inst->getBBox()->getBox(),
+          .master = inst->getMaster(),
+          .orient = inst->getOrient().getValue(),
+          .placement_status = inst->getPlacementStatus().getValue()};
+}
+
+}  // namespace
+
+void TritonRoute::recordInstTouched(odb::dbInst* inst)
+{
+  if (change_tracking_valid_) {
+    touched_insts_.try_emplace(inst, makeInstSnapshot(inst));
+  }
+}
+
+void TritonRoute::recordInstCreated(odb::dbInst* inst)
+{
+  if (change_tracking_valid_) {
+    InstSnapshot snapshot;
+    snapshot.created = true;
+    touched_insts_.try_emplace(inst, snapshot);
+  }
+}
+
+void TritonRoute::recordInstDestroyed(odb::dbInst* inst)
+{
+  if (!change_tracking_valid_) {
+    return;
+  }
+  changed_regions_.push_back(inst->getBBox()->getBox());
+  auto it = touched_insts_.find(inst);
+  if (it != touched_insts_.end()) {
+    if (!it->second.created) {
+      changed_regions_.push_back(it->second.bbox);
+    }
+    touched_insts_.erase(it);
+  }
+}
+
+void TritonRoute::recordChangedNet(const std::string& net_name)
+{
+  if (change_tracking_valid_) {
+    changed_net_names_.insert(net_name);
+  }
+}
+
+namespace {
+
+void appendNetRegions(const frNet* net, std::vector<odb::Rect>& regions)
+{
+  for (const auto& guide : net->getGuides()) {
+    regions.push_back(guide->getBBox());
+  }
+  for (const auto& shape : net->getShapes()) {
+    regions.push_back(shape->getBBox());
+  }
+  for (const auto& via : net->getVias()) {
+    regions.push_back(via->getBBox());
+  }
+  for (const auto& patch_wire : net->getPatchWires()) {
+    regions.push_back(patch_wire->getBBox());
+  }
+  for (const frInstTerm* inst_term : net->getInstTerms()) {
+    regions.push_back(inst_term->getBBox());
+  }
+  for (const frBTerm* bterm : net->getBTerms()) {
+    regions.push_back(bterm->getBBox());
+  }
+}
+
+}  // namespace
+
+void TritonRoute::recordChangedNetRegions(const frNet* net)
+{
+  if (change_tracking_valid_) {
+    appendNetRegions(net, changed_regions_);
+  }
+}
+
+void TritonRoute::invalidateChangeTracking()
+{
+  change_tracking_valid_ = false;
+  change_tracking_block_ = nullptr;
+  changed_regions_.clear();
+  touched_insts_.clear();
+  changed_net_names_.clear();
+}
+
+void TritonRoute::startChangeTracking()
+{
+  invalidateChangeTracking();
+  change_tracking_valid_ = true;
+  change_tracking_block_ = db_->getChip()->getBlock();
+}
+
+std::optional<std::vector<odb::Rect>> TritonRoute::collectChangedRegions() const
+{
+  if (!change_tracking_valid_
+      || change_tracking_block_ != db_->getChip()->getBlock()) {
+    return std::nullopt;
+  }
+  std::vector<odb::Rect> regions = changed_regions_;
+  int num_changed_insts = 0;
+  for (const auto& [inst, previous] : touched_insts_) {
+    const InstSnapshot current = makeInstSnapshot(inst);
+    if (previous.created) {
+      regions.push_back(current.bbox);
+      ++num_changed_insts;
+    } else if (current.bbox != previous.bbox
+               || current.master != previous.master
+               || current.orient != previous.orient
+               || current.placement_status != previous.placement_status) {
+      regions.push_back(previous.bbox);
+      regions.push_back(current.bbox);
+      ++num_changed_insts;
+    }
+  }
+  const size_t num_inst_regions = regions.size();
+  const frBlock* block = getDesign()->getTopBlock();
+  for (const std::string& net_name : changed_net_names_) {
+    if (const frNet* net = block->findNet(net_name)) {
+      appendNetRegions(net, regions);
+    }
+  }
+  const size_t num_changed_net_regions = regions.size();
+  // Nets without routing are routed where their guides are; nets without
+  // guides (such as single-pin nets) are not routed at all.
+  int num_unrouted_nets = 0;
+  for (const auto& net : block->getNets()) {
+    if (!net->isSpecial() && !net->hasInitialRouting() && net->hasGuides()) {
+      ++num_unrouted_nets;
+      for (const auto& guide : net->getGuides()) {
+        regions.push_back(guide->getBBox());
+      }
+    }
+  }
+  debugPrint(logger_,
+             DRT,
+             "incremental",
+             1,
+             "Changed regions: {} from {} of {} touched instances and other "
+             "callbacks, {} from {} changed nets, {} from {} unrouted nets.",
+             num_inst_regions,
+             num_changed_insts,
+             touched_insts_.size(),
+             num_changed_net_regions - num_inst_regions,
+             changed_net_names_.size(),
+             regions.size() - num_changed_net_regions,
+             num_unrouted_nets);
+  if (logger_->debugCheck(DRT, "incremental", 2)) {
+    int reported = 0;
+    for (const auto& net : block->getNets()) {
+      if (!net->isSpecial() && !net->hasInitialRouting() && net->hasGuides()
+          && reported++ < 20) {
+        logger_->report("  unrouted net {} guides {} pins {}",
+                        net->getName(),
+                        net->getGuides().size(),
+                        net->getInstTerms().size() + net->getBTerms().size());
+      }
+    }
+    reported = 0;
+    for (const std::string& net_name : changed_net_names_) {
+      if (reported++ < 20) {
+        logger_->report("  changed net {}", net_name);
+      }
+    }
+  }
+  return regions;
+}
+
 void TritonRoute::initGraphics()
 {
   graphics_factory_->reset(
@@ -705,6 +890,7 @@ void TritonRoute::stepDR(int size,
                          int ripupMode,
                          bool followGuide)
 {
+  invalidateChangeTracking();
   FlexDR::SearchRepairArgs args = {.size = size,
                                    .offset = offset,
                                    .mazeEndIter = mazeEndIter,
@@ -1018,6 +1204,11 @@ int TritonRoute::main()
       asio::post(*dist_pool_, boost::bind(&TritonRoute::sendDesignDist, this));
     }
   }
+  // Pin access recomputes access points everywhere, so region tracking
+  // cannot describe what changed.
+  const bool use_change_tracking = change_tracking_valid_ && !distributed_
+                                   && !router_cfg_->DO_PA
+                                   && !router_cfg_->SINGLE_STEP_DR;
   initDesign();
   bool has_routable_nets = false;
   bool has_grt_guides = false;
@@ -1082,6 +1273,11 @@ int TritonRoute::main()
   if (!initGuide()) {
     logger_->error(DRT, 626, "Guide loading failed.");
   }
+  incremental_changed_regions_.reset();
+  if (use_change_tracking) {
+    incremental_changed_regions_ = collectChangedRegions();
+  }
+  invalidateChangeTracking();
   prep();
   ta();
   if (distributed_) {
@@ -1089,8 +1285,12 @@ int TritonRoute::main()
                [this] { sendDesignUpdates("", router_cfg_->MAX_THREADS); });
   }
   dr();
+  incremental_changed_regions_.reset();
   if (!router_cfg_->SINGLE_STEP_DR) {
     endFR();
+    if (!distributed_) {
+      startChangeTracking();
+    }
   }
   logger_->info(DRT, 501, "Runtime: {:.2f}s", timer.elapsed());
   return 0;
@@ -1098,6 +1298,7 @@ int TritonRoute::main()
 
 void TritonRoute::pinAccess(const std::vector<odb::dbInst*>& target_insts)
 {
+  invalidateChangeTracking();
   if (router_cfg_->DBPROCESSNODE == "GF14_13M_3Mx_2Cx_4Kx_2Hx_2Gx_LB") {
     router_cfg_->USENONPREFTRACKS = false;
   }
@@ -1166,6 +1367,7 @@ void TritonRoute::updateDirtyPAData()
 
 void TritonRoute::fixMaxSpacing(int num_threads)
 {
+  invalidateChangeTracking();
   initDesign();
   initGuide();
   prep();
