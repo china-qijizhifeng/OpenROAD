@@ -8,6 +8,7 @@
 #include <list>
 #include <map>
 #include <memory>
+#include <optional>
 #include <queue>
 #include <set>
 #include <string>
@@ -160,6 +161,9 @@ class FlexDR
   std::unique_ptr<AbstractDRGraphics> graphics_{nullptr};
   std::string debugNetName_;
   int numWorkUnits_;
+  // Regions changed since the previous detailed routing and by this run, for
+  // incremental runs whose changes are known.
+  std::optional<std::vector<odb::Rect>> incremental_changed_regions_;
 
   // distributed
   dst::Distributed* dist_;
@@ -192,8 +196,12 @@ class FlexDR
                                              const odb::Rect& routeBox
                                              = odb::Rect());
   void reportIterationViolations() const;
+  // Records the extended boxes of workers that changed the design in
+  // changed_regions when it is not null.
   void endWorkersBatch(
-      std::vector<std::unique_ptr<FlexDRWorker>>& workers_batch);
+      std::vector<std::unique_ptr<FlexDRWorker>>& workers_batch,
+      std::vector<odb::Rect>* changed_regions = nullptr);
+  bool isAffectedByChanges(const FlexDRWorker& worker) const;
   void processWorkersBatch(
       std::vector<std::unique_ptr<FlexDRWorker>>& workers_batch,
       IterationProgress& iter_prog);
@@ -350,6 +358,8 @@ class FlexDRWorker
     boundaryPin_ = std::move(bp);
   }
   bool isCongested() const { return isCongested_; }
+  // Whether end() wrote routing or markers back to the design.
+  bool hasChangedDesign() const { return changed_design_; }
   void setBoundaryPins(
       frOrderedIdMap<frNet*, std::set<std::pair<odb::Point, frLayerNum>>>& bp)
   {
@@ -592,6 +602,7 @@ class FlexDRWorker
   std::string dist_dir_;
   bool dist_on_{false};
   bool isCongested_{false};
+  bool changed_design_{false};
   bool save_updates_{false};
   int worker_id_{0};
 
@@ -1152,8 +1163,8 @@ class FlexDRWorker
   bool endAddNets_updateExtFigs_via(drNet* net,
                                     const odb::Point3D& update_pt,
                                     frVia* via);
-  void endRemoveMarkers(frDesign* design);
-  void endAddMarkers(frDesign* design);
+  int endRemoveMarkers(frDesign* design);
+  int endAddMarkers(frDesign* design);
 
   // helper functions
   frCoord snapCoordToManufacturingGrid(frCoord coord, int lowerLeftCoord);
