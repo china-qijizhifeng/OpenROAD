@@ -1652,6 +1652,20 @@ Cell* dbNetwork::cell(const Instance* instance) const
   return nullptr;
 }
 
+// Without 3DIC chip instances a pin is a top-level port exactly when it is
+// a block terminal: the parent of any other pin's instance is not null.
+bool dbNetwork::isTopLevelPort(const Pin* pin) const
+{
+  if (pin == nullptr || has3DicChip()) {
+    return Network::isTopLevelPort(pin);
+  }
+  dbITerm* iterm;
+  dbBTerm* bterm;
+  dbModITerm* moditerm;
+  staToDb(pin, iterm, bterm, moditerm);
+  return bterm != nullptr;
+}
+
 Instance* dbNetwork::parent(const Instance* instance) const
 {
   if (instance == top_instance_) {

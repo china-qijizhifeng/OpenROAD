@@ -297,6 +297,7 @@ class dbNetwork : public ConcreteNetwork
   ObjectId id(const Instance* instance) const override;
   Cell* cell(const Instance* instance) const override;
   Instance* parent(const Instance* instance) const override;
+  bool isTopLevelPort(const Pin* pin) const override;
   using ConcreteNetwork::isLeaf;
   bool isLeaf(const Instance* instance) const override;
   bool isLeaf(const Pin* pin) const override;
