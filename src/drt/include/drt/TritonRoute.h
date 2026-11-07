@@ -10,6 +10,7 @@
 #include <queue>
 #include <set>
 #include <string>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -24,6 +25,8 @@ class dbInst;
 class dbBTerm;
 class dbNet;
 class dbWire;
+class dbBlock;
+class dbMaster;
 }  // namespace odb
 
 namespace utl {
@@ -43,6 +46,7 @@ namespace drt {
 
 class frDesign;
 class frInst;
+class frNet;
 class DesignCallBack;
 class FlexDR;
 class FlexPA;
@@ -189,6 +193,37 @@ class TritonRoute : public PinAccessService
   void addAvoidViaDefPA(const frViaDef* via_def);
   void updateDirtyPAData();
 
+  // State of an instance when it was first changed after the previous run.
+  struct InstSnapshot
+  {
+    odb::Rect bbox;
+    odb::dbMaster* master{nullptr};
+    int orient{0};
+    int placement_status{0};
+    bool created{false};
+  };
+  // Design changes made after the last completed detailed routing run.  The
+  // next incremental run uses them to limit its first iteration to the
+  // regions that can change.  Changes that are not tracked by region
+  // invalidate the tracking, and the next run then checks every region.
+  void recordChangedRegion(const odb::Rect& region);
+  // Instances are compared with their state at the previous run when the
+  // regions are collected, so moves that are undone (as during
+  // legalization) do not count as changes.
+  void recordInstTouched(odb::dbInst* inst);
+  void recordInstCreated(odb::dbInst* inst);
+  void recordInstDestroyed(odb::dbInst* inst);
+  void recordChangedNet(const std::string& net_name);
+  void recordChangedNetRegions(const frNet* net);
+  void invalidateChangeTracking();
+  // Regions changed since the previous run, or nullopt when unknown.  Valid
+  // only during an incremental detailed routing run.
+  const std::optional<std::vector<odb::Rect>>& getIncrementalChangedRegions()
+      const
+  {
+    return incremental_changed_regions_;
+  }
+
  private:
   std::unique_ptr<frDesign> design_;
   std::unique_ptr<frDebugSettings> debug_;
@@ -212,6 +247,12 @@ class TritonRoute : public PinAccessService
   std::optional<boost::asio::thread_pool> dist_pool_;
   std::unique_ptr<FlexPA> pa_{nullptr};
   std::unique_ptr<AbstractGraphicsFactory> graphics_factory_{nullptr};
+  bool change_tracking_valid_{false};
+  odb::dbBlock* change_tracking_block_{nullptr};
+  std::vector<odb::Rect> changed_regions_;
+  std::unordered_map<odb::dbInst*, InstSnapshot> touched_insts_;
+  std::set<std::string> changed_net_names_;
+  std::optional<std::vector<odb::Rect>> incremental_changed_regions_;
 
   void initDesign();
   void initGraphics();
@@ -221,6 +262,8 @@ class TritonRoute : public PinAccessService
   void getDRCMarkers(std::list<std::unique_ptr<frMarker>>& markers,
                      const odb::Rect& requiredDrcBox);
   void repairPDNVias();
+  void startChangeTracking();
+  std::optional<std::vector<odb::Rect>> collectChangedRegions() const;
   friend class FlexDR;
 };
 

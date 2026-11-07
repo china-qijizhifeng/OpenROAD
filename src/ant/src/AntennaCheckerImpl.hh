@@ -5,14 +5,17 @@
 
 #include <map>
 #include <memory>
+#include <mutex>
 #include <set>
 #include <string>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
 #include "ant/AntennaChecker.hh"
 #include "odb/PtrSetMap.h"
 #include "odb/db.h"
+#include "odb/dbTransform.h"
 #include "odb/dbWireGraph.h"
 
 namespace utl {
@@ -93,6 +96,44 @@ class AntennaChecker::Impl
   void makeNetWiresFromGuides(const std::vector<odb::dbNet*>& nets);
 
  private:
+  // Everything the analysis of a routed net reads from the design.  A net
+  // whose wire and connected pins are unchanged reuses its last result.
+  struct AnalyzedPin
+  {
+    odb::dbITerm* iterm{nullptr};
+    odb::dbMTerm* mterm{nullptr};
+    odb::dbTransform transform;
+    std::string inst_name;
+    bool operator==(const AnalyzedPin&) const = default;
+  };
+  struct NetAnalysisInput
+  {
+    bool global_wire{false};
+    std::vector<int> wire_data;
+    std::vector<unsigned char> wire_opcodes;
+    std::vector<AnalyzedPin> pins;
+    odb::dbMTerm* diode_mterm{nullptr};
+    float ratio_margin{0.0};
+    bool operator==(const NetAnalysisInput&) const = default;
+  };
+  struct NetAnalysis
+  {
+    NetAnalysisInput input;
+    int pin_violations{0};
+    Violations violations;
+    NetCheck net_check;
+  };
+
+  static NetAnalysisInput makeNetAnalysisInput(odb::dbNet* net,
+                                               odb::dbWire* wire,
+                                               odb::dbMTerm* diode_mterm,
+                                               float ratio_margin);
+  int analyzeNetWire(odb::dbNet* net,
+                     odb::dbMTerm* diode_mterm,
+                     float ratio_margin,
+                     Violations& antenna_violations,
+                     NetCheck& net_check);
+
   bool haveRoutedNets();
   bool designIsPlaced();
   bool haveGuides();
@@ -149,6 +190,11 @@ class AntennaChecker::Impl
   int net_violation_count_{0};
   int pin_violation_count_{0};
   std::string report_file_name_;
+  // Last analyses per net, at most one per (diode, ratio margin).  Nets are
+  // analyzed in parallel, so the map is guarded; each entry is only read or
+  // written by the thread analyzing its net.
+  std::mutex net_analyses_mutex_;
+  std::unordered_map<odb::dbNet*, std::vector<NetAnalysis>> net_analyses_;
   // consts
   static constexpr int kMaxDiodeCountPerGate = 10;
 };
