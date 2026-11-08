@@ -36,6 +36,7 @@
 #include "db/tech/frViaDef.h"
 #include "dr/FlexDR.h"
 #include "dr/FlexMazeTypes.h"
+#include "dr/SpacingGeometry.h"
 #include "frBaseTypes.h"
 #include "frDesign.h"
 #include "frProfileTask.h"
@@ -54,15 +55,6 @@ namespace drt {
 namespace gtl = boost::polygon;
 
 const int beginDebugIter = std::numeric_limits<int>::max();
-static frSquaredDistance pt2boxDistSquare(const odb::Point& pt,
-                                          const odb::Rect& box)
-
-{
-  frCoord dx = std::max({box.xMin() - pt.x(), pt.x() - box.xMax(), 0});
-  frCoord dy = std::max({box.yMin() - pt.y(), pt.y() - box.yMax(), 0});
-  return (frSquaredDistance) dx * dx + (frSquaredDistance) dy * dy;
-}
-
 // prlx = -dx, prly = -dy
 // dx > 0 : disjoint in x; dx = 0 : touching in x; dx < 0 : overlap in x
 static frSquaredDistance box2boxDistSquareNew(const odb::Rect& box1,
@@ -359,19 +351,19 @@ void FlexDRWorker::modMinSpacingCostPlanarHelper(const odb::Rect& box,
                    box.yMax() - width2 / 2);
     gridGraph_.getIdxBox(mPinLL, mPinUR, sBox);
   }
-  odb::Point pt, pt1, pt2, pt3, pt4;
-  frSquaredDistance distSquare = 0;
+  if (mIdx1.y() > mIdx2.y()) {
+    return;
+  }
+  odb::Point pt;
   for (int i = mIdx1.x(); i <= mIdx2.x(); i++) {
+    gridGraph_.getPoint(pt, i, mIdx1.y());
+    const auto x_distance = minCornerAxisDistanceSquared(
+        pt.x(), halfwidth2, box.xMin(), box.xMax());
     for (int j = mIdx1.y(); j <= mIdx2.y(); j++) {
       gridGraph_.getPoint(pt, i, j);
-      pt1 = {pt.x() + halfwidth2, pt.y() - halfwidth2};
-      pt2 = {pt.x() + halfwidth2, pt.y() + halfwidth2};
-      pt3 = {pt.x() - halfwidth2, pt.y() - halfwidth2};
-      pt4 = {pt.x() - halfwidth2, pt.y() + halfwidth2};
-      distSquare
-          = std::min(pt2boxDistSquare(pt1, box), pt2boxDistSquare(pt2, box));
-      distSquare = std::min(pt2boxDistSquare(pt3, box), distSquare);
-      distSquare = std::min(pt2boxDistSquare(pt4, box), distSquare);
+      const auto distSquare = x_distance
+                              + minCornerAxisDistanceSquared(
+                                  pt.y(), halfwidth2, box.yMin(), box.yMax());
       if (distSquare < bloatDistSquare) {
         switch (type) {
           case subRouteShape:
@@ -744,13 +736,14 @@ void FlexDRWorker::modMinSpacingCostViaHelper(const odb::Rect& box,
 
   // via prl should check min area patch metal if not fat via
   auto lNum = gridGraph_.getLayerNum(z);
-  bool isH = getTech()->getLayer(lNum)->isHorizontal();
+  auto* layer = getTech()->getLayer(lNum);
+  bool isH = layer->isHorizontal();
   bool isFatVia = (isH) ? (viaBox.dy() > width) : (viaBox.dx() > width);
 
   frCoord length2_mar = length2;
   frCoord patchLength = 0;
   if (!isFatVia) {
-    auto minAreaConstraint = getTech()->getLayer(lNum)->getAreaConstraint();
+    auto minAreaConstraint = layer->getAreaConstraint();
     auto minArea = minAreaConstraint ? minAreaConstraint->getMinArea() : 0;
     patchLength = frCoord(ceil(1.0 * minArea / width
                                / getTech()->getManufacturingGrid()))
@@ -764,13 +757,13 @@ void FlexDRWorker::modMinSpacingCostViaHelper(const odb::Rect& box,
   frCoord prl = isCurrPs ? (length2_mar) : std::min(length1, length2_mar);
   bool use_min_spacing
       = isBlockage && router_cfg_->USEMINSPACING_OBS && !isFatVia;
-  frCoord bloatDist = getTech()->getLayer(lNum)->getMinSpacingValue(
-      width1, width2, prl, use_min_spacing);
+  frCoord bloatDist
+      = layer->getMinSpacingValue(width1, width2, prl, use_min_spacing);
   bloatDist = std::max(minSpacing, bloatDist);
   frCoord bloatDistEolX = 0;
   frCoord bloatDistEolY = 0;
   if (drCon.eolWidth == 0) {
-    drCon = getTech()->getLayer(lNum)->getDrEolSpacingConstraint();
+    drCon = layer->getDrEolSpacingConstraint();
   }
   if (viaBox.dx() <= drCon.eolWidth) {
     bloatDistEolY = std::max(bloatDistEolY, drCon.eolSpace);
@@ -831,10 +824,8 @@ void FlexDRWorker::modMinSpacingCostViaHelper(const odb::Rect& box,
           }
         }
       }
-      bool use_min_spacing
-          = isBlockage && router_cfg_->USEMINSPACING_OBS && !isFatVia;
-      frCoord reqDist = getTech()->getLayer(lNum)->getMinSpacingValue(
-          width1, width2, prl, use_min_spacing);
+      frCoord reqDist
+          = layer->getMinSpacingValue(width1, width2, prl, use_min_spacing);
       reqDist = std::max(reqDist, minSpacing);
       if (distSquare < (frSquaredDistance) reqDist * reqDist) {
         switch (type) {

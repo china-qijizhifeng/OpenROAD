@@ -176,8 +176,8 @@ void FlexGridGraph::expand(FlexWavefrontGrid& currGrid,
   auto tailDir = nextWavefrontGrid.shiftAddBuffer(dir);
   // non-buffer enablement is faster for ripup all
   // commit grid prev direction if needed
-  auto tailIdx = getTailIdx(nextIdx, nextWavefrontGrid);
   if (tailDir != frDirEnum::UNKNOWN) {
+    const auto tailIdx = getTailIdx(nextIdx, nextWavefrontGrid);
     if (getPrevAstarNodeDir(tailIdx) == frDirEnum::UNKNOWN
         || getPrevAstarNodeDir(tailIdx) == tailDir) {
       setPrevAstarNodeDir(tailIdx.x(), tailIdx.y(), tailIdx.z(), tailDir);
@@ -587,21 +587,73 @@ frCost FlexGridGraph::getCostsImpl(frMIdx gridX,
                                    bool considerNDR,
                                    bool route_with_jumpers) const
 {
-  bool gridCost = hasGridCost(gridX, gridY, gridZ, dir);
-  bool apCost = hasApCost(gridX, gridY, gridZ, dir);
-  bool drcCost = hasRouteShapeCostAdj(gridX, gridY, gridZ, dir, considerNDR);
-  bool markerCost = hasMarkerCostAdj(gridX, gridY, gridZ, dir);
-  bool shapeCost = hasFixedShapeCostAdj(gridX, gridY, gridZ, dir, considerNDR);
-  bool blockCost = isBlocked(gridX, gridY, gridZ, dir);
-  bool guideCost = hasGuide(gridX, gridY, gridZ, dir);
-  frCoord edgeLength = getEdgeLength(gridX, gridY, gridZ, dir);
+  // Edge flags live at the lower endpoint, while planar costs and guides
+  // belong to the destination. Resolve those locations once for this step.
+  frMIdx edgeX = gridX;
+  frMIdx edgeY = gridY;
+  frMIdx edgeZ = gridZ;
+  auto edgeDir = dir;
+  correct(edgeX, edgeY, edgeZ, edgeDir);
+  const Node& edge = nodes_[getIdx(edgeX, edgeY, edgeZ)];
+  frMIdx dstX = gridX;
+  frMIdx dstY = gridY;
+  frMIdx dstZ = gridZ;
+  getNextGrid(dstX, dstY, dstZ, dir);
+  const auto dstIdx = getIdx(dstX, dstY, dstZ);
+
+  bool gridCost;
+  bool apCost;
+  bool blockCost = false;
+  switch (edgeDir) {
+    case frDirEnum::E:
+      gridCost = edge.hasGridCostEast;
+      apCost = edge.hasApCostEast;
+      blockCost = edge.isBlockedEast;
+      break;
+    case frDirEnum::N:
+      gridCost = edge.hasGridCostNorth;
+      apCost = edge.hasApCostNorth;
+      blockCost = edge.isBlockedNorth;
+      break;
+    default:
+      gridCost = edge.hasGridCostUp;
+      apCost = edge.hasApCostUp;
+      blockCost = edgeDir == frDirEnum::U && edge.isBlockedUp;
+      break;
+  }
+
+  bool drcCost;
+  bool markerCost;
+  bool shapeCost;
+  if (dir == frDirEnum::U || dir == frDirEnum::D) {
+    drcCost
+        = edge.routeShapeCostVia || (considerNDR && edge.routeShapeCostViaNDR);
+    markerCost = edge.markerCostVia;
+    shapeCost = !edge.overrideShapeCostVia
+                && (edge.fixedShapeCostVia
+                    || (considerNDR && edge.fixedShapeCostViaNDR));
+  } else {
+    const Node& dst = nodes_[dstIdx];
+    drcCost = dst.routeShapeCostPlanar
+              || (considerNDR && dst.routeShapeCostPlanarNDR);
+    markerCost = dst.markerCostPlanar;
+    if (dir == frDirEnum::W || dir == frDirEnum::E) {
+      shapeCost = dst.fixedShapeCostPlanarHorz
+                  || (considerNDR && dst.fixedShapeCostPlanarHorzNDR);
+    } else {
+      shapeCost = dst.fixedShapeCostPlanarVert
+                  || (considerNDR && dst.fixedShapeCostPlanarVertNDR);
+    }
+  }
+  const bool guideCost = guides_[dstIdx];
+  const frCoord edgeLength = getEdgeLength(gridX, gridY, gridZ, dir);
 
   // increase cost when a net has jumper
   frUInt4 jumper_cost = route_with_jumpers ? 10 : 1;
 
   if constexpr (!kWatermark) {
     // temporarily disable guideCost
-    return getEdgeLength(gridX, gridY, gridZ, dir)
+    return edgeLength
            + (gridCost || apCost ? router_cfg_->GRIDCOST * edgeLength : 0)
            + (drcCost ? ggDRCCost_ * edgeLength : 0)
            + (markerCost ? ggMarkerCost_ * edgeLength : 0)

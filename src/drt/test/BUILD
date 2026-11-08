@@ -258,3 +258,28 @@ cc_test(
         "@googletest//:gtest_main",
     ],
 )
+
+cc_test(
+    name = "spacing_geometry_test",
+    srcs = ["spacingGeometryTest.cpp"],
+    deps = [
+        "//src/drt:base_types",
+        "//src/odb/src/db",
+        "@googletest//:gtest",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
+    name = "layer_spacing_test",
+    srcs = ["layerSpacingTest.cpp"],
+    includes = ["../src"],
+    deps = [
+        "//src/drt:base_types",
+        "//src/drt:drt_impl",
+        "//src/odb/src/db",
+        "//src/utl",
+        "@googletest//:gtest",
+        "@googletest//:gtest_main",
+    ],
+)

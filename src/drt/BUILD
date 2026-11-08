@@ -26,6 +26,7 @@ cc_library(
     srcs = ["src/frBaseTypes.cpp"],
     hdrs = [
         "src/dr/FlexMazeTypes.h",
+        "src/dr/SpacingGeometry.h",
         "src/dr/WatermarkCost.h",
         "src/frBaseTypes.h",
     ],
