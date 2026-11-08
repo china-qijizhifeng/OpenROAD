@@ -11,6 +11,8 @@ py_library(
     name = "openroadpy",
     srcs = [
         "__init__.py",
+        "_placement_model.py",
+        "cp_sat_placement.py",
         "odb.py",
         "utl.py",
     ],
@@ -58,6 +60,31 @@ py_test(
     size = "small",
     srcs = ["openroad_test.py"],
     deps = [":openroadpy"],
+)
+
+py_test(
+    name = "placement_model_test",
+    size = "small",
+    srcs = [
+        "_placement_model.py",
+        "placement_model_test.py",
+    ],
+    imports = ["."],
+    deps = ["@openroad-cp-sat-pip//ortools"],
+)
+
+py_test(
+    name = "cp_sat_placement_test",
+    size = "small",
+    srcs = ["cp_sat_placement_test.py"],
+    data = [
+        "cp_sat_test.def",
+        "cp_sat_test.lef",
+    ],
+    deps = [
+        ":openroadpy",
+        "@openroad-cp-sat-pip//ortools",
+    ],
 )
 
 # The wheel installs and imports on its own, without the Bazel runfiles.
