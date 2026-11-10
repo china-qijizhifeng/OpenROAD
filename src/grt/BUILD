@@ -375,9 +375,12 @@ cc_binary(
         # GSegment's operator== and hash are defined in GlobalRouter.cpp.
         ":grt_impl",
         ":helem_core",
+        "//src/dbSta",
         "//src/odb/src/db",
+        "//src/sta:opensta_lib",
         "//src/stt",
         "//src/utl",
         "@openmp",
+        "@tcl_lang//:tcl",
     ],
 )

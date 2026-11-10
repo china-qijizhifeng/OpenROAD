@@ -24,13 +24,17 @@
 
 #include "FastRoute.h"
 #include "core/GCellGraph.h"
+#include "db_sta/dbSta.hh"
 #include "core/HelemRouter.h"
 #include "grt/GRoute.h"
 #include "ispd24/Ispd24Io.h"
 #include "odb/db.h"
 #include "odb/dbTypes.h"
+#include "sta/Sta.hh"
 #include "stt/SteinerTreeBuilder.h"
+#include "tcl.h"
 #include "utl/Logger.h"
+#include "utl/ServiceRegistry.h"
 
 namespace {
 
@@ -128,9 +132,16 @@ int main(int argc, char** argv)
   odb::dbChip* chip = odb::dbChip::create(db, tech);
   odb::dbBlock* block = odb::dbBlock::create(chip, "top");
   stt::SteinerTreeBuilder stt_builder(&logger);
+  // FastRoute queries the timer for slacks (updateSlacks); without a liberty
+  // library it skips timing, as in GlobalRouter runs without timing. The
+  // setup mirrors the OpenROAD test fixture (tst::Fixture).
+  sta::initSta();
+  Tcl_Interp* interp = Tcl_CreateInterp();
+  auto sta = std::make_unique<sta::dbSta>(interp, db, &logger);
+  utl::ServiceRegistry service_registry(&logger);
 
   auto fastroute = std::make_unique<grt::FastRouteCore>(
-      db, &logger, nullptr, &stt_builder, nullptr);
+      db, &logger, &service_registry, &stt_builder, sta.get());
   const int layers = graph.num_layers;
   fastroute->clear();
   fastroute->setVerbose(true);
