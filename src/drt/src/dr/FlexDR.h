@@ -4,14 +4,17 @@
 #pragma once
 
 #include <cstdint>
+#include <cstdlib>
 #include <deque>
 #include <list>
 #include <map>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <queue>
 #include <set>
 #include <string>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -60,6 +63,45 @@ namespace drt {
 class TritonRoute;
 class frConstraint;
 class frMarker;
+
+// Measurement probe for incremental-reroute research (env DRT_NETCHG=<file>).
+// Workers accumulate per-net routing work locally and merge it here once at
+// the end of FlexDRWorker::main; FlexDR::main reads it per iteration.
+namespace incr_probe {
+struct NetWork
+{
+  uint64_t ns = 0;
+  uint64_t routes = 0;
+  uint64_t searches = 0;
+  uint64_t pops = 0;
+};
+inline bool enabled()
+{
+  static const bool on = std::getenv("DRT_NETCHG") != nullptr;
+  return on;
+}
+inline std::mutex g_mutex;
+inline std::unordered_map<const frNet*, NetWork> g_work;
+inline uint64_t g_skipped_workers = 0;
+inline uint64_t g_routed_workers = 0;
+inline void merge(const std::unordered_map<const frNet*, NetWork>& local,
+                  bool skipped)
+{
+  std::lock_guard<std::mutex> lock(g_mutex);
+  for (const auto& [net, w] : local) {
+    auto& g = g_work[net];
+    g.ns += w.ns;
+    g.routes += w.routes;
+    g.searches += w.searches;
+    g.pops += w.pops;
+  }
+  if (skipped) {
+    ++g_skipped_workers;
+  } else {
+    ++g_routed_workers;
+  }
+}
+}  // namespace incr_probe
 struct SearchRepairArgs;
 
 struct FlexDRViaData
@@ -182,7 +224,9 @@ class FlexDR
   // Regions changed since the previous detailed routing and by this run, for
   // incremental runs whose changes are known.
   std::optional<std::vector<odb::Rect>> incremental_changed_regions_;
-
+  // DRT_ITER_MODE: when set for the running iteration, the flow state machine
+  // still sees this (original) rip-up mode so only the rip-up scope changes.
+  std::optional<RipUpMode> flow_args_mode_;
   // distributed
   dst::Distributed* dist_;
   bool dist_on_;
@@ -607,6 +651,7 @@ class FlexDRWorker
   std::vector<std::unique_ptr<drNet>> nets_;
   frOrderedIdMap<frNet*, std::vector<drNet*>> owner2nets_;
   FlexGridGraph gridGraph_;
+  std::unordered_map<const frNet*, incr_probe::NetWork> probe_work_;
   std::vector<frMarker> markers_;
   std::vector<frMarker> bestMarkers_;
   FlexDRWorkerRegionQuery rq_;

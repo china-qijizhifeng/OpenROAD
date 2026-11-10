@@ -805,6 +805,7 @@ bool FlexGridGraph::search(std::vector<FlexMazeIdx>& connComps,
     dump_file_.open("expansions.dump");
   }
   curr_id_ = 1;
+  ++probe_searches_;
   if (drWorker_->getDRIter() >= debugMazeIter) {
     std::cout << "INIT search: target pin " << nextPin->getName()
               << "\nsource points:\n";
@@ -868,6 +869,7 @@ bool FlexGridGraph::search(std::vector<FlexMazeIdx>& connComps,
       printExpansion(currGrid, "Popping");
     }
     wavefront_.pop();
+    ++probe_pops_;
     if (getPrevAstarNodeDir({currGrid.x(), currGrid.y(), currGrid.z()})
         != frDirEnum::UNKNOWN) {
       continue;

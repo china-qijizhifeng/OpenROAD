@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <cassert>
+#include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <iostream>
@@ -1921,6 +1922,11 @@ void FlexDRWorker::route_queue_main(std::queue<RouteQueueEntry>& rerouteQueue)
         continue;
       }
       // init
+      const bool probe_on = incr_probe::enabled();
+      const auto probe_t0 = probe_on ? std::chrono::steady_clock::now()
+                                     : std::chrono::steady_clock::time_point{};
+      const uint64_t probe_s0 = gridGraph_.getProbeSearches();
+      const uint64_t probe_p0 = gridGraph_.getProbePops();
       net->setModified(true);
       net->setNumMarkers(0);
       if (graphics_) {
@@ -2005,6 +2011,15 @@ void FlexDRWorker::route_queue_main(std::queue<RouteQueueEntry>& rerouteQueue)
 
       } else {
         logger_->error(DRT, 1006, "failed to setTargetNet");
+      }
+      if (probe_on) {
+        auto& w = probe_work_[net->getFrNet()];
+        w.ns += std::chrono::duration_cast<std::chrono::nanoseconds>(
+                    std::chrono::steady_clock::now() - probe_t0)
+                    .count();
+        w.routes += 1;
+        w.searches += gridGraph_.getProbeSearches() - probe_s0;
+        w.pops += gridGraph_.getProbePops() - probe_p0;
       }
     } else {
       if (getRipupMode() == RipUpMode::VIASWAP) {

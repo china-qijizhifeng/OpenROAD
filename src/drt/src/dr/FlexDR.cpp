@@ -6,11 +6,13 @@
 #include <sys/stat.h>
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <fstream>
 #include <iomanip>
 #include <ios>
@@ -25,6 +27,8 @@
 #include <sstream>
 #include <string>
 #include <tuple>
+#include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -282,6 +286,10 @@ int FlexDRWorker::main(frDesign* design)
   const int num_markers = getNumMarkers();
   cleanup();
   high_resolution_clock::time_point t3 = high_resolution_clock::now();
+  if (incr_probe::enabled()) {
+    incr_probe::merge(probe_work_, skipRouting_);
+    probe_work_.clear();
+  }
 
   using std::chrono::duration;
   using std::chrono::duration_cast;
@@ -1585,9 +1593,13 @@ bool FlexDR::isAffectedByChanges(const FlexDRWorker& worker) const
 void FlexDR::searchRepair(const SearchRepairArgs& args)
 {
   // Calculate flow state
+  SearchRepairArgs flow_args = args;
+  if (flow_args_mode_.has_value()) {
+    flow_args.ripupMode = *flow_args_mode_;
+  }
   const auto flow_state = flow_state_machine_->determineNextFlow(
       {.num_violations = getDesign()->getTopBlock()->getNumMarkers(),
-       .args = args});
+       .args = flow_args});
 
   const RipUpMode ripupMode = args.ripupMode;
   if ((ripupMode == RipUpMode::DRC || ripupMode == RipUpMode::NEARDRC)
@@ -2392,6 +2404,216 @@ std::vector<frVia*> FlexDR::getLonelyVias(frLayer* layer,
   return lonely_vias;
 }
 
+namespace {
+
+// DRT_ITER_MODE="1:NEARDRC,2:DRC": per-iteration rip-up mode for iterations
+// whose strategy-table mode is ALL (after the incremental ALL->INCR rewrite).
+std::map<int, RipUpMode> parseIterModeOverride(utl::Logger* logger)
+{
+  std::map<int, RipUpMode> out;
+  const char* env = std::getenv("DRT_ITER_MODE");
+  if (env == nullptr) {
+    return out;
+  }
+  std::stringstream ss(env);
+  std::string item;
+  while (std::getline(ss, item, ',')) {
+    const auto colon = item.find(':');
+    if (colon == std::string::npos) {
+      logger->error(utl::DRT, 9931, "DRT_ITER_MODE: bad item '{}'", item);
+    }
+    const int iter = std::stoi(item.substr(0, colon));
+    const std::string mode = item.substr(colon + 1);
+    if (mode == "ALL") {
+      out[iter] = RipUpMode::ALL;
+    } else if (mode == "DRC") {
+      out[iter] = RipUpMode::DRC;
+    } else if (mode == "NEARDRC") {
+      out[iter] = RipUpMode::NEARDRC;
+    } else if (mode == "INCR") {
+      out[iter] = RipUpMode::INCR;
+    } else {
+      logger->error(utl::DRT, 9932, "DRT_ITER_MODE: unknown mode '{}'", mode);
+    }
+  }
+  return out;
+}
+
+const char* ripupModeName(RipUpMode mode)
+{
+  switch (mode) {
+    case RipUpMode::DRC:
+      return "DRC";
+    case RipUpMode::ALL:
+      return "ALL";
+    case RipUpMode::NEARDRC:
+      return "NEARDRC";
+    case RipUpMode::INCR:
+      return "INCR";
+    case RipUpMode::VIASWAP:
+      return "VIASWAP";
+  }
+  return "?";
+}
+
+// Order-independent signature of a net's committed routing.
+uint64_t netRouteSignature(const frNet* net, uint64_t& num_items)
+{
+  std::vector<std::array<int64_t, 7>> items;
+  for (const auto& shape : net->getShapes()) {
+    const odb::Rect b = shape->getBBox();
+    items.push_back({(int64_t) shape->typeId(),
+                     shape->getLayerNum(),
+                     b.xMin(),
+                     b.yMin(),
+                     b.xMax(),
+                     b.yMax(),
+                     0});
+  }
+  for (const auto& via : net->getVias()) {
+    const odb::Point o = via->getOrigin();
+    items.push_back(
+        {(int64_t) frcVia, 0, o.x(), o.y(), 0, 0, via->getViaDef()->getId()});
+  }
+  for (const auto& pw : net->getPatchWires()) {
+    const odb::Rect b = pw->getBBox();
+    items.push_back({(int64_t) frcPatchWire,
+                     pw->getLayerNum(),
+                     b.xMin(),
+                     b.yMin(),
+                     b.xMax(),
+                     b.yMax(),
+                     1});
+  }
+  std::sort(items.begin(), items.end());
+  uint64_t h = 1469598103934665603ULL;
+  for (const auto& it : items) {
+    for (const int64_t x : it) {
+      h ^= static_cast<uint64_t>(x);
+      h *= 1099511628211ULL;
+    }
+  }
+  num_items = items.size();
+  return h;
+}
+
+// Nets whose committed routing lies within mult*width of a marker on the
+// marker's layer (the NEARDRC selection rule, evaluated on the design).
+std::unordered_set<const frNet*> netsNearMarkers(const frDesign* design,
+                                                 int mult)
+{
+  std::unordered_set<const frNet*> out;
+  std::vector<frBlockObject*> result;
+  for (const auto& marker : design->getTopBlock()->getMarkers()) {
+    const frLayerNum layer_num = marker->getLayerNum();
+    const frCoord width = design->getTech()->getLayer(layer_num)->getWidth();
+    odb::Rect box = marker->getBBox();
+    box.bloat(mult * width, box);
+    result.clear();
+    design->getRegionQuery()->queryDRObj(box, layer_num, result);
+    for (auto* obj : result) {
+      if (obj->typeId() == frcPathSeg || obj->typeId() == frcPatchWire) {
+        out.insert(static_cast<frShape*>(obj)->getNet());
+      } else if (obj->typeId() == frcVia) {
+        out.insert(static_cast<frVia*>(obj)->getNet());
+      }
+    }
+  }
+  return out;
+}
+
+struct IterProbe
+{
+  std::unordered_map<const frNet*, std::pair<uint64_t, uint64_t>> sig;
+  std::unordered_set<const frNet*> in_marker;
+  std::unordered_set<const frNet*> near2;
+  std::unordered_set<const frNet*> near8;
+  int markers_before = 0;
+};
+
+void probeSignatures(
+    const frDesign* design,
+    std::unordered_map<const frNet*, std::pair<uint64_t, uint64_t>>& sig)
+{
+  sig.clear();
+  for (const auto& net : design->getTopBlock()->getNets()) {
+    uint64_t n = 0;
+    const uint64_t h = netRouteSignature(net.get(), n);
+    sig[net.get()] = {h, n};
+  }
+}
+
+void probeBeforeIteration(const frDesign* design, IterProbe& probe)
+{
+  if (probe.sig.empty()) {
+    probeSignatures(design, probe.sig);
+  }
+  probe.in_marker.clear();
+  for (const auto& marker : design->getTopBlock()->getMarkers()) {
+    for (auto* src : marker->getSrcs()) {
+      if (src != nullptr && src->typeId() == frcNet) {
+        probe.in_marker.insert(static_cast<frNet*>(src));
+      }
+    }
+  }
+  probe.near2 = netsNearMarkers(design, 2);
+  probe.near8 = netsNearMarkers(design, 8);
+  probe.markers_before = design->getTopBlock()->getNumMarkers();
+  std::lock_guard<std::mutex> lock(incr_probe::g_mutex);
+  incr_probe::g_work.clear();
+  incr_probe::g_skipped_workers = 0;
+  incr_probe::g_routed_workers = 0;
+}
+
+void probeAfterIteration(const frDesign* design,
+                         IterProbe& probe,
+                         int call,
+                         int iter,
+                         RipUpMode mode,
+                         double wall_s)
+{
+  std::unordered_map<const frNet*, std::pair<uint64_t, uint64_t>> after;
+  probeSignatures(design, after);
+  std::ofstream out(std::getenv("DRT_NETCHG"), std::ios::app);
+  uint64_t changed_nets = 0;
+  uint64_t total_ns = 0;
+  for (const auto& net : design->getTopBlock()->getNets()) {
+    const frNet* n = net.get();
+    const auto before_it = probe.sig.find(n);
+    const auto& a = after[n];
+    const bool changed
+        = before_it == probe.sig.end() || before_it->second.first != a.first;
+    const auto work_it = incr_probe::g_work.find(n);
+    const incr_probe::NetWork w = work_it == incr_probe::g_work.end()
+                                      ? incr_probe::NetWork{}
+                                      : work_it->second;
+    const bool in_m = probe.in_marker.contains(n);
+    const bool in_n2 = probe.near2.contains(n);
+    const bool in_n8 = probe.near8.contains(n);
+    changed_nets += changed ? 1 : 0;
+    total_ns += w.ns;
+    if (w.routes == 0 && !changed && !in_m && !in_n2 && !in_n8) {
+      continue;
+    }
+    out << "N\t" << call << '\t' << iter << '\t' << ripupModeName(mode)
+        << '\t' << n->getId() << '\t' << (changed ? 1 : 0) << '\t'
+        << (in_m ? 1 : 0) << '\t' << (in_n2 ? 1 : 0) << '\t'
+        << (in_n8 ? 1 : 0) << '\t' << w.ns << '\t' << w.routes << '\t'
+        << w.searches << '\t' << w.pops << '\t'
+        << (before_it == probe.sig.end() ? 0 : before_it->second.second)
+        << '\t' << a.second << '\n';
+  }
+  out << "S\t" << call << '\t' << iter << '\t' << ripupModeName(mode) << '\t'
+      << design->getTopBlock()->getNets().size() << '\t' << changed_nets
+      << '\t' << incr_probe::g_routed_workers << '\t'
+      << incr_probe::g_skipped_workers << '\t' << probe.markers_before << '\t'
+      << design->getTopBlock()->getNumMarkers() << '\t' << total_ns << '\t'
+      << wall_s << '\n';
+  probe.sig = std::move(after);
+}
+
+}  // namespace
+
 int FlexDR::main()
 {
   ProfileTask profile("DR:main");
@@ -2457,6 +2679,11 @@ int FlexDR::main()
   std::vector<int> history_drvs;
   history_args.reserve(default_strategy.size());
   history_drvs.reserve(default_strategy.size());
+  const std::map<int, RipUpMode> iter_mode_override
+      = parseIterModeOverride(logger_);
+  static int probe_calls = 0;
+  const int probe_call = probe_calls++;
+  IterProbe probe;
 
   // iter_ may start > 0 when resuming from imported DRC markers; index the
   // strategy table by iter_ so the per-iteration parameters stay aligned.
@@ -2498,7 +2725,34 @@ int FlexDR::main()
         args.ripupMode = RipUpMode::INCR;
       }
     }
+    flow_args_mode_.reset();
+    if (args.ripupMode == RipUpMode::ALL) {
+      const auto it = iter_mode_override.find(iter_);
+      if (it != iter_mode_override.end() && it->second != RipUpMode::ALL) {
+        logger_->report("DRT_ITER_MODE iter {}: ALL -> {}",
+                        iter_,
+                        ripupModeName(it->second));
+        flow_args_mode_ = args.ripupMode;
+        args.ripupMode = it->second;
+      }
+    }
+    if (incr_probe::enabled()) {
+      probeBeforeIteration(getDesign(), probe);
+    }
+    const auto probe_t0 = std::chrono::steady_clock::now();
     searchRepair(args);
+    if (incr_probe::enabled()) {
+      probeAfterIteration(
+          getDesign(),
+          probe,
+          probe_call,
+          iter_,
+          args.ripupMode,
+          std::chrono::duration<double>(std::chrono::steady_clock::now()
+                                        - probe_t0)
+              .count());
+    }
+    flow_args_mode_.reset();
     const int post_drvs = getDesign()->getTopBlock()->getNumMarkers();
     if (router_cfg_->ADAPTIVE_STRATEGY && has_unidir_layer) {
       updateUnidirStubbornThreshold(

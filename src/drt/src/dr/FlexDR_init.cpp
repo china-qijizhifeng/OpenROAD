@@ -2,6 +2,7 @@
 // Copyright (c) 2019-2025, The OpenROAD Authors
 
 #include <algorithm>
+#include <cstdlib>
 #include <cmath>
 #include <cstddef>
 #include <iostream>
@@ -1581,9 +1582,13 @@ void FlexDRWorker::initNets_boundaryArea()
 void FlexDRWorker::initRipUpNetsFromMarkers()
 {
   frOrderedIdSet<drNet*> ripUpNets;
+  static const int bloat_mult = [] {
+    const char* env = std::getenv("DRT_NEARDRC_BLOAT_MULT");
+    return env != nullptr ? std::atoi(env) : 2;
+  }();
   for (auto& marker : markers_) {
     const auto bloatDist
-        = getTech()->getLayer(marker.getLayerNum())->getWidth() * 2;
+        = getTech()->getLayer(marker.getLayerNum())->getWidth() * bloat_mult;
     getRipUpNetsFromMarker(&marker, ripUpNets, bloatDist);
   }
   for (const auto& net : ripUpNets) {
