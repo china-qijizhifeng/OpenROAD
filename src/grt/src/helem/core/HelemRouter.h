@@ -57,8 +57,9 @@ struct HelemOptions
   double rho_initial = 0.05;
   double rho_growth = 2.0;  // sigma
   double tau = 100.0;
-  // y_e^0; a negative value selects the paper default (1/(100 L)) sum OvflW.
-  double multiplier_initial = -1.0;
+  // y_e^0 (tuned on ISPD24, R8); a negative value selects the paper default
+  // (1/(100 L)) sum OvflW.
+  double multiplier_initial = 0.2;
   // Segments per BCD block (paper gap G5).
   int batch_size = 2048;
   // 3-bend search box expansion: each side grows by
@@ -77,7 +78,7 @@ struct HelemOptions
   // Among equally close access points prefer the highest layer.
   bool pin_access_prefer_high_layer = false;
   // Scale of the projected 2D capacity (gap G3, 1.0 = sum of layers).
-  double capacity_2d_scale = 1.0;
+  double capacity_2d_scale = 0.8;
   // Layer assignment.
   int layer_assignment_batch_size = 16;
   LayerAssignmentOrder layer_assignment_order
