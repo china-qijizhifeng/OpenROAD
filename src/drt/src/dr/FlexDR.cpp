@@ -2665,6 +2665,11 @@ int FlexDR::main()
     if (!adaptive_enabled) {
       return false;
     }
+    // Experiment switch: DRT_ADAPTIVE_FORCE_UNIDIR=1 selects the policy branch
+    // that keeps the first shifted ALL pass (strategy row 1) on every PDK.
+    if (std::getenv("DRT_ADAPTIVE_FORCE_UNIDIR") != nullptr) {
+      return true;
+    }
     for (const auto& layer : getTech()->getLayers()) {
       if (layer->getType() == dbTechLayerType::ROUTING
           && layer->isUnidirectional()) {

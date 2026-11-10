@@ -1540,6 +1540,14 @@ void TritonRoute::setParams(const ParamStruct& params)
   }
   router_cfg_->OR_SEED = params.orSeed;
   router_cfg_->OR_K = params.orK;
+  // Experiment switch: DRT_OR_SEED / DRT_OR_K perturb the initial net order
+  // (adjacent swaps of OR_K * #nets) to measure QoR spread under equally
+  // valid orderings.
+  if (const char* seed = std::getenv("DRT_OR_SEED")) {
+    router_cfg_->OR_SEED = std::atoi(seed);
+    const char* k = std::getenv("DRT_OR_K");
+    router_cfg_->OR_K = k != nullptr ? std::atof(k) : 0.1;
+  }
   if (params.minAccessPoints > 0) {
     router_cfg_->MINNUMACCESSPOINT_STDCELLPIN = params.minAccessPoints;
     router_cfg_->MINNUMACCESSPOINT_MACROCELLPIN = params.minAccessPoints;
