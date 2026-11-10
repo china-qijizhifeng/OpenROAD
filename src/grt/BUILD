@@ -145,6 +145,7 @@ cc_library(
         "//src/sta:opensta_lib",
         "//src/stt",
         "//src/utl",
+        "@openmp",
     ],
 )
 
