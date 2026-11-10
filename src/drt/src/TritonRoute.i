@@ -239,6 +239,20 @@ void step_end()
   router->endFR();
 }
 
+bool experimental_route_trial_cmd(const char* recipe)
+{
+  auto* router = ord::OpenRoad::openRoad()->getTritonRoute();
+  return router->experimentalRouteTrial(
+      recipe, ord::OpenRoad::openRoad()->getThreadCount());
+}
+
+bool experimental_route_graph_cmd(const char* recipe, const char* output)
+{
+  auto* router = ord::OpenRoad::openRoad()->getTritonRoute();
+  return router->experimentalRouteTrial(
+      recipe, ord::OpenRoad::openRoad()->getThreadCount(), output);
+}
+
 void check_drc_cmd(const char* drc_file, int x1, int y1, int x2, int y2, const char* marker_name)
 {
   auto* router = ord::OpenRoad::openRoad()->getTritonRoute();

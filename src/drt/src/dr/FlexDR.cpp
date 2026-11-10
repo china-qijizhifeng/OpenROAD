@@ -47,6 +47,7 @@
 #include "distributed/frArchive.h"
 #include "dr/AbstractDRGraphics.h"
 #include "dr/FlexDR_conn.h"
+#include "dr/ViaCleanup.h"
 #include "drt/TritonRoute.h"
 #include "dst/BalancerJobDescription.h"
 #include "dst/Distributed.h"
@@ -2595,18 +2596,17 @@ void probeAfterIteration(const frDesign* design,
     if (w.routes == 0 && !changed && !in_m && !in_n2 && !in_n8) {
       continue;
     }
-    out << "N\t" << call << '\t' << iter << '\t' << ripupModeName(mode)
-        << '\t' << n->getId() << '\t' << (changed ? 1 : 0) << '\t'
-        << (in_m ? 1 : 0) << '\t' << (in_n2 ? 1 : 0) << '\t'
-        << (in_n8 ? 1 : 0) << '\t' << w.ns << '\t' << w.routes << '\t'
-        << w.searches << '\t' << w.pops << '\t'
-        << (before_it == probe.sig.end() ? 0 : before_it->second.second)
-        << '\t' << a.second << '\n';
+    out << "N\t" << call << '\t' << iter << '\t' << ripupModeName(mode) << '\t'
+        << n->getId() << '\t' << (changed ? 1 : 0) << '\t' << (in_m ? 1 : 0)
+        << '\t' << (in_n2 ? 1 : 0) << '\t' << (in_n8 ? 1 : 0) << '\t' << w.ns
+        << '\t' << w.routes << '\t' << w.searches << '\t' << w.pops << '\t'
+        << (before_it == probe.sig.end() ? 0 : before_it->second.second) << '\t'
+        << a.second << '\n';
   }
   out << "S\t" << call << '\t' << iter << '\t' << ripupModeName(mode) << '\t'
-      << design->getTopBlock()->getNets().size() << '\t' << changed_nets
-      << '\t' << incr_probe::g_routed_workers << '\t'
-      << incr_probe::g_skipped_workers << '\t' << probe.markers_before << '\t'
+      << design->getTopBlock()->getNets().size() << '\t' << changed_nets << '\t'
+      << incr_probe::g_routed_workers << '\t' << incr_probe::g_skipped_workers
+      << '\t' << probe.markers_before << '\t'
       << design->getTopBlock()->getNumMarkers() << '\t' << total_ns << '\t'
       << wall_s << '\n';
   probe.sig = std::move(after);
@@ -2747,15 +2747,14 @@ int FlexDR::main()
     const auto probe_t0 = std::chrono::steady_clock::now();
     searchRepair(args);
     if (incr_probe::enabled()) {
-      probeAfterIteration(
-          getDesign(),
-          probe,
-          probe_call,
-          iter_,
-          args.ripupMode,
-          std::chrono::duration<double>(std::chrono::steady_clock::now()
-                                        - probe_t0)
-              .count());
+      probeAfterIteration(getDesign(),
+                          probe,
+                          probe_call,
+                          iter_,
+                          args.ripupMode,
+                          std::chrono::duration<double>(
+                              std::chrono::steady_clock::now() - probe_t0)
+                              .count());
     }
     flow_args_mode_.reset();
     const int post_drvs = getDesign()->getTopBlock()->getNumMarkers();
@@ -2781,6 +2780,25 @@ int FlexDR::main()
     ++iter_;
   }
 
+  // Experimental cleanup only after a fresh, clean, local route. Incremental
+  // and distributed updates need their own transaction/writeback contract.
+  const char* cleanup_env = std::getenv("DRT_VIA_CLEANUP");
+  if (cleanup_env && std::string(cleanup_env) == "1" && !incremental
+      && !hasFixed && !dist_on_ && !getTech()->hasMaxSpacingConstraints()
+      && getDesign()->getTopBlock()->getNumMarkers() == 0) {
+    if (via_cleanup::run(getDesign(), logger_, router_cfg_) > 0) {
+      FlexDRConnectivityChecker checker(
+          router_, logger_, router_cfg_, graphics_.get(), false);
+      checker.check(iter_);
+      const auto markers = getDesign()->getTopBlock()->getNumMarkers();
+      if (markers != 0) {
+        logger_->error(DRT,
+                       6002,
+                       "Experimental via cleanup created {} recheck markers.",
+                       markers);
+      }
+    }
+  }
   end(/* done */ true);
   reporter->end(true);
 

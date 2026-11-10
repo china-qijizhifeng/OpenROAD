@@ -185,6 +185,10 @@ class TritonRoute : public PinAccessService
                 int y2,
                 const std::string& marker_name,
                 int num_threads);
+  // Experimental checkpoint operation; no normal routing call path.
+  bool experimentalRouteTrial(const std::string& recipe,
+                              int num_threads,
+                              const std::string& graph_file = "");
   bool initGuide();
   void prep();
   odb::dbDatabase* getDb() const { return db_; }

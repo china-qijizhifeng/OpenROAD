@@ -3,8 +3,8 @@
 
 #include "drt/TritonRoute.h"
 
-#include <cstdlib>
 #include <algorithm>
+#include <cstdlib>
 #include <fstream>
 #include <iostream>
 #include <iterator>
@@ -36,6 +36,9 @@
 #include "distributed/frArchive.h"
 #include "dr/AbstractDRGraphics.h"
 #include "dr/FlexDR.h"
+#include "dr/FlexDR_conn.h"
+#include "dr/RouteTrial.h"
+#include "dr/RouteTrialGraph.h"
 #include "drt-global.h"
 #include "drt/PinAccessService.h"
 #include "dst/Distributed.h"
@@ -1477,6 +1480,64 @@ void TritonRoute::checkDRC(const char* filename,
   frList<std::unique_ptr<frMarker>> markers;
   getDRCMarkers(markers, requiredDrcBox);
   reportDRC(filename, markers, marker_name, requiredDrcBox);
+}
+
+bool TritonRoute::experimentalRouteTrial(const std::string& recipe,
+                                         int num_threads,
+                                         const std::string& graph_file)
+{
+  router_cfg_->MAX_THREADS = num_threads;
+  initDesign();
+  if (getDesign()->getTech()->hasMaxSpacingConstraints()) {
+    logger_->error(DRT, 6003, "Route trials do not support MAXSPACING rules.");
+  }
+  auto* grid = db_->getChip()->getBlock()->getGCellGrid();
+  if (!grid || grid->getNumGridPatternsX() != 1
+      || grid->getNumGridPatternsY() != 1) {
+    logger_->error(
+        DRT, 6004, "Route trials require a saved regular GCELLGRID.");
+  }
+  io::GuideProcessor processor(getDesign(), db_, logger_, router_cfg_.get());
+  processor.readGuides();
+  processor.buildGCellPatterns();
+  FlexDR preparation(this, getDesign(), logger_, db_, router_cfg_.get());
+  preparation.init();
+  if (!graph_file.empty()) {
+    const auto source
+        = route_trial::resolveSource(getDesign(), route_trial::read(recipe));
+    return route_trial::exportGraph(
+        getDesign(), router_cfg_.get(), source, graph_file, logger_);
+  }
+  for (const auto& net : getDesign()->getTopBlock()->getNets()) {
+    net->setModified(recipe.empty());
+  }
+  if (!recipe.empty()) {
+    auto plan = route_trial::resolve(getDesign(), route_trial::read(recipe));
+    if (!route_trial::apply(getDesign(), logger_, router_cfg_.get(), plan)) {
+      logger_->report("ROUTE_TRIAL rejected by geometry or local DRC");
+      return false;
+    }
+    logger_->report(
+        "ROUTE_TRIAL net={} removed_vias={} added_vias={} old_length={} "
+        "new_length={}",
+        plan.net->getName(),
+        plan.vias.size(),
+        plan.added_vias.size(),
+        plan.old_length,
+        plan.new_length);
+  }
+  FlexDRConnectivityChecker checker(
+      this, logger_, router_cfg_.get(), nullptr, false);
+  checker.check();
+  if (getDesign()->getTopBlock()->getNumMarkers() != 0) {
+    logger_->error(
+        DRT, 6005, "Route trial connectivity processing created markers.");
+  }
+  io::Writer writer(getDesign(), logger_);
+  writer.updateDb(db_, router_cfg_.get());
+  logger_->report(
+      "ROUTE_TRIAL connectivity passed; global DRC and QoR remain required");
+  return true;
 }
 
 void TritonRoute::addUserSelectedVia(const std::string& viaName)

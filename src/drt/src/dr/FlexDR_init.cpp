@@ -2,9 +2,9 @@
 // Copyright (c) 2019-2025, The OpenROAD Authors
 
 #include <algorithm>
-#include <cstdlib>
 #include <cmath>
 #include <cstddef>
+#include <cstdlib>
 #include <iostream>
 #include <iterator>
 #include <limits>
