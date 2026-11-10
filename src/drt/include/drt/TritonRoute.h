@@ -52,6 +52,7 @@ class FlexDR;
 class FlexPA;
 class FlexTA;
 class FlexDRWorker;
+struct BonnRouteDRParams;
 class drUpdate;
 struct frDebugSettings;
 struct FlexDRViaData;
@@ -224,6 +225,11 @@ class TritonRoute : public PinAccessService
     return incremental_changed_regions_;
   }
 
+  // BonnRoute detailed routing before FlexDR (detailed_route -bonnroute).
+  void setBonnRoute(bool enabled) { bonnroute_ = enabled; }
+  // Returns false for an unknown parameter name.
+  bool setBonnRouteParam(const char* name, double value);
+
  private:
   std::unique_ptr<frDesign> design_;
   std::unique_ptr<frDebugSettings> debug_;
@@ -237,6 +243,8 @@ class TritonRoute : public PinAccessService
   int num_drvs_{-1};
   dst::Distributed* dist_{nullptr};
   bool distributed_{false};
+  bool bonnroute_{false};
+  std::unique_ptr<BonnRouteDRParams> bonnroute_params_;
   std::string dist_ip_;
   uint16_t dist_port_{0};
   std::string shared_volume_;

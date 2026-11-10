@@ -24,6 +24,7 @@ sta::define_cmd_args "detailed_route" {
     [-cloud_size sz]
     [-clean_patches]
     [-no_pin_access]
+    [-bonnroute]
     [-min_access_points count]
     [-save_guide_updates]
     [-repair_pdn_vias layer]
@@ -38,7 +39,7 @@ proc detailed_route { args } {
       -top_routing_layer -verbose -remote_host -remote_port -shared_volume \
       -cloud_size -min_access_points -repair_pdn_vias -drc_report_iter_step} \
     flags {-disable_via_gen -distributed -clean_patches -no_pin_access \
-           -single_step_dr -save_guide_updates}
+           -single_step_dr -save_guide_updates -bonnroute}
   sta::check_argc_eq0 "detailed_route" $args
 
   set enable_via_gen [expr ![info exists flags(-disable_via_gen)]]
@@ -161,6 +162,7 @@ proc detailed_route { args } {
   } else {
     set min_access_points -1
   }
+  drt::set_bonnroute_cmd [info exists flags(-bonnroute)]
   drt::detailed_route_cmd $output_maze $output_drc \
     $output_guide_coverage $db_process_node $enable_via_gen $droute_end_iter \
     $via_in_pin_bottom_layer $via_in_pin_top_layer \
@@ -525,4 +527,16 @@ proc fix_max_spacing { args } {
   sta::check_argc_eq0 "fix_max_spacing" $args
   drt::fix_max_spacing_cmd
 }
+}
+
+sta::define_cmd_args "set_bonnroute_dr_param" { name value }
+
+proc set_bonnroute_dr_param { args } {
+  if { [llength $args] != 2 } {
+    utl::error DRT 9102 "set_bonnroute_dr_param requires a name and a value."
+  }
+  lassign $args name value
+  if { ![drt::set_bonnroute_dr_param_cmd $name $value] } {
+    utl::error DRT 9103 "Unknown BonnRoute parameter $name."
+  }
 }

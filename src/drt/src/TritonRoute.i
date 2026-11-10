@@ -26,6 +26,18 @@ int detailed_route_num_drvs()
   return router->getNumDRVs();
 }
 
+void set_bonnroute_cmd(bool enabled)
+{
+  auto* router = ord::OpenRoad::openRoad()->getTritonRoute();
+  router->setBonnRoute(enabled);
+}
+
+bool set_bonnroute_dr_param_cmd(const char* name, double value)
+{
+  auto* router = ord::OpenRoad::openRoad()->getTritonRoute();
+  return router->setBonnRouteParam(name, value);
+}
+
 void detailed_route_distributed(const char* remote_ip,
                                 unsigned short remote_port,
                                 const char* sharedVolume,

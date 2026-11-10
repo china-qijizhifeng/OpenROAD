@@ -179,6 +179,8 @@ class BonnRouteDR
 
   std::vector<NetData> nets_;
   std::unordered_map<const frNet*, int> net_index_;
+  // Nets ripped up by the last routeNet().
+  std::vector<int> pending_victims_;
 
   // Statistics.
   int64_t searches_ = 0;

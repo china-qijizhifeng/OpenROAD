@@ -43,6 +43,10 @@ cc_library(
     srcs = [
         "src/DesignCallBack.cpp",
         "src/DesignCallBack.h",
+        "src/br/BonnRouteDR.cpp",
+        "src/br/BonnRouteDR.h",
+        "src/br/BrCore.cpp",
+        "src/br/BrCore.h",
         "src/TritonRoute.cpp",
         "src/db/drObj/drAccessPattern.cpp",
         "src/db/drObj/drNet.cpp",

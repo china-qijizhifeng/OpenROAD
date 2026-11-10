@@ -22,6 +22,7 @@
 #include "boost/asio/post.hpp"
 #include "boost/bind/bind.hpp"
 #include "boost/geometry/geometry.hpp"
+#include "br/BonnRouteDR.h"
 #include "db/infra/frSegStyle.h"
 #include "db/obj/frShape.h"
 #include "db/obj/frVia.h"
@@ -1166,6 +1167,14 @@ void TritonRoute::sendDesignUpdates(const std::string& router_cfg_path,
   design_->incrementVersion();
 }
 
+bool TritonRoute::setBonnRouteParam(const char* name, const double value)
+{
+  if (!bonnroute_params_) {
+    bonnroute_params_ = std::make_unique<BonnRouteDRParams>();
+  }
+  return bonnroute_params_->set(name, value);
+}
+
 int TritonRoute::main()
 {
   utl::Timer timer;
@@ -1280,6 +1289,14 @@ int TritonRoute::main()
   invalidateChangeTracking();
   prep();
   ta();
+  if (bonnroute_ && !distributed_) {
+    if (!bonnroute_params_) {
+      bonnroute_params_ = std::make_unique<BonnRouteDRParams>();
+    }
+    BonnRouteDR bonnroute(
+        getDesign(), logger_, router_cfg_.get(), *bonnroute_params_);
+    bonnroute.main();
+  }
   if (distributed_) {
     asio::post(*dist_pool_,
                [this] { sendDesignUpdates("", router_cfg_->MAX_THREADS); });
