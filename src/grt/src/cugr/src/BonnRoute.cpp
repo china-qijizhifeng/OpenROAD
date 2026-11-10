@@ -629,7 +629,7 @@ void BonnRouteGlobal::resourceSharing()
   // one track of a typical edge, so early phases already weigh length.
   std::vector<double> caps;
   for (const double c : capacity_) {
-    if (c > 0.0) {
+    if (c > 0.0 && c < std::numeric_limits<double>::max()) {
       caps.push_back(c);
     }
   }
@@ -683,6 +683,8 @@ void BonnRouteGlobal::resourceSharing()
     int64_t phase_calls = 0;
     for (int begin = 0; begin < num_nets; begin += batch) {
       const int end = std::min(num_nets, begin + batch);
+      // Prices are frozen during the parallel part of the batch.
+      const double batch_log_objective = log_objective_price_;
 #pragma omp parallel for num_threads(threads) schedule(dynamic, 1)
       for (int i = begin; i < end; i++) {
         const NetState& state = states_[order_[i]];
@@ -690,7 +692,11 @@ void BonnRouteGlobal::resourceSharing()
         results[slot].ok = false;
         if (state.last >= 0) {
           const double now = logCost(state.candidates[state.last]);
-          if (now - state.last_log_cost <= log_tolerance) {
+          // Relative to the objective price, which every phase raises.
+          const double growth
+              = (now - state.last_log_cost)
+                - (batch_log_objective - state.last_log_objective);
+          if (growth <= log_tolerance) {
             kinds[slot] = Kind::kReuse;
             continue;
           }
@@ -722,6 +728,7 @@ void BonnRouteGlobal::resourceSharing()
           state.last
               = insertCandidate(state, std::move(results[slot].candidate));
           state.last_log_cost = log_cost;
+          state.last_log_objective = batch_log_objective;
         } else {
           reuses_++;
         }
@@ -912,6 +919,10 @@ void BonnRouteGlobal::run()
 {
   utl::Timer timer;
   prepareNets();
+  min_layer_ = num_layers_;
+  for (const GRNet* net : nets_) {
+    min_layer_ = std::min(min_layer_, net->getLayerRange().min_layer);
+  }
   // Single-gcell nets keep their pin stack; their usage is background.
   for (NetState& state : states_) {
     if (!state.trivial || state.terminals.empty()) {
@@ -938,6 +949,12 @@ void BonnRouteGlobal::run()
       for (int y = 0; y < y_size_; y++) {
         const GraphEdge edge = grid_graph_->getEdge(l, x, y);
         const uint32_t r = edgeIndex(l, x, y);
+        if (l < min_layer_) {
+          // Pin layers: via pads there are not a routing resource.
+          capacity_[r] = std::numeric_limits<double>::max();
+          norm_capacity_[r] = 1e30;
+          continue;
+        }
         capacity_[r] = edge.capacity - edge.demand;
         norm_capacity_[r] = std::max(capacity_[r], params_.min_capacity);
       }

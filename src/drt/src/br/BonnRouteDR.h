@@ -107,6 +107,10 @@ class BonnRouteDR
     int z = 0;
     std::vector<OutWire> wires;
     std::vector<OutVia> vias;
+    // Planar access: the stub ends on the pin at `ap` (truncated end).
+    bool planar = false;
+    odb::Point ap;
+    frLayerNum ap_layer = 0;
   };
   struct Term
   {
@@ -121,6 +125,7 @@ class BonnRouteDR
     std::vector<OutWire> wires;
     std::vector<OutVia> vias;
     std::vector<RShape> shapes;  // committed shapes
+    std::vector<std::pair<frLayerNum, odb::Point>> pin_points;
     int ripups = 0;
     bool routed = false;
     bool failed = false;

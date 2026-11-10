@@ -111,6 +111,7 @@ class BonnRouteGlobal
     std::vector<Candidate> candidates;
     int last = -1;
     double last_log_cost = 0.0;  // log of the oracle value (absolute prices)
+    double last_log_objective = 0.0;  // ln y_obj when it was computed
     int chosen = -1;
     bool trivial = false;
     int oracle_failures = 0;
@@ -174,6 +175,8 @@ class BonnRouteGlobal
   std::vector<double> via_pad_lower_;
   std::vector<double> via_pad_upper_;
   bool via_demand_ = true;
+  // Layers below this hold no routing capacity (pin layers): not priced.
+  int min_layer_ = 0;
 
   std::vector<NetState> states_;
   std::vector<int> order_;  // nets taking part in resource sharing

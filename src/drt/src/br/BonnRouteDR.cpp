@@ -536,6 +536,11 @@ void BonnRouteDR::buildAccess(NetData& net)
           if (via_def != nullptr) {
             opt.vias.push_back({via_def, a.point});
           }
+          if (via_def == nullptr) {
+            opt.planar = true;
+            opt.ap = a.point;
+            opt.ap_layer = info.fr;
+          }
           opt.cost = (via_def != nullptr
                           ? (z > 0 ? graph_.via_cost[z - 1]
                                    : static_cast<Cost>(params_.via_cost)
@@ -729,6 +734,7 @@ bool BonnRouteDR::connect(NetData& net, const int dilation, const bool ripup)
 {
   net.wires.clear();
   net.vias.clear();
+  net.pin_points.clear();
   for (Term& t : net.terms) {
     t.chosen = -1;
   }
@@ -853,6 +859,9 @@ bool BonnRouteDR::connect(NetData& net, const int dilation, const bool ripup)
     const AccessOption& opt = term.options[term.chosen];
     net.wires.insert(net.wires.end(), opt.wires.begin(), opt.wires.end());
     net.vias.insert(net.vias.end(), opt.vias.begin(), opt.vias.end());
+    if (opt.planar) {
+      net.pin_points.emplace_back(opt.ap_layer, opt.ap);
+    }
   }
   // History for rip-up (Sec. 4.2): vertices whose use forces a rip-up.
   if (ripup) {
@@ -980,7 +989,29 @@ void BonnRouteDR::writeNets()
       continue;
     }
     frNet* net = data.net;
+    // Split wires at planar pin points so the pin end is an endpoint.
+    std::vector<OutWire> wires;
     for (const OutWire& w : data.wires) {
+      std::vector<odb::Point> cuts{w.begin, w.end};
+      for (const auto& [layer, p] : data.pin_points) {
+        const bool on_x = w.begin.y() == w.end.y() && p.y() == w.begin.y()
+                          && p.x() > std::min(w.begin.x(), w.end.x())
+                          && p.x() < std::max(w.begin.x(), w.end.x());
+        const bool on_y = w.begin.x() == w.end.x() && p.x() == w.begin.x()
+                          && p.y() > std::min(w.begin.y(), w.end.y())
+                          && p.y() < std::max(w.begin.y(), w.end.y());
+        if (layer == w.layer && (on_x || on_y)) {
+          cuts.push_back(p);
+        }
+      }
+      std::ranges::sort(cuts, [](const odb::Point& a, const odb::Point& b) {
+        return std::make_pair(a.x(), a.y()) < std::make_pair(b.x(), b.y());
+      });
+      for (size_t k = 0; k + 1 < cuts.size(); k++) {
+        wires.push_back({w.layer, cuts[k], cuts[k + 1]});
+      }
+    }
+    for (const OutWire& w : wires) {
       if (w.begin == w.end) {
         continue;
       }
@@ -991,7 +1022,21 @@ void BonnRouteDR::writeNets()
                          std::max(w.begin.y(), w.end.y()));
       seg->setPoints(b, e);
       seg->setLayerNum(w.layer);
-      seg->setStyle(tech->getLayer(w.layer)->getDefaultSegStyle());
+      frSegStyle style = tech->getLayer(w.layer)->getDefaultSegStyle();
+      // A wire ending on a pin is truncated there, which is how FlexDR
+      // recognises planar pin connections.
+      for (const auto& [layer, p] : data.pin_points) {
+        if (layer != w.layer) {
+          continue;
+        }
+        if (p == b) {
+          style.setBeginStyle(frcTruncateEndStyle, 0);
+        }
+        if (p == e) {
+          style.setEndStyle(frcTruncateEndStyle, 0);
+        }
+      }
+      seg->setStyle(style);
       net->addShape(std::move(seg));
     }
     for (const OutVia& v : data.vias) {
