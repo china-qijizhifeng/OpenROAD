@@ -102,8 +102,8 @@ class BonnRouteGlobal
   };
   struct Candidate
   {
-    std::vector<NodeRec> nodes;                     // preorder
-    std::vector<std::pair<uint32_t, float>> usage;  // resource -> demand
+    std::vector<NodeRec> nodes;                      // preorder
+    std::vector<std::pair<uint32_t, double>> usage;  // resource -> demand
     double objective = 0.0;
     uint64_t hash = 0;
     int count = 0;

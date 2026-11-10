@@ -644,13 +644,13 @@ bool BonnRouteGlobal::buildCandidate(
   candidate.objective += params_.via_weight * num_vias;
 
   const std::shared_ptr<GRTreeNode> tree = buildTree(candidate);
-  std::vector<std::pair<uint32_t, float>> usage;
+  std::vector<std::pair<uint32_t, double>> usage;
   grid_graph_->forEachTreeDemand(
       tree,
       state.net->getNdrCosts(),
       [&](const int layer, const PointT edge, const CapacityT demand) {
         usage.emplace_back(edgeIndex(layer, edge.x(), edge.y()),
-                           static_cast<float>(demand));
+                           static_cast<double>(demand));
       });
   std::ranges::sort(usage);
   candidate.usage.clear();
@@ -664,7 +664,7 @@ bool BonnRouteGlobal::buildCandidate(
   uint64_t hash = 1469598103934665603ULL;
   for (const auto& [r, d] : candidate.usage) {
     hash = (hash ^ r) * 1099511628211ULL;
-    hash = (hash ^ static_cast<uint64_t>(std::lround(d * 1024.0f)))
+    hash = (hash ^ static_cast<uint64_t>(std::llround(d * 1048576.0)))
            * 1099511628211ULL;
   }
   candidate.hash = hash;
@@ -1012,7 +1012,7 @@ void BonnRouteGlobal::roundAndRepair()
         continue;
       }
       // Overflow change of replacing the current candidate by `alt`.
-      auto delta = [&](const std::vector<std::pair<uint32_t, float>>& alt) {
+      auto delta = [&](const std::vector<std::pair<uint32_t, double>>& alt) {
         double change = 0.0;
         size_t i = 0;
         size_t j = 0;
