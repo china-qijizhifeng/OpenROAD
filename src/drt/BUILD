@@ -39,15 +39,22 @@ cc_library(
 )
 
 cc_library(
+    name = "bonnroute_core",
+    srcs = [
+        "src/br/BrCore.cpp",
+        "src/br/BrInterval.cpp",
+    ],
+    hdrs = ["src/br/BrCore.h"],
+    includes = ["src"],
+)
+
+cc_library(
     name = "drt_impl",
     srcs = [
         "src/DesignCallBack.cpp",
         "src/DesignCallBack.h",
         "src/br/BonnRouteDR.cpp",
         "src/br/BonnRouteDR.h",
-        "src/br/BrCore.cpp",
-        "src/br/BrCore.h",
-        "src/br/BrInterval.cpp",
         "src/TritonRoute.cpp",
         "src/db/drObj/drAccessPattern.cpp",
         "src/db/drObj/drNet.cpp",
@@ -203,6 +210,7 @@ cc_library(
     ],
     deps = [
         ":base_types",
+        ":bonnroute_core",
         ":pin_access_service",
         "//src/dst",
         "//src/odb/src/db",

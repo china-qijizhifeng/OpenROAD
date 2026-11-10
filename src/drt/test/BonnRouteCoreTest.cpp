@@ -1,0 +1,471 @@
+// SPDX-License-Identifier: BSD-3-Clause
+// Copyright (c) 2026, The OpenROAD Authors
+
+// Differential test: interval search == vertex search == plain Dijkstra.
+#include <cstdio>
+#include <cstdlib>
+#include <functional>
+#include <queue>
+#include <random>
+#include <set>
+
+#include "br/BrCore.h"
+
+using namespace drt::br;
+
+struct Ref
+{
+  const TrackGraph& g;
+  const FastGrid& f;
+  const SearchRequest& r;
+  bool enter(size_t v, Kind k) const
+  {
+    return f.usable(v, k, r.net) || (r.ripup && f.ripupable(v, k, r.net));
+  }
+  Cost pen(size_t v, Kind k) const
+  {
+    return f.usable(v, k, r.net) ? 0 : r.ripup_cost * (1 + f.history(v));
+  }
+  // Cost of one edge u->w as the searches price it; kInfCost if absent.
+  Cost edge(size_t u, size_t w, bool u_source) const
+  {
+    int z, i, j, z2, i2, j2;
+    g.decode(u, z, i, j);
+    g.decode(w, z2, i2, j2);
+    const TrackLayer& l = g.layers[z];
+    if (!r.region->contains(g.layers[z2], z2, i2, j2)) {
+      return kInfCost;
+    }
+    if (z == z2 && i == i2 && std::abs(j - j2) == 1) {
+      size_t e = j2 > j ? u : w;
+      if (!(u_source || enter(u, kWire)) || !enter(w, kWire)
+          || !enter(e, kWireEdge)) {
+        return kInfCost;
+      }
+      return std::abs(l.positions[j2] - l.positions[j]) + pen(w, kWire)
+             + pen(e, kWireEdge);
+    }
+    if (z == z2 && j == j2 && std::abs(i - i2) == 1) {
+      size_t e = i2 > i ? u : w;
+      if (!l.jogs || !(u_source || enter(u, kJog)) || !enter(w, kJog)
+          || !enter(e, kJogEdge)) {
+        return kInfCost;
+      }
+      return l.jog_factor * std::abs(l.tracks[i2] - l.tracks[i]) + pen(w, kJog)
+             + pen(e, kJogEdge) + (u_source ? 0 : pen(u, kJog));
+    }
+    if (z2 == z + 1 && l.up_track[j] == i2 && l.up_pos[i] == j2) {
+      if (!(enter(u, kViaUpPad) && enter(u, kCutUp) && enter(w, kViaDownPad))) {
+        return kInfCost;
+      }
+      return g.via_cost[z] + pen(u, kViaUpPad) + pen(u, kCutUp)
+             + pen(w, kViaDownPad);
+    }
+    if (z2 == z - 1 && l.down_track[j] == i2 && l.down_pos[i] == j2) {
+      if (!(enter(w, kViaUpPad) && enter(w, kCutUp) && enter(u, kViaDownPad))) {
+        return kInfCost;
+      }
+      return g.via_cost[z - 1] + pen(w, kViaUpPad) + pen(w, kCutUp)
+             + pen(u, kViaDownPad);
+    }
+    return kInfCost;
+  }
+  // Recomputes a returned path's cost (source cost + edges + target cost).
+  Cost pathCost(const SearchResult& res) const
+  {
+    if (res.path.empty()) {
+      return kInfCost;
+    }
+    std::set<size_t> src;
+    Cost c = kInfCost;
+    for (auto [v, sc] : r.sources) {
+      src.insert(v);
+      if (v == res.path.back()) {
+        c = std::min(c, sc);
+      }
+    }
+    if (c == kInfCost) {
+      return kInfCost;
+    }
+    for (size_t k = res.path.size() - 1; k > 0; k--) {
+      Cost e = edge(res.path[k], res.path[k - 1], src.count(res.path[k]) > 0);
+      if (e >= kInfCost) {
+        return kInfCost;
+      }
+      c += e;
+    }
+    Cost tc = kInfCost;
+    for (auto& t : r.targets) {
+      if (t.vertex == res.path.front()) {
+        tc = std::min(tc, t.cost);
+      }
+    }
+    return tc >= kInfCost ? kInfCost : c + tc;
+  }
+  Cost run()
+  {
+    std::vector<Cost> d(g.numVertices(), kInfCost);
+    std::set<size_t> src;
+    using P = std::pair<Cost, size_t>;
+    std::priority_queue<P, std::vector<P>, std::greater<>> q;
+    for (auto [v, c] : r.sources) {
+      src.insert(v);
+      if (c < d[v]) {
+        d[v] = c;
+        q.push({c, v});
+      }
+    }
+    Cost best = kInfCost;
+    while (!q.empty()) {
+      auto [dv, v] = q.top();
+      q.pop();
+      if (dv > d[v]) {
+        continue;
+      }
+      for (auto& t : r.targets) {
+        if (t.vertex == v) {
+          best = std::min(best, dv + t.cost);
+        }
+      }
+      int z, i, j;
+      g.decode(v, z, i, j);
+      const TrackLayer& l = g.layers[z];
+      bool s = src.count(v);
+      auto go = [&](size_t w, Cost c) {
+        if (dv + c < d[w]) {
+          d[w] = dv + c;
+          q.push({d[w], w});
+        }
+      };
+      if (s || enter(v, kWire)) {
+        for (int dd : {-1, 1}) {
+          int j2 = j + dd;
+          if (j2 < 0 || j2 >= l.numPositions()
+              || !r.region->contains(l, z, i, j2)) {
+            continue;
+          }
+          size_t w = g.vertex(z, i, j2);
+          size_t e = dd > 0 ? v : w;
+          if (!enter(w, kWire) || !enter(e, kWireEdge)) {
+            continue;
+          }
+          go(w,
+             std::abs(l.positions[j2] - l.positions[j]) + pen(w, kWire)
+                 + pen(e, kWireEdge));
+        }
+      }
+      if (l.jogs && (s || enter(v, kJog))) {
+        for (int di : {-1, 1}) {
+          int i2 = i + di;
+          if (i2 < 0 || i2 >= l.numTracks()
+              || !r.region->contains(l, z, i2, j)) {
+            continue;
+          }
+          size_t w = g.vertex(z, i2, j);
+          size_t e = di > 0 ? v : w;
+          if (!enter(w, kJog) || !enter(e, kJogEdge)) {
+            continue;
+          }
+          go(w,
+             l.jog_factor * std::abs(l.tracks[i2] - l.tracks[i]) + pen(w, kJog)
+                 + pen(e, kJogEdge) + (s ? 0 : pen(v, kJog)));
+        }
+      }
+      if (z + 1 < g.numLayers()) {
+        int i2 = l.up_track[j], j2 = l.up_pos[i];
+        if (i2 >= 0 && j2 >= 0
+            && r.region->contains(g.layers[z + 1], z + 1, i2, j2)) {
+          size_t w = g.vertex(z + 1, i2, j2);
+          if (enter(v, kViaUpPad) && enter(v, kCutUp)
+              && enter(w, kViaDownPad)) {
+            go(w,
+               g.via_cost[z] + pen(v, kViaUpPad) + pen(v, kCutUp)
+                   + pen(w, kViaDownPad));
+          }
+        }
+      }
+      if (z > 0) {
+        int i2 = l.down_track[j], j2 = l.down_pos[i];
+        if (i2 >= 0 && j2 >= 0
+            && r.region->contains(g.layers[z - 1], z - 1, i2, j2)) {
+          size_t w = g.vertex(z - 1, i2, j2);
+          if (enter(w, kViaUpPad) && enter(w, kCutUp)
+              && enter(v, kViaDownPad)) {
+            go(w,
+               g.via_cost[z - 1] + pen(w, kViaUpPad) + pen(w, kCutUp)
+                   + pen(v, kViaDownPad));
+          }
+        }
+      }
+    }
+    return best;
+  }
+};
+
+// Path cost recomputed from the returned vertex sequence.
+static bool validPath(const SearchResult& r, const SearchRequest& q)
+{
+  if (r.path.empty()) {
+    return false;
+  }
+  size_t last = r.path.back();
+  bool is_src = false;
+  for (auto [v, c] : q.sources) {
+    is_src |= v == last;
+  }
+  return is_src && r.path.front() == r.target_vertex;
+}
+
+static int randomCases(const int cases, const bool sparse)
+{
+  std::mt19937 rng(sparse ? 23456 : 12345);
+  int64_t pops_i = 0, pops_v = 0, fails = 0, found = 0, labels = 0, ivs = 0,
+          settled_i = 0, settled_v = 0;
+  for (int c = 0; c < cases; c++) {
+    TrackGraph g;
+    int Z = 2 + rng() % 3;
+    const int span = 200 + rng() % 400;
+    std::vector<std::vector<Coord>> tr(Z);
+    for (int z = 0; z < Z; z++) {
+      int pitch = 20 + rng() % 40;
+      int off = rng() % pitch;
+      for (int x = off; x < span;
+           x += pitch + (rng() % 5 == 0 ? rng() % 30 : 0)) {
+        tr[z].push_back(x);
+      }
+    }
+    g.layers.resize(Z);
+    for (int z = 0; z < Z; z++) {
+      TrackLayer& l = g.layers[z];
+      l.horizontal = (z % 2) == 0;
+      l.tracks = tr[z];
+      std::vector<Coord> pos;
+      if (z > 0) {
+        pos.insert(pos.end(), tr[z - 1].begin(), tr[z - 1].end());
+      }
+      if (z + 1 < Z) {
+        pos.insert(pos.end(), tr[z + 1].begin(), tr[z + 1].end());
+      }
+      std::sort(pos.begin(), pos.end());
+      pos.erase(std::unique(pos.begin(), pos.end()), pos.end());
+      l.positions = pos;
+      l.jogs = rng() % 3 != 0;
+      l.jog_factor = 1 + rng() % 5;
+    }
+    for (int z = 0; z + 1 < Z; z++) {
+      g.via_cost.push_back(10 + rng() % 200);
+    }
+    const int tile = 100 + rng() % 300;
+    auto tf = [&](Coord c) { return c / tile; };
+    g.finalize(tf, tf);
+    const int T = span / tile + 1;
+    FastGrid f;
+    f.init(g.numVertices());
+    double pfix = sparse ? 0.005 : (rng() % 30) / 100.0;
+    double prout = sparse ? 0.005 : (rng() % 20) / 100.0;
+    std::uniform_real_distribution<double> u(0, 1);
+    for (size_t v = 0; v < g.numVertices(); v++) {
+      for (int k = 0; k < kNumKinds; k++) {
+        if (u(rng) < pfix) {
+          f.addFixed(v, (Kind) k);
+        } else if (u(rng) < prout) {
+          f.addRouted(v, (Kind) k, 1);
+        } else if (u(rng) < (sparse ? 0.001 : 0.03)) {
+          f.addPin(v, (Kind) k, rng() % 3);
+        }
+        if (u(rng) < (sparse ? 0.0 : 0.05)) {
+          f.bumpHistory(v);
+        }
+      }
+    }
+    Region reg;
+    reg.init(Z, T, T);
+    bool full = rng() % 2;
+    for (int z = 0; z < Z; z++) {
+      for (int x = 0; x < T; x++) {
+        for (int y = 0; y < T; y++) {
+          if (full || u(rng) < 0.7) {
+            reg.allow(z, x, y);
+          }
+        }
+      }
+    }
+    SearchRequest q;
+    q.net = rng() % 3;
+    q.region = &reg;
+    q.ripup = rng() % 2;
+    q.ripup_cost = 50 + rng() % 500;
+    int ns = 1 + rng() % 3, nt = 1 + rng() % 4;
+    auto rv = [&]() { return (size_t) (rng() % g.numVertices()); };
+    for (int s = 0; s < ns; s++) {
+      q.sources.push_back({rv(), (Cost) (rng() % 3 == 0 ? rng() % 100 : 0)});
+    }
+    for (int t = 0; t < nt; t++) {
+      size_t v = rv();
+      int z, i, j;
+      g.decode(v, z, i, j);
+      auto [x, y] = g.layers[z].point(i, j);
+      q.targets.push_back({v, (Cost) (rng() % 100), t});
+      // Boxes may cover several targets.
+      if (t == 0 || rng() % 2) {
+        q.target_boxes.push_back({x, y, x, y, z, z});
+      } else {
+        auto& b = q.target_boxes.back();
+        b.xlo = std::min(b.xlo, x);
+        b.xhi = std::max(b.xhi, x);
+        b.ylo = std::min(b.ylo, y);
+        b.yhi = std::max(b.yhi, y);
+        b.zlo = std::min(b.zlo, z);
+        b.zhi = std::max(b.zhi, z);
+      }
+    }
+    PathSearch ps(g, f);
+    IntervalSearch is(g, f);
+    SearchResult ri = is.run(q);
+    SearchResult rvx = ps.run(q);
+    Ref ref{g, f, q};
+    Cost rc = ref.run();
+    Cost ci = ri.found ? ri.cost : kInfCost,
+         cv = rvx.found ? rvx.cost : kInfCost;
+    const Cost pi = ri.found ? ref.pathCost(ri) : kInfCost;
+    const Cost pv = rvx.found ? ref.pathCost(rvx) : kInfCost;
+    if (ci != rc || cv != rc || pi != ci || pv != cv
+        || (ri.found && !validPath(ri, q))) {
+      fails++;
+      if (fails < 10) {
+        printf(
+            "case %d mismatch: interval %lld (path %lld) vertex %lld (path "
+            "%lld) ref %lld\n",
+            c,
+            (long long) ci,
+            (long long) pi,
+            (long long) cv,
+            (long long) pv,
+            (long long) rc);
+      }
+    }
+    found += ri.found;
+    pops_i += ri.heap_pops;
+    labels += is.labels();
+    ivs += is.intervals();
+    settled_i += ri.settled;
+    settled_v += rvx.settled;
+    pops_v += rvx.heap_pops;
+  }
+  printf(
+      "cases %d found %lld fails %lld | heap pops interval %lld vertex %lld "
+      "(%.2fx) | intervals %lld labels %lld | settled interval %lld vertex "
+      "%lld\n",
+      cases,
+      (long long) found,
+      (long long) fails,
+      (long long) pops_i,
+      (long long) pops_v,
+      pops_i ? double(pops_v) / pops_i : 0.0,
+      (long long) ivs,
+      (long long) labels,
+      (long long) settled_i,
+      (long long) settled_v);
+  return fails != 0;
+}
+
+// Enumerate geometry directly, including shapes between legal endpoints,
+// touching endpoints, and boxes outside the track extent in both directions.
+static int blockedGeometry()
+{
+  const std::vector<std::pair<int, int>> bounds{
+      {-20, -5}, {-20, 0}, {0, 0}, {1, 99}, {100, 100}, {101, 120}};
+  for (const bool horizontal : {false, true}) {
+    TrackLayer layer;
+    layer.horizontal = horizontal;
+    layer.tracks = {0, 100};
+    layer.positions = {0, 100};
+    for (const Kind kind : {kWire, kJog, kWireEdge, kJogEdge}) {
+      for (const auto& [xlo, xhi] : bounds) {
+        for (const auto& [ylo, yhi] : bounds) {
+          std::set<std::pair<int, int>> actual;
+          forEachBlocked(layer, kind, xlo, ylo, xhi, yhi, [&](int i, int j) {
+            actual.emplace(i, j);
+          });
+          std::set<std::pair<int, int>> expected;
+          for (int i = 0; i < layer.numTracks(); i++) {
+            for (int j = 0; j < layer.numPositions(); j++) {
+              const int ni = i + (kind == kJogEdge);
+              const int nj = j + (kind == kWireEdge);
+              if (ni >= layer.numTracks() || nj >= layer.numPositions()) {
+                continue;
+              }
+              const auto [x0, y0] = layer.point(i, j);
+              const auto [x1, y1] = layer.point(ni, nj);
+              if (std::max(x0, x1) >= xlo && std::min(x0, x1) <= xhi
+                  && std::max(y0, y1) >= ylo && std::min(y0, y1) <= yhi) {
+                expected.emplace(i, j);
+              }
+            }
+          }
+          if (actual != expected) {
+            std::printf(
+                "blocked geometry mismatch: horizontal=%d kind=%d "
+                "box=(%d,%d)-(%d,%d)\n",
+                horizontal,
+                kind,
+                xlo,
+                ylo,
+                xhi,
+                yhi);
+            return 1;
+          }
+        }
+      }
+    }
+  }
+  return 0;
+}
+
+static int obstacleDetour()
+{
+  for (const bool horizontal : {false, true}) {
+    TrackGraph graph;
+    graph.layers.resize(1);
+    TrackLayer& layer = graph.layers[0];
+    layer.horizontal = horizontal;
+    layer.tracks = {0, 100};
+    layer.positions = {0, 100, 200, 300};
+    graph.finalize([](int) { return 0; }, [](int) { return 0; });
+    FastGrid grid;
+    grid.init(graph.numVertices());
+    // The obstacle hits the middle of edge (100, 200), while its endpoints
+    // remain legal. The shortest path must jog to the other track and back.
+    grid.addFixed(graph.vertex(0, 0, 1), kWireEdge);
+    Region region;
+    region.init(1, 1, 1);
+    region.allow(0, 0, 0);
+    SearchRequest request;
+    request.net = 0;
+    request.region = &region;
+    request.sources = {{graph.vertex(0, 0, 0), 0}};
+    request.targets = {{graph.vertex(0, 0, 3), 0, 0}};
+    const auto [x, y] = layer.point(0, 3);
+    request.target_boxes = {{x, y, x, y, 0, 0}};
+    PathSearch vertex(graph, grid);
+    IntervalSearch interval(graph, grid);
+    Ref reference{graph, grid, request};
+    for (const auto& result : {vertex.run(request), interval.run(request)}) {
+      if (!result.found || result.cost != 1100
+          || reference.pathCost(result) != result.cost) {
+        std::printf("failed to detour around blocked edge: horizontal=%d\n",
+                    horizontal);
+        return 1;
+      }
+    }
+  }
+  return 0;
+}
+
+int main()
+{
+  if (blockedGeometry() || obstacleDetour()) {
+    return 1;
+  }
+  return randomCases(400, false) || randomCases(400, true);
+}

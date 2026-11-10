@@ -31,6 +31,7 @@ global_route
     [-start_incremental]
     [-end_incremental]
     [-use_cugr]
+    [-bonnroute]
     [-resistance_aware]
     [-res_aware_nets_percentage percent]
     [-infinite_cap]
@@ -52,10 +53,61 @@ global_route
 | `-start_incremental` | This flag initializes the GRT listener to get the net modified. The default is false. |
 | `-end_incremental` | This flag run incremental GRT with the nets modified. The default is false. |
 | `-use_cugr` | This flag run GRT using CUGR as the router solver. NOTE: this is not ready for production. |
+| `-bonnroute` | Run the experimental BonnRoute resource-sharing engine on CUGR's grid, followed by CUGR congestion cleanup by default. |
 | `-resistance_aware` | This flag enables resistance-aware layer assignment and 3D routing. NOTE: this is not ready for production. |
 | `-res_aware_nets_percentage` | Set the percentage of resistance-aware nets (e.g. `-res_aware_nets_percentage 100` (for 100%)). The default value is `15` with resistance-aware enabled and `0` otherwise, and the allowed values are floats between `[0, 100]`. |
 | `-infinite_cap` | Enables "infinite" gcell capacity for testing purpose. NOTE: this is not recommended for production flows. |
 | `-snapshot_batched_width` | Set the semantic width of snapshot-batched routing (max batches per wave). The default is `0`, preserving the non-batched behavior. Set a positive integer to enable batched routing; allowed values are integers `[1, MAX_INT]`. Execution width still follows `set_thread_count`. NOTE: this is not recommended for production flows; it is intended for exploration and research projects. |
+
+### BonnRoute Parameters
+
+```tcl
+set_bonnroute_param name value
+```
+
+Set parameters before `global_route -bonnroute`. Unknown names are errors.
+This implementation follows the path-composition and resource-sharing framework
+of Gester et al., *BonnRoute: Algorithms and Data Structures for Fast and Good
+VLSI Routing*, TODAES 18(2), 2013, Sections 2.2–2.4.
+
+| Name | Default | Meaning |
+| ----- | ----- | ----- |
+| `phases` | `125` | Number of resource-sharing phases. |
+| `epsilon` | `1.0` | Exponential price update factor. |
+| `reuse_tolerance` | `0.1` | Allowed cost growth relative to the previous oracle value and the objective-based reuse bound. |
+| `objective_slack` | `0.05` | Slack above the congestion-free objective used for the objective resource bound. |
+| `wire_weight`, `via_weight` | `0.5`, `4.0` | Objective cost per M2 pitch of wire and per via. |
+| `margin`, `margin_ratio` | `3`, `0.25` | Expansion of each net's search bounding box. A failed search retries on the full grid. |
+| `min_capacity` | `0.25` | Capacity floor for normalizing blocked-edge usage. |
+| `batch_size` | `128` | Number of nets using a frozen price vector before ordered updates. Set to `1` for sequential Algorithm 2 updates. |
+| `threads` | OpenROAD thread count | Number of parallel oracle workers. |
+| `seed` | `1` | Randomized-rounding seed. |
+| `repair_passes` | `8` | Candidate re-selection passes after rounding. |
+| `pin_sets` | `1` | Let the oracle choose among each pin's access cells; `0` uses CUGR's pre-selected cell. |
+| `full_graph` | `0` | Search the whole grid instead of the expanded bounding box. |
+| `maze_cleanup` | `1` | Run CUGR maze routing and iterative rip-up and reroute after BonnRoute. |
+| `verbose` | `1` | Print resource-sharing and oracle-cost diagnostics. |
+
+For an experiment with full-grid searches, sequential price updates and no
+CUGR maze cleanup:
+
+```tcl
+set_bonnroute_param full_graph 1
+set_bonnroute_param batch_size 1
+set_bonnroute_param maze_cleanup 0
+global_route -bonnroute -allow_congestion -guide_file bonnroute.guide
+```
+
+These settings isolate more of the resource-sharing algorithm, but do not
+reproduce every feature of the paper. Resources use CUGR wire capacity and
+via-pad demand plus a wirelength/via objective. Extra-space optimization,
+power/yield resources and the paper's capacity estimator are absent. A pin uses
+one chosen access cell in the output tree; arbitrary zero-cost connections
+between multiple cells of the same pin are not represented. The reuse bound
+preserves an oracle approximation factor only when that factor is valid for
+the selected graph and cost model; the paper's approximation theorem has not
+been established for this adapter. Report cleanup settings alongside quality
+and timing measurements.
 
 ### Set Routing Layers
 

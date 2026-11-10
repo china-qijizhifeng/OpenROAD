@@ -7,6 +7,13 @@ load("//test:regression.bzl", "doc_check_test", "regression_test")
 
 package(features = ["layering_check"])
 
+cc_test(
+    name = "bonnroute_core_test",
+    size = "small",
+    srcs = ["BonnRouteCoreTest.cpp"],
+    deps = ["//src/drt:bonnroute_core"],
+)
+
 exports_files(
     [
         "sky130hs/sky130hs.tlef",

@@ -60,6 +60,7 @@ detailed_route
     [-cloud_size sz]
     [-clean_patches]
     [-no_pin_access]
+    [-bonnroute]
     [-min_access_points count]
     [-save_guide_updates]
     [-repair_pdn_vias layer]
@@ -93,6 +94,7 @@ detailed_route
 | `-cloud_size` | Refer to distributed arguments [here](#distributed-arguments). |
 | `-clean_patches` | Clean unneeded patches during detailed routing. | 
 | `-no_pin_access` | Disables pin access for routing. |
+| `-bonnroute` | Run the experimental BonnRoute initial detailed router after track assignment, then run FlexDR routing and DRC repair. |
 | `-save_guide_updates` | Flag to save guides updates. |
 | `-repair_pdn_vias` | This option is used for PDKs where M1 and M2 power rails run in parallel. |
 
@@ -104,6 +106,53 @@ Some arguments that are helpful for developers are listed here.
 | ----- | ----- |
 | `-or_seed` | Random seed for the order of nets to reroute. The default value is `-1`, and the allowed values are integers `[0, MAX_INT]`. | 
 | `-or_k` | Number of swaps is given by $k * sizeof(rerouteNets)$. The default value is `0`, and the allowed values are integers `[0, MAX_INT]`. |
+
+### BonnRoute Detailed Routing Parameters
+
+```tcl
+set_bonnroute_dr_param name value
+```
+
+Set parameters before `detailed_route -bonnroute`. Unknown names are errors.
+
+| Name | Default | Meaning |
+| ----- | ----- | ----- |
+| `via_cost` | `4` | Via cost in pitches of the lower routing layer. |
+| `jog_factor` | `4` | Non-preferred direction wire cost multiplier. |
+| `ripup_cost` | `40` | Base rip-up penalty in pitches of the bottom routing layer. |
+| `max_ripups` | `3` | Maximum rip-ups per net. |
+| `max_access_jog` | `2` | Maximum pin-to-track jog in pitches. |
+| `max_access_options` | `8` | Maximum access options retained per pin. |
+| `pin_cost` | `2` | Extra cost of a non-preferred access point, in pitches. |
+| `layer_dilation` | `1` | Extra routing layers around a guide. |
+| `retry_dilation` | `2` | Extra guide tiles for a retry. |
+| `use_intervals` | `1` | Use interval label sets; `0` selects the vertex-search reference. |
+| `ripup` | `1` | Enable the rip-up phase for failed nets. |
+| `verbose` | `1` | Print coverage and search statistics. |
+
+The interval search maintains reduced-distance label envelopes on tracks,
+removes dominated labels, and propagates jog labels between intervals
+(Gester et al., TODAES 18(2), 2013, Section 4.1, Algorithm 4). Via edges are
+relaxed per vertex because adjacent layers can have different track pitches.
+The fast grid checks wire and jog edges as well as their endpoints, including
+obstacles that lie strictly between track vertices.
+
+The adapter uses OpenROAD pin-access results and spacing models for its
+initial routing. It does not implement the paper's full shape-grid exception
+checker, off-track blockage-grid search, or blockage-aware future cost.
+Unrouted nets and rule violations are handled by FlexDR. Final DRC, wirelength
+and runtime therefore describe the combined flow. The log reports BonnRoute's
+own routed/skipped/failed counts, search effort and elapsed time separately.
+
+The database-independent search core has a Bazel regression target:
+
+```shell
+bazelisk test //src/drt/test:bonnroute_core_test
+```
+
+It checks obstacle-edge geometry and compares interval and vertex searches
+with a plain Dijkstra reference on generated graphs, including returned path
+costs, pin ownership, restricted regions, via edges and rip-up penalties.
 
 ### Detailed Route Debugging
 
