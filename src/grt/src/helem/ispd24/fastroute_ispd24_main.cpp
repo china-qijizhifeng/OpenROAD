@@ -258,6 +258,14 @@ int main(int argc, char** argv)
     std::sort(pins.begin(), pins.end());
     pins.erase(std::unique(pins.begin(), pins.end()), pins.end());
     if (pins.size() < 2) {
+      // Several pins sharing one access cell and layer still need a routing
+      // object for the evaluator to see them connected; helem_route emits
+      // the same one-cut via.
+      if (pins.size() == 1 && net.pins.size() > 1) {
+        const int layer = std::get<2>(pins.front());
+        const int low = layer + 1 < layers ? layer : layer - 1;
+        local_vias.emplace_back(static_cast<int>(n), low, low + 1, 0);
+      }
       continue;
     }
     bool local = true;
