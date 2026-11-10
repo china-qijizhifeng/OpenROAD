@@ -183,8 +183,7 @@ std::vector<const AccessPoint*> choosePinAccessPoints(const RoutingNet& net,
       }
     }
   }
-  if (mode == PinAccessMode::kOtherPinsBox
-      && net.pins.size() > 1) {
+  if (mode == PinAccessMode::kOtherPinsBox && net.pins.size() > 1) {
     // Second choice: closest to the box spanned by the other pins.
     std::vector<const AccessPoint*> second = choice;
     for (size_t p = 0; p < net.pins.size(); ++p) {
@@ -204,9 +203,8 @@ std::vector<const AccessPoint*> choosePinAccessPoints(const RoutingNet& net,
       }
       double best_distance = kInfinity;
       for (const AccessPoint& ap : net.pins[p].access_points) {
-        const double distance
-            = std::max({0, bx_low - ap.x, ap.x - bx_high})
-              + std::max({0, by_low - ap.y, ap.y - by_high});
+        const double distance = std::max({0, bx_low - ap.x, ap.x - bx_high})
+                                + std::max({0, by_low - ap.y, ap.y - by_high});
         if (distance < best_distance
             || (distance == best_distance && better_layer(ap, *second[p]))) {
           second[p] = &ap;
@@ -435,10 +433,10 @@ void HelemRouter::Impl::choosePinsAndBuildTrees()
       if (best == nullptr) {
         continue;
       }
-      const int64_t key = static_cast<int64_t>(best->x) * graph_.y_size
-                          + best->y;
-      auto [it, inserted] = node_of_cell.try_emplace(
-          key, static_cast<int>(tree.nodes.size()));
+      const int64_t key
+          = static_cast<int64_t>(best->x) * graph_.y_size + best->y;
+      auto [it, inserted]
+          = node_of_cell.try_emplace(key, static_cast<int>(tree.nodes.size()));
       if (inserted) {
         tree.nodes.push_back({best->x, best->y});
         tree.pin_layers.emplace_back(best->layer, best->layer);
@@ -481,10 +479,9 @@ void HelemRouter::Impl::choosePinsAndBuildTrees()
     }
     std::unordered_map<int64_t, int> node_of_cell;
     for (int i = 0; i < static_cast<int>(tree.nodes.size()); ++i) {
-      node_of_cell.emplace(
-          static_cast<int64_t>(tree.nodes[i].x) * graph_.y_size
-              + tree.nodes[i].y,
-          i);
+      node_of_cell.emplace(static_cast<int64_t>(tree.nodes[i].x) * graph_.y_size
+                               + tree.nodes[i].y,
+                           i);
     }
     auto node_id = [&](const GCellPoint& p) {
       const int64_t key = static_cast<int64_t>(p.x) * graph_.y_size + p.y;
@@ -525,8 +522,8 @@ void HelemRouter::Impl::choosePinsAndBuildTrees()
       const int y_low = std::min(segment.a.y, segment.b.y);
       const int y_high = std::max(segment.a.y, segment.b.y);
       auto expansion = [&](int side) {
-        const int grow = static_cast<int>(
-            std::ceil(options_.bbox_expand_ratio * side));
+        const int grow
+            = static_cast<int>(std::ceil(options_.bbox_expand_ratio * side));
         return std::min(options_.bbox_expand_max,
                         std::max(options_.bbox_expand_min, grow));
       };
@@ -925,14 +922,11 @@ void HelemRouter::Impl::runExponentialMultiplier()
     // y_e <- y_e * exp(rho * g_e), rho <- sigma * rho
     const int cells = graph_.cellCount();
     for (int i = 0; i < cells; ++i) {
-      multiplier_h_[i]
-          *= clampedExp(rho_ * (demand_h_[i] - capacity_h_[i]));
-      multiplier_v_[i]
-          *= clampedExp(rho_ * (demand_v_[i] - capacity_v_[i]));
+      multiplier_h_[i] *= clampedExp(rho_ * (demand_h_[i] - capacity_h_[i]));
+      multiplier_v_[i] *= clampedExp(rho_ * (demand_v_[i] - capacity_v_[i]));
     }
     rho_ *= options_.rho_growth;
-    HelemStageReport report
-        = overflowReport2D("lem-" + std::to_string(k + 1));
+    HelemStageReport report = overflowReport2D("lem-" + std::to_string(k + 1));
     report.seconds
         = std::chrono::duration<double>(Clock::now() - start).count();
     reports_.push_back(report);
@@ -1194,8 +1188,7 @@ NetAssignment HelemRouter::Impl::assignNet(int net, Scratch& scratch) const
       && tree.pin_node_count == 1) {
     const int pin_layer = tree.pin_layers[0].first;
     const int low = pin_layer + 1 < layers ? pin_layer : pin_layer - 1;
-    result.vias.push_back(
-        {tree.nodes[0].x, tree.nodes[0].y, low, low + 1});
+    result.vias.push_back({tree.nodes[0].x, tree.nodes[0].y, low, low + 1});
   }
   std::sort(result.vias.begin(),
             result.vias.end(),
@@ -1310,14 +1303,16 @@ NetAssignment HelemRouter::Impl::assignNetTree(int net, Scratch& scratch) const
       }
       std::fill(current.begin(), current.end(), kInfinity);
       current[start] = 0.0;
-      int8_t* start_from = &from[static_cast<size_t>(start) * (steps + 1) * layers];
+      int8_t* start_from
+          = &from[static_cast<size_t>(start) * (steps + 1) * layers];
       for (int p = 0; p < steps; ++p) {
         for (int l = 0; l < layers; ++l) {
           next[l] = current[l] + wire[static_cast<size_t>(p) * layers + l];
           next_from[l] = static_cast<int8_t>(l);
         }
         if (p + 1 < steps) {
-          const double* row = &prefix[static_cast<size_t>(p + 1) * (layers + 1)];
+          const double* row
+              = &prefix[static_cast<size_t>(p + 1) * (layers + 1)];
           for (int l = 1; l < layers; ++l) {
             const double cut = row[l] - row[l - 1];
             if (next[l - 1] + cut < next[l]) {
@@ -1350,8 +1345,8 @@ NetAssignment HelemRouter::Impl::assignNetTree(int net, Scratch& scratch) const
     int8_t low = -1;
     int8_t high = -1;
   };
-  std::vector<std::vector<double>> node_cost(node_count,
-                                             std::vector<double>(layers, kInfinity));
+  std::vector<std::vector<double>> node_cost(
+      node_count, std::vector<double>(layers, kInfinity));
   std::vector<std::vector<Choice>> node_choice(node_count,
                                                std::vector<Choice>(layers));
   // child_best[s][l] = min_e C_s[l][e] + node_cost[child][e]; arg in child_end.
@@ -1373,8 +1368,9 @@ NetAssignment HelemRouter::Impl::assignNetTree(int net, Scratch& scratch) const
       end.assign(layers, -1);
       for (int l = 0; l < layers; ++l) {
         for (int e = 0; e < layers; ++e) {
-          const double cost = cost_matrix[s][static_cast<size_t>(l) * layers + e]
-                              + node_cost[child][e];
+          const double cost
+              = cost_matrix[s][static_cast<size_t>(l) * layers + e]
+                + node_cost[child][e];
           if (cost < best[l]) {
             best[l] = cost;
             end[l] = static_cast<int8_t>(e);
@@ -1409,7 +1405,8 @@ NetAssignment HelemRouter::Impl::assignNetTree(int net, Scratch& scratch) const
       pin_high = tree.pin_layers[v].second;
     }
     // span_cost[low][high] = via stack + children, for spans covering pins.
-    std::vector<double> span_cost(static_cast<size_t>(layers) * layers, kInfinity);
+    std::vector<double> span_cost(static_cast<size_t>(layers) * layers,
+                                  kInfinity);
     for (int low = 0; low < layers; ++low) {
       if (pin_high >= 0 && low > pin_low) {
         break;
@@ -1425,7 +1422,8 @@ NetAssignment HelemRouter::Impl::assignNetTree(int net, Scratch& scratch) const
     if (v == 0) {
       for (int low = 0; low < layers; ++low) {
         for (int high = low; high < layers; ++high) {
-          const double cost = span_cost[static_cast<size_t>(low) * layers + high];
+          const double cost
+              = span_cost[static_cast<size_t>(low) * layers + high];
           if (cost < root_cost) {
             root_cost = cost;
             root_choice = {static_cast<int8_t>(low), static_cast<int8_t>(high)};
@@ -1439,7 +1437,8 @@ NetAssignment HelemRouter::Impl::assignNetTree(int net, Scratch& scratch) const
       Choice choice;
       for (int low = 0; low <= l; ++low) {
         for (int high = l; high < layers; ++high) {
-          const double cost = span_cost[static_cast<size_t>(low) * layers + high];
+          const double cost
+              = span_cost[static_cast<size_t>(low) * layers + high];
           if (cost < best) {
             best = cost;
             choice = {static_cast<int8_t>(low), static_cast<int8_t>(high)};
@@ -1471,14 +1470,15 @@ NetAssignment HelemRouter::Impl::assignNetTree(int net, Scratch& scratch) const
       interval.add(choice.high);
     }
     for (int s : child_segments[v]) {
-      const int start
-          = range_arg[s][static_cast<size_t>(choice.low) * layers + choice.high];
+      const int start = range_arg[s][static_cast<size_t>(choice.low) * layers
+                                     + choice.high];
       const int end = child_end[s][start];
       const int child = segment_child[s];
       span[child] = node_choice[child][end];
       const std::vector<GCellPoint>& list = cells[s];
       const int steps = static_cast<int>(list.size()) - 1;
-      const int8_t* from = &back[s][static_cast<size_t>(start) * (steps + 1) * layers];
+      const int8_t* from
+          = &back[s][static_cast<size_t>(start) * (steps + 1) * layers];
       step_layers.assign(steps, 0);
       int layer = end;
       for (int p = steps; p >= 1; --p) {
@@ -1616,8 +1616,7 @@ void HelemRouter::Impl::buildRoute(int net, const NetAssignment& assignment)
 void HelemRouter::Impl::runLayerAssignment()
 {
   const int net_count = static_cast<int>(nets_.size());
-  demand_3d_.assign(graph_.num_layers,
-                    std::vector<int>(graph_.cellCount(), 0));
+  demand_3d_.assign(graph_.num_layers, std::vector<int>(graph_.cellCount(), 0));
   routes_.assign(net_count, NetRoute3D());
   wire_length_dbu_ = 0;
   via_count_ = 0;
@@ -1670,14 +1669,14 @@ void HelemRouter::Impl::runLayerAssignment()
         }
       }
       char buffer[160];
-      std::snprintf(buffer,
-                    sizeof(buffer),
-                    "[helem] la-pass %d vias=%lld overflow_cost=%.1f seconds=%.3f",
-                    pass,
-                    static_cast<long long>(vias),
-                    scoreOverflow3D(),
-                    std::chrono::duration<double>(Clock::now() - pass_start)
-                        .count());
+      std::snprintf(
+          buffer,
+          sizeof(buffer),
+          "[helem] la-pass %d vias=%lld overflow_cost=%.1f seconds=%.3f",
+          pass,
+          static_cast<long long>(vias),
+          scoreOverflow3D(),
+          std::chrono::duration<double>(Clock::now() - pass_start).count());
       log(buffer);
     }
   }
@@ -1731,7 +1730,8 @@ void HelemRouter::Impl::logGeometryStats(const std::string& stage,
   int64_t bends = 0;
   for (const Segment& segment : segments_) {
     if (topology) {
-      length += span_x(segment.a.x, segment.b.x) + span_y(segment.a.y, segment.b.y);
+      length += span_x(segment.a.x, segment.b.x)
+                + span_y(segment.a.y, segment.b.y);
       continue;
     }
     const Path2D& path = segment.path;
@@ -1766,23 +1766,26 @@ std::vector<NetRoute3D> HelemRouter::Impl::run()
     report.seconds
         = std::chrono::duration<double>(Clock::now() - start).count();
     reports_.push_back(report);
-    std::string message = "[helem] " + name
-                          + " seconds=" + std::to_string(report.seconds);
+    std::string message
+        = "[helem] " + name + " seconds=" + std::to_string(report.seconds);
     if (overflow) {
-      message += " overflow_total=" + std::to_string(report.total_overflow_2d)
-                 + " overflow_max=" + std::to_string(report.max_overflow_2d)
-                 + " overflow_edges="
-                 + std::to_string(report.overflowed_edges_2d);
+      message
+          += " overflow_total=" + std::to_string(report.total_overflow_2d)
+             + " overflow_max=" + std::to_string(report.max_overflow_2d)
+             + " overflow_edges=" + std::to_string(report.overflowed_edges_2d);
     }
     log(message);
   };
 
-  stage("prepare", [&] {
-    buildGrid2D();
-    choosePinsAndBuildTrees();
-    log("[helem] nets=" + std::to_string(nets_.size())
-        + " segments=" + std::to_string(segments_.size()));
-  }, false);
+  stage(
+      "prepare",
+      [&] {
+        buildGrid2D();
+        choosePinsAndBuildTrees();
+        log("[helem] nets=" + std::to_string(nets_.size())
+            + " segments=" + std::to_string(segments_.size()));
+      },
+      false);
   logGeometryStats("topology", true);
   stage("lr", [&] { runLagrangianRelaxation(); }, true);
   if (options_.verify_ledger) {

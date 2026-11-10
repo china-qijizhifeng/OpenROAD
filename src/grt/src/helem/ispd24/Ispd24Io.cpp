@@ -53,7 +53,8 @@ class Cursor
 
   void skipSpace()
   {
-    while (position_ < end_ && std::isspace(static_cast<unsigned char>(*position_))) {
+    while (position_ < end_
+           && std::isspace(static_cast<unsigned char>(*position_))) {
       ++position_;
     }
   }
@@ -180,7 +181,8 @@ bool readIspd24Resource(const std::string& path,
     char name[256] = {0};
     int direction = 0;
     double min_length = 0;
-    if (std::sscanf(header.c_str(), "%255s %d %lf", name, &direction, &min_length)
+    if (std::sscanf(
+            header.c_str(), "%255s %d %lf", name, &direction, &min_length)
         != 3) {
       error = "bad layer header: " + header;
       return false;
@@ -218,7 +220,8 @@ bool readIspd24Nets(const std::string& path,
   const char* end = p + content.size();
   RoutingNet* net = nullptr;
   while (p < end) {
-    const char* line_end = static_cast<const char*>(std::memchr(p, '\n', end - p));
+    const char* line_end
+        = static_cast<const char*>(std::memchr(p, '\n', end - p));
     if (line_end == nullptr) {
       line_end = end;
     }

@@ -4,7 +4,8 @@
 // fastroute_ispd24: runs OpenROAD's FastRoute core on ISPD 2024 contest
 // inputs, so that it routes the same GCell grid, capacities and pin access
 // points as helem_route. Capacities are floored to whole tracks (FastRoute
-// stores integer capacities); pin access uses grt::helem::choosePinAccessPoints.
+// stores integer capacities); pin access uses
+// grt::helem::choosePinAccessPoints.
 //
 //   fastroute_ispd24 -cap F -net F -output F [-threads N]
 //                    [-congestion-iterations N] [-pin-access box|center]
@@ -24,8 +25,8 @@
 
 #include "FastRoute.h"
 #include "core/GCellGraph.h"
-#include "db_sta/dbSta.hh"
 #include "core/HelemRouter.h"
+#include "db_sta/dbSta.hh"
 #include "grt/GRoute.h"
 #include "ispd24/Ispd24Io.h"
 #include "odb/db.h"
@@ -284,15 +285,16 @@ int main(int argc, char** argv)
       }
       continue;
     }
-    grt::FrNet* fr_net = fastroute->addNet(db_net,
-                                           /*is_clock=*/false,
-                                           /*is_local=*/false,
-                                           /*driver_idx=*/0,
-                                           /*cost=*/1,
-                                           /*min_layer=*/graph.min_routing_layer,
-                                           /*max_layer=*/graph.topRoutingLayer(),
-                                           /*slack=*/0.0f,
-                                           /*edge_cost_per_layer=*/nullptr);
+    grt::FrNet* fr_net
+        = fastroute->addNet(db_net,
+                            /*is_clock=*/false,
+                            /*is_local=*/false,
+                            /*driver_idx=*/0,
+                            /*cost=*/1,
+                            /*min_layer=*/graph.min_routing_layer,
+                            /*max_layer=*/graph.topRoutingLayer(),
+                            /*slack=*/0.0f,
+                            /*edge_cost_per_layer=*/nullptr);
     for (const auto& [x, y, layer] : pins) {
       fr_net->addPin(x, y, layer);
     }

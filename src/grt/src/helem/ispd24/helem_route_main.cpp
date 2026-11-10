@@ -27,7 +27,6 @@
 
 namespace {
 
-
 void usage()
 {
   std::fprintf(stderr,
@@ -107,9 +106,9 @@ int main(int argc, char** argv)
     } else if (arg == "-bend") {
       options.bend_cost_scale = std::stod(value());
     } else if (arg == "-pin-access") {
-      options.pin_access_mode
-          = value() != "center" ? grt::helem::PinAccessMode::kOtherPinsBox
-                             : grt::helem::PinAccessMode::kNetCenter;
+      options.pin_access_mode = value() != "center"
+                                    ? grt::helem::PinAccessMode::kOtherPinsBox
+                                    : grt::helem::PinAccessMode::kNetCenter;
     } else if (arg == "-pin-high") {
       options.pin_access_prefer_high_layer = true;
     } else if (arg == "-exclude-own") {
@@ -222,14 +221,15 @@ int main(int argc, char** argv)
       static_cast<long long>(score.via_count));
   bool first = true;
   for (const auto& report : router.stageReports()) {
-    std::printf("%s{\"stage\":\"%s\",\"s\":%.3f,\"of_total\":%lld,"
-                "\"of_max\":%d,\"of_edges\":%lld}",
-                first ? "" : ",",
-                report.stage.c_str(),
-                report.seconds,
-                static_cast<long long>(report.total_overflow_2d),
-                report.max_overflow_2d,
-                static_cast<long long>(report.overflowed_edges_2d));
+    std::printf(
+        "%s{\"stage\":\"%s\",\"s\":%.3f,\"of_total\":%lld,"
+        "\"of_max\":%d,\"of_edges\":%lld}",
+        first ? "" : ",",
+        report.stage.c_str(),
+        report.seconds,
+        static_cast<long long>(report.total_overflow_2d),
+        report.max_overflow_2d,
+        static_cast<long long>(report.overflowed_edges_2d));
     first = false;
   }
   std::printf("]}\n");
