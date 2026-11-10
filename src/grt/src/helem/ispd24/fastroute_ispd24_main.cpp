@@ -15,10 +15,10 @@
 #include <cstdio>
 #include <cstdlib>
 #include <limits>
-#include <map>
 #include <memory>
 #include <string>
 #include <tuple>
+#include <unordered_map>
 #include <vector>
 
 #include "FastRoute.h"
@@ -250,7 +250,8 @@ int main(int argc, char** argv)
 
   // Convert to contest segments.
   std::vector<helem::NetRoute3D> out(nets.size());
-  std::map<odb::dbNet*, int> net_index;
+  // odb specializes std::less for its pointer types; hash by address.
+  std::unordered_map<odb::dbNet*, int> net_index;
   for (size_t n = 0; n < nets.size(); ++n) {
     net_index[db_nets[n]] = static_cast<int>(n);
   }
