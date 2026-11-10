@@ -137,6 +137,7 @@ class BonnRouteGlobal
     Candidate candidate;
     double log_cost = 0.0;
     double search_cost = 0.0;  // Dijkstra length of the last connection
+    double exact_cost = 0.0;
     bool checked = false;
     bool mismatch = false;
   };

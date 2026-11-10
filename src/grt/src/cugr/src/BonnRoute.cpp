@@ -873,6 +873,7 @@ void BonnRouteGlobal::resourceSharing()
             r.checked = true;
             r.mismatch = std::abs(exact - r.search_cost)
                          > 1e-9 * std::max(1.0, std::abs(exact));
+            r.exact_cost = exact;
           }
           kinds[slot] = Kind::kNew;
         } else {
@@ -892,6 +893,23 @@ void BonnRouteGlobal::resourceSharing()
           phase_calls++;
           cost_checks_ += results[slot].checked;
           cost_mismatches_ += results[slot].mismatch;
+          if (results[slot].mismatch && cost_mismatches_ <= 5) {
+            const Candidate& c = results[slot].candidate;
+            std::string nodes;
+            for (const NodeRec& n : c.nodes) {
+              nodes
+                  += fmt::format(" ({},{},{})<{}", n.layer, n.x, n.y, n.parent);
+            }
+            logger_->report(
+                "BonnRoute cost check: net {} search {:.6g} exact {:.6g} "
+                "objective {:.6g} objective weight {:.6g}; tree{}",
+                state.net->getName(),
+                results[slot].search_cost,
+                results[slot].exact_cost,
+                c.objective,
+                objective_weight_,
+                nodes);
+          }
           const double log_cost = results[slot].log_cost;
           state.last
               = insertCandidate(state, std::move(results[slot].candidate));
