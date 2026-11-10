@@ -99,6 +99,8 @@ cc_library(
 cc_library(
     name = "cugr",
     srcs = [
+        "src/cugr/src/BonnRoute.cpp",
+        "src/cugr/src/BonnRoute.h",
         "src/cugr/src/CUGR.cpp",
         "src/cugr/src/Design.cpp",
         "src/cugr/src/Design.h",
@@ -123,6 +125,9 @@ cc_library(
     ],
     hdrs = [
         "src/cugr/include/CUGR.h",
+    ],
+    copts = [
+        "-fopenmp",
     ],
     includes = [
         "include",

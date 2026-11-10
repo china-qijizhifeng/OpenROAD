@@ -210,6 +210,24 @@ is_use_cugr()
 }
 
 void
+set_bonnroute(bool enabled)
+{
+  getGlobalRouter()->setBonnRoute(enabled);
+}
+
+bool
+is_bonnroute()
+{
+  return getGlobalRouter()->isBonnRoute();
+}
+
+bool
+set_bonnroute_param(const char* name, double value)
+{
+  return getGlobalRouter()->setBonnRouteParam(name, value);
+}
+
+void
 set_skip_large_fanout(int skip_large_fanout)
 {
   getGlobalRouter()->setSkipLargeFanoutNets(skip_large_fanout);

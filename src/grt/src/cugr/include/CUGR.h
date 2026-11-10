@@ -47,6 +47,7 @@ class Design;
 class GridGraph;
 class GRNet;
 class GRTreeNode;
+struct BonnRouteParams;
 class BoxT;
 class PointT;
 
@@ -156,6 +157,13 @@ class CUGR
     congestion_iterations_ = iterations;
   }
   void setVerbose(bool verbose) { verbose_ = verbose; }
+  // BonnRoute resource-sharing global routing replaces the pattern stages of
+  // a full (non-incremental) route; see BonnRoute.h.
+  void setBonnRoute(bool enabled) { bonnroute_ = enabled; }
+  bool isBonnRoute() const { return bonnroute_; }
+  // Returns false for an unknown parameter name.
+  bool setBonnRouteParam(const std::string& name, double value);
+  void setNumThreads(int threads) { num_threads_ = threads; }
   void updateNet(odb::dbNet* net);
   void removeNet(odb::dbNet* net);
   // Transfer removed net tree ownership to preserved net without removing
@@ -268,6 +276,7 @@ class CUGR
                            double threshold = 1.0);
 
   void patternRoute(std::vector<int>& net_indices);
+  void bonnRoute(std::vector<int>& net_indices);
   // Re-route the critical nets on real 3D-tree resistance, right after the
   // neutral first PatternRoute.
   void patternRouteResAware(std::vector<int>& net_indices);
@@ -418,6 +427,9 @@ class CUGR
   float critical_nets_percentage_ = 10;
   int congestion_iterations_ = 5;
   bool verbose_ = true;
+  bool bonnroute_ = false;
+  int num_threads_ = 1;
+  std::unique_ptr<BonnRouteParams> bonnroute_params_;
 
   // Suppresses the global parasitics re-estimate during incremental routing.
   bool incremental_routing_ = false;

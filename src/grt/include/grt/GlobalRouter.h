@@ -172,6 +172,11 @@ class GlobalRouter
     engine_selected_ = true;
   };
   bool isUseCUGR() const { return use_cugr_; };
+  // BonnRoute resource sharing inside the CUGR engine (implies CUGR).
+  void setBonnRoute(bool enabled);
+  bool isBonnRoute() const;
+  // Returns false for an unknown parameter name.
+  bool setBonnRouteParam(const char* name, double value);
   void setSkipLargeFanoutNets(int skip_large_fanout)
   {
     skip_large_fanout_ = skip_large_fanout;

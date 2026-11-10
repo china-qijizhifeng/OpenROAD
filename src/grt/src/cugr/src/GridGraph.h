@@ -299,6 +299,19 @@ class GridGraph
   void extractBlockageView(GridGraphView<bool>& view) const;
   void extractCongestionView(
       GridGraphView<bool>& view) const;  // 2D overflow look-up table
+  // BonnRoute: the via-pad length a stack [low, high] puts on `layer`.
+  double getStackPadLength(int layer, int low, int high) const
+  {
+    return stackPadLength(layer, low, high);
+  }
+  bool isViaDemandEnabled() const { return constants_.via_demand_enabled; }
+  // Visits every edge charge addTreeUsage would deposit for a native tree;
+  // `demand` already includes the layer's NDR factor.
+  void forEachTreeDemand(
+      const std::shared_ptr<GRTreeNode>& tree,
+      const std::vector<double>& net_costs,
+      const std::function<void(int layer, PointT edge, CapacityT demand)>& fn)
+      const;
   void extractWireCostView(GridGraphView<CostT>& view) const;
 
   /**

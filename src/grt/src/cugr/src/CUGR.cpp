@@ -24,6 +24,7 @@
 #include <vector>
 
 #include "AbstractCugrRenderer.h"
+#include "BonnRoute.h"
 #include "Design.h"
 #include "GRNet.h"
 #include "GRTree.h"
@@ -747,6 +748,57 @@ void CUGR::patternRoute(std::vector<int>& net_indices)
   debugNetTopology(CugrStage::patternRoute, 0);
 }
 
+bool CUGR::setBonnRouteParam(const std::string& name, const double value)
+{
+  if (!bonnroute_params_) {
+    bonnroute_params_ = std::make_unique<BonnRouteParams>();
+  }
+  return bonnroute_params_->set(name, value);
+}
+
+void CUGR::bonnRoute(std::vector<int>& net_indices)
+{
+  if (verbose_) {
+    logger_->report("Stage 1: BonnRoute resource sharing.");
+  }
+  if (critical_nets_percentage_ != 0) {
+    setInitialNetSlacks(net_indices);
+  }
+  if (!bonnroute_params_) {
+    bonnroute_params_ = std::make_unique<BonnRouteParams>();
+  }
+  BonnRouteParams params = *bonnroute_params_;
+  params.verbose = params.verbose && verbose_;
+  if (params.threads <= 1) {
+    params.threads = std::max(1, num_threads_);
+  }
+  std::vector<int> sorted = net_indices;
+  std::ranges::sort(sorted);
+  std::vector<GRNet*> nets;
+  for (const int net_index : sorted) {
+    GRNet* net = gr_nets_[net_index].get();
+    if (net == nullptr || net->getNumPins() < 2) {
+      continue;
+    }
+    nets.push_back(net);
+  }
+  BonnRouteGlobal router(grid_graph_.get(), nets, params, logger_);
+  router.run();
+  // Nets without a BonnRoute tree fall back to pattern routing.
+  for (GRNet* net : nets) {
+    if (net->getRoutingTree() != nullptr) {
+      continue;
+    }
+    PatternRoute pattern_route(
+        net, grid_graph_.get(), stt_builder_, constants_, logger_);
+    pattern_route.constructSteinerTree();
+    pattern_route.constructRoutingDAG();
+    pattern_route.run();
+    grid_graph_->addTreeUsage(net->getRoutingTree(), net->getNdrCosts());
+  }
+  debugNetTopology(CugrStage::patternRoute, 0);
+}
+
 void CUGR::patternRouteResAware(std::vector<int>& net_indices)
 {
   if (!resistance_aware_ || critical_nets_percentage_ == 0) {
@@ -1040,18 +1092,29 @@ std::vector<odb::dbNet*> CUGR::route(bool incremental)
     incremental_candidates_ = net_indices;
   }
 
-  patternRoute(net_indices);
-
-  if (!incremental) {
-    // Stage 2: resistance-aware re-route of the critical nets (full route
-    // only, not congestion-gated; it ignores the congested set).
-    patternRouteResAware(net_indices);
+  const bool use_bonnroute = bonnroute_ && !incremental;
+  if (use_bonnroute) {
+    // Stages 1-3 replaced by resource sharing, rounding and re-choosing;
+    // the CUGR maze stages below clean up the remaining overflow.
+    bonnRoute(net_indices);
     updateCongestedNets(net_indices);
-  }
+    if (bonnroute_params_ && !bonnroute_params_->maze_cleanup) {
+      net_indices.clear();
+    }
+  } else {
+    patternRoute(net_indices);
 
-  patternRouteWithDetours(net_indices);
-  if (!incremental) {
-    updateCongestedNets(net_indices);
+    if (!incremental) {
+      // Stage 2: resistance-aware re-route of the critical nets (full route
+      // only, not congestion-gated; it ignores the congested set).
+      patternRouteResAware(net_indices);
+      updateCongestedNets(net_indices);
+    }
+
+    patternRouteWithDetours(net_indices);
+    if (!incremental) {
+      updateCongestedNets(net_indices);
+    }
   }
 
   debugPass("stage 3");

@@ -1188,6 +1188,18 @@ void GridGraph::forEachTreeDemandImpl(const std::shared_ptr<GRTreeNode>& tree,
       });
 }
 
+void GridGraph::forEachTreeDemand(
+    const std::shared_ptr<GRTreeNode>& tree,
+    const std::vector<double>& net_costs,
+    const std::function<void(int layer, PointT edge, CapacityT demand)>& fn)
+    const
+{
+  forEachTreeDemandImpl(
+      tree, /* adopted */ false, net_costs, [&](const TreeDemand& charge) {
+        fn(charge.layer, charge.edge, charge.demand * charge.factor);
+      });
+}
+
 void GridGraph::commitTree(const std::shared_ptr<GRTreeNode>& tree,
                            const bool rip_up,
                            const std::vector<double>& net_costs,

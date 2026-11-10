@@ -119,6 +119,22 @@ void GlobalRouter::setNumThreads(int num_threads)
 {
   num_threads_ = num_threads;
   fastroute_->setNumThreads(num_threads_);
+  cugr_->setNumThreads(num_threads_);
+}
+
+void GlobalRouter::setBonnRoute(const bool enabled)
+{
+  cugr_->setBonnRoute(enabled);
+}
+
+bool GlobalRouter::isBonnRoute() const
+{
+  return cugr_->isBonnRoute();
+}
+
+bool GlobalRouter::setBonnRouteParam(const char* name, const double value)
+{
+  return cugr_->setBonnRouteParam(name, value);
 }
 
 void GlobalRouter::setSnapshotBatchedWidth(int snapshot_batched_width)
