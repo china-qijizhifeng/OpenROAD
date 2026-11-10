@@ -288,6 +288,13 @@ Simply run the following command:
 bazelisk test //src/drt/...
 ```
 
+## Experimental routing research
+
+Opt-in routing probes, bounded route trials, and joint checkpoint helpers are
+documented in [the route-trial research notes](test/route_trials/README.md).
+These interfaces require isolated checkpoints and independent physical and
+electrical validation; they are not enabled as a production via optimizer.
+
 ## Limitations
 
 ## References
