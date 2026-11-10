@@ -3,6 +3,7 @@
 
 #include "drt/TritonRoute.h"
 
+#include <cstdlib>
 #include <algorithm>
 #include <fstream>
 #include <iostream>
@@ -1546,7 +1547,10 @@ void TritonRoute::setParams(const ParamStruct& params)
   router_cfg_->SAVE_GUIDE_UPDATES = params.saveGuideUpdates;
   router_cfg_->REPAIR_PDN_LAYER_NAME = params.repairPDNLayerName;
   router_cfg_->MAX_THREADS = params.num_threads;
-  router_cfg_->ADAPTIVE_STRATEGY = params.adaptiveStrategy;
+  // Experiment switch: DRT_ADAPTIVE=1 enables the adaptive strategy for every
+  // detailed_route call without editing the calling flow script.
+  router_cfg_->ADAPTIVE_STRATEGY
+      = params.adaptiveStrategy || std::getenv("DRT_ADAPTIVE") != nullptr;
 }
 
 void TritonRoute::addWorkerResults(
