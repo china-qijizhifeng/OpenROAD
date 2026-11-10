@@ -64,6 +64,10 @@ bool BonnRouteParams::set(const std::string& name, const double value)
     seed = static_cast<unsigned>(value);
   } else if (name == "repair_passes") {
     repair_passes = static_cast<int>(value);
+  } else if (name == "pin_sets") {
+    pin_sets = value != 0.0;
+  } else if (name == "full_graph") {
+    full_graph = value != 0.0;
   } else if (name == "maze_cleanup") {
     maze_cleanup = value != 0.0;
   } else if (name == "verbose") {
@@ -86,12 +90,13 @@ struct BonnRouteGlobal::Scratch
   std::vector<std::pair<double, int64_t>> heap;
   uint32_t epoch = 0;
 
+  // n vertices; dist / parent / stamp are per (vertex, via state) node.
   void prepare(size_t n)
   {
-    if (dist.size() < n) {
-      dist.resize(n);
-      parent.resize(n);
-      stamp.resize(n, 0);
+    if (tree_stamp.size() < n) {
+      dist.resize(3 * n);
+      parent.resize(3 * n);
+      stamp.resize(3 * n, 0);
       tree_stamp.resize(n, 0);
       term_stamp.resize(n, 0);
       term.resize(n);
@@ -149,42 +154,35 @@ double BonnRouteGlobal::wireCost(const int layer,
          + weight_[edgeIndex(layer, x, y)] * factor;
 }
 
-double BonnRouteGlobal::viaCost(const int layer,
+double BonnRouteGlobal::padCost(const int layer,
                                 const int x,
                                 const int y,
+                                const double pad,
                                 const GRNet* net) const
 {
-  double cost = objective_weight_ * params_.via_weight;
-  if (!via_demand_) {
-    return cost;
+  if (!via_demand_ || pad <= 0.0) {
+    return 0.0;
   }
-  for (int side = 0; side < 2; side++) {
-    const int pad_layer = layer + side;
-    const double pad
-        = side == 0 ? via_pad_lower_[layer] : via_pad_upper_[layer];
-    if (pad <= 0.0) {
-      continue;
-    }
-    const int direction = grid_graph_->getLayerDirection(pad_layer);
-    const int c = direction == MetalLayer::H ? x : y;
-    const int size = grid_graph_->getSize(direction);
-    const int lower_len
-        = c > 0 ? grid_graph_->getEdgeLength(direction, c - 1) : 0;
-    const int higher_len
-        = c < size - 1 ? grid_graph_->getEdgeLength(direction, c) : 0;
-    const int sum = lower_len + higher_len;
-    if (sum == 0) {
-      continue;
-    }
-    const double demand = pad / sum * net->getNdrCost(pad_layer);
-    if (lower_len > 0) {
-      const int lx = direction == MetalLayer::H ? x - 1 : x;
-      const int ly = direction == MetalLayer::H ? y : y - 1;
-      cost += weight_[edgeIndex(pad_layer, lx, ly)] * demand;
-    }
-    if (higher_len > 0) {
-      cost += weight_[edgeIndex(pad_layer, x, y)] * demand;
-    }
+  const int direction = grid_graph_->getLayerDirection(layer);
+  const int c = direction == MetalLayer::H ? x : y;
+  const int size = grid_graph_->getSize(direction);
+  const int lower_len
+      = c > 0 ? grid_graph_->getEdgeLength(direction, c - 1) : 0;
+  const int higher_len
+      = c < size - 1 ? grid_graph_->getEdgeLength(direction, c) : 0;
+  const int sum = lower_len + higher_len;
+  if (sum == 0) {
+    return 0.0;
+  }
+  const double demand = pad / sum * net->getNdrCost(layer);
+  double cost = 0.0;
+  if (lower_len > 0) {
+    const int lx = direction == MetalLayer::H ? x - 1 : x;
+    const int ly = direction == MetalLayer::H ? y : y - 1;
+    cost += weight_[edgeIndex(layer, lx, ly)] * demand;
+  }
+  if (higher_len > 0) {
+    cost += weight_[edgeIndex(layer, x, y)] * demand;
   }
   return cost;
 }
@@ -199,43 +197,78 @@ void BonnRouteGlobal::prepareNets()
     state.net = net;
     const LayerRange& range = net->getLayerRange();
     const int top_limit = std::min(range.max_layer, num_layers_ - 1);
+    // Also records CUGR's preferred access point per pin (the fallback).
     const AccessPointMap selected = grid_graph_->selectAccessPoints(net);
-    std::vector<std::pair<PointT, IntervalT>> points;
-    points.reserve(selected.size());
-    for (const auto& [point, layers] : selected) {
-      points.emplace_back(point, layers);
+    if (selected.size() <= 1) {
+      state.trivial = true;
+      if (!selected.empty()) {
+        const auto& [point, layers] = *selected.begin();
+        state.trivial_point = point;
+        state.trivial_top = std::clamp(
+            std::max(layers.high(), range.min_layer), 0, top_limit);
+        state.trivial_low
+            = std::min(std::max(layers.low(), 0), state.trivial_top);
+      } else {
+        state.trivial_low = state.trivial_top = -1;
+      }
+      continue;
     }
-    std::ranges::sort(points, [](const auto& a, const auto& b) {
-      return std::make_pair(a.first.x(), a.first.y())
-             < std::make_pair(b.first.x(), b.first.y());
-    });
+    const auto& preferred = net->getPreferredAccessPoints();
+    for (int p = 0; p < net->getNumPins(); p++) {
+      Terminal t;
+      t.pin_index = p;
+      if (params_.pin_sets) {
+        for (const GRPoint& g : grid_graph_->pinAccessCells(net, p)) {
+          t.cells.push_back(
+              {std::clamp(g.getLayerIdx(), 0, top_limit), g.x(), g.y()});
+        }
+      }
+      if (t.cells.empty()) {
+        if (auto it = preferred.find(p); it != preferred.end()) {
+          t.cells.push_back({std::clamp(it->second.layers.low(), 0, top_limit),
+                             it->second.point.x(),
+                             it->second.point.y()});
+        }
+      }
+      std::ranges::sort(t.cells);
+      t.cells.erase(std::ranges::unique(t.cells).begin(), t.cells.end());
+      if (!t.cells.empty()) {
+        state.terminals.push_back(std::move(t));
+      }
+    }
+    if (state.terminals.size() <= 1) {
+      state.trivial = true;
+      const auto& [point, layers] = *selected.begin();
+      state.trivial_point = point;
+      state.trivial_top
+          = std::clamp(std::max(layers.high(), range.min_layer), 0, top_limit);
+      state.trivial_low
+          = std::min(std::max(layers.low(), 0), state.trivial_top);
+      state.terminals.clear();
+      continue;
+    }
     // Driver first: path composition grows the tree from it.
     if (const auto driver = net->getDriverAccessPoint()) {
-      auto it = std::ranges::find_if(
-          points, [&](const auto& p) { return p.first == *driver; });
-      if (it != points.end()) {
-        std::rotate(points.begin(), it, it + 1);
+      auto it = std::ranges::find_if(state.terminals, [&](const Terminal& t) {
+        return std::ranges::any_of(t.cells, [&](const auto& c) {
+          return c[1] == driver->x() && c[2] == driver->y();
+        });
+      });
+      if (it != state.terminals.end()) {
+        std::rotate(state.terminals.begin(), it, it + 1);
       }
     }
     int lx = std::numeric_limits<int>::max();
     int ly = lx;
     int hx = std::numeric_limits<int>::min();
     int hy = hx;
-    for (const auto& [point, layers] : points) {
-      Terminal t;
-      t.point = point;
-      t.top_layer
-          = std::clamp(std::max(layers.high(), range.min_layer), 0, top_limit);
-      t.low_layer = std::min(std::max(layers.low(), 0), t.top_layer);
-      state.terminals.push_back(t);
-      lx = std::min(lx, point.x());
-      hx = std::max(hx, point.x());
-      ly = std::min(ly, point.y());
-      hy = std::max(hy, point.y());
-    }
-    if (state.terminals.size() <= 1) {
-      state.trivial = true;
-      continue;
+    for (const Terminal& t : state.terminals) {
+      for (const auto& c : t.cells) {
+        lx = std::min(lx, c[1]);
+        hx = std::max(hx, c[1]);
+        ly = std::min(ly, c[2]);
+        hy = std::max(hy, c[2]);
+      }
     }
     const int extent = std::max(hx - lx, hy - ly);
     const int margin
@@ -249,6 +282,9 @@ void BonnRouteGlobal::prepareNets()
   }
 }
 
+// Algorithm 1 under the current prices. Search states are (vertex, how a
+// via column was entered) so that a stacked via is charged its column pad
+// max(upper, lower) on intermediate layers, as GridGraph commits it.
 BonnRouteGlobal::OracleResult BonnRouteGlobal::oracle(
     const NetState& state,
     Scratch& scratch,
@@ -257,8 +293,9 @@ BonnRouteGlobal::OracleResult BonnRouteGlobal::oracle(
 {
   OracleResult result;
   const GRNet* net = state.net;
-  const BoxT region
-      = whole_grid ? BoxT(0, 0, x_size_ - 1, y_size_ - 1) : state.region;
+  const BoxT region = (whole_grid || params_.full_graph)
+                          ? BoxT(0, 0, x_size_ - 1, y_size_ - 1)
+                          : state.region;
   const int x0 = region.lx();
   const int y0 = region.ly();
   const int x1 = region.hx();
@@ -270,19 +307,18 @@ BonnRouteGlobal::OracleResult BonnRouteGlobal::oracle(
   const int64_t plane = static_cast<int64_t>(width) * height;
   const size_t n = static_cast<size_t>(plane) * num_layers;
   scratch.prepare(n);
-  const uint32_t epoch = scratch.epoch;
   auto index = [&](int l, int x, int y) -> int64_t {
     return l * plane + static_cast<int64_t>(x - x0) * height + (y - y0);
   };
   auto greater = [](const std::pair<double, int64_t>& a,
                     const std::pair<double, int64_t>& b) { return a > b; };
-  auto push = [&](double d, int64_t v) {
-    scratch.heap.emplace_back(d, v);
+  auto push = [&](double d, int64_t node) {
+    scratch.heap.emplace_back(d, node);
     std::push_heap(scratch.heap.begin(), scratch.heap.end(), greater);
   };
   auto relax = [&](int64_t from, int64_t to, double d) {
-    if (scratch.stamp[to] != epoch || d < scratch.dist[to]) {
-      scratch.stamp[to] = epoch;
+    if (scratch.stamp[to] != scratch.epoch || d < scratch.dist[to]) {
+      scratch.stamp[to] = scratch.epoch;
       scratch.dist[to] = d;
       scratch.parent[to] = static_cast<int32_t>(from);
       push(d, to);
@@ -290,52 +326,133 @@ BonnRouteGlobal::OracleResult BonnRouteGlobal::oracle(
   };
 
   const int num_terminals = static_cast<int>(state.terminals.size());
+  std::vector<std::vector<int>> pins_at;  // terminal lists per marked vertex
+  std::vector<int64_t> marked;
+  auto mark_terminals = [&]() {
+    for (size_t k = 0; k < marked.size(); k++) {
+      scratch.term_stamp[marked[k]] = scratch.epoch;
+      scratch.term[marked[k]] = static_cast<int32_t>(k);
+    }
+  };
+  for (int t = 0; t < num_terminals; t++) {
+    for (const auto& c : state.terminals[t].cells) {
+      if (c[0] >= num_layers) {
+        continue;
+      }
+      const int64_t v = index(c[0], c[1], c[2]);
+      if (scratch.term_stamp[v] != scratch.epoch) {
+        scratch.term_stamp[v] = scratch.epoch;
+        scratch.term[v] = static_cast<int32_t>(marked.size());
+        marked.push_back(v);
+        pins_at.emplace_back();
+      }
+      pins_at[scratch.term[v]].push_back(t);
+    }
+  }
   std::vector<char> connected(num_terminals, 0);
-  for (int i = 0; i < num_terminals; i++) {
-    const Terminal& t = state.terminals[i];
-    const int64_t v = index(t.top_layer, t.point.x(), t.point.y());
-    scratch.term_stamp[v] = epoch;
-    scratch.term[v] = i;
-  }
-  std::vector<std::array<int64_t, 2>> edges;  // local vertex pairs
-  {
-    const Terminal& t = state.terminals[0];
-    const int64_t v = index(t.top_layer, t.point.x(), t.point.y());
-    scratch.stamp[v] = epoch;
-    scratch.dist[v] = 0.0;
-    scratch.parent[v] = -1;
-    scratch.tree_stamp[v] = epoch;
-    push(0.0, v);
-    connected[0] = 1;
-  }
-  // Terminals sharing the root vertex are connected already (cannot happen
-  // with one terminal per gcell, kept for robustness).
-  int remaining = num_terminals - 1;
-
-  while (!scratch.heap.empty() && remaining > 0) {
-    std::pop_heap(scratch.heap.begin(), scratch.heap.end(), greater);
-    const auto [d, u] = scratch.heap.back();
-    scratch.heap.pop_back();
-    if (d > scratch.dist[u]) {
+  std::vector<int64_t> chosen(num_terminals, -1);  // vertex per terminal
+  std::vector<int64_t> tree;                       // tree vertices
+  int remaining = num_terminals;
+  auto connect_at = [&](int64_t v) {
+    if (scratch.term_stamp[v] != scratch.epoch) {
+      return;
+    }
+    for (const int t : pins_at[scratch.term[v]]) {
+      if (!connected[t]) {
+        connected[t] = 1;
+        chosen[t] = v;
+        remaining--;
+      }
+    }
+  };
+  auto add_source = [&](int64_t v) {
+    scratch.tree_stamp[v] = scratch.epoch;
+    const int64_t node = v * 3;
+    scratch.stamp[node] = scratch.epoch;
+    scratch.dist[node] = 0.0;
+    scratch.parent[node] = -1;
+    push(0.0, node);
+  };
+  // Root component: all cells of terminal 0 (zero-cost clique). If one of
+  // them also hosts other terminals, it is the root cell.
+  bool root_open = true;
+  for (const auto& c : state.terminals[0].cells) {
+    if (c[0] >= num_layers) {
       continue;
     }
-    if (scratch.term_stamp[u] == epoch && !connected[scratch.term[u]]
-        && scratch.tree_stamp[u] != epoch) {
-      // Algorithm 1, step 5: add the path to the tree; its vertices become
-      // sources at distance 0 for the next connection.
-      int64_t w = u;
-      while (scratch.tree_stamp[w] != epoch) {
-        const int64_t p = scratch.parent[w];
-        edges.push_back({w, p});
-        scratch.tree_stamp[w] = epoch;
-        // The path may pass through further terminals.
-        if (scratch.term_stamp[w] == epoch && !connected[scratch.term[w]]) {
-          connected[scratch.term[w]] = 1;
-          remaining--;
+    const int64_t v = index(c[0], c[1], c[2]);
+    if (pins_at[scratch.term[v]].size() > 1) {
+      tree.push_back(v);
+      add_source(v);
+      connect_at(v);
+      root_open = false;
+      break;
+    }
+  }
+  if (root_open) {
+    int sources = 0;
+    for (const auto& c : state.terminals[0].cells) {
+      if (c[0] < num_layers) {
+        add_source(index(c[0], c[1], c[2]));
+        sources++;
+      }
+    }
+    if (sources == 1) {
+      const auto& c = state.terminals[0].cells.front();
+      const int64_t v = index(c[0], c[1], c[2]);
+      tree.push_back(v);
+      connect_at(v);
+      root_open = false;
+    } else {
+      connected[0] = 1;
+      remaining--;
+    }
+  }
+  std::vector<std::array<int64_t, 2>> edges;  // vertex pairs
+  const double obj = objective_weight_;
+  double last_connection_cost = 0.0;
+  while (!scratch.heap.empty() && remaining > 0) {
+    std::pop_heap(scratch.heap.begin(), scratch.heap.end(), greater);
+    const auto [d, node] = scratch.heap.back();
+    scratch.heap.pop_back();
+    if (d > scratch.dist[node]) {
+      continue;
+    }
+    const int64_t u = node / 3;
+    const int s = static_cast<int>(node % 3);
+    if (scratch.tree_stamp[u] != scratch.epoch
+        && scratch.term_stamp[u] == scratch.epoch
+        && std::ranges::any_of(pins_at[scratch.term[u]],
+                               [&](int t) { return !connected[t]; })) {
+      // Algorithm 1, step 5: add the path to the tree.
+      last_connection_cost = d;
+      int64_t cur = node;
+      std::vector<int64_t> added;
+      while (scratch.tree_stamp[cur / 3] != scratch.epoch) {
+        const int64_t p = scratch.parent[cur];
+        edges.push_back({cur / 3, p / 3});
+        scratch.tree_stamp[cur / 3] = scratch.epoch;
+        added.push_back(cur / 3);
+        connect_at(cur / 3);
+        cur = p;
+      }
+      if (root_open) {
+        // The path fixes the root cell; restart from the actual tree, since
+        // labels of the other root cells are no longer distances to it.
+        root_open = false;
+        chosen[0] = cur / 3;
+        tree.push_back(cur / 3);
+        tree.insert(tree.end(), added.begin(), added.end());
+        scratch.prepare(n);
+        mark_terminals();
+        for (const int64_t v : tree) {
+          add_source(v);
         }
-        scratch.dist[w] = 0.0;
-        push(0.0, w);
-        w = p;
+      } else {
+        tree.insert(tree.end(), added.begin(), added.end());
+        for (const int64_t v : added) {
+          add_source(v);
+        }
       }
       continue;
     }
@@ -345,56 +462,76 @@ BonnRouteGlobal::OracleResult BonnRouteGlobal::oracle(
     const int y = y0 + static_cast<int>(rem % height);
     if (l >= range.min_layer && l <= range.max_layer) {
       const double factor = net->getNdrCost(l);
+      auto wire = [&](int ex, int ey) {
+        return objective_only ? wireObjective(l, ex, ey)
+                              : wireCost(l, ex, ey, factor);
+      };
       if (grid_graph_->getLayerDirection(l) == MetalLayer::H) {
         if (x > x0) {
-          const double c = objective_only ? wireObjective(l, x - 1, y)
-                                          : wireCost(l, x - 1, y, factor);
-          relax(u, u - height, d + c);
+          relax(node, (u - height) * 3, d + wire(x - 1, y));
         }
         if (x < x1) {
-          const double c = objective_only ? wireObjective(l, x, y)
-                                          : wireCost(l, x, y, factor);
-          relax(u, u + height, d + c);
+          relax(node, (u + height) * 3, d + wire(x, y));
         }
       } else {
         if (y > y0) {
-          const double c = objective_only ? wireObjective(l, x, y - 1)
-                                          : wireCost(l, x, y - 1, factor);
-          relax(u, u - 1, d + c);
+          relax(node, (u - 1) * 3, d + wire(x, y - 1));
         }
         if (y < y1) {
-          const double c = objective_only ? wireObjective(l, x, y)
-                                          : wireCost(l, x, y, factor);
-          relax(u, u + 1, d + c);
+          relax(node, (u + 1) * 3, d + wire(x, y));
         }
       }
     }
     if (l + 1 < num_layers) {
-      const double c
-          = objective_only ? params_.via_weight : viaCost(l, x, y, net);
-      relax(u, u + plane, d + c);
+      double c = params_.via_weight;
+      if (!objective_only) {
+        // Pad on l: lower pad of this via, or the column increment when the
+        // column already came up into l.
+        const double lower = via_pad_lower_[l];
+        const double pad_l = (s == 1 && l > 0)
+                                 ? std::max(via_pad_upper_[l - 1], lower)
+                                       - via_pad_upper_[l - 1]
+                                 : lower;
+        c = obj * params_.via_weight + padCost(l, x, y, pad_l, net)
+            + padCost(l + 1, x, y, via_pad_upper_[l], net);
+      }
+      relax(node, (u + plane) * 3 + 1, d + c);
     }
     if (l > 0) {
-      const double c
-          = objective_only ? params_.via_weight : viaCost(l - 1, x, y, net);
-      relax(u, u - plane, d + c);
+      double c = params_.via_weight;
+      if (!objective_only) {
+        const double upper = via_pad_upper_[l - 1];
+        const double pad_l
+            = (s == 2) ? std::max(upper, via_pad_lower_[l]) - via_pad_lower_[l]
+                       : upper;
+        c = obj * params_.via_weight + padCost(l, x, y, pad_l, net)
+            + padCost(l - 1, x, y, via_pad_lower_[l - 1], net);
+      }
+      relax(node, (u - plane) * 3 + 2, d + c);
     }
   }
   if (remaining > 0) {
     return result;
   }
+  result.search_cost = last_connection_cost;
+  auto cell = [&](int64_t v) -> std::array<int, 3> {
+    const int l = static_cast<int>(v / plane);
+    const int64_t rem = v % plane;
+    return {l,
+            x0 + static_cast<int>(rem / height),
+            y0 + static_cast<int>(rem % height)};
+  };
   std::vector<std::array<int, 3>> tree_edges;  // (layer, x, y) pairs packed
   tree_edges.reserve(edges.size() * 2);
   for (const auto& [a, b] : edges) {
-    for (const int64_t v : {a, b}) {
-      const int l = static_cast<int>(v / plane);
-      const int64_t rem = v % plane;
-      tree_edges.push_back({l,
-                            x0 + static_cast<int>(rem / height),
-                            y0 + static_cast<int>(rem % height)});
-    }
+    tree_edges.push_back(cell(a));
+    tree_edges.push_back(cell(b));
   }
-  if (!buildCandidate(state, tree_edges, result.candidate)) {
+  std::vector<std::array<int, 3>> pin_cells(num_terminals);
+  for (int t = 0; t < num_terminals; t++) {
+    pin_cells[t] = cell(chosen[t]);
+  }
+  if (!buildCandidate(state, tree_edges, pin_cells, result.candidate)) {
     return result;
   }
   result.ok = true;
@@ -404,8 +541,10 @@ BonnRouteGlobal::OracleResult BonnRouteGlobal::oracle(
 bool BonnRouteGlobal::buildCandidate(
     const NetState& state,
     const std::vector<std::array<int, 3>>& tree_edges,
+    const std::vector<std::array<int, 3>>& pin_cells,
     Candidate& candidate) const
 {
+  (void) state;
   auto key = [&](int l, int x, int y) -> uint64_t {
     return (static_cast<uint64_t>(l) * x_size_ + x) * y_size_ + y;
   };
@@ -426,13 +565,12 @@ bool BonnRouteGlobal::buildCandidate(
     add_edge(key(a[0], a[1], a[2]), key(b[0], b[1], b[2]));
   }
   std::unordered_map<uint64_t, char> pinned;
-  for (const Terminal& t : state.terminals) {
-    for (int l = t.low_layer; l < t.top_layer; l++) {
-      add_edge(key(l, t.point.x(), t.point.y()),
-               key(l + 1, t.point.x(), t.point.y()));
-    }
-    pinned[key(t.low_layer, t.point.x(), t.point.y())] = 1;
-    pinned[key(t.top_layer, t.point.x(), t.point.y())] = 1;
+  candidate.pin_cells.clear();
+  for (const auto& c : pin_cells) {
+    pinned[key(c[0], c[1], c[2])] = 1;
+    candidate.pin_cells.push_back({static_cast<int16_t>(c[0]),
+                                   static_cast<int16_t>(c[1]),
+                                   static_cast<int16_t>(c[2])});
   }
   for (auto& [k, list] : adjacency) {
     std::ranges::sort(list);
@@ -448,10 +586,7 @@ bool BonnRouteGlobal::buildCandidate(
     return pa[1] != pb[1] ? 0 : 1;
   };
 
-  const Terminal& root_terminal = state.terminals[0];
-  const uint64_t root = key(root_terminal.low_layer,
-                            root_terminal.point.x(),
-                            root_terminal.point.y());
+  const uint64_t root = key(pin_cells[0][0], pin_cells[0][1], pin_cells[0][2]);
   candidate.nodes.clear();
   candidate.objective = 0.0;
   std::unordered_map<uint64_t, char> visited;
@@ -551,6 +686,15 @@ std::shared_ptr<GRTreeNode> BonnRouteGlobal::buildTree(
   return nodes.front();
 }
 
+double BonnRouteGlobal::linearCost(const Candidate& candidate) const
+{
+  double cost = objective_weight_ * candidate.objective;
+  for (const auto& [r, d] : candidate.usage) {
+    cost += weight_[r] * d;
+  }
+  return cost;
+}
+
 double BonnRouteGlobal::logCost(const Candidate& candidate) const
 {
   double cost = objective_weight_ * candidate.objective;
@@ -617,6 +761,10 @@ void BonnRouteGlobal::resourceSharing()
         r = oracle(states_[order_[i]], s, true, true);
       }
       objective[i] = r.ok ? r.candidate.objective : 0.0;
+      states_[order_[i]].log_base_objective
+          = r.ok && r.candidate.objective > 0.0
+                ? std::log(r.candidate.objective)
+                : -1e300;
     }
     for (const double o : objective) {
       base_objective += o;
@@ -693,10 +841,18 @@ void BonnRouteGlobal::resourceSharing()
         if (state.last >= 0) {
           const double now = logCost(state.candidates[state.last]);
           // Relative to the objective price, which every phase raises.
-          const double growth
-              = (now - state.last_log_cost)
-                - (batch_log_objective - state.last_log_objective);
-          if (growth <= log_tolerance) {
+          // Reuse certificate. Prices never decrease, so for the current
+          // prices y: opt_n(y) >= opt_n(y_old) >= C_old / sigma, and
+          // opt_n(y) >= y_obj * o* / U >= y_obj * o_base / (sigma U) with
+          // o_base the phase-0 congestion-free oracle objective. Reusing b
+          // when y.g(b) <= (1 + tol) * max(C_old, y_obj o_base / U) keeps
+          // it a (1 + tol) sigma approximation, the oracle's own guarantee.
+          const double log_objective_bound = batch_log_objective
+                                             - std::log(objective_bound_)
+                                             + state.log_base_objective;
+          const double bound
+              = std::max(state.last_log_cost, log_objective_bound);
+          if (now - bound <= log_tolerance) {
             kinds[slot] = Kind::kReuse;
             continue;
           }
@@ -708,6 +864,16 @@ void BonnRouteGlobal::resourceSharing()
         }
         if (r.ok) {
           r.log_cost = logCost(r.candidate);
+          // Differential check of the oracle's edge costs against the
+          // committed demand: exact for a single path between single cells.
+          if (state.terminals.size() == 2
+              && state.terminals[0].cells.size() == 1
+              && state.terminals[1].cells.size() == 1) {
+            const double exact = linearCost(r.candidate);
+            r.checked = true;
+            r.mismatch = std::abs(exact - r.search_cost)
+                         > 1e-9 * std::max(1.0, std::abs(exact));
+          }
           kinds[slot] = Kind::kNew;
         } else {
           kinds[slot] = state.last >= 0 ? Kind::kReuse : Kind::kFail;
@@ -724,11 +890,12 @@ void BonnRouteGlobal::resourceSharing()
         }
         if (kinds[slot] == Kind::kNew) {
           phase_calls++;
+          cost_checks_ += results[slot].checked;
+          cost_mismatches_ += results[slot].mismatch;
           const double log_cost = results[slot].log_cost;
           state.last
               = insertCandidate(state, std::move(results[slot].candidate));
           state.last_log_cost = log_cost;
-          state.last_log_objective = batch_log_objective;
         } else {
           reuses_++;
         }
@@ -901,9 +1068,16 @@ void BonnRouteGlobal::commit()
       state.net->clearRoutingTree();
       continue;
     }
-    std::shared_ptr<GRTreeNode> tree
-        = buildTree(state.candidates[state.chosen]);
+    const Candidate& chosen = state.candidates[state.chosen];
+    std::shared_ptr<GRTreeNode> tree = buildTree(chosen);
     state.net->setRoutingTree(tree);
+    // The oracle chose the access cell of every pin.
+    for (size_t t = 0; t < state.terminals.size(); t++) {
+      const auto& c = chosen.pin_cells[t];
+      state.net->addPreferredAccessPoint(
+          state.terminals[t].pin_index,
+          AccessPoint{PointT(c[1], c[2]), IntervalT(c[0])});
+    }
     grid_graph_->addTreeUsage(tree, state.net->getNdrCosts());
   }
   if (failed > 0) {
@@ -925,15 +1099,14 @@ void BonnRouteGlobal::run()
   }
   // Single-gcell nets keep their pin stack; their usage is background.
   for (NetState& state : states_) {
-    if (!state.trivial || state.terminals.empty()) {
+    if (!state.trivial || state.trivial_low < 0) {
       continue;
     }
-    const Terminal& t = state.terminals[0];
-    auto node
-        = std::make_shared<GRTreeNode>(t.low_layer, t.point.x(), t.point.y());
-    if (t.top_layer != t.low_layer) {
+    const PointT& pt = state.trivial_point;
+    auto node = std::make_shared<GRTreeNode>(state.trivial_low, pt.x(), pt.y());
+    if (state.trivial_top != state.trivial_low) {
       node->addChild(
-          std::make_shared<GRTreeNode>(t.top_layer, t.point.x(), t.point.y()));
+          std::make_shared<GRTreeNode>(state.trivial_top, pt.x(), pt.y()));
     }
     state.net->setRoutingTree(node);
     grid_graph_->addTreeUsage(node, state.net->getNdrCosts());
@@ -969,6 +1142,11 @@ void BonnRouteGlobal::run()
     for (const int index : order_) {
       candidates += states_[index].candidates.size();
     }
+    logger_->report(
+        "BonnRoute: oracle cost check {} of {} two-pin searches differ "
+        "from the committed demand cost.",
+        cost_mismatches_,
+        cost_checks_);
     logger_->report(
         "BonnRoute: {} oracle calls, {} reuses, {:.2f} candidates/net, "
         "resource sharing {:.2f}s, total {:.2f}s.",

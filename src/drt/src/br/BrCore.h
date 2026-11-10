@@ -161,8 +161,62 @@ enum Kind : uint8_t
   kViaUpPad = 2,
   kCutUp = 3,
   kViaDownPad = 4,
-  kNumKinds = 5
+  // Edge legality (Sec. 3.6, Fig. 4): stored at the lower endpoint, for the
+  // preferred-direction edge to j + 1 and the jog to track i + 1. An edge
+  // can be blocked although both endpoints are legal (a shape between them).
+  kWireEdge = 5,
+  kJogEdge = 6,
+  kNumKinds = 7
 };
+
+// Calls fn(i, j) for every vertex of layer `l` whose origin lies in the
+// blocked-origin box [xlo, xhi] x [ylo, yhi] (vertex kinds), or for every
+// edge whose swept segment meets it: kWireEdge (j, j + 1) on track i,
+// kJogEdge (i, i + 1) at position j. The box is the Minkowski difference of
+// a shape (bloated by spacing) and the shape model of the kind, so an edge
+// is blocked exactly when a model placed anywhere on it violates spacing.
+template <typename F>
+void forEachBlocked(const TrackLayer& l,
+                    const Kind kind,
+                    const Coord xlo,
+                    const Coord ylo,
+                    const Coord xhi,
+                    const Coord yhi,
+                    F&& fn)
+{
+  if (xlo > xhi || ylo > yhi) {
+    return;
+  }
+  const Coord clo = l.horizontal ? ylo : xlo;
+  const Coord chi = l.horizontal ? yhi : xhi;
+  const Coord alo = l.horizontal ? xlo : ylo;
+  const Coord ahi = l.horizontal ? xhi : yhi;
+  auto first_ge = [](const std::vector<Coord>& v, Coord c) {
+    return static_cast<int>(std::lower_bound(v.begin(), v.end(), c)
+                            - v.begin());
+  };
+  auto last_le = [](const std::vector<Coord>& v, Coord c) {
+    return static_cast<int>(std::upper_bound(v.begin(), v.end(), c) - v.begin())
+           - 1;
+  };
+  int i0 = first_ge(l.tracks, clo);
+  int i1 = last_le(l.tracks, chi);
+  int j0 = first_ge(l.positions, alo);
+  int j1 = last_le(l.positions, ahi);
+  if (kind == kWireEdge) {
+    // Edges (j, j + 1) with positions[j] <= ahi and positions[j + 1] >= alo.
+    j0 = std::max(0, j0 - 1);
+    j1 = std::min(j1, l.numPositions() - 2);
+  } else if (kind == kJogEdge) {
+    i0 = std::max(0, i0 - 1);
+    i1 = std::min(i1, l.numTracks() - 2);
+  }
+  for (int i = i0; i <= i1; i++) {
+    for (int j = j0; j <= j1; j++) {
+      fn(i, j);
+    }
+  }
+}
 
 class FastGrid
 {
@@ -320,7 +374,6 @@ struct SearchRequest
   // ripup_cost * (1 + history).
   bool ripup = false;
   Cost ripup_cost = 0;
-  // Vertices never usable in this search (e.g. own pin landing conflicts).
   bool use_intervals = true;
 };
 
@@ -337,10 +390,8 @@ struct SearchResult
   int64_t settled = 0;
 };
 
-// Dijkstra with future cost on the track graph (Sec. 4.1). With
-// use_intervals, a preferred-direction run whose reduced cost is zero is
-// labelled in one sweep instead of vertex by vertex (Algorithm 4); the
-// result cost equals the vertex-by-vertex search.
+// Vertex-by-vertex Dijkstra with future cost on the track graph: the
+// reference for IntervalSearch (differential tests, use_intervals = 0).
 class PathSearch
 {
  public:
@@ -422,6 +473,96 @@ class PathSearch
   std::vector<int32_t> target_index_;
   uint32_t epoch_ = 0;
   std::vector<Item> heap_;
+};
+
+// Interval-based shortest path search (Sec. 4.1, Algorithm 4; Hetzel 1998,
+// Peyer et al. 2009). Vertices of a track are grouped on the fly into
+// maximal intervals I on which (i) the future cost changes by exactly the
+// distance between vertices and (ii) the jog edges are the same. Each
+// interval keeps a set L(I) of non-redundant labels (v, delta) with reduced
+// distance d(v') = delta + |v - v'| - pi(v) + pi(v'); intervals are
+// processed at their frontier J_I(delta) in increasing delta. Via edges are
+// relaxed per vertex of J_I(delta): their positions interleave on layers
+// whose neighbours have different pitches, so requiring (ii) for vias would
+// reduce most intervals to single vertices. Target vertices and vertices
+// with rip-up penalties form single-vertex intervals.
+class IntervalSearch
+{
+ public:
+  IntervalSearch(const TrackGraph& graph, const FastGrid& grid)
+      : graph_(graph), grid_(grid)
+  {
+  }
+  SearchResult run(const SearchRequest& request);
+  int64_t intervals() const { return num_intervals_; }
+  int64_t labels() const { return num_labels_; }
+
+ private:
+  struct Label
+  {
+    int k;       // position index within the interval (0 = target end)
+    Cost delta;  // reduced distance at k
+    int32_t pred_interval;  // -1 for a source label
+    int pred_k;
+  };
+  struct Interval
+  {
+    int z, i;
+    int ja, jb;  // position range, inclusive
+    int dir;     // +1: k = j - ja (target end at ja); -1: k = jb - j
+    std::vector<Label> labels;
+    int frontier = 0;  // vertices with k < frontier are settled
+    int n() const { return jb - ja + 1; }
+    int jOf(int k) const { return dir > 0 ? ja + k : jb - k; }
+    int kOf(int j) const { return dir > 0 ? j - ja : jb - j; }
+  };
+  struct Event
+  {
+    Cost key;
+    int32_t interval;  // -1: sink (target reached)
+    int32_t aux;       // target index for a sink
+    bool operator>(const Event& o) const
+    {
+      return key != o.key ? key > o.key : interval > o.interval;
+    }
+  };
+
+  Cost futureCost(int z, int i, int j) const;
+  bool usableZero(size_t v, Kind k) const;
+  bool enter(size_t v, Kind k) const;
+  Cost penalty(size_t v, Kind k) const;
+  bool inWindow(int z, int i, int j, size_t& li) const;
+  int intervalOf(int z, int i, int j);
+  int buildInterval(int z, int i, int j);
+  int jogSignature(int z, int i, int j, size_t v) const;
+  Cost value(const Interval& iv, int k) const;
+  const Label* argLabel(const Interval& iv, int k) const;
+  void addLabel(int interval, int k, Cost delta, int pred_interval, int pred_k);
+  void process(int interval);
+  void pushEvent(int interval);
+
+  const TrackGraph& graph_;
+  const FastGrid& grid_;
+  const SearchRequest* req_ = nullptr;
+  SearchResult* res_ = nullptr;
+  Cost min_via_cost_ = 0;
+
+  struct Window
+  {
+    int i0 = 0, ni = 0, j0 = 0, nj = 0;
+    size_t wbase = 0;
+  };
+  std::vector<Window> window_;
+  std::vector<int32_t> interval_id_;
+  std::vector<uint32_t> stamp_;
+  std::vector<uint32_t> source_stamp_;
+  std::vector<uint32_t> target_stamp_;
+  std::vector<int32_t> target_index_;
+  uint32_t epoch_ = 0;
+  std::vector<Interval> intervals_;
+  std::vector<Event> heap_;
+  int64_t num_intervals_ = 0;
+  int64_t num_labels_ = 0;
 };
 
 }  // namespace drt::br

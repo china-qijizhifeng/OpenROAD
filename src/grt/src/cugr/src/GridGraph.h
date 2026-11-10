@@ -305,6 +305,9 @@ class GridGraph
     return stackPadLength(layer, low, high);
   }
   bool isViaDemandEnabled() const { return constants_.via_demand_enabled; }
+  // BonnRoute: grid cells (layer, x, y) of all ODB access points of one pin
+  // (all APs, not only the preferred one); empty if the pin has none.
+  std::vector<GRPoint> pinAccessCells(const GRNet* net, int pin_idx) const;
   // Visits every edge charge addTreeUsage would deposit for a native tree;
   // `demand` already includes the layer's NDR factor.
   void forEachTreeDemand(

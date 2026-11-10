@@ -139,6 +139,7 @@ class BonnRouteDR
   {
     br::Region region;
     std::unique_ptr<br::PathSearch> search;
+    std::unique_ptr<br::IntervalSearch> interval_search;
     int64_t searches = 0;
     int64_t heap_pops = 0;
     int64_t settled = 0;

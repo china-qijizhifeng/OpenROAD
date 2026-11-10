@@ -39,9 +39,9 @@ struct BonnRouteParams
   // Algorithm 2: number of phases t and price update parameter epsilon.
   int phases = 125;
   double epsilon = 1.0;
-  // A net keeps its previous solution while its price grew by at most this
-  // factor since the oracle produced it (prices never decrease, so the
-  // previous oracle value is a lower bound of the current optimum).
+  // A net keeps its previous solution while its current price is within
+  // this factor of a certified lower bound of the current oracle optimum
+  // (see the reuse certificate in resourceSharing()).
   double reuse_tolerance = 0.1;
   // Objective resource bound: (1 + slack) * congestion-free objective.
   double objective_slack = 0.05;
@@ -60,6 +60,10 @@ struct BonnRouteParams
   // Randomized rounding seed and re-choose passes.
   unsigned seed = 1;
   int repair_passes = 8;
+  // Pins as vertex sets V_p (Sec. 2.1); false = one pre-selected cell.
+  bool pin_sets = true;
+  // Oracle on the whole grid graph instead of the expanded net bbox.
+  bool full_graph = false;
   // Run CUGR maze rip-up and reroute on nets still on overflowed edges.
   bool maze_cleanup = true;
   bool verbose = true;
@@ -82,11 +86,12 @@ class BonnRouteGlobal
   void run();
 
  private:
+  // A pin is the set V_p of grid vertices of its shapes (Sec. 2.1); the
+  // oracle may connect it at any of them (zero-cost clique K(V_p)).
   struct Terminal
   {
-    PointT point;
-    int low_layer;  // pin layer
-    int top_layer;  // layer the search connects to
+    std::vector<std::array<int, 3>> cells;  // (layer, x, y)
+    int pin_index = -1;
   };
   struct NodeRec
   {
@@ -102,6 +107,8 @@ class BonnRouteGlobal
     double objective = 0.0;
     uint64_t hash = 0;
     int count = 0;
+    // Cell chosen for each terminal (same order as NetState::terminals).
+    std::vector<std::array<int16_t, 3>> pin_cells;
   };
   struct NetState
   {
@@ -111,9 +118,16 @@ class BonnRouteGlobal
     std::vector<Candidate> candidates;
     int last = -1;
     double last_log_cost = 0.0;  // log of the oracle value (absolute prices)
-    double last_log_objective = 0.0;  // ln y_obj when it was computed
     int chosen = -1;
     bool trivial = false;
+    // Single-cell net: the pin stack at `trivial_point`.
+    PointT trivial_point;
+    int trivial_low = 0;
+    int trivial_top = 0;
+    // ln of the congestion-free objective of the phase-0 oracle; together
+    // with the objective price it bounds opt_n(y) from below (reuse
+    // certificate, see resourceSharing()).
+    double log_base_objective = -1e300;
     int oracle_failures = 0;
   };
   struct Scratch;
@@ -122,6 +136,9 @@ class BonnRouteGlobal
     bool ok = false;
     Candidate candidate;
     double log_cost = 0.0;
+    double search_cost = 0.0;  // Dijkstra length of the last connection
+    bool checked = false;
+    bool mismatch = false;
   };
 
   void prepareNets();
@@ -132,9 +149,12 @@ class BonnRouteGlobal
                       bool whole_grid) const;
   bool buildCandidate(const NetState& state,
                       const std::vector<std::array<int, 3>>& tree_edges,
+                      const std::vector<std::array<int, 3>>& pin_cells,
                       Candidate& candidate) const;
+  double padCost(int layer, int x, int y, double pad, const GRNet* net) const;
   std::shared_ptr<GRTreeNode> buildTree(const Candidate& candidate) const;
   double logCost(const Candidate& candidate) const;
+  double linearCost(const Candidate& candidate) const;
   void applyPrices(const Candidate& candidate);
   void renormalize();
   int insertCandidate(NetState& state, Candidate&& candidate);
@@ -149,7 +169,6 @@ class BonnRouteGlobal
   }
   double wireObjective(int layer, int x, int y) const;
   double wireCost(int layer, int x, int y, double factor) const;
-  double viaCost(int layer, int x, int y, const GRNet* net) const;
 
   GridGraph* grid_graph_;
   std::vector<GRNet*> nets_;
@@ -184,6 +203,8 @@ class BonnRouteGlobal
   // Statistics.
   int64_t oracle_calls_ = 0;
   int64_t reuses_ = 0;
+  int64_t cost_checks_ = 0;
+  int64_t cost_mismatches_ = 0;
 };
 
 }  // namespace grt

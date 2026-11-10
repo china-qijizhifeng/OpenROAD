@@ -1098,9 +1098,6 @@ std::vector<odb::dbNet*> CUGR::route(bool incremental)
     // the CUGR maze stages below clean up the remaining overflow.
     bonnRoute(net_indices);
     updateCongestedNets(net_indices);
-    if (bonnroute_params_ && !bonnroute_params_->maze_cleanup) {
-      net_indices.clear();
-    }
   } else {
     patternRoute(net_indices);
 
@@ -1118,16 +1115,27 @@ std::vector<odb::dbNet*> CUGR::route(bool incremental)
   }
 
   debugPass("stage 3");
-  if (verbose_ && !net_indices.empty()) {
-    logger_->report("Stage 4: Maze routing on sparsified graph.");
-  }
-  mazeRoute(net_indices, CugrStage::mazeRoute, /* iteration */ 0, {});
-  debugPass("stage 4");
-  if (!incremental) {
-    updateCongestedNets(net_indices);
-  }
+  // maze_cleanup=0 keeps the BonnRoute result exactly: no CUGR maze stage
+  // and no iterative rip-up and reroute.
+  const bool cugr_cleanup
+      = !use_bonnroute || !bonnroute_params_ || bonnroute_params_->maze_cleanup;
+  if (cugr_cleanup) {
+    if (verbose_ && !net_indices.empty()) {
+      logger_->report("Stage 4: Maze routing on sparsified graph.");
+    }
+    mazeRoute(net_indices, CugrStage::mazeRoute, /* iteration */ 0, {});
+    debugPass("stage 4");
+    if (!incremental) {
+      updateCongestedNets(net_indices);
+    }
 
-  iterativeRRR(net_indices, {});
+    iterativeRRR(net_indices, {});
+  } else if (verbose_) {
+    logger_->report(
+        "BonnRoute: CUGR clean-up disabled; {} nets remain on overflowed "
+        "edges.",
+        net_indices.size());
+  }
   // The relief's moves need new routes and guides in GlobalRouter too.
   std::vector<odb::dbNet*> moved;
   if (incremental) {

@@ -99,12 +99,14 @@ void PathSearch::settle(const int z,
         continue;
       }
       const size_t w = graph_.vertex(z, i2, j);
-      if (!enter(w, kJog)) {
+      const size_t edge = di > 0 ? v : w;
+      if (!enter(w, kJog) || !enter(edge, kJogEdge)) {
         continue;
       }
       const Cost c
           = layer.jog_factor * std::abs(layer.tracks[i2] - layer.tracks[i])
-            + vertexPenalty(w, kJog) + (is_source ? 0 : vertexPenalty(v, kJog));
+            + vertexPenalty(w, kJog) + vertexPenalty(edge, kJogEdge)
+            + (is_source ? 0 : vertexPenalty(v, kJog));
       relax(v, w, g + c, di > 0 ? kFromTrackBelow : kFromTrackAbove, 0);
     }
   }
@@ -216,7 +218,6 @@ SearchResult PathSearch::run(const SearchRequest& request)
   min_via_cost_ = graph_.minViaCost();
   heap_.clear();
   setupWindow(request);
-  const bool intervals = request.use_intervals;
 
   for (size_t t = 0; t < request.targets.size(); t++) {
     int z, i, j;
@@ -285,11 +286,13 @@ SearchResult PathSearch::run(const SearchRequest& request)
           continue;
         }
         const size_t w = graph_.vertex(z, i, j2);
-        if (!enter(w, kWire)) {
+        const size_t edge = d > 0 ? item.v : w;
+        if (!enter(w, kWire) || !enter(edge, kWireEdge)) {
           continue;
         }
         const Cost c = std::abs(layer.positions[j2] - layer.positions[j])
-                       + vertexPenalty(w, kWire);
+                       + vertexPenalty(w, kWire)
+                       + vertexPenalty(edge, kWireEdge);
         relax(item.v,
               w,
               item.g + c,
@@ -310,11 +313,13 @@ SearchResult PathSearch::run(const SearchRequest& request)
         break;
       }
       const size_t w = graph_.vertex(z, i, j2);
-      if (!enter(w, kWire)) {
+      const size_t edge = d > 0 ? graph_.vertex(z, i, cj) : w;
+      if (!enter(w, kWire) || !enter(edge, kWireEdge)) {
         break;
       }
       const Cost ng = g + std::abs(layer.positions[j2] - layer.positions[cj])
-                      + vertexPenalty(w, kWire);
+                      + vertexPenalty(w, kWire)
+                      + vertexPenalty(edge, kWireEdge);
       size_t lw;
       if (!local(z, i, j2, lw)) {
         break;
@@ -327,12 +332,6 @@ SearchResult PathSearch::run(const SearchRequest& request)
       parent_[lw] = d > 0 ? kFromLower : kFromHigher;
       const auto [x, y] = layer.point(i, j2);
       const Cost key = ng + futureCost(z, x, y);
-      if (intervals && key == item.key) {
-        settle(z, i, j2, w, ng);
-        cj = j2;
-        g = ng;
-        continue;
-      }
       push(Item{key, ng, w, static_cast<int8_t>(d), 0});
       break;
     }

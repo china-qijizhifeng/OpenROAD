@@ -250,33 +250,31 @@ void BonnRouteDR::markShape(const RShape& shape,
                    const frCoord ylo,
                    const frCoord xhi,
                    const frCoord yhi) {
-    if (xlo > xhi || ylo > yhi) {
-      return;
-    }
-    const br::TrackLayer& l = graph_.layers[z];
-    const frCoord clo = l.horizontal ? ylo : xlo;
-    const frCoord chi = l.horizontal ? yhi : xhi;
-    const frCoord alo = l.horizontal ? xlo : ylo;
-    const frCoord ahi = l.horizontal ? xhi : yhi;
-    const int i0 = static_cast<int>(std::ranges::lower_bound(l.tracks, clo)
-                                    - l.tracks.begin());
-    const int i1 = static_cast<int>(std::ranges::upper_bound(l.tracks, chi)
-                                    - l.tracks.begin());
-    const int j0 = static_cast<int>(std::ranges::lower_bound(l.positions, alo)
-                                    - l.positions.begin());
-    const int j1 = static_cast<int>(std::ranges::upper_bound(l.positions, ahi)
-                                    - l.positions.begin());
-    for (int i = i0; i < i1; i++) {
-      for (int j = j0; j < j1; j++) {
-        const size_t v = graph_.vertex(z, i, j);
-        if (mode == 0) {
-          grid_.addFixed(v, kind);
-        } else if (mode == 1) {
-          grid_.addPin(v, kind, owner);
-        } else {
-          grid_.addRouted(v, kind, delta);
-        }
-      }
+    br::forEachBlocked(
+        graph_.layers[z], kind, xlo, ylo, xhi, yhi, [&](int i, int j) {
+          const size_t v = graph_.vertex(z, i, j);
+          if (mode == 0) {
+            grid_.addFixed(v, kind);
+          } else if (mode == 1) {
+            grid_.addPin(v, kind, owner);
+          } else {
+            grid_.addRouted(v, kind, delta);
+          }
+        });
+    // The swept edges of wires and jogs (Sec. 3.6 edge exceptions).
+    if (kind == br::kWire || kind == br::kJog) {
+      const Kind edge = kind == br::kWire ? br::kWireEdge : br::kJogEdge;
+      br::forEachBlocked(
+          graph_.layers[z], edge, xlo, ylo, xhi, yhi, [&](int i, int j) {
+            const size_t v = graph_.vertex(z, i, j);
+            if (mode == 0) {
+              grid_.addFixed(v, edge);
+            } else if (mode == 1) {
+              grid_.addPin(v, edge, owner);
+            } else {
+              grid_.addRouted(v, edge, delta);
+            }
+          });
     }
   };
   // Origins p at which `model + p` is closer than (sx, sy) to r.
@@ -805,6 +803,21 @@ bool BonnRouteDR::connect(NetData& net,
       if (connected[t]) {
         continue;
       }
+      for (size_t o = 0; o < net.terms[t].options.size(); o++) {
+        if (valid[t][o]) {
+          const AccessOption& opt = net.terms[t].options[o];
+          req.targets.push_back(
+              {opt.vertex, opt.cost, t * 1024 + static_cast<int>(o)});
+        }
+      }
+    }
+    // Future cost pi_H (Sec. 4.1): l1 distance plus via lower bound to the
+    // nearest target point; per-term boxes keep it cheap for large nets.
+    const bool per_point = req.targets.size() <= 64;
+    for (int t = 1; t < num_terms; t++) {
+      if (connected[t]) {
+        continue;
+      }
       br::TargetBox box{std::numeric_limits<int>::max(),
                         std::numeric_limits<int>::max(),
                         std::numeric_limits<int>::min(),
@@ -816,9 +829,11 @@ bool BonnRouteDR::connect(NetData& net,
           continue;
         }
         const AccessOption& opt = net.terms[t].options[o];
-        req.targets.push_back(
-            {opt.vertex, opt.cost, t * 1024 + static_cast<int>(o)});
         const auto [x, y] = graph_.point(opt.vertex);
+        if (per_point) {
+          req.target_boxes.push_back({x, y, x, y, opt.z, opt.z});
+          continue;
+        }
         box.xlo = std::min(box.xlo, x);
         box.ylo = std::min(box.ylo, y);
         box.xhi = std::max(box.xhi, x);
@@ -826,9 +841,13 @@ bool BonnRouteDR::connect(NetData& net,
         box.zlo = std::min(box.zlo, opt.z);
         box.zhi = std::max(box.zhi, opt.z);
       }
-      req.target_boxes.push_back(box);
+      if (!per_point) {
+        req.target_boxes.push_back(box);
+      }
     }
-    br::SearchResult res = worker.search->run(req);
+    br::SearchResult res = params_.use_intervals
+                               ? worker.interval_search->run(req)
+                               : worker.search->run(req);
     worker.searches++;
     worker.heap_pops += res.heap_pops;
     worker.settled += res.settled;
@@ -1174,6 +1193,7 @@ void BonnRouteDR::main()
   for (Worker& w : workers_) {
     w.region.init(graph_.numLayers(), tiles_x_, tiles_y_);
     w.search = std::make_unique<br::PathSearch>(graph_, grid_);
+    w.interval_search = std::make_unique<br::IntervalSearch>(graph_, grid_);
   }
   buildNets();
   buildFixed();
@@ -1228,10 +1248,14 @@ void BonnRouteDR::main()
   int64_t searches = 0;
   int64_t heap_pops = 0;
   int64_t settled = 0;
+  int64_t intervals = 0;
+  int64_t labels = 0;
   for (const Worker& w : workers_) {
     searches += w.searches;
     heap_pops += w.heap_pops;
     settled += w.settled;
+    intervals += w.interval_search->intervals();
+    labels += w.interval_search->labels();
   }
   if (params_.verbose) {
     logger_->report(
@@ -1247,13 +1271,17 @@ void BonnRouteDR::main()
         setup_time);
     logger_->report(
         "BonnRoute DR: routed {} nets, {} left to FlexDR, {} skipped; {} "
-        "searches, {} heap pops, {} labels, {} rip-ups, {:.2f}s.",
+        "searches ({}), {} heap pops, {} settled vertices, {} intervals, "
+        "{} interval labels, {} rip-ups, {:.2f}s.",
         routed,
         failed,
         skipped,
         searches,
+        params_.use_intervals ? "interval labels" : "vertex labels",
         heap_pops,
         settled,
+        intervals,
+        labels,
         ripup_events_,
         timer.elapsed());
   }

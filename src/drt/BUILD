@@ -47,6 +47,7 @@ cc_library(
         "src/br/BonnRouteDR.h",
         "src/br/BrCore.cpp",
         "src/br/BrCore.h",
+        "src/br/BrInterval.cpp",
         "src/TritonRoute.cpp",
         "src/db/drObj/drAccessPattern.cpp",
         "src/db/drObj/drNet.cpp",

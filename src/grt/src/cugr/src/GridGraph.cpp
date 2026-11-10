@@ -683,6 +683,33 @@ std::vector<AccessPoint> GridGraph::translateAccessPointsToGrid(
   return aps_on_grid;
 }
 
+std::vector<GRPoint> GridGraph::pinAccessCells(const GRNet* net,
+                                               const int pin_idx) const
+{
+  std::vector<odb::dbAccessPoint*> aps;
+  odb::Point location(0, 0);
+  const auto& bterms = net->getBTermsByPinIndex();
+  const auto& iterms = net->getITermsByPinIndex();
+  if (auto it = bterms.find(pin_idx); it != bterms.end()) {
+    for (const odb::dbBPin* bpin : it->second->getBPins()) {
+      const auto& pas = bpin->getAccessPoints();
+      aps.insert(aps.end(), pas.begin(), pas.end());
+    }
+  } else if (auto it = iterms.find(pin_idx); it != iterms.end()) {
+    for (const auto& [mpin, pin_aps] : it->second->getAccessPoints()) {
+      aps.insert(aps.end(), pin_aps.begin(), pin_aps.end());
+    }
+    int x, y;
+    it->second->getInst()->getLocation(x, y);
+    location = odb::Point(x, y);
+  }
+  std::vector<GRPoint> cells;
+  for (const AccessPoint& ap : translateAccessPointsToGrid(aps, location)) {
+    cells.emplace_back(ap.layers.low(), ap.point.x(), ap.point.y());
+  }
+  return cells;
+}
+
 AccessPoint GridGraph::selectAccessPoint(
     const std::vector<AccessPoint>& access_points) const
 {
