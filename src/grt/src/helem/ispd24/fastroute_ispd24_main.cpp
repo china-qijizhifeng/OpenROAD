@@ -110,6 +110,20 @@ int main(int argc, char** argv)
   odb::dbDatabase* db = odb::dbDatabase::create();
   db->setLogger(&logger);
   odb::dbTech* tech = odb::dbTech::create(db, "ispd24");
+  // FastRoute reads routing layers (width, resistance, upper via layer) in
+  // run(); mirror the contest layers as routing layers with cut layers.
+  for (int l = 0; l < graph.num_layers; ++l) {
+    if (l > 0) {
+      odb::dbTechLayer::create(
+          tech, ("via" + std::to_string(l)).c_str(), odb::dbTechLayerType::CUT);
+    }
+    odb::dbTechLayer* layer = odb::dbTechLayer::create(
+        tech, graph.layers[l].name.c_str(), odb::dbTechLayerType::ROUTING);
+    layer->setWidth(100);
+    layer->setDirection(graph.layers[l].horizontal
+                            ? odb::dbTechLayerDir::HORIZONTAL
+                            : odb::dbTechLayerDir::VERTICAL);
+  }
   odb::dbChip* chip = odb::dbChip::create(db, tech);
   odb::dbBlock* block = odb::dbBlock::create(chip, "top");
   stt::SteinerTreeBuilder stt_builder(&logger);
