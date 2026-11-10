@@ -139,8 +139,15 @@ class BonnRouteDR
   void buildAccess(NetData& net);
   void reserveAccess(NetData& net);
   bool routeNet(NetData& net, bool allow_ripup);
-  bool connect(NetData& net, int dilation, bool ripup);
-  void buildRegion(const NetData& net, int dilation);
+  bool connect(NetData& net, int dilation, bool ripup, Worker& worker);
+  void buildRegion(const NetData& net, int dilation, br::Region& region);
+  // Tile box of everything the net's searches may touch, with halo.
+  void netTileBox(const NetData& net,
+                  int& xlo,
+                  int& ylo,
+                  int& xhi,
+                  int& yhi) const;
+  void routeParallel(std::vector<int>& order, std::vector<int>& failed);
   void pathToGeometry(const std::vector<size_t>& path, NetData& net) const;
   void shapesOf(const NetData& net, std::vector<RShape>& shapes) const;
   void viaShapes(const OutVia& via, std::vector<RShape>& shapes) const;
@@ -164,8 +171,17 @@ class BonnRouteDR
 
   br::TrackGraph graph_;
   br::FastGrid grid_;
-  br::Region region_;
-  std::unique_ptr<br::PathSearch> search_;
+  // Per-thread search state (Sec. 5.1: nets in disjoint areas are routed
+  // in parallel).
+  struct Worker
+  {
+    br::Region region;
+    std::unique_ptr<br::PathSearch> search;
+    int64_t searches = 0;
+    int64_t heap_pops = 0;
+    int64_t settled = 0;
+  };
+  std::vector<Worker> workers_;
   std::vector<LayerInfo> layers_;  // per z
   std::vector<int> z_of_fr_;       // routing layer -> z, -1
   std::vector<int> cut_z_of_fr_;   // cut layer -> lower z, -1
@@ -188,9 +204,6 @@ class BonnRouteDR
   std::vector<int> pending_victims_;
 
   // Statistics.
-  int64_t searches_ = 0;
-  int64_t heap_pops_ = 0;
-  int64_t settled_ = 0;
   int64_t ripup_events_ = 0;
 };
 

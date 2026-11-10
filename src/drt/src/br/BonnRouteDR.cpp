@@ -3,7 +3,10 @@
 
 #include "br/BonnRouteDR.h"
 
+#include <omp.h>
+
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -653,16 +656,18 @@ void BonnRouteDR::reserveAccess(NetData& net)
   }
 }
 
-void BonnRouteDR::buildRegion(const NetData& net, const int dilation)
+void BonnRouteDR::buildRegion(const NetData& net,
+                              const int dilation,
+                              br::Region& region)
 {
-  region_.reset();
+  region.reset();
   const int num_z = graph_.numLayers();
   frBlock* block = design_->getTopBlock();
   auto allow = [&](int z, int tx, int ty) {
     for (int dz = -params_.layer_dilation; dz <= params_.layer_dilation; dz++) {
       for (int dx = -dilation; dx <= dilation; dx++) {
         for (int dy = -dilation; dy <= dilation; dy++) {
-          region_.allow(z + dz, tx + dx, ty + dy);
+          region.allow(z + dz, tx + dx, ty + dy);
         }
       }
     }
@@ -730,7 +735,10 @@ void BonnRouteDR::pathToGeometry(const std::vector<size_t>& path,
   }
 }
 
-bool BonnRouteDR::connect(NetData& net, const int dilation, const bool ripup)
+bool BonnRouteDR::connect(NetData& net,
+                          const int dilation,
+                          const bool ripup,
+                          Worker& worker)
 {
   net.wires.clear();
   net.vias.clear();
@@ -738,7 +746,7 @@ bool BonnRouteDR::connect(NetData& net, const int dilation, const bool ripup)
   for (Term& t : net.terms) {
     t.chosen = -1;
   }
-  buildRegion(net, dilation);
+  buildRegion(net, dilation, worker.region);
   const int num_terms = static_cast<int>(net.terms.size());
   // Options usable now: stub free of routed foreign shapes (unless rip-up)
   // and an enterable attachment vertex.
@@ -775,7 +783,7 @@ bool BonnRouteDR::connect(NetData& net, const int dilation, const bool ripup)
   }
   br::SearchRequest req;
   req.net = net.id;
-  req.region = &region_;
+  req.region = &worker.region;
   req.ripup = ripup;
   req.ripup_cost = static_cast<Cost>(params_.ripup_cost) * layers_[0].pitch;
   req.use_intervals = params_.use_intervals;
@@ -820,10 +828,10 @@ bool BonnRouteDR::connect(NetData& net, const int dilation, const bool ripup)
       }
       req.target_boxes.push_back(box);
     }
-    br::SearchResult res = search_->run(req);
-    searches_++;
-    heap_pops_ += res.heap_pops;
-    settled_ += res.settled;
+    br::SearchResult res = worker.search->run(req);
+    worker.searches++;
+    worker.heap_pops += res.heap_pops;
+    worker.settled += res.settled;
     if (!res.found) {
       return false;
     }
@@ -948,16 +956,123 @@ void BonnRouteDR::collectVictims(const NetData& net,
   std::ranges::sort(victims);
 }
 
+void BonnRouteDR::netTileBox(const NetData& net,
+                             int& xlo,
+                             int& ylo,
+                             int& xhi,
+                             int& yhi) const
+{
+  frBlock* block = design_->getTopBlock();
+  xlo = ylo = std::numeric_limits<int>::max();
+  xhi = yhi = -1;
+  auto add = [&](int x, int y) {
+    xlo = std::min(xlo, x);
+    ylo = std::min(ylo, y);
+    xhi = std::max(xhi, x);
+    yhi = std::max(yhi, y);
+  };
+  for (const auto& guide : net.net->getGuides()) {
+    const odb::Point a = block->getGCellIdx(guide->getBeginPoint());
+    const odb::Point b = block->getGCellIdx(guide->getEndPoint());
+    add(a.x(), a.y());
+    add(b.x(), b.y());
+  }
+  for (const Term& term : net.terms) {
+    for (const AccessOption& o : term.options) {
+      const auto [x, y] = graph_.point(o.vertex);
+      add(tileX(x), tileY(y));
+    }
+  }
+  // Retry dilation plus one tile for the spacing halo of committed shapes.
+  const int halo = params_.retry_dilation + 1;
+  xlo -= halo;
+  ylo -= halo;
+  xhi += halo;
+  yhi += halo;
+}
+
+void BonnRouteDR::routeParallel(std::vector<int>& order,
+                                std::vector<int>& failed)
+{
+  // Batches of nets whose tile boxes are pairwise disjoint are routed in
+  // parallel against the committed state, then committed in net order.
+  // Batch composition does not depend on the thread count.
+  std::vector<uint32_t> stamp(static_cast<size_t>(tiles_x_) * tiles_y_, 0);
+  uint32_t round = 0;
+  std::vector<std::array<int, 4>> boxes(nets_.size());
+  for (const int id : order) {
+    auto& b = boxes[id];
+    netTileBox(nets_[id], b[0], b[1], b[2], b[3]);
+    b[0] = std::max(b[0], 0);
+    b[1] = std::max(b[1], 0);
+    b[2] = std::min(b[2], tiles_x_ - 1);
+    b[3] = std::min(b[3], tiles_y_ - 1);
+  }
+  std::vector<int> pending = order;
+  std::vector<int> batch;
+  std::vector<int> next;
+  std::vector<char> ok;
+  const int threads = static_cast<int>(workers_.size());
+  while (!pending.empty()) {
+    round++;
+    batch.clear();
+    next.clear();
+    for (const int id : pending) {
+      const auto [xlo, ylo, xhi, yhi] = boxes[id];
+      bool free = true;
+      for (int x = xlo; x <= xhi && free; x++) {
+        for (int y = ylo; y <= yhi; y++) {
+          if (stamp[static_cast<size_t>(x) * tiles_y_ + y] == round) {
+            free = false;
+            break;
+          }
+        }
+      }
+      if (!free) {
+        next.push_back(id);
+        continue;
+      }
+      for (int x = xlo; x <= xhi; x++) {
+        for (int y = ylo; y <= yhi; y++) {
+          stamp[static_cast<size_t>(x) * tiles_y_ + y] = round;
+        }
+      }
+      batch.push_back(id);
+    }
+    ok.assign(batch.size(), 0);
+#pragma omp parallel for num_threads(threads) schedule(dynamic, 1)
+    for (int k = 0; k < static_cast<int>(batch.size()); k++) {
+      Worker& w = workers_[omp_get_thread_num()];
+      NetData& net = nets_[batch[k]];
+      ok[k] = connect(net, 0, false, w)
+              || connect(net, params_.retry_dilation, false, w);
+    }
+    for (size_t k = 0; k < batch.size(); k++) {
+      NetData& net = nets_[batch[k]];
+      if (ok[k]) {
+        commitNet(net);
+      } else {
+        net.wires.clear();
+        net.vias.clear();
+        failed.push_back(net.id);
+      }
+    }
+    pending.swap(next);
+  }
+}
+
 bool BonnRouteDR::routeNet(NetData& net, const bool allow_ripup)
 {
   if (net.skip || net.failed) {
     return false;
   }
-  if (connect(net, 0, false) || connect(net, params_.retry_dilation, false)) {
+  Worker& w = workers_[0];
+  if (connect(net, 0, false, w)
+      || connect(net, params_.retry_dilation, false, w)) {
     commitNet(net);
     return true;
   }
-  if (!allow_ripup || !connect(net, params_.retry_dilation, true)) {
+  if (!allow_ripup || !connect(net, params_.retry_dilation, true, w)) {
     net.wires.clear();
     net.vias.clear();
     net.failed = true;
@@ -1055,8 +1170,11 @@ void BonnRouteDR::main()
     return;
   }
   grid_.init(graph_.numVertices());
-  region_.init(graph_.numLayers(), tiles_x_, tiles_y_);
-  search_ = std::make_unique<br::PathSearch>(graph_, grid_);
+  workers_.resize(std::max(1, router_cfg_->MAX_THREADS));
+  for (Worker& w : workers_) {
+    w.region.init(graph_.numLayers(), tiles_x_, tiles_y_);
+    w.search = std::make_unique<br::PathSearch>(graph_, grid_);
+  }
   buildNets();
   buildFixed();
   for (NetData& net : nets_) {
@@ -1078,7 +1196,11 @@ void BonnRouteDR::main()
   }
   std::ranges::stable_sort(
       order, [&](int a, int b) { return nets_[a].hpwl < nets_[b].hpwl; });
-  std::deque<int> queue(order.begin(), order.end());
+  std::vector<int> failed_first;
+  routeParallel(order, failed_first);
+  const double parallel_time = timer.elapsed();
+  // Nets without a rip-up-free route: serial rip-up and reroute.
+  std::deque<int> queue(failed_first.begin(), failed_first.end());
   while (!queue.empty()) {
     const int id = queue.front();
     queue.pop_front();
@@ -1103,7 +1225,21 @@ void BonnRouteDR::main()
     failed += !net.routed && !net.skip;
     skipped += net.skip;
   }
+  int64_t searches = 0;
+  int64_t heap_pops = 0;
+  int64_t settled = 0;
+  for (const Worker& w : workers_) {
+    searches += w.searches;
+    heap_pops += w.heap_pops;
+    settled += w.settled;
+  }
   if (params_.verbose) {
+    logger_->report(
+        "BonnRoute DR: {} threads, parallel phase until {:.2f}s, {} nets "
+        "to the rip-up phase.",
+        workers_.size(),
+        parallel_time,
+        failed_first.size());
     logger_->report(
         "BonnRoute DR: {} layers, {} track-graph vertices, setup {:.2f}s.",
         graph_.numLayers(),
@@ -1115,9 +1251,9 @@ void BonnRouteDR::main()
         routed,
         failed,
         skipped,
-        searches_,
-        heap_pops_,
-        settled_,
+        searches,
+        heap_pops,
+        settled,
         ripup_events_,
         timer.elapsed());
   }
