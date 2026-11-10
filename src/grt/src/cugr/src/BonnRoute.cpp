@@ -31,7 +31,6 @@ namespace grt {
 using utl::GRT;
 
 namespace {
-constexpr double kInf = std::numeric_limits<double>::infinity();
 // Keep exp(ln y - shift) inside the double range.
 constexpr double kRenormalizeAbove = 600.0;
 constexpr double kRenormalizeTo = 300.0;
