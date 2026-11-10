@@ -299,6 +299,9 @@ class HelemRouter::Impl
 
   // Layer assignment
   void runLayerAssignment();
+  // Diagnostics: 2D wire length of segment endpoints (topology bound) or of
+  // the current paths, in DBU; bends of the current paths.
+  void logGeometryStats(const std::string& stage, bool topology) const;
   NetAssignment assignNet(int net, Scratch& scratch) const;
   double wireCost3D(int layer, const GCellPoint& u, const GCellPoint& v) const;
   // Cost of the via cut between `layer` and `layer + 1` at a GCell: unit via
@@ -1340,6 +1343,47 @@ void HelemRouter::Impl::runLayerAssignment()
   }
 }
 
+void HelemRouter::Impl::logGeometryStats(const std::string& stage,
+                                         bool topology) const
+{
+  auto span_x = [&](int a, int b) {
+    int64_t length = 0;
+    for (int x = std::min(a, b); x < std::max(a, b); ++x) {
+      length += graph_.horizontal_edge_length[x];
+    }
+    return length;
+  };
+  auto span_y = [&](int a, int b) {
+    int64_t length = 0;
+    for (int y = std::min(a, b); y < std::max(a, b); ++y) {
+      length += graph_.vertical_edge_length[y];
+    }
+    return length;
+  };
+  int64_t length = 0;
+  int64_t bends = 0;
+  for (const Segment& segment : segments_) {
+    if (topology) {
+      length += span_x(segment.a.x, segment.b.x) + span_y(segment.a.y, segment.b.y);
+      continue;
+    }
+    const Path2D& path = segment.path;
+    for (int i = 0; i + 1 < path.count; ++i) {
+      length += span_x(path.points[i].x, path.points[i + 1].x)
+                + span_y(path.points[i].y, path.points[i + 1].y);
+    }
+    bends += std::max(0, path.count - 2);
+  }
+  int64_t pin_nodes = 0;
+  for (const NetTree& tree : trees_) {
+    pin_nodes += tree.segment_count > 0 ? tree.pin_node_count : 0;
+  }
+  log("[helem] geometry " + stage + " wire_dbu=" + std::to_string(length)
+      + " wire_cost=" + std::to_string(graph_.unit_wire_cost * length)
+      + (topology ? "" : " bends=" + std::to_string(bends))
+      + " pin_nodes=" + std::to_string(pin_nodes));
+}
+
 // ---------------------------------------------------------------------------
 
 std::vector<NetRoute3D> HelemRouter::Impl::run()
@@ -1372,6 +1416,7 @@ std::vector<NetRoute3D> HelemRouter::Impl::run()
     log("[helem] nets=" + std::to_string(nets_.size())
         + " segments=" + std::to_string(segments_.size()));
   }, false);
+  logGeometryStats("topology", true);
   stage("lr", [&] { runLagrangianRelaxation(); }, true);
   if (options_.verify_ledger) {
     verifyLedger("lr");
@@ -1384,6 +1429,7 @@ std::vector<NetRoute3D> HelemRouter::Impl::run()
         = std::chrono::duration<double>(Clock::now() - start).count();
     reports_.push_back(report);
   }
+  logGeometryStats("2d", false);
   stage("layer-assignment", [&] { runLayerAssignment(); }, false);
   char buffer[256];
   std::snprintf(buffer,

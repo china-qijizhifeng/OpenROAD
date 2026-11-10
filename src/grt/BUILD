@@ -372,6 +372,8 @@ cc_binary(
     deps = [
         ":fastroute",
         ":groute",
+        # GSegment's operator== and hash are defined in GlobalRouter.cpp.
+        ":grt_impl",
         ":helem_core",
         "//src/odb/src/db",
         "//src/stt",

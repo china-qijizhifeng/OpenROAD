@@ -11,6 +11,7 @@
 //
 // The last line on stdout is a JSON summary for experiment scripts.
 
+#include <algorithm>
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
@@ -26,7 +27,6 @@
 
 namespace {
 
-constexpr int kFluteAccuracy = 3;
 
 void usage()
 {
@@ -41,6 +41,8 @@ int main(int argc, char** argv)
   using grt::helem::HelemOptions;
   std::string cap_path, net_path, output_path;
   HelemOptions options;
+  int flute_accuracy = 10;
+  bool flute_in_dbu = true;
   options.threads = 8;
   for (int i = 1; i < argc; ++i) {
     const std::string arg = argv[i];
@@ -92,6 +94,10 @@ int main(int argc, char** argv)
       options.layer_assignment_batch_size = std::stoi(value());
     } else if (arg == "-cap2d-scale") {
       options.capacity_2d_scale = std::stod(value());
+    } else if (arg == "-flute-acc") {
+      flute_accuracy = std::stoi(value());
+    } else if (arg == "-flute-grid") {
+      flute_in_dbu = false;
     } else if (arg == "-bend") {
       options.bend_cost_scale = std::stod(value());
     } else if (arg == "-pin-access") {
@@ -143,15 +149,36 @@ int main(int argc, char** argv)
 
   stt::flt::Flute flute;
   flute.completeLUT();
-  auto steiner = [&flute](const std::vector<grt::helem::GCellPoint>& points) {
+  // GCell centres in DBU. The contest grid is anisotropic (e.g. 3800 x 2800),
+  // so the Steiner tree is built on centre coordinates, not on indices.
+  std::vector<int> center_x(graph.x_size, 0), center_y(graph.y_size, 0);
+  for (int x = 0; x + 1 < graph.x_size; ++x) {
+    center_x[x + 1] = center_x[x] + graph.horizontal_edge_length[x];
+  }
+  for (int y = 0; y + 1 < graph.y_size; ++y) {
+    center_y[y + 1] = center_y[y] + graph.vertical_edge_length[y];
+  }
+  auto to_index = [](const std::vector<int>& centers, int coordinate) {
+    return static_cast<int>(
+        std::lower_bound(centers.begin(), centers.end(), coordinate)
+        - centers.begin());
+  };
+  auto steiner = [&](const std::vector<grt::helem::GCellPoint>& points) {
     std::vector<int> xs, ys;
     xs.reserve(points.size());
     ys.reserve(points.size());
     for (const auto& p : points) {
-      xs.push_back(p.x);
-      ys.push_back(p.y);
+      xs.push_back(flute_in_dbu ? center_x[p.x] : p.x);
+      ys.push_back(flute_in_dbu ? center_y[p.y] : p.y);
     }
-    const stt::Tree tree = flute.flute(xs, ys, kFluteAccuracy);
+    stt::Tree tree = flute.flute(xs, ys, flute_accuracy);
+    if (flute_in_dbu) {
+      // Steiner points lie on the Hanan grid of the inputs, i.e. on centres.
+      for (stt::Branch& branch : tree.branch) {
+        branch.x = to_index(center_x, branch.x);
+        branch.y = to_index(center_y, branch.y);
+      }
+    }
     std::vector<grt::helem::SteinerEdge> edges;
     const int branches = tree.branchCount();
     edges.reserve(branches);
