@@ -303,11 +303,15 @@ class HelemRouter::Impl
   // the current paths, in DBU; bends of the current paths.
   void logGeometryStats(const std::string& stage, bool topology) const;
   NetAssignment assignNet(int net, Scratch& scratch) const;
+  NetAssignment assignNetTree(int net, Scratch& scratch) const;
   double wireCost3D(int layer, const GCellPoint& u, const GCellPoint& v) const;
   // Cost of the via cut between `layer` and `layer + 1` at a GCell: unit via
   // cost plus the overflow change of the stacked-via demand on `layer`.
   double viaCost3D(int layer, const GCellPoint& cell) const;
-  void commitNet(int net, const NetAssignment& assignment);
+  // Adds (sign 1) or removes (sign -1) the 3D demand of an assignment.
+  void applyDemand(const NetAssignment& assignment, int sign);
+  void buildRoute(int net, const NetAssignment& assignment);
+  double scoreOverflow3D() const;
 
   const GCellGraph& graph_;
   const std::vector<RoutingNet>& nets_;
@@ -1201,33 +1205,389 @@ NetAssignment HelemRouter::Impl::assignNet(int net, Scratch& scratch) const
   return result;
 }
 
-void HelemRouter::Impl::commitNet(int net, const NetAssignment& assignment)
+// Exact layer assignment of one net over its Steiner tree.
+//
+// Each segment (parent node u -> child node v) gets a matrix
+// C[s][e] = cheapest wire+via cost along its 2D path when the first wire
+// leaves u on layer s and the last wire enters v on layer e. A node's via
+// stack spans [low, high], which must cover the layer of the incoming wire,
+// the pin layers and the start layer of every child segment. Bottom-up,
+// node_cost[v][l] is the best cost of v's subtree when its incoming wire
+// arrives on layer l; spans are enumerated (L^2) per node.
+NetAssignment HelemRouter::Impl::assignNetTree(int net, Scratch& scratch) const
 {
-  NetRoute3D& route = routes_[net];
-  route.segments.clear();
+  const NetTree& tree = trees_[net];
+  if (tree.segment_count == 0) {
+    return assignNet(net, scratch);
+  }
+  const int layers = graph_.num_layers;
+  const int node_count = static_cast<int>(tree.nodes.size());
+
+  // Orient segments from node 0.
+  std::vector<std::vector<std::pair<int, int>>> adjacency(node_count);
+  for (int s = 0; s < tree.segment_count; ++s) {
+    const Segment& segment = segments_[tree.first_segment + s];
+    adjacency[segment.node_a].emplace_back(segment.node_b, s);
+    adjacency[segment.node_b].emplace_back(segment.node_a, s);
+  }
+  std::vector<int> order{0};
+  std::vector<int> parent_segment(node_count, -1);
+  std::vector<char> forward(tree.segment_count, 1);
+  std::vector<std::vector<int>> child_segments(node_count);
+  std::vector<int> segment_child(tree.segment_count, -1);
+  std::vector<char> visited(node_count, 0);
+  visited[0] = 1;
+  for (size_t head = 0; head < order.size(); ++head) {
+    const int node = order[head];
+    for (const auto& [next, s] : adjacency[node]) {
+      if (visited[next]) {
+        continue;
+      }
+      visited[next] = 1;
+      order.push_back(next);
+      parent_segment[next] = s;
+      forward[s] = segments_[tree.first_segment + s].node_a == node;
+      child_segments[node].push_back(s);
+      segment_child[s] = next;
+    }
+  }
+
+  // Cells of each oriented segment.
+  std::vector<std::vector<GCellPoint>> cells(tree.segment_count);
+  for (int s = 0; s < tree.segment_count; ++s) {
+    const Path2D& path = segments_[tree.first_segment + s].path;
+    std::vector<GCellPoint>& list = cells[s];
+    for (int i = 0; i + 1 < path.count; ++i) {
+      const GCellPoint& u = path.points[i];
+      const GCellPoint& v = path.points[i + 1];
+      const int dx = (v.x > u.x) - (v.x < u.x);
+      const int dy = (v.y > u.y) - (v.y < u.y);
+      GCellPoint p = u;
+      while (p != v) {
+        list.push_back(p);
+        p.x += dx;
+        p.y += dy;
+      }
+    }
+    list.push_back(path.points[path.count - 1]);
+    if (!forward[s]) {
+      std::reverse(list.begin(), list.end());
+    }
+  }
+
+  // Per-segment path DP for every start layer. dist/back are indexed
+  // [start][position][layer]; back holds the layer the wire of the previous
+  // step used before the via sweep at this position.
+  std::vector<std::vector<double>> cost_matrix(tree.segment_count);
+  std::vector<std::vector<int8_t>> back(tree.segment_count);
+  std::vector<double> prefix;  // via prefix per position
+  std::vector<double> current(layers), next(layers);
+  std::vector<int8_t> next_from(layers);
+  for (int s = 0; s < tree.segment_count; ++s) {
+    const std::vector<GCellPoint>& list = cells[s];
+    const int steps = static_cast<int>(list.size()) - 1;
+    std::vector<double>& matrix = cost_matrix[s];
+    matrix.assign(static_cast<size_t>(layers) * layers, kInfinity);
+    std::vector<int8_t>& from = back[s];
+    from.assign(static_cast<size_t>(layers) * (steps + 1) * layers, -1);
+    prefix.assign(static_cast<size_t>(steps + 1) * (layers + 1), 0.0);
+    for (int p = 1; p < steps; ++p) {
+      double* row = &prefix[static_cast<size_t>(p) * (layers + 1)];
+      for (int l = 0; l + 1 < layers; ++l) {
+        row[l + 1] = row[l] + viaCost3D(l, list[p]);
+      }
+    }
+    std::vector<double> wire(static_cast<size_t>(steps) * layers);
+    for (int p = 0; p < steps; ++p) {
+      for (int l = 0; l < layers; ++l) {
+        wire[static_cast<size_t>(p) * layers + l]
+            = wireCost3D(l, list[p], list[p + 1]);
+      }
+    }
+    for (int start = 0; start < layers; ++start) {
+      if (wire[start] == kInfinity) {
+        continue;
+      }
+      std::fill(current.begin(), current.end(), kInfinity);
+      current[start] = 0.0;
+      int8_t* start_from = &from[static_cast<size_t>(start) * (steps + 1) * layers];
+      for (int p = 0; p < steps; ++p) {
+        for (int l = 0; l < layers; ++l) {
+          next[l] = current[l] + wire[static_cast<size_t>(p) * layers + l];
+          next_from[l] = static_cast<int8_t>(l);
+        }
+        if (p + 1 < steps) {
+          const double* row = &prefix[static_cast<size_t>(p + 1) * (layers + 1)];
+          for (int l = 1; l < layers; ++l) {
+            const double cut = row[l] - row[l - 1];
+            if (next[l - 1] + cut < next[l]) {
+              next[l] = next[l - 1] + cut;
+              next_from[l] = next_from[l - 1];
+            }
+          }
+          for (int l = layers - 2; l >= 0; --l) {
+            const double cut = row[l + 1] - row[l];
+            if (next[l + 1] + cut < next[l]) {
+              next[l] = next[l + 1] + cut;
+              next_from[l] = next_from[l + 1];
+            }
+          }
+        }
+        std::copy(next_from.begin(),
+                  next_from.end(),
+                  start_from + static_cast<size_t>(p + 1) * layers);
+        current.swap(next);
+      }
+      for (int e = 0; e < layers; ++e) {
+        matrix[static_cast<size_t>(start) * layers + e] = current[e];
+      }
+    }
+  }
+
+  // Bottom-up node DP.
+  struct Choice
+  {
+    int8_t low = -1;
+    int8_t high = -1;
+  };
+  std::vector<std::vector<double>> node_cost(node_count,
+                                             std::vector<double>(layers, kInfinity));
+  std::vector<std::vector<Choice>> node_choice(node_count,
+                                               std::vector<Choice>(layers));
+  // child_best[s][l] = min_e C_s[l][e] + node_cost[child][e]; arg in child_end.
+  std::vector<std::vector<double>> child_best(tree.segment_count);
+  std::vector<std::vector<int8_t>> child_end(tree.segment_count);
+  // range_min[s][low * L + high] and its argmin layer.
+  std::vector<std::vector<double>> range_min(tree.segment_count);
+  std::vector<std::vector<int8_t>> range_arg(tree.segment_count);
+  std::vector<double> via_prefix(layers + 1);
+  double root_cost = kInfinity;
+  Choice root_choice;
+  for (int k = static_cast<int>(order.size()) - 1; k >= 0; --k) {
+    const int v = order[k];
+    for (int s : child_segments[v]) {
+      const int child = segment_child[s];
+      std::vector<double>& best = child_best[s];
+      std::vector<int8_t>& end = child_end[s];
+      best.assign(layers, kInfinity);
+      end.assign(layers, -1);
+      for (int l = 0; l < layers; ++l) {
+        for (int e = 0; e < layers; ++e) {
+          const double cost = cost_matrix[s][static_cast<size_t>(l) * layers + e]
+                              + node_cost[child][e];
+          if (cost < best[l]) {
+            best[l] = cost;
+            end[l] = static_cast<int8_t>(e);
+          }
+        }
+      }
+      std::vector<double>& rmin = range_min[s];
+      std::vector<int8_t>& rarg = range_arg[s];
+      rmin.assign(static_cast<size_t>(layers) * layers, kInfinity);
+      rarg.assign(static_cast<size_t>(layers) * layers, -1);
+      for (int low = 0; low < layers; ++low) {
+        double m = kInfinity;
+        int8_t a = -1;
+        for (int high = low; high < layers; ++high) {
+          if (best[high] < m) {
+            m = best[high];
+            a = static_cast<int8_t>(high);
+          }
+          rmin[static_cast<size_t>(low) * layers + high] = m;
+          rarg[static_cast<size_t>(low) * layers + high] = a;
+        }
+      }
+    }
+    const GCellPoint& cell = tree.nodes[v];
+    via_prefix[0] = 0.0;
+    for (int l = 0; l + 1 < layers; ++l) {
+      via_prefix[l + 1] = via_prefix[l] + viaCost3D(l, cell);
+    }
+    int pin_low = layers, pin_high = -1;
+    if (v < tree.pin_node_count) {
+      pin_low = tree.pin_layers[v].first;
+      pin_high = tree.pin_layers[v].second;
+    }
+    // span_cost[low][high] = via stack + children, for spans covering pins.
+    std::vector<double> span_cost(static_cast<size_t>(layers) * layers, kInfinity);
+    for (int low = 0; low < layers; ++low) {
+      if (pin_high >= 0 && low > pin_low) {
+        break;
+      }
+      for (int high = std::max(low, pin_high); high < layers; ++high) {
+        double cost = via_prefix[high] - via_prefix[low];
+        for (int s : child_segments[v]) {
+          cost += range_min[s][static_cast<size_t>(low) * layers + high];
+        }
+        span_cost[static_cast<size_t>(low) * layers + high] = cost;
+      }
+    }
+    if (v == 0) {
+      for (int low = 0; low < layers; ++low) {
+        for (int high = low; high < layers; ++high) {
+          const double cost = span_cost[static_cast<size_t>(low) * layers + high];
+          if (cost < root_cost) {
+            root_cost = cost;
+            root_choice = {static_cast<int8_t>(low), static_cast<int8_t>(high)};
+          }
+        }
+      }
+      continue;
+    }
+    for (int l = 0; l < layers; ++l) {
+      double best = kInfinity;
+      Choice choice;
+      for (int low = 0; low <= l; ++low) {
+        for (int high = l; high < layers; ++high) {
+          const double cost = span_cost[static_cast<size_t>(low) * layers + high];
+          if (cost < best) {
+            best = cost;
+            choice = {static_cast<int8_t>(low), static_cast<int8_t>(high)};
+          }
+        }
+      }
+      node_cost[v][l] = best;
+      node_choice[v][l] = choice;
+    }
+  }
+
+  NetAssignment result;
+  if (root_cost == kInfinity) {
+    return assignNet(net, scratch);  // no legal assignment; fall back
+  }
+  // Top-down reconstruction.
+  std::vector<Choice> span(node_count);
+  span[0] = root_choice;
+  std::unordered_map<int64_t, LayerInterval> spans;
+  auto cell_key = [&](const GCellPoint& p) {
+    return static_cast<int64_t>(p.x) * graph_.y_size + p.y;
+  };
+  std::vector<int> step_layers;
+  for (int v : order) {
+    const Choice choice = span[v];
+    if (choice.low < choice.high) {
+      LayerInterval& interval = spans[cell_key(tree.nodes[v])];
+      interval.add(choice.low);
+      interval.add(choice.high);
+    }
+    for (int s : child_segments[v]) {
+      const int start
+          = range_arg[s][static_cast<size_t>(choice.low) * layers + choice.high];
+      const int end = child_end[s][start];
+      const int child = segment_child[s];
+      span[child] = node_choice[child][end];
+      const std::vector<GCellPoint>& list = cells[s];
+      const int steps = static_cast<int>(list.size()) - 1;
+      const int8_t* from = &back[s][static_cast<size_t>(start) * (steps + 1) * layers];
+      step_layers.assign(steps, 0);
+      int layer = end;
+      for (int p = steps; p >= 1; --p) {
+        const int wire_layer = from[static_cast<size_t>(p) * layers + layer];
+        step_layers[p - 1] = wire_layer;
+        layer = wire_layer;
+      }
+      for (int p = 0; p < steps; ++p) {
+        const int l = step_layers[p];
+        const int x = std::min(list[p].x, list[p + 1].x);
+        const int y = std::min(list[p].y, list[p + 1].y);
+        result.wire_edges.push_back(wireKey(l, graph_.layerEdgeIndex(l, x, y)));
+        if (p > 0 && step_layers[p - 1] != l) {
+          LayerInterval& interval = spans[cell_key(list[p])];
+          interval.add(step_layers[p - 1]);
+          interval.add(l);
+        }
+      }
+    }
+  }
+  std::sort(result.wire_edges.begin(), result.wire_edges.end());
+  result.wire_edges.erase(
+      std::unique(result.wire_edges.begin(), result.wire_edges.end()),
+      result.wire_edges.end());
+  for (const auto& [key, interval] : spans) {
+    if (interval.low < interval.high) {
+      result.vias.push_back({static_cast<int>(key / graph_.y_size),
+                             static_cast<int>(key % graph_.y_size),
+                             interval.low,
+                             interval.high});
+    }
+  }
+  std::sort(result.vias.begin(),
+            result.vias.end(),
+            [](const ViaSpan& a, const ViaSpan& b) {
+              return std::tie(a.x, a.y) < std::tie(b.x, b.y);
+            });
+  return result;
+}
+
+void HelemRouter::Impl::applyDemand(const NetAssignment& assignment, int sign)
+{
   const int x_size = graph_.x_size;
   const int y_size = graph_.y_size;
   // Cells covered by this net's wires, for the stacked-via rule.
   std::vector<uint64_t> covered;
   covered.reserve(assignment.wire_edges.size() * 2);
+  for (const uint64_t key : assignment.wire_edges) {
+    const int layer = static_cast<int>(key >> 40);
+    const int index = static_cast<int>(key & 0xffffffffffULL);
+    demand_3d_[layer][index] += 2 * sign;
+    covered.push_back(key);
+    covered.push_back(key + 1);
+  }
+  std::sort(covered.begin(), covered.end());
+  for (const ViaSpan& via : assignment.vias) {
+    for (int layer = via.low; layer < via.high; ++layer) {
+      const int index = graph_.layerEdgeIndex(layer, via.x, via.y);
+      if (std::binary_search(
+              covered.begin(), covered.end(), wireKey(layer, index))) {
+        continue;
+      }
+      // Stacked via: half a track on the adjacent edges of the lower layer.
+      std::vector<int>& demand = demand_3d_[layer];
+      if (graph_.layers[layer].horizontal) {
+        const bool has_left = via.x > 0;
+        const bool has_right = via.x < x_size - 1;
+        if (has_left && has_right) {
+          demand[graph_.layerEdgeIndex(layer, via.x - 1, via.y)] += sign;
+          demand[index] += sign;
+        } else if (has_left) {
+          demand[graph_.layerEdgeIndex(layer, via.x - 1, via.y)] += 2 * sign;
+        } else if (has_right) {
+          demand[index] += 2 * sign;
+        }
+      } else {
+        const bool has_below = via.y > 0;
+        const bool has_above = via.y < y_size - 1;
+        if (has_below && has_above) {
+          demand[graph_.layerEdgeIndex(layer, via.x, via.y - 1)] += sign;
+          demand[index] += sign;
+        } else if (has_below) {
+          demand[graph_.layerEdgeIndex(layer, via.x, via.y - 1)] += 2 * sign;
+        } else if (has_above) {
+          demand[index] += 2 * sign;
+        }
+      }
+    }
+  }
+}
 
+void HelemRouter::Impl::buildRoute(int net, const NetAssignment& assignment)
+{
+  NetRoute3D& route = routes_[net];
+  route.segments.clear();
+  const int x_size = graph_.x_size;
+  const int y_size = graph_.y_size;
   size_t i = 0;
   while (i < assignment.wire_edges.size()) {
-    const uint64_t key = assignment.wire_edges[i];
-    const int layer = static_cast<int>(key >> 40);
+    const int layer = static_cast<int>(assignment.wire_edges[i] >> 40);
     size_t j = i;
     while (j + 1 < assignment.wire_edges.size()
            && assignment.wire_edges[j + 1] == assignment.wire_edges[j] + 1) {
       ++j;
     }
-    const int first = static_cast<int>(assignment.wire_edges[i] & 0xffffffffffULL);
-    const int last = static_cast<int>(assignment.wire_edges[j] & 0xffffffffffULL);
-    std::vector<int>& demand = demand_3d_[layer];
-    for (int index = first; index <= last; ++index) {
-      demand[index] += 2;
-      covered.push_back(wireKey(layer, index));
-      covered.push_back(wireKey(layer, index + 1));
-    }
+    const int first
+        = static_cast<int>(assignment.wire_edges[i] & 0xffffffffffULL);
+    const int last
+        = static_cast<int>(assignment.wire_edges[j] & 0xffffffffffULL);
     if (graph_.layers[layer].horizontal) {
       const int y = first / x_size;
       const int x_first = first % x_size;
@@ -1247,43 +1607,9 @@ void HelemRouter::Impl::commitNet(int net, const NetAssignment& assignment)
     }
     i = j + 1;
   }
-  std::sort(covered.begin(), covered.end());
   for (const ViaSpan& via : assignment.vias) {
-    route.segments.push_back(
-        {via.x, via.y, via.low, via.x, via.y, via.high});
+    route.segments.push_back({via.x, via.y, via.low, via.x, via.y, via.high});
     via_count_ += via.high - via.low;
-    for (int layer = via.low; layer < via.high; ++layer) {
-      const int index = graph_.layerEdgeIndex(layer, via.x, via.y);
-      if (std::binary_search(
-              covered.begin(), covered.end(), wireKey(layer, index))) {
-        continue;
-      }
-      // Stacked via: half a track on the adjacent edges of the lower layer.
-      std::vector<int>& demand = demand_3d_[layer];
-      if (graph_.layers[layer].horizontal) {
-        const bool has_left = via.x > 0;
-        const bool has_right = via.x < x_size - 1;
-        if (has_left && has_right) {
-          demand[graph_.layerEdgeIndex(layer, via.x - 1, via.y)] += 1;
-          demand[index] += 1;
-        } else if (has_left) {
-          demand[graph_.layerEdgeIndex(layer, via.x - 1, via.y)] += 2;
-        } else if (has_right) {
-          demand[index] += 2;
-        }
-      } else {
-        const bool has_below = via.y > 0;
-        const bool has_above = via.y < y_size - 1;
-        if (has_below && has_above) {
-          demand[graph_.layerEdgeIndex(layer, via.x, via.y - 1)] += 1;
-          demand[index] += 1;
-        } else if (has_below) {
-          demand[graph_.layerEdgeIndex(layer, via.x, via.y - 1)] += 2;
-        } else if (has_above) {
-          demand[index] += 2;
-        }
-      }
-    }
   }
 }
 
@@ -1308,27 +1634,67 @@ void HelemRouter::Impl::runLayerAssignment()
   const int batch_size = std::max(1, options_.layer_assignment_batch_size);
   const int thread_count = threads();
   std::vector<Scratch> scratch(thread_count);
-  std::vector<NetAssignment> batch(batch_size);
-  for (int begin = 0; begin < net_count; begin += batch_size) {
-    const int end = std::min(net_count, begin + batch_size);
+  std::vector<NetAssignment> assignments(net_count);
+  // Pass 0 assigns every net; later passes rip up a batch, reassign it with
+  // all other nets fixed, and keep the new assignment.
+  for (int pass = 0; pass <= options_.layer_assignment_passes; ++pass) {
+    const auto pass_start = Clock::now();
+    for (int begin = 0; begin < net_count; begin += batch_size) {
+      const int end = std::min(net_count, begin + batch_size);
+      if (pass > 0) {
+        for (int i = begin; i < end; ++i) {
+          applyDemand(assignments[order[i]], -1);
+        }
+      }
 #pragma omp parallel for num_threads(thread_count) schedule(dynamic, 4)
-    for (int i = begin; i < end; ++i) {
+      for (int i = begin; i < end; ++i) {
 #ifdef _OPENMP
-      Scratch& local = scratch[omp_get_thread_num()];
+        Scratch& local = scratch[omp_get_thread_num()];
 #else
-      Scratch& local = scratch[0];
+        Scratch& local = scratch[0];
 #endif
-      batch[i - begin] = assignNet(order[i], local);
+        assignments[order[i]]
+            = options_.layer_assignment_mode == LayerAssignmentMode::kTree
+                  ? assignNetTree(order[i], local)
+                  : assignNet(order[i], local);
+      }
+      for (int i = begin; i < end; ++i) {
+        applyDemand(assignments[order[i]], 1);
+      }
     }
-    for (int i = begin; i < end; ++i) {
-      commitNet(order[i], batch[i - begin]);
+    if (options_.layer_assignment_passes > 0) {
+      int64_t vias = 0;
+      for (const NetAssignment& assignment : assignments) {
+        for (const ViaSpan& via : assignment.vias) {
+          vias += via.high - via.low;
+        }
+      }
+      char buffer[160];
+      std::snprintf(buffer,
+                    sizeof(buffer),
+                    "[helem] la-pass %d vias=%lld overflow_cost=%.1f seconds=%.3f",
+                    pass,
+                    static_cast<long long>(vias),
+                    scoreOverflow3D(),
+                    std::chrono::duration<double>(Clock::now() - pass_start)
+                        .count());
+      log(buffer);
     }
+  }
+  for (int n = 0; n < net_count; ++n) {
+    buildRoute(n, assignments[n]);
   }
 
   score_ = HelemScore();
   score_.wire_cost = graph_.unit_wire_cost * wire_length_dbu_;
   score_.via_count = via_count_;
   score_.via_cost = graph_.unit_via_cost * via_count_;
+  score_.overflow_cost = scoreOverflow3D();
+}
+
+double HelemRouter::Impl::scoreOverflow3D() const
+{
+  double total = 0.0;
   for (int layer = 0; layer < graph_.num_layers; ++layer) {
     if (!graph_.isRoutingLayer(layer)) {
       continue;
@@ -1339,8 +1705,9 @@ void HelemRouter::Impl::runLayerAssignment()
     for (int i = 0; i < graph_.cellCount(); ++i) {
       layer_cost += overflowCost(capacity[i], demand[i]);
     }
-    score_.overflow_cost += graph_.layers[layer].overflow_weight * layer_cost;
+    total += graph_.layers[layer].overflow_weight * layer_cost;
   }
+  return total;
 }
 
 void HelemRouter::Impl::logGeometryStats(const std::string& stage,

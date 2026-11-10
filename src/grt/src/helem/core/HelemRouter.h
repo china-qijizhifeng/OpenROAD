@@ -40,6 +40,13 @@ enum class PinAccessMode
   kOtherPinsBox,  // closest to the box of the other pins' first choices
 };
 
+// Layer assignment algorithm (paper gap G8).
+enum class LayerAssignmentMode
+{
+  kPath,  // per 2-pin segment DP, segments in BFS order (first version)
+  kTree,  // exact DP over the whole Steiner tree, via spans chosen per node
+};
+
 // Order of nets inside the layer assignment (paper gap G8).
 enum class LayerAssignmentOrder
 {
@@ -83,6 +90,9 @@ struct HelemOptions
   int layer_assignment_batch_size = 16;
   LayerAssignmentOrder layer_assignment_order
       = LayerAssignmentOrder::kShortFirst;
+  LayerAssignmentMode layer_assignment_mode = LayerAssignmentMode::kTree;
+  // Rip-up and reassign passes after the first layer assignment.
+  int layer_assignment_passes = 1;
   int threads = 1;
   bool verbose = true;
   // Recompute the demand ledger from scratch after each stage and compare.

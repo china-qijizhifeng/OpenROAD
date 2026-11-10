@@ -90,6 +90,12 @@ int main(int argc, char** argv)
       options.layer_assignment_order
           = value() == "long" ? grt::helem::LayerAssignmentOrder::kLongFirst
                               : grt::helem::LayerAssignmentOrder::kShortFirst;
+    } else if (arg == "-la-mode") {
+      options.layer_assignment_mode
+          = value() == "path" ? grt::helem::LayerAssignmentMode::kPath
+                              : grt::helem::LayerAssignmentMode::kTree;
+    } else if (arg == "-la-passes") {
+      options.layer_assignment_passes = std::stoi(value());
     } else if (arg == "-la-batch") {
       options.layer_assignment_batch_size = std::stoi(value());
     } else if (arg == "-cap2d-scale") {
