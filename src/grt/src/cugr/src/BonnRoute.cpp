@@ -24,7 +24,7 @@
 #include "Layers.h"
 #include "geo.h"
 #include "utl/Logger.h"
-#include "utl/Timer.h"
+#include "utl/timer.h"
 
 namespace grt {
 

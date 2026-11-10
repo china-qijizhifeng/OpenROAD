@@ -33,7 +33,7 @@
 #include "odb/dbTypes.h"
 #include "odb/geom.h"
 #include "utl/Logger.h"
-#include "utl/Timer.h"
+#include "utl/timer.h"
 
 namespace drt {
 
@@ -750,6 +750,15 @@ bool BonnRouteDR::connect(NetData& net, const int dilation, const bool ripup)
             ok = false;
             break;
           }
+        }
+        // Landing pad against routed shapes and other pins' reservations.
+        for (const OutVia& v : opt.vias) {
+          if (!ok) {
+            break;
+          }
+          std::vector<RShape> vs;
+          viaShapes(v, vs);
+          ok = !shapeConflicts(vs.back(), net.id);
         }
       }
       valid[t][o] = ok;
