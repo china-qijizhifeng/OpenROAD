@@ -61,11 +61,13 @@ global_route
 
 ### BonnRoute Parameters
 
+Set BonnRoute global routing parameters before `global_route -bonnroute`.
+Unknown names are errors.
+
 ```tcl
 set_bonnroute_param name value
 ```
 
-Set parameters before `global_route -bonnroute`. Unknown names are errors.
 This implementation follows the path-composition and resource-sharing framework
 of Gester et al., *BonnRoute: Algorithms and Data Structures for Fast and Good
 VLSI Routing*, TODAES 18(2), 2013, Sections 2.2–2.4.

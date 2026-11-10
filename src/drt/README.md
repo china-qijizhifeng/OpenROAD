@@ -109,11 +109,12 @@ Some arguments that are helpful for developers are listed here.
 
 ### BonnRoute Detailed Routing Parameters
 
+Set BonnRoute detailed routing parameters before `detailed_route -bonnroute`.
+Unknown names are errors.
+
 ```tcl
 set_bonnroute_dr_param name value
 ```
-
-Set parameters before `detailed_route -bonnroute`. Unknown names are errors.
 
 | Name | Default | Meaning |
 | ----- | ----- | ----- |
