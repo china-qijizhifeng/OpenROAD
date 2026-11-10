@@ -201,8 +201,11 @@ void BonnRouteGlobal::prepareNets()
     const LayerRange& range = net->getLayerRange();
     const int top_limit = std::min(range.max_layer, num_layers_ - 1);
     const AccessPointMap selected = grid_graph_->selectAccessPoints(net);
-    std::vector<std::pair<PointT, IntervalT>> points(selected.begin(),
-                                                     selected.end());
+    std::vector<std::pair<PointT, IntervalT>> points;
+    points.reserve(selected.size());
+    for (const auto& [point, layers] : selected) {
+      points.emplace_back(point, layers);
+    }
     std::ranges::sort(points, [](const auto& a, const auto& b) {
       return std::make_pair(a.first.x(), a.first.y())
              < std::make_pair(b.first.x(), b.first.y());
