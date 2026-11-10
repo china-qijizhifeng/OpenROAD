@@ -107,6 +107,13 @@ struct HelemScore
   double total() const { return wire_cost + via_cost + overflow_cost; }
 };
 
+// One access point per pin (nullptr for pins without access points), using
+// the pin access rule of gap G1. Shared with the comparison drivers so every
+// router sees the same pins.
+std::vector<const AccessPoint*> choosePinAccessPoints(const RoutingNet& net,
+                                                      PinAccessMode mode,
+                                                      bool prefer_high);
+
 class HelemRouter
 {
  public:

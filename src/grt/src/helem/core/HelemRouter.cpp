@@ -148,6 +148,77 @@ struct Scratch
 
 }  // namespace
 
+std::vector<const AccessPoint*> choosePinAccessPoints(const RoutingNet& net,
+                                                      PinAccessMode mode,
+                                                      bool prefer_high)
+{
+  int x_low = std::numeric_limits<int>::max();
+  int y_low = x_low;
+  int x_high = std::numeric_limits<int>::min();
+  int y_high = x_high;
+  for (const RoutingPin& pin : net.pins) {
+    for (const AccessPoint& ap : pin.access_points) {
+      x_low = std::min(x_low, ap.x);
+      x_high = std::max(x_high, ap.x);
+      y_low = std::min(y_low, ap.y);
+      y_high = std::max(y_high, ap.y);
+    }
+  }
+  const double center_x = 0.5 * (x_low + x_high);
+  const double center_y = 0.5 * (y_low + y_high);
+  auto better_layer = [&](const AccessPoint& a, const AccessPoint& b) {
+    return prefer_high ? a.layer > b.layer : a.layer < b.layer;
+  };
+  // First choice: closest to the net centre.
+  std::vector<const AccessPoint*> choice(net.pins.size(), nullptr);
+  for (size_t p = 0; p < net.pins.size(); ++p) {
+    double best_distance = kInfinity;
+    for (const AccessPoint& ap : net.pins[p].access_points) {
+      const double distance
+          = std::abs(ap.x - center_x) + std::abs(ap.y - center_y);
+      if (distance < best_distance
+          || (distance == best_distance && better_layer(ap, *choice[p]))) {
+        choice[p] = &ap;
+        best_distance = distance;
+      }
+    }
+  }
+  if (mode == PinAccessMode::kOtherPinsBox
+      && net.pins.size() > 1) {
+    // Second choice: closest to the box spanned by the other pins.
+    std::vector<const AccessPoint*> second = choice;
+    for (size_t p = 0; p < net.pins.size(); ++p) {
+      int bx_low = std::numeric_limits<int>::max(), by_low = bx_low;
+      int bx_high = std::numeric_limits<int>::min(), by_high = bx_high;
+      for (size_t q = 0; q < net.pins.size(); ++q) {
+        if (q == p || choice[q] == nullptr) {
+          continue;
+        }
+        bx_low = std::min(bx_low, choice[q]->x);
+        bx_high = std::max(bx_high, choice[q]->x);
+        by_low = std::min(by_low, choice[q]->y);
+        by_high = std::max(by_high, choice[q]->y);
+      }
+      if (bx_low > bx_high) {
+        continue;
+      }
+      double best_distance = kInfinity;
+      for (const AccessPoint& ap : net.pins[p].access_points) {
+        const double distance
+            = std::max({0, bx_low - ap.x, ap.x - bx_high})
+              + std::max({0, by_low - ap.y, ap.y - by_high});
+        if (distance < best_distance
+            || (distance == best_distance && better_layer(ap, *second[p]))) {
+          second[p] = &ap;
+          best_distance = distance;
+        }
+      }
+    }
+    choice = second;
+  }
+  return choice;
+}
+
 class HelemRouter::Impl
 {
  public:
@@ -349,73 +420,8 @@ void HelemRouter::Impl::choosePinsAndBuildTrees()
   for (int n = 0; n < net_count; ++n) {
     const RoutingNet& net = nets_[n];
     NetTree& tree = trees_[n];
-    // Pin access (gap G1): the access point closest to the net centre, then
-    // the lowest layer.
-    int x_low = std::numeric_limits<int>::max();
-    int y_low = x_low;
-    int x_high = std::numeric_limits<int>::min();
-    int y_high = x_high;
-    for (const RoutingPin& pin : net.pins) {
-      for (const AccessPoint& ap : pin.access_points) {
-        x_low = std::min(x_low, ap.x);
-        x_high = std::max(x_high, ap.x);
-        y_low = std::min(y_low, ap.y);
-        y_high = std::max(y_high, ap.y);
-      }
-    }
-    const double center_x = 0.5 * (x_low + x_high);
-    const double center_y = 0.5 * (y_low + y_high);
-    const bool prefer_high = options_.pin_access_prefer_high_layer;
-    auto better_layer = [&](const AccessPoint& a, const AccessPoint& b) {
-      return prefer_high ? a.layer > b.layer : a.layer < b.layer;
-    };
-    // First choice: closest to the net centre.
-    std::vector<const AccessPoint*> choice(net.pins.size(), nullptr);
-    for (size_t p = 0; p < net.pins.size(); ++p) {
-      double best_distance = kInfinity;
-      for (const AccessPoint& ap : net.pins[p].access_points) {
-        const double distance
-            = std::abs(ap.x - center_x) + std::abs(ap.y - center_y);
-        if (distance < best_distance
-            || (distance == best_distance && better_layer(ap, *choice[p]))) {
-          choice[p] = &ap;
-          best_distance = distance;
-        }
-      }
-    }
-    if (options_.pin_access_mode == PinAccessMode::kOtherPinsBox
-        && net.pins.size() > 1) {
-      // Second choice: closest to the box spanned by the other pins.
-      std::vector<const AccessPoint*> second = choice;
-      for (size_t p = 0; p < net.pins.size(); ++p) {
-        int bx_low = std::numeric_limits<int>::max(), by_low = bx_low;
-        int bx_high = std::numeric_limits<int>::min(), by_high = bx_high;
-        for (size_t q = 0; q < net.pins.size(); ++q) {
-          if (q == p || choice[q] == nullptr) {
-            continue;
-          }
-          bx_low = std::min(bx_low, choice[q]->x);
-          bx_high = std::max(bx_high, choice[q]->x);
-          by_low = std::min(by_low, choice[q]->y);
-          by_high = std::max(by_high, choice[q]->y);
-        }
-        if (bx_low > bx_high) {
-          continue;
-        }
-        double best_distance = kInfinity;
-        for (const AccessPoint& ap : net.pins[p].access_points) {
-          const double distance
-              = std::max({0, bx_low - ap.x, ap.x - bx_high})
-                + std::max({0, by_low - ap.y, ap.y - by_high});
-          if (distance < best_distance
-              || (distance == best_distance && better_layer(ap, *second[p]))) {
-            second[p] = &ap;
-            best_distance = distance;
-          }
-        }
-      }
-      choice = second;
-    }
+    const std::vector<const AccessPoint*> choice = choosePinAccessPoints(
+        net, options_.pin_access_mode, options_.pin_access_prefer_high_layer);
     std::unordered_map<int64_t, int> node_of_cell;
     for (size_t p = 0; p < net.pins.size(); ++p) {
       const AccessPoint* best = choice[p];

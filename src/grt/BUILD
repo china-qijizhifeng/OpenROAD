@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: BSD-3-Clause
 # Copyright (c) 2025, The OpenROAD Authors
 
+load("@rules_cc//cc:cc_binary.bzl", "cc_binary")
 load("@rules_cc//cc:cc_library.bzl", "cc_library")
 load("//bazel:python_wrap_cc.bzl", "python_wrap_cc", "python_wrap_library")
 load("//bazel:tcl_encode_or.bzl", "tcl_encode")
@@ -330,4 +331,51 @@ python_wrap_library(
     name = "py_wrap",
     includes = ["src"],
     deps = [":grt"],
+)
+
+# HeLEM global router core (no OpenDB dependency) and ISPD 2024 file I/O.
+cc_library(
+    name = "helem_core",
+    srcs = [
+        "src/helem/core/HelemRouter.cpp",
+        "src/helem/ispd24/Ispd24Io.cpp",
+    ],
+    hdrs = [
+        "src/helem/core/GCellGraph.h",
+        "src/helem/core/HelemRouter.h",
+        "src/helem/ispd24/Ispd24Io.h",
+    ],
+    copts = ["-fopenmp"],
+    includes = ["src/helem"],
+    visibility = ["//visibility:private"],
+    deps = ["@openmp"],
+)
+
+# Runs HeLEM on ISPD 2024 contest inputs (.cap/.net).
+cc_binary(
+    name = "helem_route",
+    srcs = ["src/helem/ispd24/helem_route_main.cpp"],
+    copts = ["-fopenmp"],
+    deps = [
+        ":helem_core",
+        "//src/stt",
+        "@openmp",
+    ],
+)
+
+# Runs OpenROAD's FastRoute core on the same ISPD 2024 inputs, for
+# comparison with helem_route on an identical grid, capacity and pin access.
+cc_binary(
+    name = "fastroute_ispd24",
+    srcs = ["src/helem/ispd24/fastroute_ispd24_main.cpp"],
+    copts = ["-fopenmp"],
+    deps = [
+        ":fastroute",
+        ":groute",
+        ":helem_core",
+        "//src/odb/src/db",
+        "//src/stt",
+        "//src/utl",
+        "@openmp",
+    ],
 )
