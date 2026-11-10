@@ -133,6 +133,17 @@ class BonnRouteDR
     int64_t hpwl = 0;
   };
 
+  // Per-thread search state (Sec. 5.1: nets in disjoint areas are routed
+  // in parallel).
+  struct Worker
+  {
+    br::Region region;
+    std::unique_ptr<br::PathSearch> search;
+    int64_t searches = 0;
+    int64_t heap_pops = 0;
+    int64_t settled = 0;
+  };
+
   void buildTrackGraph();
   void buildFixed();
   void buildNets();
@@ -171,16 +182,6 @@ class BonnRouteDR
 
   br::TrackGraph graph_;
   br::FastGrid grid_;
-  // Per-thread search state (Sec. 5.1: nets in disjoint areas are routed
-  // in parallel).
-  struct Worker
-  {
-    br::Region region;
-    std::unique_ptr<br::PathSearch> search;
-    int64_t searches = 0;
-    int64_t heap_pops = 0;
-    int64_t settled = 0;
-  };
   std::vector<Worker> workers_;
   std::vector<LayerInfo> layers_;  // per z
   std::vector<int> z_of_fr_;       // routing layer -> z, -1
