@@ -12,6 +12,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <limits>
@@ -150,48 +151,80 @@ int main(int argc, char** argv)
                                      : odb::dbTechLayerDir::VERTICAL);
   }
 
-  // Capacities: FastRoute layer numbers are 1-based here.
+  // Capacities, following GlobalRouter's contract: every edge of a layer
+  // first gets the layer's nominal capacity (here the largest contest
+  // capacity on that layer, floored to whole tracks), which also becomes the
+  // layer's base capacity; edges with less capacity are then reduced with
+  // addAdjustment, as GlobalRouter does for blockages. FastRoute layer
+  // numbers are 1-based.
+  auto edge_cap = [&](int l, int x, int y) {
+    return graph.isRoutingLayer(l)
+               ? static_cast<int>(std::floor(
+                     graph.capacity[l][graph.layerEdgeIndex(l, x, y)]))
+               : 0;
+  };
+  std::vector<int> nominal(layers, 0);
+  for (int l = 0; l < layers; ++l) {
+    for (int y = 0; y < graph.y_size; ++y) {
+      for (int x = 0; x < graph.x_size; ++x) {
+        const bool edge = graph.layers[l].horizontal ? x + 1 < graph.x_size
+                                                     : y + 1 < graph.y_size;
+        if (edge) {
+          nominal[l] = std::max(nominal[l], edge_cap(l, x, y));
+        }
+      }
+    }
+  }
   fastroute->initEdges();
   for (int l = 0; l < layers; ++l) {
-    const bool routing = graph.isRoutingLayer(l);
-    int min_cap = std::numeric_limits<int>::max();
     if (graph.layers[l].horizontal) {
       for (int y = 0; y < graph.y_size; ++y) {
         for (int x = 0; x + 1 < graph.x_size; ++x) {
-          const int cap
-              = routing ? static_cast<int>(std::floor(
-                    graph.capacity[l][graph.layerEdgeIndex(l, x, y)]))
-                        : 0;
-          min_cap = std::min(min_cap, cap);
-          fastroute->setEdgeCapacity(x, y, x + 1, y, l + 1, cap);
+          fastroute->setEdgeCapacity(x, y, x + 1, y, l + 1, nominal[l]);
         }
       }
-      fastroute->addHCapacity(min_cap == std::numeric_limits<int>::max()
-                                  ? 0
-                                  : min_cap,
-                              l + 1);
+      fastroute->addHCapacity(nominal[l], l + 1);
     } else {
       for (int x = 0; x < graph.x_size; ++x) {
         for (int y = 0; y + 1 < graph.y_size; ++y) {
-          const int cap
-              = routing ? static_cast<int>(std::floor(
-                    graph.capacity[l][graph.layerEdgeIndex(l, x, y)]))
-                        : 0;
-          min_cap = std::min(min_cap, cap);
-          fastroute->setEdgeCapacity(x, y, x, y + 1, l + 1, cap);
+          fastroute->setEdgeCapacity(x, y, x, y + 1, l + 1, nominal[l]);
         }
       }
-      fastroute->addVCapacity(min_cap == std::numeric_limits<int>::max()
-                                  ? 0
-                                  : min_cap,
-                              l + 1);
+      fastroute->addVCapacity(nominal[l], l + 1);
     }
   }
   fastroute->initLowerBoundCapacities();
   std::vector<int> track_space(layers, 1);
   fastroute->initBlockedIntervals(track_space);
   fastroute->saveResourcesBeforeAdjustments();
+  int64_t adjusted = 0;
+  for (int l = 0; l < layers; ++l) {
+    const bool horizontal = graph.layers[l].horizontal;
+    for (int y = 0; y < graph.y_size; ++y) {
+      for (int x = 0; x < graph.x_size; ++x) {
+        if (horizontal ? x + 1 >= graph.x_size : y + 1 >= graph.y_size) {
+          continue;
+        }
+        const int cap = edge_cap(l, x, y);
+        if (cap < nominal[l]) {
+          fastroute->addAdjustment(x,
+                                   y,
+                                   horizontal ? x + 1 : x,
+                                   horizontal ? y : y + 1,
+                                   l + 1,
+                                   static_cast<uint16_t>(cap),
+                                   true);
+          ++adjusted;
+        }
+      }
+    }
+  }
   fastroute->initEdgesCapacityPerLayer();
+  std::printf("[fastroute] nominal capacity per layer:");
+  for (int l = 0; l < layers; ++l) {
+    std::printf(" %d", nominal[l]);
+  }
+  std::printf("; adjusted edges=%lld\n", static_cast<long long>(adjusted));
 
   // Nets.
   std::vector<odb::dbNet*> db_nets(nets.size(), nullptr);
