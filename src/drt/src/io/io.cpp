@@ -716,6 +716,7 @@ void io::Parser::updateNetRouting(frNet* netIn, odb::dbNet* net)
   frCoord right = -1;
   frCoord top = -1;
   frCoord width = 0;
+  bool tapered = false;
   odb::dbWireDecoder decoder;
 
   if (!net->isSpecial() && net->getWire() != nullptr) {
@@ -767,6 +768,9 @@ void io::Parser::updateNetRouting(frNet* netIn, odb::dbNet* net)
           case odb::dbWireDecoder::JUNCTION:
           case odb::dbWireDecoder::SHORT:
           case odb::dbWireDecoder::VWIRE:
+            // A path without RULE uses default rules even on an NDR net.
+            // Keep this across bends and vias until the next path begins.
+            tapered = net->getNonDefaultRule() != nullptr;
             prevLayer = decoder.getLayer();
             layerName = prevLayer->getName();
             if (getTech()->name2layer_.find(layerName)
@@ -822,9 +826,11 @@ void io::Parser::updateNetRouting(frNet* netIn, odb::dbNet* net)
             decoder.getRect(left, bottom, right, top);
             hasRect = true;
             break;
+          case odb::dbWireDecoder::RULE:
+            tapered = false;
+            break;
           case odb::dbWireDecoder::ITERM:
           case odb::dbWireDecoder::BTERM:
-          case odb::dbWireDecoder::RULE:
           case odb::dbWireDecoder::END_DECODE:
             break;
           default:
@@ -921,6 +927,7 @@ void io::Parser::updateNetRouting(frNet* netIn, odb::dbNet* net)
             tmpEndStyle,
             tmpEndEnum == frcExtendEndStyle ? defaultEndExt : endExt);
         tmpP->setStyle(tmpSegStyle);
+        tmpP->setTapered(tapered);
         netIn->addShape(std::move(tmpP));
       }
       if (!viaName.empty()) {
@@ -935,6 +942,7 @@ void io::Parser::updateNetRouting(frNet* netIn, odb::dbNet* net)
           }
           auto viaDef = getTech()->name2via_[viaName];
           auto tmpP = std::make_unique<frVia>(viaDef, p);
+          tmpP->setTapered(tapered);
           tmpP->addToNet(netIn);
           netIn->addVia(std::move(tmpP));
         }
