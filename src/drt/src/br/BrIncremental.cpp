@@ -812,6 +812,85 @@ bool BonnRouteDR::prepareNet(NetData& net,
   return !net.skip;
 }
 
+int BonnRouteDR::routingComponents(const frNet* net) const
+{
+  std::vector<RShape> shapes;
+  routingShapes(net, shapes);
+  // Objects: wires and patches one shape each, vias three; then pins.
+  std::vector<int> object_of;
+  int num_objects = 0;
+  for (const auto& shape : net->getShapes()) {
+    (void) shape;
+    object_of.push_back(num_objects++);
+  }
+  for (const auto& via : net->getVias()) {
+    (void) via;
+    object_of.insert(object_of.end(), 3, num_objects++);
+  }
+  for (const auto& patch : net->getPatchWires()) {
+    (void) patch;
+    object_of.push_back(num_objects++);
+  }
+  struct Item
+  {
+    frLayerNum layer;
+    odb::Rect rect;
+    int object;
+  };
+  std::vector<Item> items;
+  for (size_t k = 0; k < shapes.size(); k++) {
+    items.push_back({shapes[k].layer, shapes[k].rect, object_of[k]});
+  }
+  const int first_pin = num_objects;
+  std::vector<frRect> rects;
+  for (const frInstTerm* it : net->getInstTerms()) {
+    rects.clear();
+    it->getShapes(rects);
+    for (const frRect& r : rects) {
+      items.push_back({r.getLayerNum(), r.getBBox(), num_objects});
+    }
+    num_objects++;
+  }
+  for (const frBTerm* bt : net->getBTerms()) {
+    rects.clear();
+    bt->getShapes(rects);
+    for (const frRect& r : rects) {
+      items.push_back({r.getLayerNum(), r.getBBox(), num_objects});
+    }
+    num_objects++;
+  }
+  std::vector<int> parent(num_objects);
+  for (int k = 0; k < num_objects; k++) {
+    parent[k] = k;
+  }
+  auto find = [&](int x) {
+    while (parent[x] != x) {
+      parent[x] = parent[parent[x]];
+      x = parent[x];
+    }
+    return x;
+  };
+  std::ranges::sort(items, [](const Item& a, const Item& b) {
+    return std::make_pair(a.layer, a.rect.xMin())
+           < std::make_pair(b.layer, b.rect.xMin());
+  });
+  for (size_t a = 0; a < items.size(); a++) {
+    for (size_t b = a + 1; b < items.size() && items[b].layer == items[a].layer
+                           && items[b].rect.xMin() <= items[a].rect.xMax();
+         b++) {
+      if (items[a].rect.intersects(items[b].rect)) {
+        parent[find(items[a].object)] = find(items[b].object);
+      }
+    }
+  }
+  std::unordered_set<int> roots;
+  for (int k = 0; k < num_objects; k++) {
+    roots.insert(find(k));
+  }
+  (void) first_pin;
+  return static_cast<int>(roots.size());
+}
+
 void BonnRouteDR::classifyInput(const NetData& net,
                                 InputClassification& out) const
 {
@@ -1340,6 +1419,33 @@ void BonnRouteDR::routeIncremental(std::vector<odb::Rect>& regions)
   }
   writeNets();
   write_mask_.clear();
+  // Debug check: nets written in this call whose routing and pins are not
+  // one component.
+  int64_t disconnected = 0;
+  if (logger_->debugCheck(utl::DRT, "incremental", 1)) {
+    for (const int id : touched) {
+      const NetData& data = nets_[id];
+      if (!data.routed) {
+        continue;
+      }
+      const int components = routingComponents(data.net);
+      if (components != 1) {
+        disconnected++;
+        if (disconnected <= 20) {
+          logger_->report(
+              "  BonnRoute incremental wrote net {} in {} components ({} "
+              "wires, {} vias, {} patches, {} pins, input kept {}).",
+              data.net->getName(),
+              components,
+              data.net->getShapes().size(),
+              data.net->getVias().size(),
+              data.net->getPatchWires().size(),
+              data.net->getInstTerms().size() + data.net->getBTerms().size(),
+              data.keeps_input);
+        }
+      }
+    }
+  }
   frBlock* block = design_->getTopBlock();
   auto add_guides = [&](const NetData& data) {
     for (const auto& guide : data.net->getGuides()) {
@@ -1425,7 +1531,8 @@ void BonnRouteDR::routeIncremental(std::vector<odb::Rect>& regions)
         "nets_to_route={} unrouted={} pins_changed={} not_prepared={} "
         "first_pass_failed={} ripups={} written={} left_to_flexdr={} "
         "regions={} classified_nets={} complete_nets={} pieces={} kept={} "
-        "reserved={} dropped={} discount_runs={} restored_unconnected={}",
+        "reserved={} dropped={} discount_runs={} restored_unconnected={} "
+        "disconnected_written={}",
         sync_s,
         access_s,
         route_s,
@@ -1453,7 +1560,8 @@ void BonnRouteDR::routeIncremental(std::vector<odb::Rect>& regions)
         cstats.reserved,
         cstats.dropped,
         cstats.discount_runs,
-        restored);
+        restored,
+        disconnected);
   }
 }
 

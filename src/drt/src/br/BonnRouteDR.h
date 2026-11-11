@@ -907,6 +907,10 @@ class BonnRouteDR
   // the vertex search set up (enableIncrementalDiscounts).
   bool incremental_discounts_ = false;
   void enableIncrementalDiscounts();
+  // Components of the net's routing and pins in the design (touching metal
+  // on a layer joins two objects); 1 for a connected net. Debug check of
+  // the nets written by an incremental call.
+  int routingComponents(const frNet* net) const;
   void gridOnlyChange(const RShape& shape,
                       br::ShapeType type,
                       int owner,
