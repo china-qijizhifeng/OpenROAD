@@ -9,7 +9,7 @@ TODAES 18(2), 2013. `set_bonnroute_profile` selects the algorithm variant:
 | ----- | ----- |
 | `2013-reimpl` | The 2013 paper as written, as far as implemented (this document lists every remaining difference). |
 | `2013-improved` | Default. The 2013 algorithms with measured optimizations that change search order or scheduling (vertex search, speculative tail batches, l1 GR bound, deterministic price batches, unresolved nets to FlexDR). |
-| `2021` | Placeholder for Ahrens et al., arXiv:2111.06169: `2013-reimpl` plus its potentials and reservations. See [2021 TODO](#2021-todo). |
+| `2021` | Ahrens et al., arXiv:2111.06169, bulk routing (Table 3): `2013-reimpl` with the general-model potential for every search. See [2021 TODO](#2021-todo). |
 
 Both 2013 profiles share every data structure and every exact speed-up
 (cache-line alignment, per-class reach windows, tile-grouped fast-grid
@@ -48,12 +48,16 @@ speed-ups is checked by the differential tests in `src/drt/test` and
 
 ## 2021 TODO
 
-The `2021` profile currently sets `2013-reimpl` plus the general-model
-potential (`potential 3`) and track-assignment reservations at a 3/4 discount
-(`reservations 1`), which run in the vertex search. Open items of
-arXiv:2111.06169:
+The `2021` profile sets `2013-reimpl` plus the general-model potential
+(`potential 3`) for every search, as in the bulk routing experiment (Table 3).
+Reservations (`reservations 1`, discount 3/4) are the tool of the paper's
+incremental routing (Sec. 5.2, Tables 4-6), whose input is a legal detailed
+routing. Fed with track assignment wires in bulk routing, they block other
+nets and send more nets to the serial rip-up phase; the paper suggests
+reserving only higher layers for such input (`reserve_min_layer`). Open items
+of arXiv:2111.06169:
 
-- Discount rates and oracle potentials in the interval search.
+- Discount rates in the interval search (reservations run in the vertex search).
 - Via reservations; dropping short wires that only connect to illegal input wires.
 - The incremental scenario: keep pin-to-pin paths of legal detailed wires, replace the rest by global wires, re-route with reservations.
 - Region-dependent costs (layer-range penalties).
