@@ -96,6 +96,8 @@ bool BonnRouteParams::set(const std::string& name, const double value)
     landmark_refresh = std::max(1, static_cast<int>(value));
   } else if (name == "goal_check") {
     goal_check = value != 0.0;
+  } else if (name == "concurrent_prices") {
+    concurrent_prices = value != 0.0;
   } else if (name == "verbose") {
     verbose = value != 0.0;
   } else {
@@ -203,13 +205,55 @@ double BonnRouteGlobal::wireObjective(const int layer,
   return wire_objective_[direction][direction == MetalLayer::H ? x : y];
 }
 
+namespace {
+// Relaxed atomic access to a double shared between oracle threads with
+// concurrent_prices (GCC/Clang builtins; plain loads and stores on x86).
+double loadRelaxed(const double& v)
+{
+  double out;
+  __atomic_load(&v, &out, __ATOMIC_RELAXED);
+  return out;
+}
+// v = max(v, value); returns nothing.
+void storeMax(double& v, const double value)
+{
+  double cur = loadRelaxed(v);
+  double desired = value;
+  while (cur < desired
+         && !__atomic_compare_exchange(
+             &v, &cur, &desired, true, __ATOMIC_RELAXED, __ATOMIC_RELAXED)) {
+  }
+}
+// v += inc; returns the new value.
+double addRelaxed(double& v, const double inc)
+{
+  double cur = loadRelaxed(v);
+  double next = cur + inc;
+  while (!__atomic_compare_exchange(
+      &v, &cur, &next, true, __ATOMIC_RELAXED, __ATOMIC_RELAXED)) {
+    next = cur + inc;
+  }
+  return next;
+}
+}  // namespace
+
+double BonnRouteGlobal::price(const uint32_t r) const
+{
+  return loadRelaxed(weight_[r]);
+}
+
+double BonnRouteGlobal::objectiveWeight() const
+{
+  return loadRelaxed(objective_weight_);
+}
+
 double BonnRouteGlobal::wireCost(const int layer,
                                  const int x,
                                  const int y,
                                  const double factor) const
 {
-  return objective_weight_ * wireObjective(layer, x, y)
-         + weight_[edgeIndex(layer, x, y)] * factor;
+  return objectiveWeight() * wireObjective(layer, x, y)
+         + price(edgeIndex(layer, x, y)) * factor;
 }
 
 double BonnRouteGlobal::padCost(const int layer,
@@ -240,10 +284,10 @@ double BonnRouteGlobal::padCostFactor(const int layer,
   if (flank.lower) {
     const int lx = direction == MetalLayer::H ? x - 1 : x;
     const int ly = direction == MetalLayer::H ? y : y - 1;
-    cost += weight_[edgeIndex(layer, lx, ly)] * demand;
+    cost += price(edgeIndex(layer, lx, ly)) * demand;
   }
   if (flank.higher) {
-    cost += weight_[edgeIndex(layer, x, y)] * demand;
+    cost += price(edgeIndex(layer, x, y)) * demand;
   }
   return cost;
 }
@@ -535,7 +579,7 @@ BonnRouteGlobal::OracleResult BonnRouteGlobal::oracleImpl(
       return scratch.heap.empty();
     }
   };
-  const double obj = objective_weight_;
+  const double obj = objectiveWeight();
   double last_connection_cost = 0.0;
   while (!heap_empty() && remaining > 0) {
     double d;
@@ -796,7 +840,7 @@ void BonnRouteGlobal::initGoal(GoalContext& goal,
   };
   const double objective_x = cheapest(MetalLayer::H, x0, x1);
   const double objective_y = cheapest(MetalLayer::V, y0, y1);
-  const double scale = objective_only ? 1.0 : objective_weight_;
+  const double scale = objective_only ? 1.0 : objectiveWeight();
   goal.ox = scale * objective_x;
   goal.oy = scale * objective_y;
   goal.ov = scale * params_.via_weight;
@@ -1413,18 +1457,18 @@ std::shared_ptr<GRTreeNode> BonnRouteGlobal::buildTree(
 
 double BonnRouteGlobal::linearCost(const Candidate& candidate) const
 {
-  double cost = objective_weight_ * candidate.objective;
+  double cost = objectiveWeight() * candidate.objective;
   for (const auto& [r, d] : candidate.usage) {
-    cost += weight_[r] * d;
+    cost += price(r) * d;
   }
   return cost;
 }
 
 double BonnRouteGlobal::logCost(const Candidate& candidate) const
 {
-  double cost = objective_weight_ * candidate.objective;
+  double cost = objectiveWeight() * candidate.objective;
   for (const auto& [r, d] : candidate.usage) {
-    cost += weight_[r] * d;
+    cost += price(r) * d;
   }
   return std::log(std::max(cost, 1e-300)) + shift_;
 }
@@ -1812,6 +1856,10 @@ void BonnRouteGlobal::resourceSharing()
   std::vector<OracleResult> results(batch);
   const double log_tolerance
       = std::log1p(std::max(0.0, params_.reuse_tolerance));
+  if (params_.concurrent_prices) {
+    resourceSharingConcurrent(log_tolerance, initial_log_objective);
+    return;
+  }
   for (int phase = 0; phase < params_.phases; phase++) {
     int64_t phase_calls = 0;
     if (goal) {
@@ -1951,6 +1999,124 @@ void BonnRouteGlobal::resourceSharing()
           lambda_max,
           lambda_obj);
     }
+  }
+}
+
+void BonnRouteGlobal::applyPricesConcurrent(const Candidate& candidate)
+{
+  const double eps = params_.epsilon;
+  for (const auto& [r, d] : candidate.usage) {
+    const double lp = addRelaxed(log_price_[r], eps * d / norm_capacity_[r]);
+    // Stores from threads that added earlier may land later: keep the
+    // largest, which belongs to the latest log price (weights stay monotone).
+    storeMax(weight_[r], std::exp(lp - shift_) / norm_capacity_[r]);
+    storeMax(max_log_price_, lp);
+  }
+  const double lo = addRelaxed(log_objective_price_,
+                               eps * candidate.objective / objective_bound_);
+  storeMax(objective_weight_, std::exp(lo - shift_) / objective_bound_);
+}
+
+// Sec. 2.3: "the algorithm can be parallelized, and a highly scalable
+// parallelized version has been implemented"; Sec. 5.1: "volatility-
+// tolerant block solvers [Mueller et al. 2011] can be used to guarantee the
+// desired approximation ratio even with concurrent access to the same
+// resources by multiple threads". Each thread takes the next net, reads the
+// current prices, calls the oracle and applies the price update at once.
+// Prices only grow while a net is routed, which the reuse certificate and
+// the goal-orientation bounds already assume. Nets of a phase are taken
+// largest search region first so the phase ends without a long tail.
+void BonnRouteGlobal::resourceSharingConcurrent(
+    const double log_tolerance,
+    const double initial_log_objective)
+{
+  const int threads = std::max(1, params_.threads);
+  std::vector<Scratch> scratch(threads);
+  const bool goal = params_.goal_orientation != 0;
+  const int num_nets = static_cast<int>(order_.size());
+  std::vector<int> order = order_;
+  auto work = [&](int index) {
+    const BoxT& r = states_[index].region;
+    return static_cast<int64_t>(r.hx() - r.lx() + 1) * (r.hy() - r.ly() + 1);
+  };
+  std::ranges::stable_sort(order,
+                           [&](int a, int b) { return work(a) > work(b); });
+  std::atomic<int64_t> reuses{0};
+  for (int phase = 0; phase < params_.phases; phase++) {
+    if (goal) {
+      updateGoalBounds(phase % params_.landmark_refresh == 0);
+    }
+    std::atomic<int64_t> phase_calls{0};
+#pragma omp parallel for num_threads(threads) schedule(dynamic, 1)
+    for (int i = 0; i < num_nets; i++) {
+      NetState& state = states_[order[i]];
+      bool reuse = false;
+      if (state.last >= 0) {
+        const double now = logCost(state.candidates[state.last]);
+        const double log_objective_bound = loadRelaxed(log_objective_price_)
+                                           - std::log(objective_bound_)
+                                           + state.log_base_objective;
+        const double bound = std::max(state.last_log_cost, log_objective_bound);
+        reuse = now - bound <= log_tolerance;
+      }
+      if (!reuse) {
+        Scratch& s = scratch[omp_get_thread_num()];
+        OracleResult r = oracle(state, s, false, false);
+        if (!r.ok) {
+          r = oracle(state, s, false, true);
+        }
+        if (r.ok) {
+          // No exact cost check: other threads change the prices between
+          // the search and any recomputation.
+          const double log_cost = logCost(r.candidate);
+          state.last = insertCandidate(state, std::move(r.candidate));
+          state.last_log_cost = log_cost;
+          phase_calls++;
+        } else if (state.last < 0) {
+          state.oracle_failures++;
+          continue;
+        } else {
+          reuse = true;
+        }
+      }
+      if (reuse) {
+        reuses++;
+      }
+      Candidate& chosen = state.candidates[state.last];
+      chosen.count++;
+      applyPricesConcurrent(chosen);
+    }
+    oracle_calls_ += phase_calls;
+    // Between phases no thread runs: renormalize here only. Within one
+    // phase a log price grows by its normalized load, far below the
+    // remaining headroom of exp().
+    if (std::max(max_log_price_, log_objective_price_) - shift_
+        > kRenormalizeAbove) {
+      renormalize();
+    }
+    const int done = phase + 1;
+    if (params_.verbose
+        && (done == 1 || done % 25 == 0 || done == params_.phases)) {
+      double lambda_max = 0.0;
+      for (const double lp : log_price_) {
+        lambda_max = std::max(lambda_max, lp);
+      }
+      lambda_max /= params_.epsilon * done;
+      const double lambda_obj = (log_objective_price_ - initial_log_objective)
+                                / (params_.epsilon * done);
+      logger_->report(
+          "BonnRoute phase {:3d}: oracle calls {:7d}, max edge load {:.3f}, "
+          "objective load {:.3f} (concurrent prices).",
+          done,
+          phase_calls.load(),
+          lambda_max,
+          lambda_obj);
+    }
+  }
+  reuses_ += reuses;
+  for (const Scratch& sc : scratch) {
+    search_pops_ += sc.pops;
+    search_settled_ += sc.settled;
   }
 }
 

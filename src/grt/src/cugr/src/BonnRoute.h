@@ -98,6 +98,12 @@ struct BonnRouteParams
   // Debug: rerun every oracle without goal orientation and compare the
   // connection costs (reported as "goal check").
   bool goal_check = false;
+  // Sec. 2.3/5.1: threads route nets concurrently and update the shared
+  // prices as they go (volatility-tolerant block solver, Mueller et al.
+  // 2011), without frozen batches or a barrier per batch; one barrier per
+  // phase. Results then depend on thread timing. 0 = deterministic
+  // frozen-price batches.
+  bool concurrent_prices = false;
   bool verbose = true;
 
   // Returns false if the name is unknown.
@@ -294,6 +300,13 @@ class BonnRouteGlobal
   // resources are refreshed once per batch by refreshWeights().
   void applyPrices(const Candidate& candidate);
   void refreshWeights();
+  // Concurrent variant: atomic log-price adds and monotone weight stores.
+  void applyPricesConcurrent(const Candidate& candidate);
+  // Price reads that tolerate concurrent updates (plain loads on x86).
+  double price(uint32_t r) const;
+  double objectiveWeight() const;
+  void resourceSharingConcurrent(double log_tolerance,
+                                 double initial_log_objective);
   void renormalize();
   int insertCandidate(NetState& state, Candidate&& candidate);
   void resourceSharing();
