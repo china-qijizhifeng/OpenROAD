@@ -531,7 +531,8 @@ class IntervalSearch
   void rebuildEnvelope(Interval& iv);
   int frontierEnd(const Interval& iv, Cost delta) const;
   void addLabel(int interval, int k, Cost delta, int pred_interval, int pred_k);
-  void process(int interval, Cost delta);
+  // Settles J_I(delta) = [frontier, g) (g < 0: computed) and relaxes it.
+  void process(int interval, Cost delta, int g);
   void pushEvent(int interval);
 
   const TrackGraph& graph_;
@@ -576,6 +577,18 @@ class IntervalSearch
     int32_t z, i, j;
   };
   std::vector<Pending> pending_;
+  // Event::interval of the jogs of a settled run J = [f, g) of a plain
+  // interval (relaxed by relaxJogs); Event::aux indexes jog_runs_.
+  static constexpr int32_t kJogEvent = -3;
+  struct JogRun
+  {
+    int32_t interval;
+    int32_t f, g;
+    int32_t di;
+    Cost delta;
+  };
+  std::vector<JogRun> jog_runs_;
+  void relaxJogs(const JogRun& run);
   // While direct_, pushEvent stores the event in direct_event_ instead.
   bool direct_ = false;
   Event direct_event_{0, 0, -1, 0};
