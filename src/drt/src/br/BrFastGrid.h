@@ -37,11 +37,13 @@
 
 #pragma once
 
+#include <algorithm>
 #include <array>
 #include <cstdint>
 #include <memory>
 #include <tuple>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 #include "br/BrDistanceRules.h"
