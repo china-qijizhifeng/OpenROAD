@@ -2928,12 +2928,17 @@ void BonnRouteDR::buildOffTrackAccess(const std::vector<char>& pre_skip)
     const int n = static_cast<int>(ia.terms.size());
     const br::Isometry m = ia.place.compose(instances[rep].place.inverse());
     std::vector<std::vector<AccessOption>> cats(n);
+    // One net per pin, complete before mapping: solve() and the legality
+    // checks below index nets by pin, also after a failed mapping.
     std::vector<int> nets;
+    nets.reserve(n);
+    for (const auto& [net, t] : ia.terms) {
+      nets.push_back(net);
+    }
     bool mapped = true;
     step_timer.reset();
     for (int p = 0; p < n; p++) {
       const auto [net, t] = ia.terms[p];
-      nets.push_back(net);
       if (k == rep) {
         cats[p] = cd.catalogues[p];
         continue;
