@@ -134,6 +134,7 @@ set_bonnroute_dr_param name value
 | `ripup_depth` | `3` | Maximum depth of a rip-up sequence; a failed sequence restores the original routing (Section 4.4). |
 | `ripup_passes` | `2` | Rip-up passes over unrouted nets; each later pass enlarges the routing area by one tile. |
 | `partitions` | `1` | Route in a sequence of balanced thread partitions with decreasing region counts (Section 5.1); `0` uses batches of nets with disjoint boxes. |
+| `critical_nets` | `1` | Route clock nets first, serially on the whole chip (critical net routing step of Section 5.1). |
 | `partition_regions` | `0` | Regions of the first partition; `0` means twice the thread count. |
 | `reservations` | `0` | Reserve legal track-assignment wires for their nets and discount them (Ahrens et al., arXiv:2111.06169, Section 5.2). Selects the vertex search. |
 | `discount_numerator` / `discount_denominator` | `3` / `4` | Cost factor of reserved edges for their own net. |

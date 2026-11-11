@@ -82,6 +82,8 @@ bool BonnRouteDRParams::set(const std::string& name, const double value)
     potential = std::clamp(v, 0, 4);
   } else if (name == "potential_detour_tiles") {
     potential_detour_tiles = std::max(0, v);
+  } else if (name == "critical_nets") {
+    critical_nets = v != 0;
   } else if (name == "partitions") {
     partitions = v != 0;
   } else if (name == "partition_regions") {
@@ -1682,7 +1684,8 @@ void BonnRouteDR::partitionRegions(
 }
 
 void BonnRouteDR::routePartitions(const std::vector<int>& order,
-                                  std::vector<int>& failed)
+                                  std::vector<int>& failed,
+                                  const int initial_regions)
 {
   std::vector<std::array<int, 4>> boxes(nets_.size());
   for (const int id : order) {
@@ -1694,8 +1697,9 @@ void BonnRouteDR::routePartitions(const std::vector<int>& order,
     b[3] = std::min(b[3], tiles_y_ - 1);
   }
   const int threads = static_cast<int>(workers_.size());
-  int count
-      = params_.partition_regions > 0 ? params_.partition_regions : 2 * threads;
+  int count = initial_regions > 0             ? initial_regions
+              : params_.partition_regions > 0 ? params_.partition_regions
+                                              : 2 * threads;
   std::vector<int> pending = order;
   std::vector<std::array<int, 4>> regions;
   int partition = 0;
@@ -1759,11 +1763,14 @@ void BonnRouteDR::routePartitions(const std::vector<int>& order,
                     routed,
                     next.size());
     }
+    const bool placed_any = next.size() < pending.size();
     pending.swap(next);
     partition++;
-    // Fewer, larger regions in later partitions (Sec. 5.1).
-    if (count > 1 && partition % 2 == 0) {
+    // Fewer, larger regions in later partitions (Sec. 5.1). A partition
+    // that holds none of the pending nets is skipped in the sequence.
+    if (count > 1 && (partition % 2 == 0 || !placed_any)) {
       count = std::max(1, count / 2);
+      partition += partition % 2;
     }
   }
 }
@@ -1999,10 +2006,20 @@ void BonnRouteDR::main()
   for (Worker& w : workers_) {
     w.local_routed.assign(z_of_fr_.size(), RTree<int>());
   }
+  // Sec. 5.1: critical nets (here: clock nets) first, on the whole chip.
+  std::vector<int> regular;
+  std::vector<int> critical;
+  for (const int id : order) {
+    (params_.critical_nets && nets_[id].net->isClock() ? critical : regular)
+        .push_back(id);
+  }
+  if (!critical.empty()) {
+    routePartitions(critical, failed_first, 1);
+  }
   if (params_.partitions) {
-    routePartitions(order, failed_first);
+    routePartitions(regular, failed_first);
   } else {
-    routeParallel(order, failed_first);
+    routeParallel(regular, failed_first);
   }
   const double parallel_time = timer.elapsed();
   // FlexDR handles unresolved nets unless serial rip-up is requested.

@@ -60,6 +60,9 @@ struct BonnRouteDRParams
   // bounding boxes. partition_regions = 0 uses twice the thread count.
   bool partitions = true;
   int partition_regions = 0;
+  // Sec. 5.1: a critical net routing step before the partitions; clock
+  // nets are routed first, serially, on the whole chip.
+  bool critical_nets = true;
   // Interval property (ii) also for vias (Sec. 4.1); 0 relaxes vias per
   // vertex and lets intervals ignore via availability.
   bool interval_via_property = true;
@@ -290,7 +293,10 @@ class BonnRouteDR
   // Applies a worker's deferred shape-index updates (serial).
   void mergeWorker(Worker& worker);
   // Sec. 5.1: a sequence of balanced partitions into thread regions.
-  void routePartitions(const std::vector<int>& order, std::vector<int>& failed);
+  // initial_regions: regions of the first partition, 0 = parameter.
+  void routePartitions(const std::vector<int>& order,
+                       std::vector<int>& failed,
+                       int initial_regions = 0);
   void partitionRegions(const std::vector<int>& nets,
                         const std::vector<std::array<int, 4>>& boxes,
                         int count,
