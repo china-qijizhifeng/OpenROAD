@@ -161,6 +161,8 @@ bool BonnRouteDRParams::set(const std::string& name, const double value)
     critical_nets = v != 0;
   } else if (name == "route_ndr_nets") {
     route_ndr_nets = v != 0;
+  } else if (name == "fast_ndr_permille") {
+    fast_ndr_permille = std::clamp(v, 0, 1000);
   } else if (name == "fast_wire_types") {
     fast_wire_types = std::clamp(v, 1, br::FastGrid::kMaxWireTypes);
   } else if (name == "tail_batch") {
@@ -517,7 +519,9 @@ void BonnRouteDR::buildRoutingSpace()
     ndrs.push_back(ndr.get());
     ndr_nets[ndr.get()] = 0;
   }
+  int64_t all_nets = 0;
   for (const auto& net : design_->getTopBlock()->getNets()) {
+    all_nets++;
     if (net->getNondefaultRule() != nullptr) {
       ndr_nets[net->getNondefaultRule()]++;
     }
@@ -625,11 +629,14 @@ void BonnRouteDR::buildRoutingSpace()
     type_nets_.push_back(ndr_nets[ndrs[k]]);
     ndr_type_[ndrs[k]] = index;
   }
-  // Fast wire types: the default rule and the NDRs with nets, most
-  // frequent first, up to fast_wire_types.
+  // Fast wire types: the default rule and the NDRs with at least
+  // fast_ndr_permille / 1000 of the nets, most frequent first, up to
+  // fast_wire_types.
   fast_types_ = 1;
   while (fast_types_ < static_cast<int>(wire_types_.size())
          && fast_types_ < params_.fast_wire_types && type_nets_[fast_types_] > 0
+         && int64_t{type_nets_[fast_types_]} * 1000
+                >= int64_t{params_.fast_ndr_permille} * all_nets
          && params_.route_ndr_nets) {
     fast_types_++;
   }

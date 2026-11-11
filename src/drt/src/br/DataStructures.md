@@ -159,8 +159,13 @@ segment, so constant point levels on an edge imply its level.
   five wire types in bits 0–59. *Choice of the fast wire types* (Sec. 3.6
   "a restricted set of frequent wire types"): BonnRouteDR keeps the default
   rule and, with `route_ndr_nets 1`, the NDRs used by the most nets, up to
-  `fast_wire_types` (at most 5); NDRs without nets and further NDRs are
-  answered by the distance rule checker (`LegalityOracle`). Via-layer word (intervals along the lower layer's tracks over
+  `fast_wire_types` (at most 5), each by at least `fast_ndr_permille` (10)
+  per mille of the nets; other NDRs are answered by the distance rule
+  checker (`LegalityOracle`). A fast wire type costs its fields in every
+  fast-grid build and update over the whole chip: CTS's clock NDR on
+  2-12 nets of aes/tinyRocket_nangate45 as a second fast type added 3-15 s
+  to BonnRoute DR (E2E, `e2e/ndr/REPORT.md`), so such NDRs stay with the
+  checker. Via-layer word (intervals along the lower layer's tracks over
   its via positions): 6 bits per wire type (cut, projection).
 * *Choice for the edge bit*: bit 60 marks the preferred-direction edge to the
   next position and bit 61 the jog edge to the next track, both at the lower

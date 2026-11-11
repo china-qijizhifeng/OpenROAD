@@ -167,6 +167,7 @@ set_bonnroute_dr_param name value
 | `critical_nets` | `1` | Route clock nets and, with `route_ndr_nets 1`, nets with nondefault rules first, serially on the whole chip (critical net routing step of Section 5.1). |
 | `route_ndr_nets` | `0` | Route nets with nondefault rules with their wire type: NDR width, NDR preferred vias and NDR spacing (Sections 3.2, 3.6); `0` leaves them to FlexDR. `2013-reimpl` and `2021` set `1`. |
 | `fast_wire_types` | `5` | Wire types held by the fast grid: the default rule and the NDRs with the most nets, at most 5; other wire types are answered by the distance rule checker. |
+| `fast_ndr_permille` | `10` | An NDR becomes a fast wire type only if at least this many per mille of the nets use it; every fast wire type adds its fields to every fast-grid build and update. CTS clock NDRs (a few nets) stay with the checker. |
 | `tail_batch` | `32` | Once a partition would have fewer regions than threads, route the remaining nets in batches of this size: searched in parallel on the unchanged routing space, committed in net order, and searched again in the next batch on a conflict with an earlier commit of the same batch. `0` keeps the partition sequence to its end. |
 | `partition_regions` | `0` | Regions of the first partition; `0` means twice the thread count. |
 | `reservations` | `0` | Reserve legal track-assignment wires for their nets and discount them (Ahrens et al., arXiv:2111.06169, Section 5.2). Selects the vertex search. |

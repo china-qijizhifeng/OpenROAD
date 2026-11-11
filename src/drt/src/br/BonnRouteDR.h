@@ -93,9 +93,12 @@ struct BonnRouteDRParams
   bool route_ndr_nets = false;
   // Sec. 3.6: wire types held by the fast grid ("a restricted set of
   // frequent wire types"): the default rule and the NDRs used by the most
-  // nets, at most 5 (FastGrid::kMaxWireTypes); the others are answered by
-  // the distance rule checker.
+  // nets, at most 5 (FastGrid::kMaxWireTypes), each by at least
+  // fast_ndr_permille / 1000 of the nets; the others are answered by the
+  // distance rule checker. Every fast wire type adds its fields to every
+  // fast-grid build and update over the whole chip.
   int fast_wire_types = 5;
+  int fast_ndr_permille = 10;
   // Interval property (ii) also for vias (Sec. 4.1); 0 relaxes vias per
   // vertex and lets intervals ignore via availability.
   bool interval_via_property = true;
