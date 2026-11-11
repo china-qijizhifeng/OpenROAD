@@ -5,6 +5,8 @@
 // reading legality through the fast grid API (Sec. 3.6) including edges
 // marked for the distance rule checker and wire types outside the fast
 // grid.
+#include <algorithm>
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <functional>
@@ -12,7 +14,9 @@
 #include <queue>
 #include <random>
 #include <set>
+#include <span>
 #include <tuple>
+#include <utility>
 #include <vector>
 
 #include "br/BrCore.h"

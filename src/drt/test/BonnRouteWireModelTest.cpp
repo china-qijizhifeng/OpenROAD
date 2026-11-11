@@ -8,6 +8,7 @@
 // is symmetric and translation invariant, and wire types carry the models
 // of every layer.
 
+#include <algorithm>
 #include <cstdint>
 #include <cstdio>
 #include <random>

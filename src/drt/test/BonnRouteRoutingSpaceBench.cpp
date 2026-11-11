@@ -10,6 +10,7 @@
 //
 // usage: bonnroute_routing_space_bench [seed] [extent_dbu] [searches]
 
+#include <algorithm>
 #include <boost/geometry.hpp>
 #include <boost/geometry/index/rtree.hpp>
 #include <chrono>

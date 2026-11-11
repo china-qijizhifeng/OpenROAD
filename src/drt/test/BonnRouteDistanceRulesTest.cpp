@@ -8,6 +8,7 @@
 // the known area), blocking nets with ripup levels, the wire-type query
 // interface and the placed-shape check.
 
+#include <algorithm>
 #include <cstdint>
 #include <cstdio>
 #include <random>
