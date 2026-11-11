@@ -9,13 +9,15 @@
 //
 // Resources are the CUGR wire edges (demand as committed by
 // GridGraph::addTreeUsage, including via-pad flank demand) plus one objective
-// resource (wire length + vias, CUGR cost weights). Edge capacities follow
-// Sec. 2.5 (BonnRouteCapacity.h) or, with capacity_model 0, CUGR's model.
-// Pins are vertex sets V_p joined by zero-cost cliques (Sec. 2.1-2.2); the
-// trees keep the used clique edges as pin links (GRTreeNode::isPinLink).
-// The routing trees left on the nets are committed to the grid graph so that
-// every CUGR downstream step (maze clean-up, guides, congestion report)
-// applies as is.
+// resource (wire length + vias, CUGR cost weights). With extra_space, a net
+// may also take extra space s(n, e) on its wire edges, and power and yield
+// loss are two further resources (Sec. 2.1, Fig. 1; BonnRouteResources.h). Edge
+// capacities follow Sec. 2.5 (BonnRouteCapacity.h) or, with capacity_model 0,
+// CUGR's model. Pins are vertex sets V_p joined by zero-cost cliques
+// (Sec. 2.1-2.2); the trees keep the used clique edges as pin links
+// (GRTreeNode::isPinLink). The routing trees left on the nets are committed to
+// the grid graph so that every CUGR downstream step (maze clean-up, guides,
+// congestion report) applies as is.
 
 #pragma once
 
@@ -28,8 +30,10 @@
 #include <vector>
 
 #include "BonnRouteCapacity.h"
+#include "BonnRouteResources.h"
 #include "GRTree.h"
 #include "geo.h"
+#include "grt/BonnRouteExtraSpace.h"
 
 namespace utl {
 class Logger;
@@ -110,6 +114,21 @@ struct BonnRouteParams
   // whole flow: it is written to the database for detailed routing, and
   // guides cover the coarse cells.
   int gcell_scale = 1;
+  // Sec. 2.1: extra space s(n, e) >= 0 per used wire edge, in tracks on the
+  // grid {0, extra_space_step, ..., extra_space_max}, with the resources
+  // power and yield loss whose use decreases with s (Fig. 1). Their bounds
+  // are power_target / yield_target times the congestion-free value without
+  // extra space (<= 0 disables the resource) and grow when a resource
+  // proves the bottleneck (resource_adapt). coupling_fraction is the share
+  // of the layer's edge (sidewall) capacitance that couples to the
+  // neighbor wires at minimum spacing.
+  bool extra_space = false;
+  double extra_space_step = 0.5;
+  double extra_space_max = 2.0;
+  double power_target = 1.0;
+  double yield_target = 1.0;
+  double coupling_fraction = 0.5;
+  bool resource_adapt = true;
   bool verbose = true;
   // Algorithm profile: 0 = 2013-improved (default), 1 = 2013-reimpl,
   // 2 = 2021 (same GR as 2013-reimpl).
@@ -136,8 +155,18 @@ class BonnRouteGlobal
   // CUGR's capacities (GridGraph::edgeFlatIndex order) before capacity
   // model 1 replaced them; empty for capacity model 0.
   const std::vector<double>& cugrCapacity() const { return cugr_capacity_; }
+  // Extra space of the committed trees after trimming to the capacity left
+  // by all wires; one entry per net with some extra space.
+  struct NetSpace
+  {
+    GRNet* net = nullptr;
+    std::shared_ptr<GRTreeNode> tree;  // the tree the space belongs to
+    std::vector<bonnroute::ExtraSpaceEdge> edges;
+  };
+  const std::vector<NetSpace>& extraSpace() const { return extra_space_; }
 
  private:
+  friend class BonnRouteTestPeer;
   // A pin is the set V_p of grid vertices of its shapes (Sec. 2.1); the
   // oracle may connect it at any of them (zero-cost clique K(V_p)).
   struct Terminal
@@ -161,6 +190,8 @@ class BonnRouteGlobal
     double objective = 0.0;
     uint64_t hash = 0;
     int count = 0;
+    // Extra space s > 0 per wire edge resource (Sec. 2.1), sorted.
+    std::vector<std::pair<uint32_t, float>> space;
     // Representative cell of each terminal (same order as
     // NetState::terminals): a cell of the pin in the tree, preferring one
     // with a wire or via.
@@ -245,6 +276,25 @@ class BonnRouteGlobal
   };
 
   void prepareNets();
+  // Sec. 2.1 extra space: per-layer models, bounds and the edge cost.
+  void initSpaceModels();
+  // Cost of the extra space part of wire edge (layer, x, y) at the current
+  // prices: min over s of (space, power, yield) minus nothing that the
+  // plain wire cost already holds; `space` receives the minimizer.
+  double spaceCost(int layer, int x, int y, double* space) const;
+  // Visits every wire unit edge (layer, lower cell x, y) of a candidate.
+  template <typename F>
+  void forEachWireEdge(const Candidate& candidate, F&& fn) const;
+  // Power and yield of a candidate's wires with no extra space.
+  void zeroSpaceResources(const Candidate& candidate,
+                          double& power,
+                          double& yield) const;
+  // Guess-and-adapt of the power / yield bounds (Sec. 2.1).
+  void adaptResourceBounds(int done);
+  void trimAndExportSpace();
+  // ", power load .., yield load .." for the phase reports.
+  std::string resourceLoads(int done) const;
+  double edgeLength(int layer, int x, int y) const;
   // Path composition Steiner tree (Algorithm 1) under the current prices.
   OracleResult oracle(const NetState& state,
                       Scratch& scratch,
@@ -366,6 +416,7 @@ class BonnRouteGlobal
   };
   std::vector<int> layer_direction_;
   std::array<std::vector<double>, 2> wire_objective_;  // [direction][index]
+  std::array<std::vector<double>, 2> edge_length_;     // DBU, [dir][index]
   std::vector<std::vector<PadFlank>> pad_flank_;       // [layer][index]
   // Resources whose log price changed in the current batch.
   std::vector<uint32_t> touched_;
@@ -376,6 +427,19 @@ class BonnRouteGlobal
   int min_layer_ = 0;
 
   std::vector<NetState> states_;
+  // Extra space (Sec. 2.1): resources num_edges_ (power) and num_edges_ + 1
+  // (yield) follow the edge resources.
+  uint32_t num_edges_ = 0;
+  uint32_t power_resource_ = 0;
+  uint32_t yield_resource_ = 0;
+  bool use_power_ = false;
+  bool use_yield_ = false;
+  bonnroute::SpaceGrid space_grid_;
+  std::vector<bonnroute::SpaceLayerModel> space_model_;  // per layer
+  std::vector<double> base_power_;  // per net order index, congestion-free
+  std::vector<double> base_yield_;
+  int bound_adaptations_ = 0;
+  std::vector<NetSpace> extra_space_;
   std::unique_ptr<bonnroute::CapacityEstimator> estimator_;
   std::vector<double> cugr_capacity_;
   double estimate_time_ = 0.0;

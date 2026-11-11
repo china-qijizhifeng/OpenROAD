@@ -22,7 +22,7 @@ speed-ups is checked by the differential tests in `src/drt/test` and
 | Section | Status in `2013-reimpl` |
 | ----- | ----- |
 | 2.1 GR graph, pins as vertex sets | Implemented on OpenROAD GCells; pins connect through zero-cost cliques over the cells of their access points. |
-| 2.1–2.2 resources, extra space | Edge capacities and the wirelength/via objective. Extra space and power/yield resources: [TODO](#2013-todo). |
+| 2.1–2.2 resources, extra space | Edge capacities, the wirelength/via objective, extra space s(n,e) on a grid of 0.5 tracks with convex power (switched wire capacitance with coupling) and yield (critical area) resources; the oracle takes the optimum s per edge (`extra_space`, see `src/grt/README.md`). DR reading the extra space: [TODO](#2013-todo). |
 | 2.2 oracle (Algorithm 1) | Path composition with goal-oriented Dijkstra (l1 and landmark bounds). |
 | 2.3 resource sharing (Algorithm 2) | t = 125, epsilon = 1, reuse rule, concurrent price updates. |
 | 2.4 rounding, rip-up and reroute | Randomized rounding, re-choose, CUGR maze clean-up. |
@@ -42,7 +42,7 @@ speed-ups is checked by the differential tests in `src/drt/test` and
 
 ## 2013 TODO
 
-- **Extra space and resources (Sec. 2.1–2.2):** extra space assignment s(n,e), convex power and yield resources, extra space handed to DR wire spreading.
+- **Extra space in DR (Sec. 2.1, 4.2):** DR wire spreading reads the GR extra space (net property `bonnroute_extra_space`, `src/grt/include/grt/BonnRouteExtraSpace.h`) instead of GCell congestion.
 - **Wire types in DR (Sec. 3.2, 5.1):** NDR spacing, routing NDR nets (currently skipped), wide-wire nets in the critical step.
 - **Tile size (Sec. 2.1):** tiles for 50–100 wires per layer; `gcell_scale` is an experiment, and DR on coarse guides is slow.
 - **Track optimization (Sec. 3.5, Müller 2009):** maximal usable track length.

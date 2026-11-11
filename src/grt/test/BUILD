@@ -281,10 +281,23 @@ cc_test(
 )
 
 cc_test(
+    name = "TestBonnRouteResources",
+    size = "small",
+    srcs = ["cpp/TestBonnRouteResources.cpp"],
+    deps = [
+        "//src/grt:bonnroute_extra_space",
+        "//src/grt:cugr",
+        "@googletest//:gtest",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
     name = "TestBonnRouteModels",
     size = "small",
     srcs = ["cpp/TestBonnRouteModels.cpp"],
     deps = [
+        "//src/grt:bonnroute_extra_space",
         "//src/grt:cugr",
         "//src/odb/src/db",
         "//src/utl",

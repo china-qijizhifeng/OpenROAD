@@ -20,11 +20,15 @@
 #include <vector>
 
 #include "BonnRouteCapacity.h"
+#include "BonnRouteResources.h"
+#include "Design.h"
 #include "GRNet.h"
 #include "GRTree.h"
 #include "GridGraph.h"
 #include "Layers.h"
 #include "geo.h"
+#include "grt/BonnRouteExtraSpace.h"
+#include "odb/db.h"
 #include "utl/Logger.h"
 #include "utl/timer.h"
 
@@ -54,15 +58,19 @@ void BonnRouteParams::applyProfile(const int which)
   gcell_scale = 1;
   if (profile >= 1) {
     // 2013-reimpl and 2021 (the 2021 paper changes DR only): goal orientation
-    // with landmarks (Sec. 2.2) and volatility-tolerant concurrent price
-    // updates (Sec. 2.3).
+    // with landmarks (Sec. 2.2), volatility-tolerant concurrent price
+    // updates (Sec. 2.3) and the extra space assignment with power and
+    // yield resources (Sec. 2.1, Fig. 1).
     landmarks = 8;
     concurrent_prices = true;
+    extra_space = true;
   } else {
     // 2013-improved: the l1 bound (faster than landmarks here) and
-    // deterministic frozen-price batches.
+    // deterministic frozen-price batches; extra space stays off until it
+    // has been measured.
     landmarks = 0;
     concurrent_prices = false;
+    extra_space = false;
   }
 }
 
@@ -134,6 +142,20 @@ bool BonnRouteParams::set(const std::string& name, const double value)
     concurrent_prices = value != 0.0;
   } else if (name == "gcell_scale") {
     gcell_scale = std::clamp(static_cast<int>(value), 1, 64);
+  } else if (name == "extra_space") {
+    extra_space = value != 0.0;
+  } else if (name == "extra_space_step") {
+    extra_space_step = std::max(0.0, value);
+  } else if (name == "extra_space_max") {
+    extra_space_max = std::max(0.0, value);
+  } else if (name == "power_target") {
+    power_target = value;
+  } else if (name == "yield_target") {
+    yield_target = value;
+  } else if (name == "coupling_fraction") {
+    coupling_fraction = std::clamp(value, 0.0, 1.0);
+  } else if (name == "resource_adapt") {
+    resource_adapt = value != 0.0;
   } else if (name == "verbose") {
     verbose = value != 0.0;
   } else {
@@ -206,7 +228,9 @@ BonnRouteGlobal::BonnRouteGlobal(GridGraph* grid_graph,
   for (int direction = 0; direction < 2; direction++) {
     const int size = grid_graph_->getSize(direction);
     wire_objective_[direction].assign(std::max(size, 1), 0.0);
+    edge_length_[direction].assign(std::max(size, 1), 0.0);
     for (int c = 0; c + 1 < size; c++) {
+      edge_length_[direction][c] = grid_graph_->getEdgeLength(direction, c);
       wire_objective_[direction][c] = params_.wire_weight
                                       * grid_graph_->getEdgeLength(direction, c)
                                       / m2_pitch_;
@@ -616,6 +640,7 @@ BonnRouteGlobal::OracleResult BonnRouteGlobal::oracleImpl(
     }
   };
   const double obj = objectiveWeight();
+  const bool extra = params_.extra_space && !objective_only;
   double last_connection_cost = 0.0;
   while (!heap_empty() && remaining > 0) {
     double d;
@@ -697,8 +722,15 @@ BonnRouteGlobal::OracleResult BonnRouteGlobal::oracleImpl(
     if (l >= range.min_layer && l <= range.max_layer) {
       const double factor = net->getNdrCost(l);
       auto wire = [&](int ex, int ey) {
-        return objective_only ? wireObjective(l, ex, ey)
-                              : wireCost(l, ex, ey, factor);
+        if (objective_only) {
+          return wireObjective(l, ex, ey);
+        }
+        double c = wireCost(l, ex, ey, factor);
+        if (extra) {
+          // Eq. (1): the edge cost with the optimum extra space.
+          c += spaceCost(l, ex, ey, nullptr);
+        }
+        return c;
       };
       if (layer_direction_[l] == MetalLayer::H) {
         if (x > x0) {
@@ -1457,6 +1489,37 @@ bool BonnRouteGlobal::buildCandidate(
         usage.emplace_back(edgeIndex(layer, edge.x(), edge.y()),
                            static_cast<double>(demand));
       });
+  candidate.space.clear();
+  if (params_.extra_space) {
+    // Sec. 2.2: b* = (chi(T*), s) with the extra space s that minimizes
+    // each edge's cost; the edge uses w(n, e) + s, power and yield their
+    // gamma(s) (Fig. 1).
+    std::vector<std::array<int, 3>> wires;
+    forEachWireEdge(candidate,
+                    [&](int l, int x, int y) { wires.push_back({l, x, y}); });
+    std::ranges::sort(wires);
+    wires.erase(std::ranges::unique(wires).begin(), wires.end());
+    double power = 0.0;
+    double yield = 0.0;
+    for (const auto& [l, x, y] : wires) {
+      double space = 0.0;
+      spaceCost(l, x, y, &space);
+      const uint32_t r = edgeIndex(l, x, y);
+      if (space > 0.0) {
+        usage.emplace_back(r, space);
+        candidate.space.emplace_back(r, static_cast<float>(space));
+      }
+      const double length = edgeLength(l, x, y);
+      power += length * space_model_[l].powerPerLength(space);
+      yield += length * space_model_[l].yieldPerLength(space);
+    }
+    if (use_power_) {
+      usage.emplace_back(power_resource_, power);
+    }
+    if (use_yield_) {
+      usage.emplace_back(yield_resource_, yield);
+    }
+  }
   std::ranges::sort(usage);
   candidate.usage.clear();
   for (const auto& [r, d] : usage) {
@@ -1489,6 +1552,306 @@ std::shared_ptr<GRTreeNode> BonnRouteGlobal::buildTree(
     }
   }
   return nodes.front();
+}
+
+double BonnRouteGlobal::edgeLength(const int layer,
+                                   const int x,
+                                   const int y) const
+{
+  const int direction = layer_direction_[layer];
+  return edge_length_[direction][direction == MetalLayer::H ? x : y];
+}
+
+template <typename F>
+void BonnRouteGlobal::forEachWireEdge(const Candidate& candidate, F&& fn) const
+{
+  for (const NodeRec& rec : candidate.nodes) {
+    if (rec.parent < 0 || rec.pin >= 0) {
+      continue;
+    }
+    const NodeRec& up = candidate.nodes[rec.parent];
+    if (up.layer != rec.layer) {
+      continue;
+    }
+    if (layer_direction_[rec.layer] == MetalLayer::H) {
+      for (int c = std::min(rec.x, up.x); c < std::max(rec.x, up.x); c++) {
+        fn(rec.layer, c, rec.y);
+      }
+    } else {
+      for (int c = std::min(rec.y, up.y); c < std::max(rec.y, up.y); c++) {
+        fn(rec.layer, rec.x, c);
+      }
+    }
+  }
+}
+
+void BonnRouteGlobal::zeroSpaceResources(const Candidate& candidate,
+                                         double& power,
+                                         double& yield) const
+{
+  power = 0.0;
+  yield = 0.0;
+  forEachWireEdge(candidate, [&](int l, int x, int y) {
+    const double length = edgeLength(l, x, y);
+    power += length * space_model_[l].powerPerLength(0.0);
+    yield += length * space_model_[l].yieldPerLength(0.0);
+  });
+}
+
+// Fig. 1 resource models per wiring layer. Interpretation choices (see
+// BonnRouteResources.h and src/grt/README.md):
+//  - gap g = pitch - width (the gap to a wire on the neighbor track),
+//    growth a = pitch / 2 (s tracks of space split over both sides);
+//  - capacitance per unit length = odb's area capacitance * width + 2 *
+//    edge capacitance (LEF CPERSQDIST / EDGECAPACITANCE, or the values
+//    set_layer_rc stores, which put the whole wire capacitance in the area
+//    term); coupling_fraction of it couples to the neighbor wires at gap g.
+//    Activity 1: power is proportional to the switched capacitance;
+//  - minimum defect size x0 = the smallest width or gap of the routing
+//    layers, so x0 <= d on every layer.
+// NDR nets use w(n, e) = their NDR factor for the space resource and the
+// default-wire power / yield models.
+void BonnRouteGlobal::initSpaceModels()
+{
+  num_edges_ = static_cast<uint32_t>(num_layers_) * x_size_ * y_size_;
+  power_resource_ = num_edges_;
+  yield_resource_ = num_edges_ + 1;
+  use_power_ = params_.extra_space && params_.power_target > 0.0;
+  use_yield_ = params_.extra_space && params_.yield_target > 0.0;
+  space_grid_.step = params_.extra_space_step;
+  space_grid_.max = params_.extra_space ? params_.extra_space_max : 0.0;
+  const Design* design = grid_graph_->getDesign();
+  double defect = std::numeric_limits<double>::max();
+  for (int l = std::max(0, min_layer_); l < num_layers_; l++) {
+    const MetalLayer& layer = design->getLayer(l);
+    const double width = std::max(1, layer.getWidth());
+    const double pitch = std::max(1, layer.getPitch());
+    const double gap
+        = pitch - width > 0.0 ? pitch - width : std::max(1, layer.getSpacing());
+    defect = std::min({defect, width, gap});
+  }
+  if (defect == std::numeric_limits<double>::max()) {
+    defect = 1.0;
+  }
+  space_model_.clear();
+  for (int l = 0; l < num_layers_; l++) {
+    const MetalLayer& layer = design->getLayer(l);
+    odb::dbTechLayer* tech = layer.getTechLayer();
+    space_model_.push_back(bonnroute::makeSpaceLayerModel(
+        layer.getWidth(),
+        layer.getPitch(),
+        layer.getSpacing(),
+        tech != nullptr ? tech->getCapacitance() : 0.0,
+        tech != nullptr ? tech->getEdgeCapacitance() : 0.0,
+        grid_graph_->getLibDBU(),
+        params_.coupling_fraction,
+        defect));
+    if (params_.extra_space && params_.verbose && l >= min_layer_) {
+      const bonnroute::SpaceLayerModel& m = space_model_.back();
+      logger_->report(
+          "BonnRoute extra space model {}: gap {:.0f}, growth {:.0f} DBU per "
+          "track, ground {:.4g} / coupling {:.4g} fF per DBU, x0 {:.0f}.",
+          grid_graph_->getLayerName(l),
+          m.gap,
+          m.growth,
+          m.ground_capacitance,
+          m.coupling_capacitance,
+          m.defect_size);
+    }
+  }
+}
+
+double BonnRouteGlobal::spaceCost(const int layer,
+                                  const int x,
+                                  const int y,
+                                  double* space) const
+{
+  const bonnroute::SpaceLayerModel& m = space_model_[layer];
+  const double length = edgeLength(layer, x, y);
+  const double p = use_power_ ? price(power_resource_) : 0.0;
+  const double q = use_yield_ ? price(yield_resource_) : 0.0;
+  const double shape = length * (p * m.powerShape() + q * m.yieldShape());
+  const double constant
+      = length
+        * (p * m.ground_capacitance
+           + q * m.defect_size * m.defect_size / (2.0 * m.wire_width));
+  bonnroute::SpaceGrid grid = space_grid_;
+  if (layer < min_layer_) {
+    grid.max = 0.0;
+  }
+  const bonnroute::SpaceChoice choice = bonnroute::minimizeSpace(
+      price(edgeIndex(layer, x, y)), shape, m.gap, m.growth, grid);
+  if (space != nullptr) {
+    *space = choice.space;
+  }
+  return choice.cost + constant;
+}
+
+// Sec. 2.1: "For the objective function, we do not have an upper bound a
+// priori, but we can guess a value that we expect to be achievable and
+// adapt it if needed." The power and yield bounds start at their targets
+// times the congestion-free value without extra space. A bound grows when
+// its resource's average load lambda_r exceeds the larger of 1 and the
+// largest edge load by more than 5%: then the bound is not achievable
+// alongside the edge capacities. The log price is rescaled to the new bound
+// (ln y_r = eps * sum of g_n^r); prices of this resource may then fall, so
+// the reuse certificates based on earlier oracle values are dropped.
+std::string BonnRouteGlobal::resourceLoads(const int done) const
+{
+  if (!params_.extra_space) {
+    return "";
+  }
+  const double scale = params_.epsilon * done;
+  return fmt::format(", power load {:.3f}, yield load {:.3f}",
+                     use_power_ ? log_price_[power_resource_] / scale : 0.0,
+                     use_yield_ ? log_price_[yield_resource_] / scale : 0.0);
+}
+
+void BonnRouteGlobal::adaptResourceBounds(const int done)
+{
+  const double scale = params_.epsilon * done;
+  if (scale <= 0.0) {
+    return;
+  }
+  double edge = 0.0;
+  for (uint32_t r = 0; r < num_edges_; r++) {
+    edge = std::max(edge, log_price_[r]);
+  }
+  const double reference = std::max(1.0, edge / scale);
+  bool changed = false;
+  for (const uint32_t r : {power_resource_, yield_resource_}) {
+    if ((r == power_resource_ && !use_power_)
+        || (r == yield_resource_ && !use_yield_)) {
+      continue;
+    }
+    const double lambda = log_price_[r] / scale;
+    if (lambda <= 1.05 * reference) {
+      continue;
+    }
+    const double factor = lambda / reference;
+    norm_capacity_[r] *= factor;
+    log_price_[r] /= factor;
+    weight_[r] = std::exp(log_price_[r] - shift_) / norm_capacity_[r];
+    bound_adaptations_++;
+    changed = true;
+    if (params_.verbose) {
+      logger_->report(
+          "BonnRoute phase {:3d}: {} bound raised by {:.3f} (load {:.3f}, "
+          "edge load {:.3f}).",
+          done,
+          r == power_resource_ ? "power" : "yield",
+          factor,
+          lambda,
+          edge / scale);
+    }
+  }
+  if (changed) {
+    for (NetState& state : states_) {
+      state.last_log_cost = -1e300;
+    }
+  }
+}
+
+// After rounding and re-choosing, s is trimmed so that every edge holds it
+// next to all nets' wires: the edge's extra space is scaled down to the
+// capacity left after the committed wires (and rounded down to the grid).
+// CUGR's demand keeps the wires only, so its maze clean-up may still use
+// that room; trees it reroutes lose their extra space (CUGR exports only
+// the space of trees left as committed here).
+void BonnRouteGlobal::trimAndExportSpace()
+{
+  extra_space_.clear();
+  std::vector<double> total(num_edges_, 0.0);
+  for (const int index : order_) {
+    const NetState& state = states_[index];
+    if (state.chosen < 0) {
+      continue;
+    }
+    for (const auto& [r, sp] : state.candidates[state.chosen].space) {
+      total[r] += sp;
+    }
+  }
+  std::vector<float> keep(num_edges_, 1.0f);
+  double before = 0.0;
+  for (uint32_t r = 0; r < num_edges_; r++) {
+    if (total[r] <= 0.0) {
+      continue;
+    }
+    before += total[r];
+    const int y = static_cast<int>(r % y_size_);
+    const int x = static_cast<int>((r / y_size_) % x_size_);
+    const int l = static_cast<int>(r / y_size_ / x_size_);
+    const GraphEdge edge = grid_graph_->getEdge(l, x, y);
+    const double slack = std::max(0.0, edge.capacity - edge.demand);
+    if (total[r] > slack) {
+      keep[r] = static_cast<float>(slack / total[r]);
+    }
+  }
+  const double step = space_grid_.step > 0.0 ? space_grid_.step : 1.0;
+  double after = 0.0;
+  double power = 0.0;
+  double power0 = 0.0;
+  double yield = 0.0;
+  double yield0 = 0.0;
+  int64_t edges = 0;
+  for (const int index : order_) {
+    const NetState& state = states_[index];
+    if (state.chosen < 0) {
+      continue;
+    }
+    const Candidate& chosen = state.candidates[state.chosen];
+    NetSpace ns;
+    ns.net = state.net;
+    ns.tree = state.net->getRoutingTree();
+    std::vector<std::pair<uint32_t, float>> trimmed;
+    for (const auto& [r, sp] : chosen.space) {
+      const double v = std::floor(sp * keep[r] / step + 1e-6) * step;
+      if (v <= 0.0) {
+        continue;
+      }
+      trimmed.emplace_back(r, static_cast<float>(v));
+      const int y = static_cast<int>(r % y_size_);
+      const int x = static_cast<int>((r / y_size_) % x_size_);
+      const int l = static_cast<int>(r / y_size_ / x_size_);
+      ns.edges.push_back({l + 1, x, y, static_cast<float>(v)});
+      after += v;
+      edges++;
+    }
+    double p0 = 0.0;
+    double y0 = 0.0;
+    zeroSpaceResources(chosen, p0, y0);
+    power0 += p0;
+    yield0 += y0;
+    forEachWireEdge(chosen, [&](int l, int x, int y) {
+      const uint32_t r = edgeIndex(l, x, y);
+      const auto it = std::ranges::lower_bound(
+          trimmed, r, {}, &std::pair<uint32_t, float>::first);
+      const double sp
+          = (it != trimmed.end() && it->first == r) ? it->second : 0.0;
+      const double length = edgeLength(l, x, y);
+      power += length * space_model_[l].powerPerLength(sp);
+      yield += length * space_model_[l].yieldPerLength(sp);
+    });
+    if (!ns.edges.empty()) {
+      extra_space_.push_back(std::move(ns));
+    }
+  }
+  if (params_.verbose) {
+    logger_->report(
+        "BonnRoute extra space: {} edges of {} nets, {:.1f} tracks ({:.1f} "
+        "before trimming to capacity); wire power {:.4g} fF ({:+.2f}% vs. "
+        "no extra space), yield critical area {:.4g} ({:+.2f}%); bounds "
+        "adapted {} times.",
+        edges,
+        extra_space_.size(),
+        after,
+        before,
+        power,
+        power0 > 0.0 ? 100.0 * (power - power0) / power0 : 0.0,
+        yield,
+        yield0 > 0.0 ? 100.0 * (yield - yield0) / yield0 : 0.0,
+        bound_adaptations_);
+  }
 }
 
 double BonnRouteGlobal::linearCost(const Candidate& candidate) const
@@ -1575,6 +1938,9 @@ void BonnRouteGlobal::pilot(std::vector<double>* stack_counts)
   const int num_nets = static_cast<int>(order_.size());
   // Congestion-free objective: guess for the objective resource bound.
   std::vector<double> objective(num_nets, 0.0);
+  const bool space = params_.extra_space;
+  base_power_.assign(space ? num_nets : 0, 0.0);
+  base_yield_.assign(space ? num_nets : 0, 0.0);
   // Via columns (x, y, low, high) of each net's congestion-free tree.
   std::vector<std::vector<std::array<int, 4>>> columns(
       stack_counts != nullptr ? num_nets : 0);
@@ -1599,6 +1965,9 @@ void BonnRouteGlobal::pilot(std::vector<double>* stack_counts)
                 segments);
     }
     objective[i] = r.ok ? r.candidate.objective : 0.0;
+    if (space && r.ok) {
+      zeroSpaceResources(r.candidate, base_power_[i], base_yield_[i]);
+    }
     states_[order_[i]].log_base_objective
         = r.ok && r.candidate.objective > 0.0 ? std::log(r.candidate.objective)
                                               : -1e300;
@@ -2021,19 +2390,24 @@ void BonnRouteGlobal::resourceSharing()
       // ln y_r = eps * (sum of normalized loads); divide by phases for the
       // average fractional load lambda_r.
       double lambda_max = 0.0;
-      for (const double lp : log_price_) {
-        lambda_max = std::max(lambda_max, lp);
+      for (uint32_t r = 0; r < num_edges_; r++) {
+        lambda_max = std::max(lambda_max, log_price_[r]);
       }
       lambda_max /= params_.epsilon * done;
       const double lambda_obj = (log_objective_price_ - initial_log_objective)
                                 / (params_.epsilon * done);
       logger_->report(
           "BonnRoute phase {:3d}: oracle calls {:7d}, max edge load {:.3f}, "
-          "objective load {:.3f}.",
+          "objective load {:.3f}{}.",
           done,
           phase_calls,
           lambda_max,
-          lambda_obj);
+          lambda_obj,
+          resourceLoads(done));
+    }
+    if (params_.extra_space && params_.resource_adapt
+        && (done == 1 || done % 25 == 0) && done < params_.phases) {
+      adaptResourceBounds(done);
     }
   }
 }
@@ -2134,19 +2508,24 @@ void BonnRouteGlobal::resourceSharingConcurrent(
     if (params_.verbose
         && (done == 1 || done % 25 == 0 || done == params_.phases)) {
       double lambda_max = 0.0;
-      for (const double lp : log_price_) {
-        lambda_max = std::max(lambda_max, lp);
+      for (uint32_t r = 0; r < num_edges_; r++) {
+        lambda_max = std::max(lambda_max, log_price_[r]);
       }
       lambda_max /= params_.epsilon * done;
       const double lambda_obj = (log_objective_price_ - initial_log_objective)
                                 / (params_.epsilon * done);
       logger_->report(
           "BonnRoute phase {:3d}: oracle calls {:7d}, max edge load {:.3f}, "
-          "objective load {:.3f} (concurrent prices).",
+          "objective load {:.3f}{} (concurrent prices).",
           done,
           phase_calls.load(),
           lambda_max,
-          lambda_obj);
+          lambda_obj,
+          resourceLoads(done));
+    }
+    if (params_.extra_space && params_.resource_adapt
+        && (done == 1 || done % 25 == 0) && done < params_.phases) {
+      adaptResourceBounds(done);
     }
   }
   reuses_ += reuses;
@@ -2308,6 +2687,9 @@ void BonnRouteGlobal::commit()
     }
     grid_graph_->addTreeUsage(tree, state.net->getNdrCosts());
   }
+  if (params_.extra_space) {
+    trimAndExportSpace();
+  }
   if (failed > 0) {
     logger_->warn(GRT,
                   760,
@@ -2357,6 +2739,7 @@ void BonnRouteGlobal::run()
       f = 1.0;
     }
   }
+  initSpaceModels();
   std::vector<double> stack_counts;
   const bool count_stacks = estimate && params_.capacity_stacked_vias;
   pilot(count_stacks ? &stack_counts : nullptr);
@@ -2369,8 +2752,8 @@ void BonnRouteGlobal::run()
     estimate_time_ += stack_timer.elapsed();
     reportCapacities();
   }
-  const size_t num_resources
-      = static_cast<size_t>(num_layers_) * x_size_ * y_size_;
+  // Edge resources, then power and yield (used with extra_space only).
+  const size_t num_resources = static_cast<size_t>(num_edges_) + 2;
   capacity_.assign(num_resources, 0.0);
   norm_capacity_.assign(num_resources, params_.min_capacity);
   log_price_.assign(num_resources, 0.0);
@@ -2389,6 +2772,42 @@ void BonnRouteGlobal::run()
         capacity_[r] = edge.capacity - edge.demand;
         norm_capacity_[r] = std::max(capacity_[r], params_.min_capacity);
       }
+    }
+  }
+  // Power and yield never count as overflow in rounding (Sec. 2.4 repairs
+  // edge capacities); their bounds u_r normalize the prices.
+  for (const uint32_t r : {power_resource_, yield_resource_}) {
+    capacity_[r] = std::numeric_limits<double>::max();
+    norm_capacity_[r] = 1e30;
+  }
+  if (params_.extra_space) {
+    double power = 0.0;
+    double yield = 0.0;
+    for (size_t i = 0; i < base_power_.size(); i++) {
+      power += base_power_[i];
+      yield += base_yield_[i];
+    }
+    use_power_ = use_power_ && power > 0.0;
+    use_yield_ = use_yield_ && yield > 0.0;
+    if (use_power_) {
+      norm_capacity_[power_resource_] = params_.power_target * power;
+    }
+    if (use_yield_) {
+      norm_capacity_[yield_resource_] = params_.yield_target * yield;
+    }
+    if (params_.verbose) {
+      logger_->report(
+          "BonnRoute extra space: step {:.2f}, max {:.2f} tracks; power "
+          "bound {:.4g} fF ({:.2f} x {:.4g}), yield bound {:.4g} ({:.2f} x "
+          "{:.4g}).",
+          space_grid_.step,
+          space_grid_.max,
+          use_power_ ? norm_capacity_[power_resource_] : 0.0,
+          params_.power_target,
+          power,
+          use_yield_ ? norm_capacity_[yield_resource_] : 0.0,
+          params_.yield_target,
+          yield);
     }
   }
   resourceSharing();

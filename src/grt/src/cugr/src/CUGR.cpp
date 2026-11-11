@@ -5,6 +5,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
 #include <fstream>
 #include <functional>
 #include <iostream>
@@ -37,6 +38,7 @@
 #include "db_sta/dbSta.hh"
 #include "est/ParasiticsService.h"
 #include "geo.h"
+#include "grt/BonnRouteExtraSpace.h"
 #include "grt/GRoute.h"
 #include "odb/PtrSetMap.h"
 #include "odb/db.h"
@@ -795,6 +797,11 @@ void CUGR::bonnRoute(std::vector<int>& net_indices)
   BonnRouteGlobal router(grid_graph_.get(), nets, params, logger_);
   router.run();
   bonnroute_cugr_capacity_ = router.cugrCapacity();
+  bonnroute_space_.clear();
+  for (const BonnRouteGlobal::NetSpace& space : router.extraSpace()) {
+    bonnroute_space_.push_back(
+        {space.net, space.tree, bonnroute::encodeExtraSpace(space.edges)});
+  }
   // Nets without a BonnRoute tree fall back to pattern routing.
   for (GRNet* net : nets) {
     if (net->getRoutingTree() != nullptr) {
@@ -1157,6 +1164,7 @@ std::vector<odb::dbNet*> CUGR::route(bool incremental)
 
   printStatistics();
   reportBonnRouteCapacityOverflow();
+  exportBonnRouteExtraSpace(incremental, net_indices);
 
   if (incremental) {
     incremental_routing_ = false;
@@ -2090,6 +2098,54 @@ void CUGR::getGuides(const GRNet* net,
           }
         }
       });
+}
+
+// grt/BonnRouteExtraSpace.h: the extra space of BonnRoute's trees as
+// odb properties for detailed routing. Every routed net loses an old
+// property; a net keeps the new one only if its tree is still the one
+// BonnRoute committed (CUGR's clean-up may have rerouted it).
+void CUGR::exportBonnRouteExtraSpace(const bool incremental,
+                                     const std::vector<int>& net_indices)
+{
+  auto clear = [](odb::dbNet* db_net) {
+    if (odb::dbStringProperty* prop
+        = odb::dbStringProperty::find(db_net, bonnroute::kExtraSpaceProperty)) {
+      odb::dbProperty::destroy(prop);
+    }
+  };
+  if (incremental) {
+    for (const int index : net_indices) {
+      if (gr_nets_[index] != nullptr) {
+        clear(gr_nets_[index]->getDbNet());
+      }
+    }
+    return;
+  }
+  for (const auto& net : gr_nets_) {
+    if (net != nullptr) {
+      clear(net->getDbNet());
+    }
+  }
+  int exported = 0;
+  int rerouted = 0;
+  for (const BonnRouteSpace& space : bonnroute_space_) {
+    if (space.net->getRoutingTree() != space.tree) {
+      rerouted++;
+      continue;
+    }
+    odb::dbStringProperty::create(space.net->getDbNet(),
+                                  bonnroute::kExtraSpaceProperty,
+                                  space.encoded.c_str());
+    exported++;
+  }
+  if (verbose_ && !bonnroute_space_.empty()) {
+    logger_->report(
+        "BonnRoute extra space exported for {} nets ({} rerouted by the "
+        "clean-up keep none).",
+        exported,
+        rerouted);
+  }
+  bonnroute_space_.clear();
 }
 
 void CUGR::reportBonnRouteCapacityOverflow() const
