@@ -593,6 +593,26 @@ class IntervalSearch
   bool direct_ = false;
   Event direct_event_{0, 0, -1, 0};
   mutable PagedLabels<VertexLabel> labels_;
+  // labels_[li] through the last page used (most lookups stay on a track).
+  VertexLabel& label(const size_t li) const
+  {
+    if ((li >> kLabelPageBits) == label_page_) {
+      return label_base_[li & kLabelPageMask];
+    }
+    VertexLabel& l = labels_[li];
+    if (!labels_.overflow()) {
+      label_page_ = li >> kLabelPageBits;
+      label_base_ = &l - (li & kLabelPageMask);
+    }
+    return l;
+  }
+  static constexpr int kLabelPageBits = PagedLabels<VertexLabel>::kPageBits;
+  static constexpr size_t kLabelPageMask
+      = PagedLabels<VertexLabel>::kPageSize - 1;
+  mutable size_t label_page_ = ~size_t{0};
+  mutable VertexLabel* label_base_ = nullptr;
+  // Per target box of the track being built: cross cost, along range.
+  std::vector<std::array<Cost, 3>> track_future_;
   uint32_t epoch_ = 0;
   // intervals_[0, num_used_) belong to the current search; the others keep
   // their label storage for later searches (at most kKeptIntervals).

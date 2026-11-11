@@ -270,8 +270,8 @@ int IntervalSearch::intervalOf(const int z, const int i, const int j)
   if (!inWindow(z, i, j, li)) {
     return -1;
   }
-  if (labels_[li].stamp == epoch_) {
-    return labels_[li].interval_id;
+  if (label(li).stamp == epoch_) {
+    return label(li).interval_id;
   }
   return buildInterval(z, i, j);
 }
@@ -291,22 +291,46 @@ int IntervalSearch::buildInterval(const int z, const int i, const int j)
     if (!inWindow(z, i, jj, li)) {
       return false;
     }
-    VertexLabel& label = labels_[li];
-    if (label.stamp == epoch_ || label.target_stamp == epoch_
+    VertexLabel& lab = label(li);
+    if (lab.stamp == epoch_ || lab.target_stamp == epoch_
         || !region.contains(layer, z, i, jj)) {
       return false;
     }
-    bits = info(z, i, jj, label);
+    bits = info(z, i, jj, lab);
     sig = bits & property_mask;
     return (bits & kInfoWireLegal) != 0
-           && !(label.source_stamp == epoch_ && layer.jogs
+           && !(lab.source_stamp == epoch_ && layer.jogs
                 && !(bits & kInfoJogLegal))
            && (bits & kTransPenalty) == 0;
   };
   int ja = j;
   int jb = j;
   int cls = 0;
-  const Cost pi0 = futureCost(z, i, j);
+  // pi_H along track i: per target box, the cost across the track
+  // (cross distance, via bound, terminal cost) and its range along it.
+  track_future_.clear();
+  for (const TargetBox& b : req_->target_boxes) {
+    const Coord c = layer.tracks[i];
+    const Coord clo = layer.horizontal ? b.ylo : b.xlo;
+    const Coord chi = layer.horizontal ? b.yhi : b.xhi;
+    track_future_.push_back(
+        {std::max({Cost{0}, Cost{clo} - c, Cost{c} - chi}) + viaBound(z, b)
+             + (req_->exact_future_cost ? b.cost : 0),
+         layer.horizontal ? b.xlo : b.ylo,
+         layer.horizontal ? b.xhi : b.yhi});
+  }
+  auto future = [&](int jj) {
+    if (track_future_.empty()) {
+      return Cost{0};
+    }
+    const Cost a = layer.positions[jj];
+    Cost best = kInfCost;
+    for (const auto& [cross, lo, hi] : track_future_) {
+      best = std::min(best, cross + std::max({Cost{0}, lo - a, a - hi}));
+    }
+    return best;
+  };
+  const Cost pi0 = future(j);
   Cost pi_a = pi0;
   Cost pi_b = pi0;
   uint16_t sig = 0;
@@ -335,7 +359,7 @@ int IntervalSearch::buildInterval(const int z, const int i, const int j)
         return false;
       }
       // Adjacent members must have the same slope, exactly +1 or -1.
-      const Cost pi_to = futureCost(z, i, to);
+      const Cost pi_to = future(to);
       const Cost step
           = static_cast<Cost>(layer.positions[to]) - layer.positions[from];
       const Cost dpi = pi_to - pi_from;
@@ -381,8 +405,8 @@ int IntervalSearch::buildInterval(const int z, const int i, const int j)
   for (int jj = ja; jj <= jb; jj++) {
     size_t li = 0;
     inWindow(z, i, jj, li);
-    labels_[li].stamp = epoch_;
-    labels_[li].interval_id = id;
+    label(li).stamp = epoch_;
+    label(li).interval_id = id;
   }
   num_intervals_++;
   return id;
@@ -542,13 +566,13 @@ void IntervalSearch::addLabel(const int interval,
     // path is cheaper (Algorithm 4, line 25, checked as early as possible).
     size_t li = 0;
     inWindow(iv.z, iv.i, iv.ja, li);
-    if (labels_[li].target_stamp == epoch_) {
-      const auto& t = req_->targets[labels_[li].target_index];
+    if (label(li).target_stamp == epoch_) {
+      const auto& t = req_->targets[label(li).target_index];
       // delta includes pi(t) <= t.cost (the box cost is the cheapest
       // terminal cost), so the sink key stays >= delta.
       const Cost pi_t = iv.futureCost(layer, iv.ja);
       heap_.push_back(Event{
-          delta - pi_t + t.cost, kSinkTie, -1, labels_[li].target_index});
+          delta - pi_t + t.cost, kSinkTie, -1, label(li).target_index});
       std::push_heap(heap_.begin(), heap_.end(), std::greater<>());
       res_->heap_pushes++;
     }
@@ -607,12 +631,12 @@ void IntervalSearch::process(const int id, const Cost delta, int g)
   auto bits_of = [&](int k) {
     size_t li = 0;
     inWindow(z, i, j_of(k), li);
-    return labels_[li].info;
+    return label(li).info;
   };
   auto via_bits_of = [&](int k) {
     size_t li = 0;
     inWindow(z, i, j_of(k), li);
-    return viaInfo(z, i, j_of(k), labels_[li]);
+    return viaInfo(z, i, j_of(k), label(li));
   };
   const uint16_t signature = single ? 0 : bits_of(f);
   // Relaxation of an edge from member from_k to (z2, i2, j2), in two steps:
@@ -634,7 +658,7 @@ void IntervalSearch::process(const int id, const Cost delta, int g)
     if (i2 < 0 || j2 < 0 || !inWindow(z2, i2, j2, li)) {
       return false;
     }
-    VertexLabel& w = labels_[li];
+    VertexLabel& w = label(li);
     const Cost from = delta + cost - intervals_[id].futureCost(layer, j_of(from_k));
     p = Probe{&w, z2, i2, j2, 0, 0};
     if (w.stamp == epoch_) {
@@ -753,7 +777,7 @@ void IntervalSearch::process(const int id, const Cost delta, int g)
       const At edge = di > 0 ? v : w;
       size_t li = 0;
       inWindow(z, i, j, li);
-      const bool source = labels_[li].source_stamp == epoch_;
+      const bool source = label(li).source_stamp == epoch_;
       if (!region.contains(layer, z, i2, j) || !(source || enter(v, kJog))
           || !enter(w, kJog) || !enter(edge, kJogEdge)) {
         continue;
@@ -789,7 +813,7 @@ void IntervalSearch::process(const int id, const Cost delta, int g)
     const At edge = dj > 0 ? v : w;
     size_t li = 0;
     inWindow(z, i, j, li);
-    if ((labels_[li].source_stamp != epoch_ && !enter(v, kWire))
+    if ((label(li).source_stamp != epoch_ && !enter(v, kWire))
         || !enter(w, kWire) || !enter(edge, kWireEdge)) {
       continue;
     }
@@ -870,6 +894,7 @@ SearchResult IntervalSearch::run(const SearchRequest& request)
     total += static_cast<size_t>(w.ni) * w.nj;
   }
   epoch_ = labels_.reset(total, request.label_limit);
+  label_page_ = ~size_t{0};
   vias_at_build_ = request.interval_via_property || request.ripup;
   for (size_t t = 0; t < request.targets.size(); t++) {
     int z, i, j;
@@ -878,31 +903,48 @@ SearchResult IntervalSearch::run(const SearchRequest& request)
     if (!inWindow(z, i, j, li)) {
       continue;
     }
-    if (labels_[li].target_stamp == epoch_
-        && request.targets[labels_[li].target_index].cost
+    if (label(li).target_stamp == epoch_
+        && request.targets[label(li).target_index].cost
                <= request.targets[t].cost) {
       continue;
     }
-    labels_[li].target_stamp = epoch_;
-    labels_[li].target_index = static_cast<int32_t>(t);
+    label(li).target_stamp = epoch_;
+    label(li).target_index = static_cast<int32_t>(t);
   }
   for (const auto& [v, c] : request.sources) {
     int z, i, j;
     graph_.decode(v, z, i, j);
     size_t li = 0;
     if (inWindow(z, i, j, li)) {
-      labels_[li].source_stamp = epoch_;
+      label(li).source_stamp = epoch_;
     }
   }
-  // Algorithm 4, lines 1-4 (with source costs).
+  // Algorithm 4, lines 1-4 (with source costs): every source gets a label
+  // (delta = cost + pi), deferred like the labels of relaxations, so the
+  // intervals of sources far from the targets (a routed tree) are built
+  // only if the search reaches their level.
   for (const auto& [v, c] : request.sources) {
     int z, i, j;
     graph_.decode(v, z, i, j);
-    const int id = intervalOf(z, i, j);
-    if (id >= 0) {
-      const Interval& iv = intervals_[id];
-      addLabel(id, iv.kOf(j), c + iv.futureCost(graph_.layers[z], j), -1, -1);
+    size_t li = 0;
+    if (!inWindow(z, i, j, li)) {
+      continue;
     }
+    VertexLabel& w = label(li);
+    const Cost pi = futureCost(z, i, j);
+    const Cost d = c + pi;
+    if (w.pending_stamp == epoch_ && w.pending_delta <= d) {
+      continue;
+    }
+    w.pending_stamp = epoch_;
+    w.pending_delta = d;
+    w.pending_pred_interval = -1;
+    w.pending_pred_k = -1;
+    pending_.push_back({z, i, j});
+    heap_.push_back(Event{
+        d, tieKey(pi), kPendingEvent, static_cast<int32_t>(pending_.size() - 1)});
+    std::push_heap(heap_.begin(), heap_.end(), std::greater<>());
+    result.heap_pushes++;
   }
   while (!heap_.empty()) {
     if (labels_.overflow()) {
@@ -922,7 +964,7 @@ SearchResult IntervalSearch::run(const SearchRequest& request)
       const Pending p = pending_[e.aux];
       size_t li = 0;
       inWindow(p.z, p.i, p.j, li);
-      VertexLabel& w = labels_[li];
+      VertexLabel& w = label(li);
       if (w.pending_stamp != epoch_ || w.pending_delta != e.key) {
         continue;  // superseded by a cheaper deferred label
       }
@@ -982,7 +1024,7 @@ SearchResult IntervalSearch::run(const SearchRequest& request)
   graph_.decode(result.target_vertex, z, i, j);
   size_t li = 0;
   inWindow(z, i, j, li);
-  int id = labels_[li].interval_id;
+  int id = label(li).interval_id;
   int k = intervals_[id].kOf(j);
   while (true) {
     const Interval& iv = intervals_[id];
