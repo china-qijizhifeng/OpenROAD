@@ -241,6 +241,10 @@ bool BonnRouteDRParams::set(const std::string& name, const double value)
     incremental_resident = v != 0;
   } else if (name == "reserve_short_pitches") {
     reserve_short_pitches = std::max(0, v);
+  } else if (name == "incremental_reservations") {
+    incremental_reservations = v != 0;
+  } else if (name == "incremental_potential") {
+    incremental_potential = std::clamp(v, 0, 4);
   } else if (name == "verbose") {
     verbose = v != 0;
   } else {

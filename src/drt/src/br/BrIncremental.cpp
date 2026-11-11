@@ -21,8 +21,10 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <iterator>
 #include <memory>
 #include <string>
+#include <tuple>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
@@ -119,6 +121,45 @@ void BonnRouteDR::gridOnlyChange(const RShape& shape,
     projection.role = br::ShapeRole::kCutProjection;
     apply(above, shapeClass(projection, above));
   }
+}
+
+void BonnRouteDR::enableIncrementalDiscounts()
+{
+  if (incremental_discounts_ || !params_.incremental_reservations
+      || params_.discount_denominator <= 1) {
+    incremental_discounts_ = incremental_discounts_ || graph_.wire_unit > 1;
+    return;
+  }
+  // The first call may have used unit wire costs (no reservations there):
+  // scale every cost of the resident track graph and of the kept access
+  // options to the discount denominator, so that discounted runs stay
+  // integral (arXiv:2111.06169 Sec. 5.2). Path costs keep their order.
+  if (graph_.wire_unit == 1) {
+    const br::Cost f = params_.discount_denominator;
+    graph_.wire_unit = f;
+    for (br::TrackLayer& l : graph_.layers) {
+      l.jog_factor *= f;
+    }
+    for (br::Cost& c : graph_.via_cost) {
+      c *= f;
+    }
+    for (NetData& net : nets_) {
+      for (Term& term : net.terms) {
+        for (AccessOption& o : term.options) {
+          o.cost *= f;
+        }
+      }
+    }
+  }
+  // Discounted runs need the vertex search (the interval search assumes
+  // unit wire costs).
+  params_.use_intervals = false;
+  for (Worker& w : workers_) {
+    if (!w.search) {
+      w.search = std::make_unique<br::PathSearch>(graph_, grid_);
+    }
+  }
+  incremental_discounts_ = true;
 }
 
 bool BonnRouteDR::residentFor(const frDesign* design) const
@@ -424,11 +465,12 @@ void BonnRouteDR::syncInstances(SyncStats& stats)
 void BonnRouteDR::syncNets(SyncStats& stats)
 {
   frBlock* block = design_->getTopBlock();
-  // First pass: fingerprints; nets whose routing changed are re-read.
+  // Nets whose routing fingerprint changed (or that BonnRoute routed in
+  // the previous call) are compared shape by shape with the routing space;
+  // only shapes that differ are removed or inserted.
   std::vector<int> reread;
   std::vector<uint64_t> fp(nets_.size(), 0);
   std::vector<char> seen(nets_.size(), 0);
-  int64_t changed_shapes = 0;
   for (const auto& up : block->getNets()) {
     frNet* net = up.get();
     auto it = net_index_.find(net);
@@ -446,44 +488,81 @@ void BonnRouteDR::syncNets(SyncStats& stats)
     fp[id] = routingFingerprint(net);
     if (fp[id] != data.routing_fp || data.routed || !data.shapes.empty()) {
       reread.push_back(id);
-      changed_shapes += static_cast<int64_t>(data.input_shapes.size())
-                        + static_cast<int64_t>(net->getShapes().size())
-                        + 3 * static_cast<int64_t>(net->getVias().size());
     }
   }
-  // Many changes (FlexDR's clean-up after the first BonnRoute run): update
-  // the shape grid only and rebuild the fast grid once.
-  const bool bulk = changed_shapes > 200000;
-  grid_only_ = bulk;
-  std::vector<RShape> shapes;
+  auto key = [](const RShape& r) {
+    return std::make_tuple(r.layer,
+                           r.rect.xMin(),
+                           r.rect.yMin(),
+                           r.rect.xMax(),
+                           r.rect.yMax(),
+                           static_cast<int>(r.role));
+  };
+  auto less = [&](const RShape& a, const RShape& b) { return key(a) < key(b); };
+  // Per net: shapes in the space (old) and in the design (new), sorted.
+  struct Delta
+  {
+    int id;
+    std::vector<RShape> now;
+    std::vector<RShape> remove;
+    std::vector<RShape> insert;
+  };
+  std::vector<Delta> deltas;
+  int64_t changed_shapes = 0;
   for (const int id : reread) {
     NetData& data = nets_[id];
-    br::FastGridBuilder::PendingRemovals pending;
+    Delta d{id, {}, {}, {}};
+    routingShapes(data.net, d.now);
+    std::vector<RShape> old;
     if (data.input_present) {
-      stats.shapes_removed += static_cast<int64_t>(data.input_shapes.size());
-      setInputShapes(data, false, &pending);
+      old = data.input_shapes;
     }
-    for (const RShape& s : data.shapes) {
+    old.insert(old.end(), data.shapes.begin(), data.shapes.end());
+    std::ranges::sort(old, less);
+    std::vector<RShape> now = d.now;
+    std::ranges::sort(now, less);
+    std::ranges::set_difference(old, now, std::back_inserter(d.remove), less);
+    std::ranges::set_difference(now, old, std::back_inserter(d.insert), less);
+    changed_shapes += static_cast<int64_t>(d.remove.size() + d.insert.size());
+    deltas.push_back(std::move(d));
+  }
+  // Many changes: update the shape grid only and rebuild the fast grid once.
+  const bool bulk = changed_shapes > 200000;
+  for (Delta& d : deltas) {
+    NetData& data = nets_[d.id];
+    br::FastGridBuilder::PendingRemovals pending;
+    for (const RShape& s : d.remove) {
       if (bulk) {
         gridOnlyChange(s, routedShapeType(s.role), data.id, false);
       } else {
         changeShape(
             s, routedShapeType(s.role), data.id, false, nullptr, &pending);
       }
-      stats.shapes_removed++;
     }
-    fast_builder_.flush(pending);
+    if (!bulk) {
+      fast_builder_.flush(pending);
+    }
+    for (const RShape& s : d.insert) {
+      if (bulk) {
+        gridOnlyChange(s, routedShapeType(s.role), data.id, true);
+      } else {
+        changeShape(s, routedShapeType(s.role), data.id, true, nullptr);
+      }
+    }
+    stats.shapes_removed += static_cast<int64_t>(d.remove.size());
+    stats.shapes_inserted += static_cast<int64_t>(d.insert.size());
+    if (!d.remove.empty() || !d.insert.empty()) {
+      stats.nets_reread++;
+    }
     data.shapes.clear();
     data.wires.clear();
     data.vias.clear();
     data.routed = false;
-    routingShapes(data.net, data.input_shapes);
-    setInputShapes(data, true);
-    stats.shapes_inserted += static_cast<int64_t>(data.input_shapes.size());
-    data.routing_fp = fp[id];
-    stats.nets_reread++;
+    data.input_shapes = std::move(d.now);
+    data.input_present = !data.input_shapes.empty();
+    data.input_removed = false;
+    data.routing_fp = fp[d.id];
   }
-  grid_only_ = false;
   if (bulk) {
     rebuildFastGrid();
   }
@@ -881,9 +960,9 @@ void BonnRouteDR::applyClassification(NetData& net,
     stats.reserved++;
     net.input_reservation.insert(
         net.input_reservation.end(), piece.shapes.begin(), piece.shapes.end());
-    // Discounted runs need the vertex search with discount costs
-    // (`reservations 1`); otherwise the reservation only keeps the space.
-    if (piece.kind != 0 || !modernSearch()) {
+    // Discounted runs need discount costs (enableIncrementalDiscounts);
+    // otherwise the reservation only keeps the space for the net.
+    if (piece.kind != 0 || graph_.wire_unit <= 1) {
       continue;
     }
     // Discount runs on the track the wire lies on (as reserveInputWires).
@@ -1075,6 +1154,10 @@ void BonnRouteDR::routeIncremental(std::vector<odb::Rect>& regions)
   utl::Timer timer;
   regions.clear();
   incremental_active_ = true;
+  enableIncrementalDiscounts();
+  // The paper's incremental runs use the general potential (Tables 4, 6).
+  const int potential = params_.potential;
+  params_.potential = params_.incremental_potential;
   SyncStats stats;
   syncInstances(stats);
   syncNets(stats);
@@ -1331,6 +1414,7 @@ void BonnRouteDR::routeIncremental(std::vector<odb::Rect>& regions)
   }
   victim_changed_insts_ = nullptr;
   incremental_active_ = false;
+  params_.potential = potential;
   classified_.clear();
   const double write_s = timer.elapsed() - sync_s - access_s - route_s;
   if (params_.verbose) {

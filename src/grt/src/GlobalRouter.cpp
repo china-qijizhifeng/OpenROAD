@@ -1237,9 +1237,14 @@ void GlobalRouter::updateDirtyNets(std::vector<Net*>& dirty_nets)
   for (odb::dbNet* db_net : dirty_nets_) {
     Net* net = db_net_map_[db_net];
     updateNetPins(net);
-    if (!keeping_detailed_wires_) {
-      destroyNetWire(net);
+    if (keeping_detailed_wires_ && db_net->getWire() != nullptr) {
+      // -keep_detailed_wires: the net keeps its detailed wires and its
+      // guides; detailed routing connects the new diode.
+      net->setDirtyNet(false);
+      net->clearLastPinPositions();
+      continue;
     }
+    destroyNetWire(net);
     std::string pins_not_covered;
     // compare new positions with last positions & add on vector
     if (net->isResAware()
@@ -7485,10 +7490,15 @@ std::vector<Net*> GlobalRouter::updateDirtyRoutesCugr(bool save_guides)
     // Stale detailed wires (post-detailed-route repair) must go: the
     // reroute and its guides supersede them, and the antenna checker
     // must not read them. No-op for nets without wires. With
-    // -keep_detailed_wires the wires of nets that got diodes stay.
-    if (!keeping_detailed_wires_) {
-      destroyNetWire(net);
+    // -keep_detailed_wires the nets that got diodes keep their wires and
+    // guides; detailed routing connects the diodes.
+    if (keeping_detailed_wires_ && db_net->getWire() != nullptr) {
+      net->setDirtyNet(false);
+      net->clearLastPinPositions();
+      cugr_->markNetStale(db_net);
+      continue;
     }
+    destroyNetWire(net);
     // Journal-restored nets get their pre-change routing back from the odb
     // guides instead of a reroute; a failed restore forces the reroute.
     const bool restore_requested

@@ -232,6 +232,14 @@ struct BonnRouteDRParams
   // Input wires shorter than this many pitches of their layer that connect
   // only to illegal input wires get no reservation (Sec. 5.2).
   int reserve_short_pitches = 2;
+  // In incremental calls (whatever the profile), legal input wires are
+  // reservations of their net at the discount (Sec. 5.2: the input is a
+  // legal detailed routing); the first call is unaffected. The search of
+  // incremental calls is then the vertex search with discounted runs.
+  bool incremental_reservations = true;
+  // Future cost of incremental calls (values of `potential`); 3 is the
+  // general model with discounts used in the paper's Tables 4 and 6.
+  int incremental_potential = 3;
   bool verbose = true;
   // Algorithm profile: 0 = 2013-improved (default), 1 = 2013-reimpl,
   // 2 = 2021 (2013-reimpl plus Ahrens et al., arXiv:2111.06169).
@@ -895,6 +903,10 @@ class BonnRouteDR
   // Bulk updates of the incremental mode change the shape grid only; the
   // fast grid is rebuilt afterwards.
   bool grid_only_ = false;
+  // Incremental calls: wire costs scaled to the discount denominator and
+  // the vertex search set up (enableIncrementalDiscounts).
+  bool incremental_discounts_ = false;
+  void enableIncrementalDiscounts();
   void gridOnlyChange(const RShape& shape,
                       br::ShapeType type,
                       int owner,
