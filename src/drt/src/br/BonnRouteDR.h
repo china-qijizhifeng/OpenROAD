@@ -87,6 +87,22 @@ struct BonnRouteDRParams
   // Threads of the speculative batches; 0 uses all router threads. The
   // batch results do not depend on it (a check of that determinism).
   int tail_threads = 0;
+  // Within a batch, start the searches with the largest estimated cost
+  // first (longest processing time first); results do not depend on it.
+  bool tail_order = true;
+  // Pipeline instead of a barrier per batch (BrTailPipeline.h): batches of
+  // tail_batch nets keep their semantics (searched on the commits of the
+  // earlier batches, decided in order), a conflicting net is searched again
+  // tail_retry_delay batches later, and searches and decisions of nets with
+  // disjoint tile boxes overlap across batches. Results depend on the net
+  // order, tail_batch and tail_retry_delay only.
+  bool tail_pipeline = true;
+  int tail_retry_delay = 1;
+  // Settled vertices a net may use in its speculative tail attempt; a net
+  // that needs more (almost always one without a route, left to FlexDR) is
+  // deferred to a final pass of the stage without a budget, so it does not
+  // hold up the batches. 0 disables the budget.
+  int tail_defer_settled = 300000;
   // Sec. 5.1: a critical net routing step before the partitions; clock
   // nets are routed first, serially, on the whole chip.
   bool critical_nets = true;
@@ -313,6 +329,11 @@ class BonnRouteDR
   {
     // Searching in a speculative batch: read-only on shared routing space.
     bool speculative = false;
+    // Settled-vertex budget of the current connect (0: none), the settled
+    // count at its start, and whether a search was skipped for it.
+    int64_t effort_budget = 0;
+    int64_t effort_start = 0;
+    bool effort_exceeded = false;
     // Spreading tiles of the net being routed (extra space mode).
     std::vector<std::vector<uint8_t>> spread_mask;
     br::Region region;
@@ -613,6 +634,25 @@ class BonnRouteDR
   void routeSpeculative(const std::vector<int>& order,
                         std::vector<int>& failed,
                         const char* stage);
+  // One pass of routeSpeculative: nets over the settled budget (0: none)
+  // go to `deferred`, in net order.
+  void routeSpeculativeBatches(const std::vector<int>& order,
+                               std::vector<int>& failed,
+                               std::vector<int>& deferred,
+                               const std::string& stage,
+                               int threads,
+                               int64_t budget);
+  void routeSpeculativePipeline(const std::vector<int>& order,
+                                std::vector<int>& failed,
+                                std::vector<int>& deferred,
+                                const std::string& stage,
+                                int threads,
+                                int64_t budget);
+  // Estimated search effort of a tail net (orders the searches of a batch).
+  double tailSearchEstimate(const NetData& net) const;
+  // Routing digest of all nets (FNV-1a over net id, routed flag, wires,
+  // vias and pin points).
+  uint64_t tailRoutingDigest() const;
   void partitionRegions(const std::vector<int>& nets,
                         const std::vector<std::array<int, 4>>& boxes,
                         int count,

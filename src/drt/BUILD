@@ -51,6 +51,7 @@ cc_library(
         "src/br/BrPinAccess.cpp",
         "src/br/BrPotential.cpp",
         "src/br/BrShapeGrid.cpp",
+        "src/br/BrTailPipeline.cpp",
         "src/br/BrWireModel.cpp",
     ],
     hdrs = [
@@ -66,6 +67,7 @@ cc_library(
         "src/br/BrPotentialOracle.h",
         "src/br/BrSameNetRules.h",
         "src/br/BrShapeGrid.h",
+        "src/br/BrTailPipeline.h",
         "src/br/BrTrackGraph.h",
         "src/br/BrWireModel.h",
     ],

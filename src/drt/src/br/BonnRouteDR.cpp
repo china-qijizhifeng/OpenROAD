@@ -15,6 +15,7 @@
 #include <functional>
 #include <limits>
 #include <memory>
+#include <numeric>
 #include <optional>
 #include <string>
 #include <tuple>
@@ -29,6 +30,7 @@
 #include "br/BrPathCleanup.h"
 #include "br/BrPinAccess.h"
 #include "br/BrSameNetRules.h"
+#include "br/BrTailPipeline.h"
 #include "db/obj/frAccess.h"
 #include "db/obj/frBTerm.h"
 #include "db/obj/frBlock.h"
@@ -81,6 +83,10 @@ void BonnRouteDRParams::applyProfile(const int which)
     interval_nearest_first = false;
     ripup = false;
     tail_batch = 32;
+    tail_order = true;
+    tail_pipeline = true;
+    tail_retry_delay = 1;
+    tail_defer_settled = 300000;
     potential = 0;
     spreading = false;
   }
@@ -163,6 +169,14 @@ bool BonnRouteDRParams::set(const std::string& name, const double value)
     tail_batch = std::max(0, v);
   } else if (name == "tail_threads") {
     tail_threads = std::max(0, v);
+  } else if (name == "tail_order") {
+    tail_order = v != 0;
+  } else if (name == "tail_pipeline") {
+    tail_pipeline = v != 0;
+  } else if (name == "tail_retry_delay") {
+    tail_retry_delay = std::max(1, v);
+  } else if (name == "tail_defer_settled") {
+    tail_defer_settled = std::max(0, v);
   } else if (name == "partitions") {
     partitions = v != 0;
   } else if (name == "partition_regions") {
@@ -3610,6 +3624,19 @@ bool BonnRouteDR::connectInRegion(NetData& net,
   for (Term& term : net.terms) {
     term.chosen = -1;
   }
+  // Effort budget of a speculative tail attempt (tail_defer_settled):
+  // checked before each search, so an attempt settles at most the budget
+  // plus one search; the net is then deferred (see routeSpeculative).
+  auto over_budget = [&worker]() {
+    if (worker.effort_budget > 0
+        && worker.settled - worker.effort_start >= worker.effort_budget) {
+      worker.effort_exceeded = true;
+    }
+    return worker.effort_exceeded;
+  };
+  if (over_budget()) {
+    return false;
+  }
   const int num_terms = static_cast<int>(net.terms.size());
   br::SearchRequest req;
   req.net = net.id;
@@ -3803,6 +3830,9 @@ bool BonnRouteDR::connectInRegion(NetData& net,
   bool full_region = false;
   int remaining = num_terms - 1;
   while (remaining > 0) {
+    if (over_budget()) {
+      return false;
+    }
     br::SearchResult res;
     // Sec. 4.4: route the connection inside the GR tiles of a guide path
     // to another component first; fall back to the net's whole area.
@@ -3821,6 +3851,9 @@ bool BonnRouteDR::connectInRegion(NetData& net,
       }
     }
     if (!res.found) {
+      if (over_budget()) {
+        return false;
+      }
       if (!full_region) {
         buildRegion(net, dilation, worker.region);
         full_region = true;
@@ -4196,12 +4229,44 @@ void BonnRouteDR::routeSpeculative(const std::vector<int>& order,
       = params_.tail_threads > 0
             ? std::min(params_.tail_threads, static_cast<int>(workers_.size()))
             : static_cast<int>(workers_.size());
+  // Nets over the effort budget are routed after all others, in net order,
+  // in a second pass without a budget.
+  std::vector<int> deferred;
+  std::vector<int> none;
+  const int64_t budget = params_.tail_defer_settled;
+  if (params_.tail_pipeline) {
+    routeSpeculativePipeline(order, failed, deferred, stage, threads, budget);
+  } else {
+    routeSpeculativeBatches(order, failed, deferred, stage, threads, budget);
+  }
+  if (deferred.empty()) {
+    return;
+  }
+  const std::string late = std::string(stage) + " deferred";
+  if (params_.tail_pipeline) {
+    routeSpeculativePipeline(deferred, failed, none, late, threads, 0);
+  } else {
+    routeSpeculativeBatches(deferred, failed, none, late, threads, 0);
+  }
+}
+
+void BonnRouteDR::routeSpeculativeBatches(const std::vector<int>& order,
+                                          std::vector<int>& failed,
+                                          std::vector<int>& deferred,
+                                          const std::string& stage,
+                                          const int threads,
+                                          const int64_t budget)
+{
   const size_t batch_size = static_cast<size_t>(params_.tail_batch);
   std::deque<int> queue(order.begin(), order.end());
   std::vector<int> batch;
   std::vector<char> ok;
   std::vector<double> busy;
   std::vector<int64_t> settled;
+  std::vector<char> over;
+  int64_t deferred_count = 0;
+  std::vector<int> slots;
+  std::vector<double> estimate;
   std::vector<RShape> shapes;
   int64_t batches = 0;
   int64_t conflicts = 0;
@@ -4226,15 +4291,36 @@ void BonnRouteDR::routeSpeculative(const std::vector<int>& order,
     ok.assign(batch.size(), 0);
     busy.assign(batch.size(), 0);
     settled.assign(batch.size(), 0);
+    over.assign(batch.size(), 0);
+    // Searches in dispatch order: by default the largest estimated effort
+    // first, so a long search does not start last. Every search reads the
+    // same routing space, so the order only changes the batch wall time.
+    slots.resize(batch.size());
+    std::iota(slots.begin(), slots.end(), 0);
+    if (params_.tail_order) {
+      estimate.resize(batch.size());
+      for (size_t k = 0; k < batch.size(); k++) {
+        estimate[k] = tailSearchEstimate(nets_[batch[k]]);
+      }
+      std::ranges::stable_sort(
+          slots, [&](int a, int b) { return estimate[a] > estimate[b]; });
+    }
     const double wall_start = omp_get_wtime();
     // Nothing writes the routing space while the batch is searched.
 #pragma omp parallel for num_threads(threads) schedule(dynamic, 1)
-    for (int k = 0; k < static_cast<int>(batch.size()); k++) {
+    for (int i = 0; i < static_cast<int>(batch.size()); i++) {
+      const int k = slots[i];
       Worker& w = workers_[omp_get_thread_num()];
       const double start = omp_get_wtime();
       const int64_t settled_before = w.settled;
       w.speculative = true;
+      w.effort_budget = budget;
+      w.effort_start = w.settled;
+      w.effort_exceeded = false;
       ok[k] = connect(nets_[batch[k]], false, w);
+      over[k] = !ok[k] && w.effort_exceeded;
+      w.effort_budget = 0;
+      w.effort_exceeded = false;
       w.speculative = false;
       settled[k] = w.settled - settled_before;
       busy[k] = omp_get_wtime() - start;
@@ -4280,13 +4366,20 @@ void BonnRouteDR::routeSpeculative(const std::vector<int>& order,
     std::vector<odb::Rect> committed_boxes;
     for (size_t k = 0; k < batch.size(); k++) {
       NetData& net = nets_[batch[k]];
-      // Per-net trace: 0 failed, 1 committed, 2 conflict; exact check run.
+      // Per-net trace: 0 failed, 1 committed, 2 conflict, 3 deferred (over
+      // the effort budget); exact check run.
       int outcome = 0;
       bool exact = false;
       if (!ok[k]) {
         net.wires.clear();
         net.vias.clear();
-        failed.push_back(net.id);
+        if (over[k]) {
+          deferred.push_back(net.id);
+          deferred_count++;
+          outcome = 3;
+        } else {
+          failed.push_back(net.id);
+        }
       } else {
         bool clash = false;
         if (!committed_boxes.empty()) {
@@ -4400,37 +4493,6 @@ void BonnRouteDR::routeSpeculative(const std::vector<int>& order,
           static_cast<size_t>(q * static_cast<double>(search_times.size())));
       return 1e3 * search_times[i];
     };
-    // Routing digest of all nets after the stage (FNV-1a over net id,
-    // routed flag, wires, vias and pin points): equal runs print equal
-    // digests, whatever the thread count.
-    uint64_t digest = 1469598103934665603ULL;
-    auto add = [&digest](const int64_t v) {
-      digest ^= static_cast<uint64_t>(v);
-      digest *= 1099511628211ULL;
-    };
-    for (const NetData& net : nets_) {
-      add(net.id);
-      add(net.routed);
-      for (const OutWire& w : net.wires) {
-        add(w.layer);
-        add(w.begin.x());
-        add(w.begin.y());
-        add(w.end.x());
-        add(w.end.y());
-        add(w.patch);
-      }
-      for (const OutVia& v : net.vias) {
-        add(v.def->getCutLayerNum());
-        add(static_cast<int64_t>(std::hash<std::string>()(v.def->getName())));
-        add(v.point.x());
-        add(v.point.y());
-      }
-      for (const auto& [layer, p] : net.pin_points) {
-        add(layer);
-        add(p.x());
-        add(p.y());
-      }
-    }
     logger_->info(
         utl::DRT,
         9125,
@@ -4438,7 +4500,8 @@ void BonnRouteDR::routeSpeculative(const std::vector<int>& order,
         "search per batch {:.2f}s in total ({:.0f}% of the parallel search "
         "wall), idle thread time at the batch barriers {:.2f}s; {} searches, "
         "search time p50 {:.1f} ms, p90 {:.1f} ms, p99 {:.1f} ms, max {:.1f} "
-        "ms; routing digest {:016x}.",
+        "ms; {} nets deferred over an effort of {} settled vertices; routing "
+        "digest {:016x}.",
         stage,
         threads,
         longest_total,
@@ -4449,7 +4512,264 @@ void BonnRouteDR::routeSpeculative(const std::vector<int>& order,
         quantile_ms(0.9),
         quantile_ms(0.99),
         search_times.empty() ? 0.0 : 1e3 * search_times.back(),
-        digest);
+        deferred_count,
+        budget,
+        tailRoutingDigest());
+  }
+}
+
+double BonnRouteDR::tailSearchEstimate(const NetData& net) const
+{
+  // Search effort grows with the routing area and the number of
+  // connections: guide tiles times terminals.
+  return static_cast<double>(net.guide_tiles.size())
+         * static_cast<double>(std::max<size_t>(1, net.terms.size()));
+}
+
+uint64_t BonnRouteDR::tailRoutingDigest() const
+{
+  uint64_t digest = 1469598103934665603ULL;
+  auto add = [&digest](const int64_t v) {
+    digest ^= static_cast<uint64_t>(v);
+    digest *= 1099511628211ULL;
+  };
+  for (const NetData& net : nets_) {
+    add(net.id);
+    add(net.routed);
+    for (const OutWire& w : net.wires) {
+      add(w.layer);
+      add(w.begin.x());
+      add(w.begin.y());
+      add(w.end.x());
+      add(w.end.y());
+      add(w.patch);
+    }
+    for (const OutVia& v : net.vias) {
+      add(v.def->getCutLayerNum());
+      add(static_cast<int64_t>(std::hash<std::string>()(v.def->getName())));
+      add(v.point.x());
+      add(v.point.y());
+    }
+    for (const auto& [layer, p] : net.pin_points) {
+      add(layer);
+      add(p.x());
+      add(p.y());
+    }
+  }
+  return digest;
+}
+
+void BonnRouteDR::routeSpeculativePipeline(const std::vector<int>& order,
+                                           std::vector<int>& failed,
+                                           std::vector<int>& deferred,
+                                           const std::string& stage,
+                                           const int threads,
+                                           const int64_t budget)
+{
+  // Tile boxes hold every read and write of a net's search and commit
+  // (netTileBox adds the interaction halo, Sec. 5.1), so nets with
+  // disjoint boxes are searched and committed concurrently, as threads of
+  // disjoint partition regions are.
+  std::vector<br::TailPipeline::Box> boxes(nets_.size());
+  for (const int id : order) {
+    int xlo, ylo, xhi, yhi;
+    netTileBox(nets_[id], xlo, ylo, xhi, yhi);
+    boxes[id] = {std::max(xlo, 0),
+                 std::max(ylo, 0),
+                 std::min(xhi, tiles_x_ - 1),
+                 std::min(yhi, tiles_y_ - 1)};
+  }
+  std::vector<double> search_seconds(nets_.size(), 0);
+  std::vector<int64_t> settled(nets_.size(), 0);
+  std::vector<char> over(nets_.size(), 0);
+  // Shapes of committed nets, bloated by the interaction distance.
+  std::vector<odb::Rect> committed_box(nets_.size());
+  std::vector<std::vector<RShape>> shapes(threads);
+  std::vector<int64_t> checked(threads, 0);
+  std::vector<double> check_seconds(threads, 0);
+  std::vector<std::vector<double>> times(threads);
+  const bool trace = logger_->debugCheck(utl::DRT, "bonnroute_tail", 1);
+  br::TailPipeline::Hooks hooks;
+  hooks.parallel = [](const int count, const std::function<void(int)>& body) {
+#pragma omp parallel num_threads(count)
+    body(omp_get_thread_num());
+  };
+  hooks.search = [&](const int id, const int t) {
+    Worker& w = workers_[t];
+    const double start = omp_get_wtime();
+    const int64_t before = w.settled;
+    w.speculative = true;
+    w.effort_budget = budget;
+    w.effort_start = w.settled;
+    w.effort_exceeded = false;
+    const bool found = connect(nets_[id], false, w);
+    over[id] = !found && w.effort_exceeded;
+    w.effort_budget = 0;
+    w.effort_exceeded = false;
+    w.speculative = false;
+    settled[id] = w.settled - before;
+    search_seconds[id] = omp_get_wtime() - start;
+    times[t].push_back(search_seconds[id]);
+    return found;
+  };
+  hooks.decide = [&](const int id,
+                     const bool found,
+                     const std::vector<int>& earlier,
+                     const int t) {
+    using Decision = br::TailPipeline::Decision;
+    Worker& w = workers_[t];
+    NetData& net = nets_[id];
+    Decision decision = Decision::kCommitted;
+    bool exact = false;
+    if (!found) {
+      net.wires.clear();
+      net.vias.clear();
+      decision = Decision::kFailed;
+    } else {
+      // Only commits earlier in the batch can conflict (the route was
+      // legal on the commits of the earlier batches), and only within the
+      // interaction distance of their shapes.
+      bool clash = false;
+      if (!earlier.empty()) {
+        shapesOf(net, shapes[t]);
+        odb::Rect box;
+        box.mergeInit();
+        for (const RShape& shape : shapes[t]) {
+          box.merge(shape.rect);
+        }
+        const bool near
+            = !box.isInverted() && std::ranges::any_of(earlier, [&](int e) {
+                return committed_box[e].intersects(box);
+              });
+        if (near) {
+          const double check_start = omp_get_wtime();
+          clash = std::ranges::any_of(shapes[t], [&](const RShape& shape) {
+            return shapeConflicts(shape, net.id, &w);
+          });
+          check_seconds[t] += omp_get_wtime() - check_start;
+          checked[t]++;
+          exact = true;
+        }
+      }
+      if (clash) {
+        net.wires.clear();
+        net.vias.clear();
+        net.pin_points.clear();
+        decision = Decision::kConflict;
+      } else {
+        commitNet(net, &w);
+        // Released and recomputed exactly inside the net's box.
+        setReservations(net, false, &w);
+        odb::Rect box;
+        box.mergeInit();
+        for (const RShape& shape : net.shapes) {
+          box.merge(shape.rect);
+        }
+        if (!box.isInverted()) {
+          box.bloat(static_cast<int>(interaction_reach_), box);
+          committed_box[id] = box;
+        }
+      }
+    }
+    if (trace) {
+      const auto& b = boxes[id];
+      logger_->debug(utl::DRT,
+                     "bonnroute_tail",
+                     "tail pipeline net {} search_ms {:.3f} settled {} "
+                     "outcome {} exact {} box {} {} {} {} guide_tiles {} "
+                     "terms {} hpwl {}",
+                     id,
+                     1e3 * search_seconds[id],
+                     settled[id],
+                     decision == Decision::kFailed
+                         ? (over[id] ? 3 : 0)
+                         : (decision == Decision::kCommitted ? 1 : 2),
+                     exact ? 1 : 0,
+                     b[0],
+                     b[1],
+                     b[2],
+                     b[3],
+                     net.guide_tiles.size(),
+                     net.terms.size(),
+                     net.hpwl);
+    }
+    return decision;
+  };
+  if (params_.tail_order) {
+    hooks.cost = [&](const int id) { return tailSearchEstimate(nets_[id]); };
+  }
+  br::TailPipeline pipeline(params_.tail_batch, params_.tail_retry_delay);
+  std::vector<int> unrouted;
+  const br::TailPipeline::Stats stats
+      = pipeline.run(order, boxes, threads, hooks, unrouted);
+  int64_t deferred_count = 0;
+  for (const int id : unrouted) {
+    if (over[id]) {
+      deferred.push_back(id);
+      deferred_count++;
+    } else {
+      failed.push_back(id);
+    }
+  }
+  partition_wall_ += stats.wall;
+  partition_busy_ += stats.search_busy + stats.decide_busy;
+  partition_capacity_ += stats.wall * threads;
+  if (params_.verbose) {
+    int64_t checked_total = 0;
+    double check_total = 0;
+    std::vector<double> all;
+    for (int t = 0; t < threads; t++) {
+      checked_total += checked[t];
+      check_total += check_seconds[t];
+      all.insert(all.end(), times[t].begin(), times[t].end());
+    }
+    std::ranges::sort(all);
+    auto quantile_ms = [&](const double q) {
+      if (all.empty()) {
+        return 0.0;
+      }
+      const size_t i
+          = std::min(all.size() - 1,
+                     static_cast<size_t>(q * static_cast<double>(all.size())));
+      return 1e3 * all[i];
+    };
+    const double capacity = stats.wall * threads;
+    logger_->info(
+        utl::DRT,
+        9127,
+        "BonnRoute {} speculative pipeline: {} batches of {} nets (retries "
+        "{} batches later), {} nets committed, {} searched again after a "
+        "conflict, {} without a route; {:.2f}s on {} threads, thread "
+        "utilization {:.0f}% (searches {:.2f}s, decisions {:.2f}s incl. {} "
+        "exact checks {:.2f}s, idle {:.2f}s); {} searches started before an "
+        "earlier batch was decided; search time p50 {:.1f} ms, p90 {:.1f} "
+        "ms, p99 {:.1f} ms, max {:.1f} ms; {} nets deferred over an effort "
+        "of {} settled vertices; routing digest {:016x}.",
+        stage,
+        stats.batches,
+        params_.tail_batch,
+        params_.tail_retry_delay,
+        stats.committed,
+        stats.conflicts,
+        stats.failed - deferred_count,
+        stats.wall,
+        threads,
+        capacity > 0
+            ? 100.0 * (stats.search_busy + stats.decide_busy) / capacity
+            : 0.0,
+        stats.search_busy,
+        stats.decide_busy,
+        checked_total,
+        check_total,
+        stats.idle,
+        stats.overlapped_searches,
+        quantile_ms(0.5),
+        quantile_ms(0.9),
+        quantile_ms(0.99),
+        all.empty() ? 0.0 : 1e3 * all.back(),
+        deferred_count,
+        budget,
+        tailRoutingDigest());
   }
 }
 

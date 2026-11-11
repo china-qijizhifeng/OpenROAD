@@ -252,6 +252,18 @@ segment, so constant point levels on an edge imply its level.
   the halo does not depend on the classes interned later.
   `BonnRoutePartitionTest` checks equality with a serial run; run it with
   `-fsanitize=thread` as well.
+* Speculative tail pipeline (`BrTailPipeline.h`, `tail_pipeline 1`): the
+  same tile-box argument lets the tail batches overlap. An attempt of batch
+  b reads the commits of the earlier batches and nothing else inside its
+  box; its search waits only for the decisions of interacting attempts of
+  earlier batches, and a decision waits for the searches of the interacting
+  attempts of its batch and the decisions of those earlier in it. Retries
+  enter batch b + `tail_retry_delay` in the position order of their source
+  batch once that batch is fully decided. Commits run on the deciding
+  thread with its write cache and flush the net's released reservations
+  inside its box. `BonnRouteTailPipelineTest` compares the pipeline on 1-8
+  threads with a serial execution of the semantics on random instances;
+  run it with `-fsanitize=thread` as well.
 * Search scratch: per-vertex labels live in 1024-label pages allocated when a
   search touches them (`PagedLabels`), so a die-spanning window costs a page
   table, not 29 B per window vertex per worker.
