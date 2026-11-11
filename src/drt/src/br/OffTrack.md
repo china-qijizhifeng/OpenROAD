@@ -294,6 +294,38 @@ halo, so the search finds none ("no tau-feasible path", 210 pins on
 tinyRocket). OpenROAD's pin access treats the abutment as intended; these
 pins keep the access stubs (`offtrack_macro_pins 0`).
 
+Layers whose wires must stay on tracks in the preferred direction (drt's
+`isUnidirectional`: multi-patterned or RECTONLY, plus RIGHTWAYONGRIDONLY;
+asap7 M1-M3): the catalogue search removes every planar arc that is not a
+preferred-direction arc along a track (Sec. 3.8, "removing edges that induce
+a violation"), the post-processing makes no jog shifts or collapses there,
+and min-area extensions are preferred-direction only. A wrong-way or
+off-track piece there is unroutable for FlexDR: a worker boundary through it
+becomes a boundary pin FlexDR cannot reach on that layer (aes_asap7,
+`DRT-0255 ... cannot find path`, source "aps" on the box edge on M2). The
+final check in `writeNets` leaves any net with such a wire to FlexDR
+("wrong-way or off-track wires" in the log). The test compares the filtered
+search with a brute force restricted the same way.
+
+Access points: by default only the access point pin access chose for each
+pin (`offtrack_preferred_access_points 1`). Pin access chooses them as a
+conflict-free pattern of the instance and its neighbours; catalogue paths
+from other access points of the pin met neighbouring access vias more
+often (metal2 spacing on Nangate45, metal1 on sky130). Access points off the
+manufacturing grid are never used (they put the via and the grid lines off
+it).
+
+Min-area extensions are written as FlexDR patch wires anchored at their via
+(`frPatchWire`, origin at the via, offset box on the manufacturing grid).
+Written as path segments, FlexDR's connectivity check removed them as
+dangling and reported Recheck markers (asap7: 14,308 on M2 for 16,968
+extensions), and their lengths were off the grid (Off Grid on sky130 met1).
+
+Via connection marks: a via pad at an access point of a pin of the net is
+marked bottom/top connected, as FlexDR marks its own vias. Unmarked, FlexDR's
+connectivity check (`buildPin2epMap`) does not see the pin connected and may
+remove the access via as a dangling object (Recheck on li1 on sky130).
+
 ## Pin contacts and FlexDR (DRT-1231)
 
 FlexDR's clean-up (`initNets_searchRepair_pin2epMap`, `initNet_term_helper`

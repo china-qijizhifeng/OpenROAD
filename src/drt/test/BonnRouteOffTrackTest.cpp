@@ -950,7 +950,11 @@ void testCleanup(std::mt19937& rng)
     layer.half_width = half;
     layer.rules.width = 2 * half;
     layer.rules.notch_spacing = rng() % 2 == 0 ? 2 * half : 0;
+    layer.grid = 1 + static_cast<GeoCoord>(rng() % 3);
+    layer.horizontal = rng() % 2 == 0;
     req.layers = {layer, layer, layer};
+    const bool on_tracks = rng() % 4 == 0;
+    req.layers[0].on_tracks = on_tracks;
     req.layers[1].rules.min_area = rng() % 2 == 0 ? 60 + rng() % 120 : 0;
     std::vector<Box> obstacles;
     req.allowed = [&obstacles](int, const Box& b) {
@@ -1050,7 +1054,22 @@ void testCleanup(std::mt19937& rng)
       CHECK(a.p.x == b.p.x || a.p.y == b.p.y, "diagonal segment");
       CHECK(req.allowed(a.layer, wireBox(a.p, b.p, half)), "illegal new metal");
     }
+    if (on_tracks) {
+      // No jog shifts or collapses on an on-track-only layer.
+      for (const RouteNode& n : r.nodes) {
+        CHECK(n.layer != 0
+                  || std::find(nodes.begin(), nodes.end(), n) != nodes.end(),
+              "node moved on an on-track-only layer");
+      }
+    }
     for (const CleanupPatch& p : r.patches) {
+      const CleanupLayer& pl = req.layers[p.layer];
+      CHECK(pl.horizontal ? p.begin.y == p.end.y : p.begin.x == p.end.x,
+            "patch not in the preferred direction");
+      CHECK((std::abs(p.end.x - p.begin.x) + std::abs(p.end.y - p.begin.y))
+                    % pl.grid
+                == 0,
+            "patch length off the manufacturing grid");
       CHECK(req.allowed(p.layer, wireBox(p.begin, p.end, half)),
             "illegal patch");
       CHECK(req.node_allowed(p.layer, p.end), "patch tip on a pin");
@@ -1249,6 +1268,103 @@ void testPinContacts(std::mt19937& rng)
       static_cast<long long>(guard_cases));
 }
 
+// ---------------------------------------------------------------------------
+// Layers whose wires must stay on tracks in the preferred direction (asap7
+// M1-M3, unidirectional): with the arc filter BonnRouteDR uses, every
+// returned segment lies on a track in the preferred direction, and the
+// costs equal a brute force restricted the same way.
+void testOnTrackLayers(std::mt19937& rng)
+{
+  int cases = 0;
+  int found = 0;
+  OffTrackSearch search;
+  for (int it = 0; it < 1500; it++) {
+    const bool horizontal = rng() % 2 == 0;
+    const GeoCoord pitch = 3 + static_cast<GeoCoord>(rng() % 4);
+    std::vector<GeoCoord> tracks;
+    for (GeoCoord c = 1; c < 40; c += pitch) {
+      tracks.push_back(c);
+    }
+    const std::vector<Box> obs
+        = randomBoxes(rng, static_cast<int>(rng() % 6), 40, 8);
+    auto on_track_point = [&]() {
+      const GeoCoord c = tracks[rng() % tracks.size()];
+      const GeoCoord a = static_cast<GeoCoord>(rng() % 40);
+      return horizontal ? GridPoint{a, c} : GridPoint{c, a};
+    };
+    const GridPoint s = on_track_point();
+    const GridPoint t
+        = rng() % 2 == 0
+              ? on_track_point()
+              : (horizontal
+                     ? GridPoint{static_cast<GeoCoord>(rng() % 40), s.y}
+                     : GridPoint{s.x, static_cast<GeoCoord>(rng() % 40)});
+    const GeoCoord tau = 1 + static_cast<GeoCoord>(rng() % 4);
+    BlockageGridInput gin;
+    gin.layers.push_back({tau, obs});
+    gin.points = {s, t};
+    OffTrackRequest req;
+    OffTrackLayer l;
+    l.grid = buildBlockageGrid(gin)[0];
+    l.obstacles = obs;
+    req.layers = {l};
+    req.window = {-1000, -1000, 1000, 1000};
+    req.sources.push_back({0, {s.x, s.y, s.x, s.y}});
+    req.targets.push_back({0, t, 0});
+    req.arc_filter =
+        [&](int, const GridPoint& from, const GridPoint&, int, const int dir) {
+          const bool along_x = dir == 0 || dir == 1;
+          return along_x == horizontal
+                 && std::binary_search(tracks.begin(),
+                                       tracks.end(),
+                                       horizontal ? from.y : from.x);
+        };
+    const OffTrackResult res = search.run(req);
+    // Restricted brute force: a straight preferred segment along a track,
+    // at least tau long unless s == t, avoiding the obstacles.
+    int64_t brute = kInf;
+    const bool same_line = horizontal ? s.y == t.y : s.x == t.x;
+    if (s == t) {
+      brute = 0;
+    } else if (same_line
+               && std::binary_search(
+                   tracks.begin(), tracks.end(), horizontal ? s.y : s.x)) {
+      const int64_t len
+          = std::abs(int64_t{s.x} - t.x) + std::abs(int64_t{s.y} - t.y);
+      if (len >= tau && !edgeBlocked(obs, s, t)) {
+        brute = len;
+      }
+    }
+    const int64_t got = res.paths.empty() ? kInf : res.paths.front().cost;
+    CHECK(got == brute,
+          "on-track layer it=%d G=%lld brute=%lld",
+          it,
+          static_cast<long long>(got == kInf ? -1 : got),
+          static_cast<long long>(brute == kInf ? -1 : brute));
+    for (const OffTrackPath& p : res.paths) {
+      for (size_t k = 0; k + 1 < p.nodes.size(); k++) {
+        const GridPoint& a = p.nodes[k].p;
+        const GridPoint& b = p.nodes[k + 1].p;
+        if (a == b) {
+          continue;
+        }
+        const bool along_x = a.y == b.y;
+        CHECK(along_x == horizontal, "wrong-way segment");
+        CHECK(std::binary_search(
+                  tracks.begin(), tracks.end(), horizontal ? a.y : a.x),
+              "off-track segment");
+      }
+    }
+    found += !res.paths.empty();
+    cases++;
+  }
+  std::printf(
+      "on-track-only layers: %d instances equal to the restricted brute "
+      "force (%d with a path), no wrong-way or off-track segment\n",
+      cases,
+      found);
+}
+
 }  // namespace
 
 int main()
@@ -1264,6 +1380,7 @@ int main()
   testSignatures(rng);
   testCleanup(rng);
   testPinContacts(rng);
+  testOnTrackLayers(rng);
   const double secs
       = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0)
             .count();

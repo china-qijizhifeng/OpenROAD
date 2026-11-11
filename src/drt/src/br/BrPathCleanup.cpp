@@ -103,7 +103,8 @@ class RunCleaner
   {
     normalize(r);
     stats_.violations_before += score(r, rules_).inner + score(r, rules_).end;
-    const int max_changes = 2 * static_cast<int>(r.size()) + 8;
+    const int max_changes
+        = rules_.on_tracks ? 0 : 2 * static_cast<int>(r.size()) + 8;
     int changes = 0;
     bool progress = true;
     while (progress && changes < max_changes) {
@@ -246,24 +247,35 @@ void fixMinArea(const CleanupRequest& req,
   }
   stats.area_violations++;
   const GeoCoord width = std::max<GeoCoord>(1, 2 * l.half_width);
-  // Candidate extensions: beyond the last node along the last segment,
-  // beyond the first node along the first segment, then both preferred
-  // directions.
+  // Candidate extensions in the preferred direction only (a wrong-way
+  // patch is illegal on unidirectional layers and breaks rectangles):
+  // beyond the last node, then beyond the first node, outward along the
+  // end segment where it is preferred, else both ways.
   std::vector<std::pair<GridPoint, GridPoint>> dirs;  // (anchor, unit)
-  auto unit = [](const GridPoint& from, const GridPoint& to) {
-    return GridPoint{(to.x > from.x) - (to.x < from.x),
-                     (to.y > from.y) - (to.y < from.y)};
+  const GridPoint pref = l.horizontal ? GridPoint{1, 0} : GridPoint{0, 1};
+  auto add_dirs = [&](const GridPoint& anchor, const GridPoint* inner) {
+    if (inner != nullptr
+        && (l.horizontal ? inner->y == anchor.y : inner->x == anchor.x)
+        && !(*inner == anchor)) {
+      const GridPoint u{(anchor.x > inner->x) - (anchor.x < inner->x),
+                        (anchor.y > inner->y) - (anchor.y < inner->y)};
+      dirs.emplace_back(anchor, u);
+      return;
+    }
+    dirs.emplace_back(anchor, pref);
+    dirs.emplace_back(anchor, GridPoint{-pref.x, -pref.y});
   };
   if (r.size() >= 2) {
-    dirs.emplace_back(r.back().p, unit(r[r.size() - 2].p, r.back().p));
-    dirs.emplace_back(r.front().p, unit(r[1].p, r.front().p));
+    add_dirs(r.back().p, &r[r.size() - 2].p);
+    add_dirs(r.front().p, &r[1].p);
   } else {
-    const GridPoint pref = l.horizontal ? GridPoint{1, 0} : GridPoint{0, 1};
-    dirs.emplace_back(r.front().p, pref);
-    dirs.emplace_back(r.front().p, GridPoint{-pref.x, -pref.y});
+    add_dirs(r.front().p, nullptr);
   }
+  const GeoCoord grid = std::max<GeoCoord>(1, l.grid);
+  auto on_grid = [grid](int64_t v) { return (v + grid - 1) / grid * grid; };
   for (const auto& [anchor, u] : dirs) {
-    int64_t need = (l.rules.min_area - unionArea(boxes) + width - 1) / width;
+    int64_t need
+        = on_grid((l.rules.min_area - unionArea(boxes) + width - 1) / width);
     for (int attempt = 0; attempt < 4 && need > 0; attempt++) {
       const GridPoint tip{anchor.x + static_cast<GeoCoord>(u.x * need),
                           anchor.y + static_cast<GeoCoord>(u.y * need)};
@@ -280,7 +292,7 @@ void fixMinArea(const CleanupRequest& req,
         stats.area_fixed++;
         return;
       }
-      need += (l.rules.min_area - area + width - 1) / width;
+      need = on_grid(need + (l.rules.min_area - area + width - 1) / width);
     }
   }
 }

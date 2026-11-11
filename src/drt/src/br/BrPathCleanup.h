@@ -24,6 +24,11 @@ struct CleanupLayer
   GeoCoord half_width = 0;
   SameNetLayerRules rules;
   bool horizontal = true;  // preferred direction (min-area extensions)
+  // Manufacturing grid: extension lengths are multiples of it.
+  GeoCoord grid = 1;
+  // Wires only on tracks in the preferred direction (unidirectional
+  // layers): no jog shifts or U collapses (they move wires off track).
+  bool on_tracks = false;
 };
 
 struct CleanupRequest
@@ -91,7 +96,8 @@ struct CleanupResult
 //     shorter leg of a U whose base is short (fix C); a change is kept only
 //     if its new metal is `allowed` and it reduces the run's inner
 //     violations without adding end violations;
-//  3. extend via-to-via pieces below the minimum area beyond a via.
+//  3. extend via-to-via pieces below the minimum area beyond a via, in the
+//     preferred direction and by a multiple of the manufacturing grid.
 // Chain ends and vias never move, and no change creates a node where
 // `node_allowed` is false.
 CleanupResult cleanupConnection(const CleanupRequest& request);

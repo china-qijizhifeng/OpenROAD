@@ -170,6 +170,9 @@ struct BonnRouteDRParams
   // pin contact at an access point, so 0 is incompatible with it (see
   // OffTrack.md; the final contact guard then drops affected nets).
   bool offtrack_from_access_points = true;
+  // Only the access point pin access chose for each pin (its conflict-free
+  // pattern); 0 uses all access points of the pin.
+  bool offtrack_preferred_access_points = true;
   // Sec. 4.1 searches: per-worker label budget in MB (0: unlimited); a
   // search that would exceed it stops without a path (counted).
   int search_label_mb = 512;
@@ -222,6 +225,9 @@ class BonnRouteDR
     frLayerNum layer;
     odb::Point begin;
     odb::Point end;
+    // A min-area extension beyond a via at `begin`: written as a patch wire
+    // (FlexDR's form; its connectivity check removes dangling segments).
+    bool patch = false;
   };
   struct OutVia
   {
@@ -403,7 +409,18 @@ class BonnRouteDR
   };
   // The access points of the pin of `term` (FlexDR's: the instance's pin
   // access index, no-rotation transform; index 0 for top-level pins).
-  void accessSources(const Term& term, std::vector<AccessSource>& out) const;
+  // `preferred_only`: the access point pin access chose per pin (the
+  // instance pin's access point), else all of the pin access index.
+  void accessSources(const Term& term,
+                     std::vector<AccessSource>& out,
+                     bool preferred_only = false) const;
+  // Wires of a layer that must stay on its tracks in the preferred
+  // direction (multi-patterned, RECTONLY, RIGHTWAYONGRIDONLY: drt treats
+  // them as unidirectional; FlexDR cannot route a wrong-way piece there).
+  bool onTracksOnly(frLayerNum layer) const;
+  bool wireOnTracks(const OutWire& wire) const;
+  int64_t wrong_way_nets_ = 0;
+  int64_t connected_vias_ = 0;
   void accessPointsOf(const frBlockObject* pin,
                       std::vector<br::RouteNode>& out) const;
   // Pin contacts of the net's geometry that are not access points (wire
@@ -417,6 +434,10 @@ class BonnRouteDR
   // True unless p lies on a pin of `net` on `layer` away from its access
   // points (no new nodes there in the post-processing).
   bool nodeAllowed(int net, frLayerNum layer, const odb::Point& p) const;
+  // p is an access point (on `layer`) of a pin of the net there.
+  bool atAccessPoint(const NetData& net,
+                     frLayerNum layer,
+                     const odb::Point& p) const;
   int64_t guard_nets_ = 0;
   int64_t guard_contacts_ = 0;
   // Via pads on pins away from access points (not a FlexDR term: retained
