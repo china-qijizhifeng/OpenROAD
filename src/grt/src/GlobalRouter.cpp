@@ -4322,6 +4322,13 @@ odb::Rect GlobalRouter::globalRoutingToBox(const GSegment& route)
   const auto [init_x, final_x] = std::minmax(route.init_x, route.final_x);
   const auto [init_y, final_y] = std::minmax(route.init_y, route.final_y);
 
+  // With BonnRoute's gcell_scale, CUGR's gcells are larger than the tile
+  // and route points also come from the tile grid (pins, local nets): a
+  // guide is the union of the CUGR gcells holding its end points, so it
+  // never ends inside a gcell of the detailed router's (CUGR's) grid.
+  if (use_cugr_ && cugr_->getGridlineSize() > grid_->getTileSize()) {
+    return cugr_->gcellUnion(init_x, init_y, final_x, final_y);
+  }
   int llX = init_x - (grid_->getTileSize() / 2);
   int llY = init_y - (grid_->getTileSize() / 2);
   int urX = final_x + (grid_->getTileSize() / 2);

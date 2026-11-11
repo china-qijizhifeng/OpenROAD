@@ -130,6 +130,10 @@ bool BonnRouteDRParams::set(const std::string& name, const double value)
     offtrack_notch_tau = v != 0;
   } else if (name == "access_classes") {
     access_classes = v != 0;
+  } else if (name == "access_class_margin") {
+    access_class_margin = std::max(0, v);
+  } else if (name == "offtrack_macro_pins") {
+    offtrack_macro_pins = v != 0;
   } else if (name == "access_node_limit") {
     access_node_limit = std::max(1, v);
   } else if (name == "access_track_weight") {
@@ -1270,8 +1274,28 @@ class BonnRouteDR::Legality final : public br::DiffNetLegality
     if (dr_.gridLayer(layer) < 0) {
       return true;
     }
-    return !dr_.shapeConflicts(
-        RShape{static_cast<frLayerNum>(layer), toRect(box)}, net, worker_);
+    // A box on a track layer is a wire (preferred if it is not longer
+    // across the preferred direction), on a cut layer a cut.
+    RShape shape{static_cast<frLayerNum>(layer), toRect(box)};
+    const int z = dr_.z_of_fr_[layer];
+    if (z >= 0) {
+      const bool along_x = shape.rect.dx() >= shape.rect.dy();
+      shape.role = (shape.rect.dx() == shape.rect.dy()
+                    || along_x == dr_.layers_[z].horizontal)
+                       ? br::ShapeRole::kPreferredWire
+                       : br::ShapeRole::kNonPreferredWire;
+    } else if (dr_.design_->getTech()->getLayer(layer)->getType()
+               == odb::dbTechLayerType::CUT) {
+      shape.role = br::ShapeRole::kCut;
+    }
+    return allowedShape(shape, net);
+  }
+
+  // Exact check of a shape with its role (wire model, via pad, cut).
+  bool allowedShape(const RShape& shape, const int net) const
+  {
+    return dr_.gridLayer(shape.layer) < 0
+           || !dr_.shapeConflicts(shape, net, worker_);
   }
 
   void blockages(const int layer,
@@ -1372,6 +1396,8 @@ void BonnRouteDR::AccessStats::add(const AccessStats& o)
   empty_no_targets += o.empty_no_targets;
   empty_no_path += o.empty_no_path;
   empty_rejected += o.empty_rejected;
+  macro_pins += o.macro_pins;
+  member_regenerated += o.member_regenerated;
   for (const std::string& e : o.empty_examples) {
     if (empty_examples.size() < 10) {
       empty_examples.push_back(e);
@@ -1467,24 +1493,33 @@ void forEachNetPinAt(frRegionQuery* rq,
 
 int64_t BonnRouteDR::pinContactViolations(const NetData& net,
                                           const std::vector<OutWire>& wires,
-                                          const std::vector<OutVia>& vias) const
+                                          const std::vector<OutVia>& vias,
+                                          const bool count_vias) const
 {
-  // FlexDR (initNets_searchRepair_pin2epMap) makes a pin a term of a worker
-  // at every truncated path-segment end and every connected via pad on the
-  // pin, and then needs one of the pin's access points inside the worker's
-  // box. Truncated ends are the planar pin points; vias are checked
-  // whether connected or not, since FlexDR marks vias it keeps.
+  // FlexDR makes a pin a term of a worker (initNets_searchRepair_pin2epMap,
+  // and initNets_segmentTerms for border segments) only at truncated
+  // path-segment ends and at via pads marked bottom/top connected, and then
+  // needs one of the pin's access points inside the worker's box
+  // (initNet_term_helper, DRT-1231). The connected flags are set only by
+  // FlexDR's maze on vias it creates (FlexDR_maze.cpp, at access points or
+  // through checkViaConnectivityToAP, which requires an access point);
+  // vias of the initial routing keep the default false (frVia). So only
+  // the truncated ends, the planar pin points, are a risk; via pads on pins
+  // are counted separately with `count_vias` for the log.
   std::vector<br::RouteNode> contacts;
-  for (const OutWire& w : wires) {
-    for (const auto& [layer, p] : net.pin_points) {
-      if (layer == w.layer && (p == w.begin || p == w.end)) {
-        contacts.push_back({layer, toGrid(p)});
+  if (!count_vias) {
+    for (const OutWire& w : wires) {
+      for (const auto& [layer, p] : net.pin_points) {
+        if (layer == w.layer && (p == w.begin || p == w.end)) {
+          contacts.push_back({layer, toGrid(p)});
+        }
       }
     }
-  }
-  for (const OutVia& v : vias) {
-    contacts.push_back({v.def->getLayer1Num(), toGrid(v.point)});
-    contacts.push_back({v.def->getLayer2Num(), toGrid(v.point)});
+  } else {
+    for (const OutVia& v : vias) {
+      contacts.push_back({v.def->getLayer1Num(), toGrid(v.point)});
+      contacts.push_back({v.def->getLayer2Num(), toGrid(v.point)});
+    }
   }
   std::ranges::sort(contacts,
                     [](const br::RouteNode& a, const br::RouteNode& b) {
@@ -1561,8 +1596,12 @@ void BonnRouteDR::buildSameNetRules()
     if (frAreaConstraint* area = layer->getAreaConstraint()) {
       rules.min_area = area->getMinArea();
     }
-    const br::MinimumSegmentLength m = br::minimumSegmentLength(
-        rules, params_.offtrack_notch_tau, params_.offtrack_tau);
+    // tau on the manufacturing grid; without a mapped rule the grid itself.
+    const frCoord grid
+        = std::max<frCoord>(1, design_->getTech()->getManufacturingGrid());
+    br::MinimumSegmentLength m = br::minimumSegmentLength(
+        rules, params_.offtrack_notch_tau, params_.offtrack_tau, grid);
+    m.tau = (m.tau + grid - 1) / grid * grid;
     same_net_rules_[z] = rules;
     tau_[z] = m.tau;
     br::CleanupLayer& cl = cleanup_layers_[info.fr];
@@ -1665,16 +1704,44 @@ bool BonnRouteDR::optionLegal(const AccessOption& option,
     std::vector<RShape> via;
     viaShapes(option.vias[k], via);
     if (static_cast<int>(k) == option.pin_via) {
-      // Pin access checked the pin-layer pad and the cut (as for the
-      // access stubs); the top pad meets the routing space.
+      // Pin access checked the pin-layer pad and the cut against the fixed
+      // surroundings; they still meet other nets' routing and
+      // reservations, and the top pad meets everything.
+      if (routedConflicts(via[0], net) || routedConflicts(via[1], net)) {
+        return false;
+      }
       shapes.push_back(via.back());
     } else {
       shapes.insert(shapes.end(), via.begin(), via.end());
     }
   }
-  return std::ranges::all_of(shapes, [&](const RShape& s) {
-    return legality.allowed(s.layer, toBox(s.rect), net);
-  });
+  return std::ranges::all_of(
+      shapes, [&](const RShape& s) { return legality.allowedShape(s, net); });
+}
+
+bool BonnRouteDR::routedConflicts(const RShape& shape, const int net) const
+{
+  const int g = gridLayer(shape.layer);
+  if (g < 0) {
+    return false;
+  }
+  const br::ShapeClassTable& classes = shape_classes_;
+  const br::Coord reach = classes.reach(g);
+  const br::Rect r = brRect(shape.rect);
+  thread_local br::GridWindow pieces;
+  shape_grid_.collect(g, r.bloated(reach, reach), pieces);
+  const br::PlacedShape placed{r, shapeClass(shape, g), 3};
+  for (const br::GridPiece& p : pieces.pieces) {
+    if (p.type == br::ShapeType::kBlockage || p.type == br::ShapeType::kPin
+        || (p.owner == net && net >= 0)) {
+      continue;
+    }
+    if (br::shapesViolate(
+            classes, placed, br::PlacedShape{p.rect, p.cls, p.line_end_ends})) {
+      return true;
+    }
+  }
+  return false;
 }
 
 void BonnRouteDR::offTrackCatalogue(const int net,
@@ -1699,6 +1766,17 @@ void BonnRouteDR::offTrackCatalogue(const int net,
   frLayerNum pin_layer = -1;
   std::vector<odb::Rect> pin;
   const bool from_aps = params_.offtrack_from_access_points;
+  // Macro pins (e.g. fakeram45 metal3 pins) abut the macro's obstruction
+  // on their layer and the next one: every path leaving the pin starts
+  // inside the obstruction's spacing halo, so no tau-feasible path exists.
+  // OpenROAD's pin access treats that abutment as intended; these pins keep
+  // the access stubs unless offtrack_macro_pins is set.
+  if (!params_.offtrack_macro_pins && term.inst_term != nullptr
+      && term.inst_term->getInst()->getMaster()->getMasterType().isBlock()) {
+    stats.pins--;
+    stats.macro_pins++;
+    return;
+  }
   const int num_fr = static_cast<int>(z_of_fr_.size());
   const int num_z = static_cast<int>(layers_.size());
   // Sources (Sec. 4.3 paths "connecting it to on-track points"): the
@@ -1813,7 +1891,24 @@ void BonnRouteDR::offTrackCatalogue(const int net,
     area.merge(odb::Rect(t.p, t.p));
   }
   const frCoord margin = 2 * max_tau + max_pitch;
-  const br::Box window = toBox(area).bloated(margin);
+  // Blockage-grid lines on the manufacturing grid: obstacles grow outward
+  // to it (conservative), so every coordinate of Algorithm 3 (lines plus
+  // multiples of tau, itself on the grid) is on it.
+  const frCoord mfg
+      = std::max<frCoord>(1, design_->getTech()->getManufacturingGrid());
+  auto snap_out = [mfg](std::vector<br::Box>& boxes, const size_t from) {
+    auto down = [mfg](const br::GeoCoord c) {
+      return static_cast<br::GeoCoord>(c >= 0 ? c / mfg * mfg
+                                              : -((-c + mfg - 1) / mfg) * mfg);
+    };
+    for (size_t k = from; k < boxes.size(); k++) {
+      br::Box& b = boxes[k];
+      b = {down(b.xlo), down(b.ylo), -down(-b.xhi), -down(-b.yhi)};
+    }
+  };
+  std::vector<br::Box> window_box{toBox(area).bloated(margin)};
+  snap_out(window_box, 0);
+  const br::Box window = window_box.front();
   const Legality legality(*this, worker);
   br::BlockageGridInput grid_in;
   br::OffTrackRequest req;
@@ -1825,6 +1920,12 @@ void BonnRouteDR::offTrackCatalogue(const int net,
       const frCoord half = layers_[z].width / 2;
       legality.blockages(
           fr, window, net, {-half, -half, half, half}, layer.obstacles);
+      snap_out(layer.obstacles, 0);
+      // The on-track cost model: non-preferred wire costs the jog factor.
+      // (Theorem 3.2 is checked with such axis weights as well.)
+      const int64_t jog = std::max(1, params_.jog_factor);
+      layer.cost_x = layers_[z].horizontal ? 1 : jog;
+      layer.cost_y = layers_[z].horizontal ? jog : 1;
     }
     grid_in.layers.push_back({z >= 0 ? tau_[z] : 1,
                               layer.obstacles,
@@ -1835,12 +1936,15 @@ void BonnRouteDR::offTrackCatalogue(const int net,
   std::array<RShape, 3> via_model{};
   if (via != nullptr) {
     const frVia v0(via, odb::Point(0, 0));
-    via_model = {RShape{via->getLayer1Num(), v0.getLayer1BBox()},
-                 RShape{via->getCutLayerNum(), v0.getCutBBox()},
-                 RShape{via->getLayer2Num(), v0.getLayer2BBox()}};
+    via_model = {
+        RShape{via->getLayer1Num(), v0.getLayer1BBox(), br::ShapeRole::kViaPad},
+        RShape{via->getCutLayerNum(), v0.getCutBBox(), br::ShapeRole::kCut},
+        RShape{
+            via->getLayer2Num(), v0.getLayer2BBox(), br::ShapeRole::kViaPad}};
     for (const RShape& m : via_model) {
       legality.blockages(m.layer, window, net, toBox(m.rect), via_blocks);
     }
+    snap_out(via_blocks, 0);
     grid_in.via_blockages.push_back(via_blocks);
   }
   for (const Target& t : targets) {
@@ -1882,9 +1986,11 @@ void BonnRouteDR::offTrackCatalogue(const int net,
       for (const AccessSource& a : aps) {
         if (a.via != nullptr && a.via->getLayer2Num() == upper
             && toGrid(a.point) == p) {
-          const frVia v(a.via, a.point);
-          return legality.allowed(
-              a.via->getLayer2Num(), toBox(v.getLayer2BBox()), net);
+          std::vector<RShape> shapes;
+          viaShapes({a.via, a.point}, shapes);
+          return !routedConflicts(shapes[0], net)
+                 && !routedConflicts(shapes[1], net)
+                 && legality.allowedShape(shapes[2], net);
         }
       }
     }
@@ -1896,10 +2002,9 @@ void BonnRouteDR::offTrackCatalogue(const int net,
         return false;
       }
     }
-    for (const RShape& m : via_model) {
-      odb::Rect r = m.rect;
-      r.moveDelta(p.x, p.y);
-      if (!legality.allowed(m.layer, toBox(r), net)) {
+    for (RShape m : via_model) {
+      m.rect.moveDelta(p.x, p.y);
+      if (!legality.allowedShape(m, net)) {
         return false;
       }
     }
@@ -2183,8 +2288,13 @@ void BonnRouteDR::buildOffTrackAccess(const std::vector<char>& pre_skip)
   // Reach of a pin's search: targets within the radius, the window margin
   // (2 tau + pitch) and the spacing plus model extent of the obstacles that
   // can enter the window (at most two pitches).
-  const frCoord halo
-      = params_.offtrack_radius * max_pitch + 2 * max_tau + 3 * max_pitch;
+  // Sec. 4.3: "Expanding the bounding area of an instance ... and taking
+  // all shapes influencing this area and the track coordinates into
+  // account". The area is the instance box plus access_class_margin
+  // pitches; access paths reaching beyond it are re-checked at each member
+  // (mapped paths illegal there are dropped and the pin's catalogue is
+  // generated again if none remains).
+  const frCoord halo = params_.access_class_margin * max_pitch;
   const frLayerNum bottom = layers_.front().fr;
   const frLayerNum sig_top = layers_[std::min(num_z, 3) - 1].fr;
   const int threads = static_cast<int>(workers_.size());
@@ -2446,6 +2556,23 @@ void BonnRouteDR::buildOffTrackAccess(const std::vector<char>& pre_skip)
     }
     std::vector<int> choice = mapped ? cd.choice : std::vector<int>(n, -1);
     bool reuse = mapped;
+    if (mapped && k != rep) {
+      // Shapes outside the signature area can make mapped paths illegal at
+      // this member; a pin left without a legal path gets its own
+      // catalogue.
+      for (int p = 0; p < n; p++) {
+        if (cats[p].empty()
+            || std::ranges::any_of(cats[p], [&](const AccessOption& o) {
+                 return optionLegal(o, nets[p], nullptr);
+               })) {
+          continue;
+        }
+        const auto [net, t] = ia.terms[p];
+        offTrackCatalogue(net, nets_[net].terms[t], nullptr, cats[p], stats);
+        stats.member_regenerated++;
+        reuse = false;
+      }
+    }
     for (int p = 0; p < n && reuse; p++) {
       reuse = choice[p] < 0 ? cats[p].empty()
                             : optionLegal(cats[p][choice[p]], nets[p], nullptr);
@@ -2503,7 +2630,8 @@ void BonnRouteDR::buildOffTrackAccess(const std::vector<char>& pre_skip)
         "{} settled; search {:.2f}s; {} selections ({} optimal, {} nodes); "
         "{} primary paths; {:.2f}s. Empty catalogues: {} without usable "
         "access point or pin shape, {} without usable on-track point, {} "
-        "without path, {} with all paths rejected{}{}.",
+        "without path, {} with all paths rejected, {} macro pins with "
+        "access stubs; {} member pins regenerated{}{}.",
         stats.instances,
         stats.classes,
         stats.class_reused,
@@ -2528,6 +2656,8 @@ void BonnRouteDR::buildOffTrackAccess(const std::vector<char>& pre_skip)
         stats.empty_no_targets,
         stats.empty_no_path,
         stats.empty_rejected,
+        stats.macro_pins,
+        stats.member_regenerated,
         stats.empty_examples.empty() ? "" : "; e.g. ",
         [&] {
           std::string list;
@@ -2677,7 +2807,8 @@ void BonnRouteDR::setReservation(Term& term,
 
 void BonnRouteDR::setReservations(NetData& net,
                                   const bool active,
-                                  Worker* local)
+                                  Worker* local,
+                                  br::FastGridBuilder::PendingRemovals* batch)
 {
   if (active) {
     for (Term& term : net.terms) {
@@ -2686,7 +2817,9 @@ void BonnRouteDR::setReservations(NetData& net,
     return;
   }
   // Released together: one exact fast-grid recomputation.
-  br::FastGridBuilder::PendingRemovals pending;
+  br::FastGridBuilder::PendingRemovals own;
+  br::FastGridBuilder::PendingRemovals& pending
+      = batch != nullptr ? *batch : own;
   for (Term& term : net.terms) {
     if (term.reservation_active) {
       for (const RShape& shape : term.reservation) {
@@ -2703,7 +2836,9 @@ void BonnRouteDR::setReservations(NetData& net,
     }
     net.input_reserved = false;
   }
-  fast_builder_.flush(pending);
+  if (batch == nullptr) {
+    fast_builder_.flush(pending);
+  }
 }
 
 void BonnRouteDR::setInputReservation(NetData& net,
@@ -3754,6 +3889,7 @@ void BonnRouteDR::routeSpeculative(const std::vector<int>& order,
   int64_t checked = 0;
   double commit_seconds = 0;
   double check_seconds = 0;
+  double flush_seconds = 0;
   double wall_total = 0;
   double busy_total = 0;
   while (!queue.empty()) {
@@ -3788,6 +3924,12 @@ void BonnRouteDR::routeSpeculative(const std::vector<int>& order,
     // earlier in the batch can conflict: nets whose bounding boxes stay
     // farther apart skip the exact check.
     const double commit_start = omp_get_wtime();
+    // The reservation releases of the whole batch are flushed together
+    // after its commits. No search runs before the flush, inserts take the
+    // maximum with stored levels, and the flush recomputes every removal
+    // candidate exactly against the current shape grid, so the fast grid
+    // is exact again before the next batch is searched.
+    br::FastGridBuilder::PendingRemovals released;
     std::vector<int> retry;
     std::vector<odb::Rect> committed_boxes;
     for (size_t k = 0; k < batch.size(); k++) {
@@ -3829,7 +3971,7 @@ void BonnRouteDR::routeSpeculative(const std::vector<int>& order,
         continue;
       }
       commitNet(net, nullptr);
-      setReservations(net, false, nullptr);
+      setReservations(net, false, nullptr, &released);
       odb::Rect box;
       box.mergeInit();
       for (const RShape& shape : net.shapes) {
@@ -3841,6 +3983,9 @@ void BonnRouteDR::routeSpeculative(const std::vector<int>& order,
       }
       nets++;
     }
+    const double flush_start = omp_get_wtime();
+    fast_builder_.flush(released);
+    flush_seconds += omp_get_wtime() - flush_start;
     commit_seconds += omp_get_wtime() - commit_start;
     for (auto it = retry.rbegin(); it != retry.rend(); ++it) {
       queue.push_front(*it);
@@ -3857,7 +4002,8 @@ void BonnRouteDR::routeSpeculative(const std::vector<int>& order,
         "BonnRoute {} speculative batches: {} batches of up to {} "
         "nets, {} nets committed, {} searched again after a "
         "conflict; parallel search {:.2f}s, thread utilization {:.0f}%; "
-        "serial commit {:.2f}s ({} nets checked exactly, {:.2f}s).",
+        "serial commit {:.2f}s ({} nets checked exactly, {:.2f}s; "
+        "reservation release flush {:.2f}s).",
         stage,
         batches,
         batch_size,
@@ -3867,7 +4013,8 @@ void BonnRouteDR::routeSpeculative(const std::vector<int>& order,
         wall_total > 0 ? 100.0 * busy_total / (wall_total * threads) : 0.0,
         commit_seconds,
         checked,
-        check_seconds);
+        check_seconds,
+        flush_seconds);
   }
 }
 
@@ -4134,6 +4281,7 @@ void BonnRouteDR::writeNets()
     }
     // Contact guard: FlexDR's clean-up needs every pin contact at one of the
     // pin's access points; otherwise the net is left to FlexDR.
+    guard_via_contacts_ += pinContactViolations(data, wires, data.vias, true);
     if (const int64_t bad = pinContactViolations(data, wires, data.vias)) {
       guard_nets_++;
       guard_contacts_ += bad;
@@ -4473,10 +4621,12 @@ void BonnRouteDR::main()
           regenerated_paths);
     }
     logger_->report(
-        "BonnRoute DR contact guard: {} nets with {} pin contacts away from "
-        "access points left to FlexDR.",
+        "BonnRoute DR contact guard: {} nets with {} truncated pin contacts "
+        "away from access points left to FlexDR; {} via pads on pins away "
+        "from access points (not FlexDR terms, kept).",
         guard_nets_,
-        guard_contacts_);
+        guard_contacts_,
+        guard_via_contacts_);
     if (params_.postprocess) {
       logger_->report(
           "BonnRoute DR post-processing: {} layer runs, same-net violations "

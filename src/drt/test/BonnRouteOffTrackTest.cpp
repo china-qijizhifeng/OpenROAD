@@ -145,6 +145,10 @@ struct Instance
     GeoCoord tau = 1;
     bool wires = true;
     std::vector<Box> obstacles;
+    // Cost per unit of x / y wire (axis weights: the jog factor of a
+    // non-preferred direction).
+    int64_t cost_x = 1;
+    int64_t cost_y = 1;
   };
   std::vector<Layer> layers;
   std::vector<Box> via_obstacles;  // between layer 0 and 1
@@ -251,7 +255,8 @@ int64_t bruteForce(const Instance& in, const Box& dom)
           continue;
         }
         const int nlen2 = straight ? std::min(len + 1, tmax) : 1;
-        push(id(z, nx, ny, nd, std::min(nlen2, tmax)), c + 1);
+        push(id(z, nx, ny, nd, std::min(nlen2, tmax)),
+             c + (nd < 2 ? l.cost_x : l.cost_y));
       }
     }
     if (done) {
@@ -287,6 +292,8 @@ OffTrackRequest makeRequest(const Instance& in,
     l.grid = grid[z];
     l.obstacles = in.layers[z].obstacles;
     l.wires = in.layers[z].wires;
+    l.cost_x = in.layers[z].cost_x;
+    l.cost_y = in.layers[z].cost_y;
     req.layers.push_back(std::move(l));
   }
   req.sources.push_back({in.s.layer, {in.s.p.x, in.s.p.y, in.s.p.x, in.s.p.y}});
@@ -326,7 +333,7 @@ int64_t verifyPath(const Instance& in, const OffTrackPath& path)
     if (len < l.tau || !l.wires || edgeBlocked(l.obstacles, a.p, b.p)) {
       return -1;
     }
-    cost += len;
+    cost += len * (a.p.y == b.p.y ? l.cost_x : l.cost_y);
   }
   return cost;
 }
@@ -376,6 +383,7 @@ void testTheorem(std::mt19937& rng, const int layers, const int count)
   int64_t astar_settled = 0;
   int64_t dijkstra_settled = 0;
   int points_only_cases = 0;
+  int weighted_cases = 0;
   for (int it = 0; it < count; it++) {
     Instance in;
     const int size = 20 + static_cast<int>(rng() % 20);
@@ -387,6 +395,12 @@ void testTheorem(std::mt19937& rng, const int layers, const int count)
       l.obstacles = randomBoxes(rng, k, size, 10);
       n += k;
       l.wires = layers == 1 || z == 1 || rng() % 3 != 0;
+      if (rng() % 2 == 0) {
+        // Preferred direction 1, the other the jog factor.
+        const int64_t jog = 1 + static_cast<int64_t>(rng() % 4);
+        (rng() % 2 == 0 ? l.cost_x : l.cost_y) = jog;
+        weighted_cases++;
+      }
       in.layers.push_back(l);
     }
     if (layers > 1) {
@@ -469,7 +483,7 @@ void testTheorem(std::mt19937& rng, const int layers, const int count)
   std::printf(
       "theorem 3.2 (%d layer%s): %d/%d instances G == brute force (%d without "
       "path), %d infeasible returned paths; max grid vertices %lld; %d "
-      "with a points_only first layer\n",
+      "with a points_only first layer, %d layers with axis weights\n",
       layers,
       layers > 1 ? "s" : "",
       equal,
@@ -477,7 +491,8 @@ void testTheorem(std::mt19937& rng, const int layers, const int count)
       unreachable,
       bad_paths,
       static_cast<long long>(max_vertices),
-      points_only_cases);
+      points_only_cases,
+      weighted_cases);
   std::printf(
       "  A* (3 nearest of 6 targets) settled %.1f%% of the states plain "
       "Dijkstra settles for all targets, same costs\n",
@@ -683,7 +698,7 @@ void testSameNetMapping(std::mt19937& rng)
     SameNetLayerRules rules;
     rules.width = w;
     rules.min_step_length = min_step;
-    const GeoCoord tau = minimumSegmentLength(rules, false, 0).tau;
+    const GeoCoord tau = minimumSegmentLength(rules, false, 0, w).tau;
     CHECK(tau == min_step + w || (min_step + w < w && tau == w), "tau");
     const auto path = randomPath(rng, tau, tau, half, 2 + rng() % 6);
     if (path.size() < 2) {

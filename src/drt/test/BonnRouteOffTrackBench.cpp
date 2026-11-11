@@ -422,17 +422,28 @@ void runGcdLike(int rows, int cells, unsigned seed)
   {
     const char* name = "";
     bool from_aps = false;
+    GeoCoord tau = kTau;
+    int64_t jog = 1;        // cost of non-preferred (horizontal) metal2 wire
+    double horizontal = 0;  // non-preferred length of catalogue paths
+    double length = 0;
     std::vector<double> vertices;
     std::vector<double> settled;
     std::vector<double> micros;
     int64_t empty = 0;
     int64_t paths = 0;
   };
-  Mode modes[2];
-  modes[0].name = "region sources";
+  // Round 7 (region sources, tau = width, unit costs), round 8 (access
+  // points, tau = width, unit costs), now (access points, tau = grid, jog
+  // factor 4 for non-preferred wire).
+  Mode modes[3];
+  modes[0].name = "r7 region";
   modes[0].from_aps = false;
-  modes[1].name = "access points";
+  modes[1].name = "r8 points";
   modes[1].from_aps = true;
+  modes[2].name = "now";
+  modes[2].from_aps = true;
+  modes[2].tau = 10;
+  modes[2].jog = 4;
   OffTrackSearch search;
   for (int net = 0; net < static_cast<int>(pins.size()); net++) {
     const std::vector<Box>& pin = pins[net];
@@ -496,7 +507,7 @@ void runGcdLike(int rows, int cells, unsigned seed)
       l1.wires = false;
       OffTrackLayer l2;
       gin.layers.push_back({1, {}, mode.from_aps});
-      gin.layers.push_back({kTau, {}});
+      gin.layers.push_back({mode.tau, {}});
       gin.via_blockages.push_back(via_blocks);
       for (const OffTrackTarget& t : targets) {
         gin.points.push_back(t.p);
@@ -520,6 +531,8 @@ void runGcdLike(int rows, int cells, unsigned seed)
       req.window = window;
       req.targets = targets;
       req.via_cost = 140;
+      req.layers[1].cost_y = 1;
+      req.layers[1].cost_x = mode.jog;
       req.max_targets = 16;
       req.via_allowed = [&](int, const GridPoint& p) {
         if (mode.from_aps) {
@@ -539,6 +552,17 @@ void runGcdLike(int rows, int cells, unsigned seed)
       mode.vertices.push_back(static_cast<double>(res.grid_vertices));
       mode.settled.push_back(static_cast<double>(res.settled));
       mode.paths += static_cast<int64_t>(std::min<size_t>(8, res.paths.size()));
+      for (size_t k = 0; k < std::min<size_t>(8, res.paths.size()); k++) {
+        const auto& nodes = res.paths[k].nodes;
+        for (size_t q = 0; q + 1 < nodes.size(); q++) {
+          if (nodes[q].layer == nodes[q + 1].layer) {
+            const double h = std::abs(nodes[q].p.x - nodes[q + 1].p.x);
+            const double v = std::abs(nodes[q].p.y - nodes[q + 1].p.y);
+            mode.horizontal += h;
+            mode.length += h + v;
+          }
+        }
+      }
       mode.empty += res.paths.empty();
     }
   }
@@ -560,9 +584,10 @@ void runGcdLike(int rows, int cells, unsigned seed)
       sum_t += m.micros[k];
     }
     std::printf(
-        "  %-15s searches %zu, empty %lld, paths %lld; grid vertices "
+        "  %-10s searches %zu, empty %lld, paths %lld; grid vertices "
         "total %.0f (p50 %.0f, max %.0f); settled total %.0f; search "
-        "%.2f s (p50 %.0f us)\n",
+        "%.2f s (p50 %.0f us); per path %.0f DBU wire, %.0f "
+        "non-preferred\n",
         m.name,
         m.vertices.size(),
         static_cast<long long>(m.empty),
@@ -572,7 +597,9 @@ void runGcdLike(int rows, int cells, unsigned seed)
         percentile(m.vertices, 1.0),
         sum_s,
         sum_t / 1e6,
-        percentile(m.micros, 0.5));
+        percentile(m.micros, 0.5),
+        m.length / std::max<int64_t>(1, m.paths),
+        m.horizontal / std::max<int64_t>(1, m.paths));
   }
 }
 
@@ -590,19 +617,24 @@ int main(int argc, char** argv)
   const int cells = argc > 2 ? std::atoi(argv[2]) : 40;
   const unsigned seed = argc > 3 ? std::atoi(argv[3]) : 1;
   const int patterns = argc > 4 ? std::atoi(argv[4]) : 0;
+  // Signature area: cell box plus this many metal2 pitches (as
+  // access_class_margin); -1 = the previous reach of a pin's search.
+  const int margin = argc > 5 ? std::atoi(argv[5]) : 0;
   std::mt19937 rng(seed);
   const std::vector<Master> masters = makeMasters(rng);
   const Chip chip = makeChip(rng, masters, rows, cells, patterns);
   SameNetLayerRules rules;
   rules.width = kWidth;
-  const GeoCoord tau = minimumSegmentLength(rules, false, 0).tau;
+  // As BonnRouteDR: no mapped rule, tau = manufacturing grid (5 here).
+  const GeoCoord tau = minimumSegmentLength(rules, false, 0, 5).tau;
   // Circuit classes.
   const auto t0 = std::chrono::steady_clock::now();
   CircuitClassTable table;
   std::vector<int> cls(chip.instances.size());
   std::vector<int> rep;
-  const GeoCoord halo
-      = kRadius * kM2Pitch + 2 * tau + 3 * kM2Pitch;  // as BonnRouteDR
+  const GeoCoord halo = margin >= 0
+                            ? margin * kM2Pitch
+                            : kRadius * kM2Pitch + 2 * tau + 3 * kM2Pitch;
   for (size_t k = 0; k < chip.instances.size(); k++) {
     const Instance& inst = chip.instances[k];
     const Master& m = masters[inst.master];
@@ -748,12 +780,15 @@ int main(int argc, char** argv)
     mean_size += s;
   }
   mean_size /= std::max<size_t>(1, sizes.size());
-  std::printf("bench rows=%d cells/row=%d seed=%u row patterns=%d tau=%d\n",
-              rows,
-              cells,
-              seed,
-              patterns,
-              tau);
+  std::printf(
+      "bench rows=%d cells/row=%d seed=%u row patterns=%d signature margin "
+      "%d pitches tau=%d\n",
+      rows,
+      cells,
+      seed,
+      patterns,
+      margin,
+      tau);
   std::printf(
       "  instances %zu, circuit classes %d (%.1f instances/class), "
       "signatures %.1f ms\n",

@@ -83,7 +83,9 @@ void Design::readLayers()
       }
     }
   }
-  default_gridline_spacing_ = block_->getGCellTileSize();
+  fine_gridline_spacing_ = block_->getGCellTileSize();
+  default_gridline_spacing_
+      = fine_gridline_spacing_ * std::max(1, constants_.gcell_scale);
 }
 
 void Design::readNetlist()

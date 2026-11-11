@@ -143,6 +143,13 @@ struct BonnRouteDRParams
   // Reuse a circuit class's catalogues and conflict-free solution for all
   // its instances; 0 solves every instance separately.
   bool access_classes = true;
+  // Circuit signature area: the instance box expanded by this many pitches
+  // of the lowest track layers (Sec. 4.3 "expanding the bounding area").
+  // Paths mapped from the class representative are checked at each member.
+  int access_class_margin = 0;
+  // Off-track access also for pins of block (macro) instances; 0 keeps the
+  // access stubs there (see OffTrack.md).
+  bool offtrack_macro_pins = false;
   int access_node_limit = 20000;
   // Weights of the conflict-free solution (Sec. 4.3), in pitches of the
   // bottom track layer: per blocked track, per missing on-track
@@ -365,6 +372,8 @@ class BonnRouteDR
     int64_t empty_no_targets = 0;
     int64_t empty_no_path = 0;
     int64_t empty_rejected = 0;
+    int64_t macro_pins = 0;
+    int64_t member_regenerated = 0;
     std::vector<std::string> empty_examples;
     void add(const AccessStats& o);
   };
@@ -388,14 +397,19 @@ class BonnRouteDR
   // Pin contacts of the net's geometry that are not access points (wire
   // ends truncated on a pin and via pads at the via origin); see
   // br::pinContactViolations.
+  // With `vias`, via pads are counted instead of truncated ends.
   int64_t pinContactViolations(const NetData& net,
                                const std::vector<OutWire>& wires,
-                               const std::vector<OutVia>& vias) const;
+                               const std::vector<OutVia>& vias,
+                               bool count_vias = false) const;
   // True unless p lies on a pin of `net` on `layer` away from its access
   // points (no new nodes there in the post-processing).
   bool nodeAllowed(int net, frLayerNum layer, const odb::Point& p) const;
   int64_t guard_nets_ = 0;
   int64_t guard_contacts_ = 0;
+  // Via pads on pins away from access points (not a FlexDR term: retained
+  // vias are never marked connected); reported only.
+  int64_t guard_via_contacts_ = 0;
   bool pinShapes(const Term& term,
                  frLayerNum& layer,
                  std::vector<odb::Rect>& rects) const;
@@ -432,7 +446,12 @@ class BonnRouteDR
                              Worker& worker,
                              std::vector<OutWire>& patches) const;
   // `local`: the worker whose region contains the net (Sec. 5.1).
-  void setReservations(NetData& net, bool active, Worker* local = nullptr);
+  // Releasing with `pending` collects the fast-grid recomputation there for
+  // one later flush; without it the release flushes at once.
+  void setReservations(NetData& net,
+                       bool active,
+                       Worker* local = nullptr,
+                       br::FastGridBuilder::PendingRemovals* pending = nullptr);
   void reserveInputWires();
   void setInputReservation(NetData& net, bool active, Worker* local = nullptr);
   // Diff-net conflict with the shapes of an R-tree (input wires only).
@@ -552,6 +571,10 @@ class BonnRouteDR
   bool shapeConflicts(const RShape& shape,
                       int net,
                       const Worker* worker = nullptr) const;
+  // Conflicts with routed shapes and reservations of other nets only
+  // (blockages and pins are not looked at): the pin-layer pad and cut of an
+  // access point's via, whose fixed surroundings pin access checked.
+  bool routedConflicts(const RShape& shape, int net) const;
   frCoord spacing(int z, frCoord width1, frCoord width2, frCoord prl) const;
   void writeNets();
 

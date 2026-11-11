@@ -134,6 +134,8 @@ set_bonnroute_dr_param name value
 | `access_node_limit` | `20000` | Node limit of destructive bounding per circuit; beyond it the greedy choice is used. |
 | `access_track_weight` / `access_direction_weight` / `access_spread_weight` | `1` / `1` / `1` | Weights of the conflict-free solution: pitches per blocked track, pitches per missing on-track continuation, cost per DBU two endpoints are closer than two pitches. |
 | `postprocess` | `1` | Same-net post-processing of each connection (Section 4.4). `offtrack_access 0` with `postprocess 0` is the previous behaviour. |
+| `access_class_margin` | `0` | Circuit-class signature area: the instance box plus this many pitches (Section 4.3). Paths mapped from the class representative are re-checked at every member; a pin left without a legal path gets its own catalogue. |
+| `offtrack_macro_pins` | `0` | `1` builds off-track catalogues also for pins of block (macro) instances; by default they keep the access stubs (their pins abut the macro obstruction, so no minimum-segment-length path leaves them). |
 | `offtrack_from_access_points` | `1` | Start catalogue paths at the pin's OpenROAD access points. `0` starts anywhere on the pin, as in the paper; it is incompatible with the FlexDR clean-up, whose workers need every pin contact at an access point (the contact guard then leaves the affected nets to FlexDR). |
 | `layer_dilation` | `1` | Extra routing layers around a guide. |
 | `retry_dilation` | `2` | Extra guide tiles for a retry. |
