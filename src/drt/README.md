@@ -142,6 +142,7 @@ set_bonnroute_dr_param name value
 | `use_intervals` | `0` | Use vertex search by default; `1` selects interval label sets. |
 | `ripup` | `0` | Leave unresolved nets to FlexDR by default; `1` enables serial rip-up and rerouting. |
 | `interval_via_property` | `1` | Interval property (ii) of Section 4.1 also for vias; `0` relaxes vias per vertex. |
+| `interval_nearest_first` | `0` | Among interval events with equal key, take the smallest future cost first instead of the largest (Algorithm 4, line 12). Exact either way; `1` stops at targets without labeling the whole last layer of equal-length paths. |
 | `component_regions` | `1` | Search each connection first inside the GR tiles of a shortest guide-tile path to another component (Section 4.4). |
 | `ripup_depth` | `3` | Maximum depth of a rip-up sequence; a failed sequence restores the original routing (Section 4.4). |
 | `ripup_passes` | `2` | Rip-up passes over unrouted nets; each later pass enlarges the routing area by one tile. |

@@ -82,6 +82,8 @@ bool BonnRouteDRParams::set(const std::string& name, const double value)
     ripup = v != 0;
   } else if (name == "interval_via_property") {
     interval_via_property = v != 0;
+  } else if (name == "interval_nearest_first") {
+    interval_nearest_first = v != 0;
   } else if (name == "reservations") {
     reservations = v != 0;
   } else if (name == "discount_numerator") {
@@ -3344,6 +3346,7 @@ bool BonnRouteDR::connectInRegion(NetData& net,
                       / params_.discount_denominator;
   req.use_intervals = params_.use_intervals;
   req.interval_via_property = params_.interval_via_property;
+  req.interval_nearest_first = params_.interval_nearest_first;
   req.exact_future_cost = params_.exact_future_cost;
   std::unordered_set<size_t> in_tree;
   std::vector<size_t> tree;

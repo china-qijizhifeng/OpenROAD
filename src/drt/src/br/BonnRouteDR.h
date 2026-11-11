@@ -90,6 +90,11 @@ struct BonnRouteDRParams
   // Interval property (ii) also for vias (Sec. 4.1); 0 relaxes vias per
   // vertex and lets intervals ignore via availability.
   bool interval_via_property = true;
+  // Among interval events with equal key, process the one with the
+  // smallest future cost first; Algorithm 4 (line 12) takes the largest.
+  // Both are exact; this order reaches targets without labeling the whole
+  // last flat layer of equal-length shortest paths.
+  bool interval_nearest_first = false;
   // Sec. 4.4: bound on the depth of a rip-up sequence; a failed sequence
   // restores the original routing.
   int ripup_depth = 3;
