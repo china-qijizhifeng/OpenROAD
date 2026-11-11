@@ -80,15 +80,68 @@ bool IntervalSearch::inWindow(const int z,
   return true;
 }
 
-uint8_t IntervalSearch::computeTransitions(const int z,
-                                           const int i,
-                                           const int j) const
+uint16_t IntervalSearch::computeInfo(const int z,
+                                     const int i,
+                                     const int j,
+                                     const bool vias) const
 {
-  const At v{z, i, j};
   const TrackLayer& layer = graph_.layers[z];
-  uint8_t bits = 0;
-  if (layer.jogs && enter(v, kJog)) {
-    const bool v_zero = usableZero(v, kJog);
+  const int t = req_->wire_type;
+  auto usable = [&](const RipupLevel l) {
+    return l == kLegal || (req_->ripup && l <= req_->max_ripup_level);
+  };
+  uint16_t bits = 0;
+  if (t >= grid_.numWireTypes()) {
+    // Every level comes from the checker.
+    const At v{z, i, j};
+    bits |= usableZero(v, kWire) ? kInfoWireLegal : 0;
+    const bool jog_usable = layer.jogs && enter(v, kJog);
+    bits |= layer.jogs && usableZero(v, kJog) ? kInfoJogLegal : 0;
+    if (j + 1 < layer.numPositions() && usableZero(v, kWireEdge)) {
+      bits |= kInfoEdgeLegal;
+    }
+    for (const int di : {-1, 1}) {
+      const int i2 = i + di;
+      size_t li = 0;
+      if (!jog_usable || i2 < 0 || i2 >= layer.numTracks()
+          || !inWindow(z, i2, j, li)
+          || !req_->region->contains(layer, z, i2, j)) {
+        continue;
+      }
+      const At w{z, i2, j};
+      const At edge = di > 0 ? v : w;
+      const RipupLevel worst = std::max(level(w, kJog), level(edge, kJogEdge));
+      if (usable(worst)) {
+        bits |= di > 0 ? kTransJogAbove : kTransJogBelow;
+        if (!(bits & kInfoJogLegal) || worst != kLegal) {
+          bits |= kTransPenalty;  // cannot be compressed into an interval
+        }
+      }
+    }
+    return vias ? bits | computeVias(z, i, j, 0) : bits;
+  }
+  // Fast wire type: decode the words (detail::levelOf, one word per track).
+  const int s_wire = FastGrid::wiringShift(t, 0);
+  const int s_jog = FastGrid::wiringShift(t, 1);
+  const uint64_t own = reader_.wiringWord(z, i, j);
+  const RipupLevel wire = FastGrid::field(own, s_wire);
+  const RipupLevel jog = FastGrid::field(own, s_jog);
+  int64_t queries = 2;
+  bits |= wire == kLegal ? kInfoWireLegal : 0;
+  bits |= layer.jogs && jog == kLegal ? kInfoJogLegal : 0;
+  if (j + 1 < layer.numPositions()) {
+    queries++;
+    RipupLevel edge;
+    if ((own >> FastGrid::kWireEdgeBit) & 1) {
+      edge = level(At{z, i, j}, kWireEdge);
+      queries--;
+    } else {
+      edge = std::max(
+          wire, FastGrid::field(reader_.wiringWord(z, i, j + 1), s_wire));
+    }
+    bits |= edge == kLegal ? kInfoEdgeLegal : 0;
+  }
+  if (layer.jogs && usable(jog)) {
     for (const int di : {-1, 1}) {
       const int i2 = i + di;
       size_t li = 0;
@@ -96,16 +149,39 @@ uint8_t IntervalSearch::computeTransitions(const int z,
           || !req_->region->contains(layer, z, i2, j)) {
         continue;
       }
-      const At w{z, i2, j};
-      const At edge = di > 0 ? v : w;
-      if (enter(w, kJog) && enter(edge, kJogEdge)) {
+      const uint64_t other = reader_.wiringWord(z, i2, j);
+      const RipupLevel other_jog = FastGrid::field(other, s_jog);
+      const uint64_t lower = di > 0 ? own : other;
+      RipupLevel jog_edge;
+      queries += 2;
+      if ((lower >> FastGrid::kJogEdgeBit) & 1) {
+        jog_edge = level(At{z, std::min(i, i2), j}, kJogEdge);
+        queries--;
+      } else {
+        jog_edge = std::max(jog, other_jog);
+      }
+      const RipupLevel worst = std::max(other_jog, jog_edge);
+      if (usable(worst)) {
         bits |= di > 0 ? kTransJogAbove : kTransJogBelow;
-        if (!v_zero || !usableZero(w, kJog) || !usableZero(edge, kJogEdge)) {
+        if (jog != kLegal || worst != kLegal) {
           bits |= kTransPenalty;  // cannot be compressed into an interval
         }
       }
     }
   }
+  counters_.fast_grid += queries;
+  return vias ? bits | computeVias(z, i, j, own) : bits;
+}
+
+uint16_t IntervalSearch::computeVias(const int z,
+                                     const int i,
+                                     const int j,
+                                     const uint64_t own) const
+{
+  const TrackLayer& layer = graph_.layers[z];
+  const int t = req_->wire_type;
+  const bool fast = t < grid_.numWireTypes();
+  uint16_t bits = kInfoVias;
   for (const int dz : {-1, 1}) {
     const int z2 = z + dz;
     if (z2 < 0 || z2 >= graph_.numLayers()) {
@@ -118,13 +194,35 @@ uint8_t IntervalSearch::computeTransitions(const int z,
         || !req_->region->contains(graph_.layers[z2], z2, i2, j2)) {
       continue;
     }
-    const At w{z2, i2, j2};
-    const At lower = dz > 0 ? v : w;
-    const At upper = dz > 0 ? w : v;
-    const RipupLevel pad = level(lower, kViaUpPad);
-    const RipupLevel cut = level(lower, kCutUp);
-    const RipupLevel top = level(upper, kViaDownPad);
-    const RipupLevel worst = std::max({pad, cut, top});
+    RipupLevel worst;
+    if (fast) {
+      // Lower pad, cut above it and upper pad (detail::levelOf).
+      const int zl = std::min(z, z2);
+      const int il = dz > 0 ? i : i2;
+      const int jl = dz > 0 ? j : j2;
+      const uint64_t lower_word = dz > 0 ? own : reader_.wiringWord(zl, il, jl);
+      const uint64_t upper_word = dz > 0 ? reader_.wiringWord(z2, i2, j2) : own;
+      const int c = grid_.viaIndex(zl, jl);
+      RipupLevel cut = kNotRemovable;
+      if (c >= 0) {
+        const uint64_t w = reader_.viaWord(zl, il, c);
+        cut = std::max(FastGrid::field(w, FastGrid::viaShift(t, 0)),
+                       FastGrid::field(w, FastGrid::viaShift(t, 1)));
+      }
+      worst = std::max(
+          {FastGrid::field(lower_word, FastGrid::wiringShift(t, 2)),
+           cut,
+           FastGrid::field(upper_word, FastGrid::wiringShift(t, 3))});
+      counters_.fast_grid += 3;
+    } else {
+      const At v{z, i, j};
+      const At w{z2, i2, j2};
+      const At lower = dz > 0 ? v : w;
+      const At upper = dz > 0 ? w : v;
+      worst = std::max({level(lower, kViaUpPad),
+                        level(lower, kCutUp),
+                        level(upper, kViaDownPad)});
+    }
     if (worst == kLegal || (req_->ripup && worst <= req_->max_ripup_level)) {
       bits |= dz > 0 ? kTransViaAbove : kTransViaBelow;
       if (worst != kLegal) {
@@ -135,16 +233,35 @@ uint8_t IntervalSearch::computeTransitions(const int z,
   return bits;
 }
 
-uint8_t IntervalSearch::transitions(const int z,
-                                    const int i,
-                                    const int j,
-                                    VertexLabel& label) const
+uint16_t IntervalSearch::info(const int z,
+                              const int i,
+                              const int j,
+                              VertexLabel& label) const
 {
-  if (label.transitions_stamp != epoch_) {
-    label.transitions = computeTransitions(z, i, j);
-    label.transitions_stamp = epoch_;
+  if (label.info_stamp != epoch_) {
+    label.info = computeInfo(z, i, j, vias_at_build_);
+    label.info_stamp = epoch_;
   }
-  return label.transitions;
+  return label.info;
+}
+
+uint16_t IntervalSearch::viaInfo(const int z,
+                                 const int i,
+                                 const int j,
+                                 VertexLabel& label) const
+{
+  const uint16_t bits = info(z, i, j, label);
+  if (bits & kInfoVias) {
+    return bits;
+  }
+  label.info = bits
+               | computeVias(z,
+                             i,
+                             j,
+                             req_->wire_type < grid_.numWireTypes()
+                                 ? reader_.wiringWord(z, i, j)
+                                 : 0);
+  return label.info;
 }
 
 int IntervalSearch::intervalOf(const int z, const int i, const int j)
@@ -166,11 +283,10 @@ int IntervalSearch::buildInterval(const int z, const int i, const int j)
   // A vertex may join an interval if it is a plain wire vertex: in the
   // region, unassigned, wire-usable without penalty and not a target.
   // Its transitions (property (ii)) are computed once and kept.
-  const uint8_t property_mask
-      = req_->interval_via_property ? uint8_t{0xff}
-                                    : uint8_t{kTransJogBelow | kTransJogAbove
-                                              | kTransPenalty};
-  auto plain = [&](int jj, uint8_t& sig) {
+  const uint16_t property_mask
+      = kTransJogBelow | kTransJogAbove | kTransPenalty
+        | (req_->interval_via_property ? kTransViaBelow | kTransViaAbove : 0);
+  auto plain = [&](int jj, uint16_t& sig, uint16_t& bits) {
     size_t li = 0;
     if (!inWindow(z, i, jj, li)) {
       return false;
@@ -180,15 +296,12 @@ int IntervalSearch::buildInterval(const int z, const int i, const int j)
         || !region.contains(layer, z, i, jj)) {
       return false;
     }
-    const At v{z, i, jj};
-    if (!usableZero(v, kWire)
-        || (label.source_stamp == epoch_ && layer.jogs
-            && !usableZero(v, kJog))) {
-      return false;
-    }
-    const uint8_t bits = transitions(z, i, jj, label);
+    bits = info(z, i, jj, label);
     sig = bits & property_mask;
-    return (bits & kTransPenalty) == 0;
+    return (bits & kInfoWireLegal) != 0
+           && !(label.source_stamp == epoch_ && layer.jogs
+                && !(bits & kInfoJogLegal))
+           && (bits & kTransPenalty) == 0;
   };
   int ja = j;
   int jb = j;
@@ -196,19 +309,22 @@ int IntervalSearch::buildInterval(const int z, const int i, const int j)
   const Cost pi0 = futureCost(z, i, j);
   Cost pi_a = pi0;
   Cost pi_b = pi0;
-  uint8_t sig = 0;
-  if (!plain(j, sig)) {
+  uint16_t sig = 0;
+  uint16_t bits_a = 0;
+  if (!plain(j, sig, bits_a)) {
     ends_[kEndStartVertex] += 2;
   } else {
     IntervalEnd end = kEndTrack;
-    auto joins = [&](int from, int to, Cost& pi_from) {
-      uint8_t sig_to = 0;
-      if (!plain(to, sig_to)) {
+    uint16_t bits_b = bits_a;
+    auto joins = [&](int from, int to, Cost& pi_from, uint16_t& bits_from) {
+      uint16_t sig_to = 0;
+      uint16_t bits_to = 0;
+      if (!plain(to, sig_to, bits_to)) {
         end = kEndNeighbour;
         return false;
       }
-      const int a = std::min(from, to);
-      if (!usableZero(At{z, i, a}, kWireEdge)) {
+      // The preferred-direction edge is kept at its lower end.
+      if (!((to > from ? bits_from : bits_to) & kInfoEdgeLegal)) {
         end = kEndWireEdge;
         return false;
       }
@@ -230,15 +346,16 @@ int IntervalSearch::buildInterval(const int z, const int i, const int j)
       }
       cls = c;
       pi_from = pi_to;
+      bits_from = bits_to;
       return true;
     };
     end = kEndTrack;
-    while (jb + 1 < layer.numPositions() && joins(jb, jb + 1, pi_b)) {
+    while (jb + 1 < layer.numPositions() && joins(jb, jb + 1, pi_b, bits_b)) {
       jb++;
     }
     ends_[end]++;
     end = kEndTrack;
-    while (ja > 0 && joins(ja, ja - 1, pi_a)) {
+    while (ja > 0 && joins(ja, ja - 1, pi_a, bits_a)) {
       ja--;
     }
     ends_[end]++;
@@ -423,9 +540,14 @@ void IntervalSearch::process(const int id, const Cost delta)
   auto bits_of = [&](int k) {
     size_t li = 0;
     inWindow(z, i, j_of(k), li);
-    return labels_[li].transitions;
+    return labels_[li].info;
   };
-  const uint8_t signature = single ? 0 : bits_of(f);
+  auto via_bits_of = [&](int k) {
+    size_t li = 0;
+    inWindow(z, i, j_of(k), li);
+    return viaInfo(z, i, j_of(k), labels_[li]);
+  };
+  const uint16_t signature = single ? 0 : bits_of(f);
   auto relax_to = [&](int from_k, int z2, int i2, int j2, Cost cost) {
     const Cost pi = intervals_[id].futureCost(layer, j_of(from_k));
     const int next_id = intervalOf(z2, i2, j2);
@@ -458,7 +580,7 @@ void IntervalSearch::process(const int id, const Cost delta)
   // skip the entire run when the interval has no vias in that direction.
   for (const int dz : {-1, 1}) {
     const int z2 = z + dz;
-    const uint8_t via_bit = dz > 0 ? kTransViaAbove : kTransViaBelow;
+    const uint16_t via_bit = dz > 0 ? kTransViaAbove : kTransViaBelow;
     if (z2 < 0 || z2 >= graph_.numLayers()
         || (!single && req_->interval_via_property && !(signature & via_bit))) {
       continue;
@@ -468,7 +590,7 @@ void IntervalSearch::process(const int id, const Cost delta)
       const int i2 = dz > 0 ? layer.up_track[j] : layer.down_track[j];
       const int j2 = dz > 0 ? layer.up_pos[i] : layer.down_pos[i];
       if (!single) {
-        if (bits_of(k) & via_bit) {
+        if (via_bits_of(k) & via_bit) {
           relax_to(k, z2, i2, j2, graph_.via_cost[std::min(z, z2)]);
         }
         continue;
@@ -499,7 +621,7 @@ void IntervalSearch::process(const int id, const Cost delta)
   if (layer.jogs) {
     for (const int di : {-1, 1}) {
       const int i2 = i + di;
-      const uint8_t jog_bit = di > 0 ? kTransJogAbove : kTransJogBelow;
+      const uint16_t jog_bit = di > 0 ? kTransJogAbove : kTransJogBelow;
       if (i2 < 0 || i2 >= layer.numTracks()
           || (!single && !(signature & jog_bit))) {
         continue;
@@ -633,6 +755,7 @@ SearchResult IntervalSearch::run(const SearchRequest& request)
     total += static_cast<size_t>(w.ni) * w.nj;
   }
   epoch_ = labels_.reset(total, request.label_limit);
+  vias_at_build_ = request.interval_via_property || request.ripup;
   for (size_t t = 0; t < request.targets.size(); t++) {
     int z, i, j;
     graph_.decode(request.targets[t].vertex, z, i, j);

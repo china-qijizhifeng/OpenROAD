@@ -494,19 +494,32 @@ class IntervalSearch
   bool inWindow(int z, int i, int j, size_t& li) const;
   int intervalOf(int z, int i, int j);
   int buildInterval(int z, int i, int j);
-  // Jog and via transitions of a vertex (kTrans* bits), computed once per
-  // search and kept in its vertex label.
-  enum : uint8_t
+  // What the interval search needs to know about a vertex, computed once
+  // per search into its vertex label: its jog and via transitions
+  // (property (ii)) and the levels its interval membership depends on.
+  enum : uint16_t
   {
     kTransJogBelow = 1,
     kTransJogAbove = 2,
     kTransViaBelow = 4,
     kTransViaAbove = 8,
     kTransPenalty = 16,  // an existing transition carries a rip-up penalty
+    kInfoWireLegal = 32,  // kWire
+    kInfoJogLegal = 64,   // kJog
+    kInfoEdgeLegal = 128,  // kWireEdge to position j + 1
+    kInfoVias = 256,       // the via bits are computed
   };
   struct VertexLabel;
-  uint8_t transitions(int z, int i, int j, VertexLabel& label) const;
-  uint8_t computeTransitions(int z, int i, int j) const;
+  uint16_t info(int z, int i, int j, VertexLabel& label) const;
+  uint16_t viaInfo(int z, int i, int j, VertexLabel& label) const;
+  // The fast-grid words of the vertex and its neighbours give all levels
+  // at once; wire types outside the fast grid and marked edges go through
+  // levelOf to the checker.
+  uint16_t computeInfo(int z, int i, int j, bool vias) const;
+  uint16_t computeVias(int z, int i, int j, uint64_t own) const;
+  // Via transitions are part of the interval property, or carry rip-up
+  // penalties that make vertices singletons: needed to build intervals.
+  bool vias_at_build_ = true;
   Cost value(const Interval& iv, int k) const;
   const Label* argLabel(const Interval& iv, int k) const;
   void rebuildEnvelope(Interval& iv);
@@ -536,10 +549,10 @@ class IntervalSearch
     uint32_t stamp = 0;
     uint32_t source_stamp = 0;
     uint32_t target_stamp = 0;
-    uint32_t transitions_stamp = 0;
+    uint32_t info_stamp = 0;
     int32_t interval_id = 0;
     int32_t target_index = 0;
-    uint8_t transitions = 0;
+    uint16_t info = 0;
   };
   mutable PagedLabels<VertexLabel> labels_;
   uint32_t epoch_ = 0;
