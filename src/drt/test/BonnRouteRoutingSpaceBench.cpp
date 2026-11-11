@@ -9,6 +9,10 @@
 // same shapes with the same pairwise rule (the previous BonnRouteDR path).
 //
 // usage: bonnroute_routing_space_bench [seed] [extent_dbu] [searches]
+// BR_RULES=n45: Nangate45's metal1-4 rules (DBU 2000: the PRL / wide-metal
+// tables up to 3000 DBU, no line-end rule), metal1 rails of 0.17 um and
+// metal4 straps of 0.48 um, no metal2 blockages (gcd-like); n45macro adds
+// the metal2 blockages (macro-like wide shapes).
 
 #include <algorithm>
 #include <boost/geometry.hpp>
@@ -18,6 +22,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <random>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -62,7 +67,11 @@ int main(int argc, char** argv)
   const int num_searches = argc > 3 ? std::atoi(argv[3]) : 4000;
   std::mt19937 rng(seed);
   const int num_z = 4;
-  const Coord pitch[num_z] = {280, 280, 280, 560};
+  const char* rules_env = std::getenv("BR_RULES");
+  const std::string_view rules_name = rules_env != nullptr ? rules_env : "";
+  const bool n45 = rules_name == "n45" || rules_name == "n45macro";
+  const bool blockages = !n45 || rules_name == "n45macro";
+  const Coord pitch[num_z] = {280, n45 ? 380 : 280, 280, 560};
   const Coord width[num_z] = {140, 140, 140, 280};
   // Rules: PRL / wide-metal table, line-end rule, cut spacing, an
   // inter-layer via rule between the upper via layers.
@@ -77,13 +86,49 @@ int main(int argc, char** argv)
           return base + (m > 600 && prl > 1000 ? 50 : 0) + (m > 2000 ? 150 : 0);
         });
     w.line_end = {width[z] + 40, base + 30, width[z] / 2};
+    if (n45) {
+      // LEF SPACINGTABLE PARALLELRUNLENGTH: the value of the largest width
+      // and run-length thresholds exceeded; Nangate45's tables are
+      // min(row value, column value).
+      const std::vector<Coord> widths
+          = z == 3 ? std::vector<Coord>{540, 1000, 1800, 3000}
+                   : std::vector<Coord>{180, 540, 1000, 1800, 3000};
+      const std::vector<Coord> runs
+          = z == 3 ? std::vector<Coord>{1800, 3600, 5400, 8000}
+                   : std::vector<Coord>{600, 1800, 3600, 5400, 8000};
+      const std::vector<Coord> values
+          = z == 3 ? std::vector<Coord>{280, 540, 1000, 1800, 3000}
+                   : std::vector<Coord>{140, 180, 540, 1000, 1800, 3000};
+      std::vector<Coord> width_breaks;
+      std::vector<Coord> run_breaks;
+      for (const Coord t : widths) {
+        width_breaks.insert(width_breaks.end(), {t, t + 1});
+      }
+      for (const Coord t : runs) {
+        run_breaks.insert(run_breaks.end(), {t, t + 1});
+      }
+      auto exceeded = [](const std::vector<Coord>& thresholds, Coord v) {
+        return static_cast<size_t>(
+            std::ranges::count_if(thresholds, [&](Coord t) { return v > t; }));
+      };
+      w.spacing = z == 0 ? SpacingTable::constant(130)
+                         : SpacingTable::sample(
+                               width_breaks,
+                               run_breaks,
+                               [&](Coord a, Coord b, Coord prl) {
+                                 return std::min(
+                                     values[exceeded(widths, std::max(a, b))],
+                                     values[exceeded(runs, prl)]);
+                               });
+      w.line_end = {};
+    }
     rules.push_back(w);
     if (z + 1 < num_z) {
       LayerRules v;
       v.via_layer = true;
       v.horizontal = w.horizontal;
-      v.spacing = SpacingTable::constant(160);
-      v.projection_spacing = z >= 1 ? 120 : 0;
+      v.spacing = SpacingTable::constant(n45 && z >= 1 ? 180 : 160);
+      v.projection_spacing = z >= 1 && !n45 ? 120 : 0;
       rules.push_back(v);
     }
   }
@@ -175,9 +220,10 @@ int main(int argc, char** argv)
   };
   // Fixed shapes: M1 rails every 10 tracks, pins in the rows, OBS on M2.
   int net = 0;
+  const Coord rail = n45 ? 170 : 85;
   for (Coord y = 0; y < extent; y += 10 * pitch[0]) {
     add(0,
-        {0, y - 85, extent, y + 85},
+        {0, y - rail, extent, y + rail},
         ShapeRole::kFixed,
         ShapeType::kBlockage,
         kNoNet);
@@ -191,7 +237,17 @@ int main(int argc, char** argv)
           net++);
     }
   }
-  for (int k = 0; k < extent / 4000; k++) {
+  if (n45) {
+    // Power straps on metal4 (vertical), 0.48 um every 40 tracks.
+    for (Coord x = 20 * pitch[3]; x + 480 < extent; x += 40 * pitch[3]) {
+      add(6,
+          {x - 480, 0, x + 480, extent},
+          ShapeRole::kFixed,
+          ShapeType::kBlockage,
+          kNoNet);
+    }
+  }
+  for (int k = 0; blockages && k < extent / 4000; k++) {
     const Coord x = rng() % (extent - 6000);
     const Coord y = rng() % (extent - 6000);
     add(2,
@@ -273,7 +329,9 @@ int main(int argc, char** argv)
     }
   }
   std::printf(
-      "instance: seed %u, extent %d DBU, %d layers, %zu shapes, %d pins\n",
+      "instance: %s rules, seed %u, extent %d DBU, %d layers, %zu shapes, %d "
+      "pins\n",
+      n45 ? rules_env : "default",
       seed,
       extent,
       num_z,
@@ -321,9 +379,27 @@ int main(int argc, char** argv)
   std::printf("| bytes per interval / per shape | %.1f / %.1f |\n",
               double(sg.bytes) / std::max<int64_t>(1, sg.intervals),
               double(sg.bytes) / shapes.size());
-  std::printf("| build time shape grid / R-tree (s) | %.3f / %.3f |\n\n",
-              t_grid,
-              t_tree);
+  std::printf(
+      "| build time shape grid / R-tree (s) | %.3f / %.3f |\n", t_grid, t_tree);
+#ifdef BR_SHAPE_CLASS_REACHES
+  std::printf("| wide shapes (separate index) | %lld |\n",
+              (long long) sg.wide_shapes);
+  std::printf("| reach per layer: rules / interned classes / narrow |");
+  for (int g = 0; g < classes.numLayers(); g++) {
+    std::printf(" %d/%d/%d",
+                classes.ruleReach(g),
+                classes.classReach(g),
+                classes.narrowReach(g));
+  }
+  std::printf(" |\n");
+#else
+  std::printf("| reach per layer (rules) |");
+  for (int g = 0; g < classes.numLayers(); g++) {
+    std::printf(" %d", classes.reach(g));
+  }
+  std::printf(" |\n");
+#endif
+  std::printf("\n");
   // 2. Fast grid.
   DistanceRuleChecker checker(&grid);
   FastGrid fast;
