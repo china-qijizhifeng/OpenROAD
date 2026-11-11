@@ -35,6 +35,8 @@ namespace {
 // Keep exp(ln y - shift) inside the double range.
 constexpr double kRenormalizeAbove = 600.0;
 constexpr double kRenormalizeTo = 300.0;
+// Destructive interference size of the x86-64/AArch64 targets we build for.
+constexpr std::size_t kCacheLine = 64;
 }  // namespace
 
 bool BonnRouteParams::set(const std::string& name, const double value)
@@ -94,7 +96,10 @@ bool BonnRouteParams::set(const std::string& name, const double value)
 }
 
 // Per-thread Dijkstra state over the search region, reset by epoch stamps.
-struct BonnRouteGlobal::Scratch
+// Each thread's instance is cache-line aligned: the heap's end pointer is
+// written on every push and pop, and must not share a line with another
+// thread's vector headers (std::vector<Scratch> stores them contiguously).
+struct alignas(kCacheLine) BonnRouteGlobal::Scratch
 {
   std::vector<double> dist;
   std::vector<int32_t> parent;
