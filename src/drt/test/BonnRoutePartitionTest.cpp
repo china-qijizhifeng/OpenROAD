@@ -144,10 +144,15 @@ std::vector<std::vector<RipupLevel>> run(Space& s,
     const StoredShape& sh = op.shape;
     if (op.insert) {
       s.grid.insert(sh.layer, sh.rect, sh.cls, sh.type, sh.owner, cache);
+      s.builder.shapeInserted(sh.layer,
+                              PlacedShape{sh.rect, sh.cls, 3},
+                              s.grid.level(sh.type, sh.owner));
     } else {
       s.grid.remove(sh.layer, sh.rect, sh.cls, sh.type, sh.owner, cache);
+      s.builder.shapeRemoved(sh.layer,
+                             PlacedShape{sh.rect, sh.cls, 3},
+                             s.grid.level(sh.type, sh.owner));
     }
-    s.builder.shapeChanged(sh.layer, sh.rect);
     CheckOptions opts;
     opts.report_nets = true;
     opts.groups = 4 * num_z;

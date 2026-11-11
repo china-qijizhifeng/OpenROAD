@@ -36,6 +36,7 @@ struct Totals
   int64_t intervals = 0;
   int64_t via_intervals = 0;
   int64_t vertices = 0;
+  int64_t overlays = 0;
 };
 
 void fail(Totals& t, const char* what, int c)
@@ -45,7 +46,9 @@ void fail(Totals& t, const char* what, int c)
   }
 }
 
-// Brute-force level of one model (rect relative to l).
+// Brute-force level of one model (rect relative to l), the shapes of
+// `ignored` treated as removed.
+thread_local int32_t g_ignored = kNoNet;
 RipupLevel brute(const ShapeClassTable& classes,
                  const ShapeGrid& grid,
                  const std::vector<StoredShape>& shapes,
@@ -54,7 +57,7 @@ RipupLevel brute(const ShapeClassTable& classes,
 {
   std::vector<LocatedModel> one{m};
   one[0].group = 0;
-  return bruteLevels(classes, grid, shapes, one, 1, l, kNoNet)[0];
+  return bruteLevels(classes, grid, shapes, one, 1, l, g_ignored)[0];
 }
 
 void runCase(std::mt19937& rng, const int c, Totals& t)
@@ -196,151 +199,214 @@ void runCase(std::mt19937& rng, const int c, Totals& t)
         s.cls = classes.classify(s.layer, s.rect, ShapeRole::kFixed);
       }
       grid.insert(s.layer, s.rect, s.cls, s.type, s.owner, cache);
-      builder.shapeChanged(s.layer, s.rect);
+      // Incremental insert (max with the shape's induced levels); now and
+      // then the exact recomputation.
+      if (rng() % 8 == 0) {
+        builder.shapeChanged(s.layer, s.rect);
+      } else {
+        builder.shapeInserted(s.layer,
+                              PlacedShape{s.rect, s.cls, 3},
+                              grid.level(s.type, s.owner));
+      }
       live.push_back(s);
+    } else if (rng() % 3 == 0) {
+      // A group of removals, recomputed once (a net's rip-up).
+      FastGridBuilder::PendingRemovals pending;
+      for (int r = randomInt(rng, 1, 4); r > 0 && !live.empty(); r--) {
+        const size_t at = rng() % live.size();
+        const StoredShape s = live[at];
+        live.erase(live.begin() + at);
+        grid.remove(s.layer, s.rect, s.cls, s.type, s.owner, cache);
+        builder.shapeRemoved(s.layer,
+                             PlacedShape{s.rect, s.cls, 3},
+                             grid.level(s.type, s.owner),
+                             pending);
+      }
+      builder.flush(pending);
     } else {
       const size_t at = rng() % live.size();
       const StoredShape s = live[at];
       live.erase(live.begin() + at);
       grid.remove(s.layer, s.rect, s.cls, s.type, s.owner, cache);
-      builder.shapeChanged(s.layer, s.rect);
+      builder.shapeRemoved(
+          s.layer, PlacedShape{s.rect, s.cls, 3}, grid.level(s.type, s.owner));
     }
   }
-  // Every vertex and edge against the reference.
-  auto model = [&](int layer, const WireModel& m) {
-    return LocatedModel{layer, m.rect, m.cls, 3, 0};
-  };
-  for (int z = 0; z < num_z; z++) {
-    const TrackLayer& l = graph.layers[z];
-    for (int i = 0; i < l.numTracks(); i++) {
-      for (int j = 0; j < l.numPositions(); j++) {
-        const auto [x, y] = l.point(i, j);
-        const Point p{x, y};
-        for (int wt = 0; wt <= fast; wt++) {
-          const WireType& w = types[wt];
-          auto expect_vertex = [&](Kind k) -> RipupLevel {
-            switch (k) {
-              case kWire:
-                return brute(
-                    classes, grid, live, model(2 * z, w.preferred[z]), p);
-              case kJog:
-                return brute(
-                    classes, grid, live, model(2 * z, w.non_preferred[z]), p);
-              case kViaUpPad:
-                return z + 1 < num_z && w.via[z].valid
-                           ? brute(classes,
-                                   grid,
-                                   live,
-                                   model(2 * z, w.via[z].bottom),
-                                   p)
-                           : kLegal;
-              case kViaDownPad:
-                return z > 0 && w.via[z - 1].valid
-                           ? brute(classes,
-                                   grid,
-                                   live,
-                                   model(2 * z, w.via[z - 1].top),
-                                   p)
-                           : kLegal;
-              case kCutUp: {
-                if (z + 1 >= num_z || l.up_track[j] < 0 || !w.via[z].valid) {
-                  return kLegal;
-                }
-                RipupLevel v = brute(
-                    classes, grid, live, model(2 * z + 1, w.via[z].cut), p);
-                if (w.via[z].projection.valid) {
-                  v = std::max(v,
-                               brute(classes,
+  // Searches read through a reader (run cursors); with an overlay, the
+  // shapes of one net count as removed (Sec. 4.4). Both are checked against
+  // the brute-force reference, the base also against fg.level().
+  FastGridReader rd;
+  FastGridOverlay overlay;
+  const int32_t own = randomInt(rng, 0, nets - 1);
+  std::vector<FastGridBuilder::OwnShape> own_shapes;
+  for (const StoredShape& s : live) {
+    if (s.owner == own && isOwned(s.type)) {
+      own_shapes.push_back({s.layer,
+                            PlacedShape{s.rect, s.cls, 3},
+                            grid.level(s.type, s.owner)});
+    }
+  }
+  for (const bool with_overlay : {false, true}) {
+    if (with_overlay) {
+      builder.buildOverlay(own, own_shapes, overlay);
+      rd.reset(&fg, &overlay);
+      g_ignored = own;
+    } else {
+      rd.reset(&fg, nullptr);
+      g_ignored = kNoNet;
+    }
+    // Every vertex and edge against the reference.
+    auto model = [&](int layer, const WireModel& m) {
+      return LocatedModel{layer, m.rect, m.cls, 3, 0};
+    };
+    for (int z = 0; z < num_z; z++) {
+      const TrackLayer& l = graph.layers[z];
+      for (int i = 0; i < l.numTracks(); i++) {
+        for (int j = 0; j < l.numPositions(); j++) {
+          const auto [x, y] = l.point(i, j);
+          const Point p{x, y};
+          for (int wt = 0; wt <= fast; wt++) {
+            const WireType& w = types[wt];
+            auto expect_vertex = [&](Kind k) -> RipupLevel {
+              switch (k) {
+                case kWire:
+                  return brute(
+                      classes, grid, live, model(2 * z, w.preferred[z]), p);
+                case kJog:
+                  return brute(
+                      classes, grid, live, model(2 * z, w.non_preferred[z]), p);
+                case kViaUpPad:
+                  return z + 1 < num_z && w.via[z].valid
+                             ? brute(classes,
                                      grid,
                                      live,
-                                     model(2 * z + 3, w.via[z].projection),
-                                     p));
+                                     model(2 * z, w.via[z].bottom),
+                                     p)
+                             : kLegal;
+                case kViaDownPad:
+                  return z > 0 && w.via[z - 1].valid
+                             ? brute(classes,
+                                     grid,
+                                     live,
+                                     model(2 * z, w.via[z - 1].top),
+                                     p)
+                             : kLegal;
+                case kCutUp: {
+                  if (z + 1 >= num_z || l.up_track[j] < 0 || !w.via[z].valid) {
+                    return kLegal;
+                  }
+                  RipupLevel v = brute(
+                      classes, grid, live, model(2 * z + 1, w.via[z].cut), p);
+                  if (w.via[z].projection.valid) {
+                    v = std::max(v,
+                                 brute(classes,
+                                       grid,
+                                       live,
+                                       model(2 * z + 3, w.via[z].projection),
+                                       p));
+                  }
+                  return v;
                 }
-                return v;
+                default:
+                  return kLegal;
               }
-              default:
-                return kLegal;
+            };
+            for (const Kind k : {kWire, kJog, kViaUpPad, kCutUp, kViaDownPad}) {
+              if (k == kCutUp && (z + 1 >= num_z || l.up_track[j] < 0)) {
+                continue;
+              }
+              const bool absent
+                  = (k == kViaUpPad && (z + 1 >= num_z || !w.via[z].valid))
+                    || (k == kViaDownPad && (z == 0 || !w.via[z - 1].valid))
+                    || (k == kCutUp && !w.via[z].valid);
+              const RipupLevel want = expect_vertex(k);
+              const RipupLevel got = rd.level(z, i, j, k, wt);
+              if (!with_overlay && got != fg.level(z, i, j, k, wt)) {
+                fail(t, "reader differs from fast grid", c);
+              }
+              t.vertex_checks++;
+              t.blocked += want != kLegal;
+              // Absent models: the fast grid stores legal, the checker says
+              // not available; the search never asks.
+              if (!absent && got != want) {
+                fail(t,
+                     with_overlay ? "overlay vertex level differs"
+                                  : "vertex level differs",
+                     c);
+              }
             }
-          };
-          for (const Kind k : {kWire, kJog, kViaUpPad, kCutUp, kViaDownPad}) {
-            if (k == kCutUp && (z + 1 >= num_z || l.up_track[j] < 0)) {
-              continue;
-            }
-            const bool absent
-                = (k == kViaUpPad && (z + 1 >= num_z || !w.via[z].valid))
-                  || (k == kViaDownPad && (z == 0 || !w.via[z - 1].valid))
-                  || (k == kCutUp && !w.via[z].valid);
-            const RipupLevel want = expect_vertex(k);
-            const RipupLevel got = fg.level(z, i, j, k, wt);
-            t.vertex_checks++;
-            t.blocked += want != kLegal;
-            // Absent models: the fast grid stores legal, the checker says
-            // not available; the search never asks.
-            if (!absent && got != want) {
-              fail(t, "vertex level differs", c);
+            // Edges: level = max(endpoints, swept wire); bit exactness.
+            for (const Kind e : {kWireEdge, kJogEdge}) {
+              const bool along = e == kWireEdge;
+              if (along ? j + 1 >= l.numPositions() : i + 1 >= l.numTracks()) {
+                continue;
+              }
+              const WireModel& m = along ? w.preferred[z] : w.non_preferred[z];
+              const Coord d = along ? l.positions[j + 1] - l.positions[j]
+                                    : l.tracks[i + 1] - l.tracks[i];
+              const bool shift_x = along == l.horizontal;
+              LocatedModel swept = model(2 * z, m);
+              swept.rect = m.rect.hull(
+                  m.rect.translated(shift_x ? Point{d, 0} : Point{0, d}));
+              const RipupLevel s = brute(classes, grid, live, swept, p);
+              const auto [x2, y2]
+                  = along ? l.point(i, j + 1) : l.point(i + 1, j);
+              const RipupLevel ea
+                  = brute(classes, grid, live, model(2 * z, m), p);
+              const RipupLevel eb
+                  = brute(classes, grid, live, model(2 * z, m), Point{x2, y2});
+              const RipupLevel want = std::max({ea, eb, s});
+              t.edge_checks++;
+              if (!along && !l.jogs) {
+                continue;
+              }
+              if (rd.level(z, i, j, e, wt) != want) {
+                fail(t,
+                     with_overlay ? "overlay edge level differs"
+                                  : "edge level differs",
+                     c);
+              }
             }
           }
-          // Edges: level = max(endpoints, swept wire); bit exactness.
+          // Bits: set iff some fast wire type's swept wire exceeds its
+          // endpoints.
           for (const Kind e : {kWireEdge, kJogEdge}) {
+            if (with_overlay) {
+              continue;
+            }
             const bool along = e == kWireEdge;
-            if (along ? j + 1 >= l.numPositions() : i + 1 >= l.numTracks()) {
+            if ((along ? j + 1 >= l.numPositions() : i + 1 >= l.numTracks())
+                || (!along && !l.jogs)) {
               continue;
             }
-            const WireModel& m = along ? w.preferred[z] : w.non_preferred[z];
-            const Coord d = along ? l.positions[j + 1] - l.positions[j]
-                                  : l.tracks[i + 1] - l.tracks[i];
-            const bool shift_x = along == l.horizontal;
-            LocatedModel swept = model(2 * z, m);
-            swept.rect = m.rect.hull(
-                m.rect.translated(shift_x ? Point{d, 0} : Point{0, d}));
-            const RipupLevel s = brute(classes, grid, live, swept, p);
-            const auto [x2, y2] = along ? l.point(i, j + 1) : l.point(i + 1, j);
-            const RipupLevel ea
-                = brute(classes, grid, live, model(2 * z, m), p);
-            const RipupLevel eb
-                = brute(classes, grid, live, model(2 * z, m), Point{x2, y2});
-            const RipupLevel want = std::max({ea, eb, s});
-            t.edge_checks++;
-            if (!along && !l.jogs) {
-              continue;
+            bool need = false;
+            for (int wt = 0; wt < fast; wt++) {
+              const WireModel& m
+                  = along ? types[wt].preferred[z] : types[wt].non_preferred[z];
+              const Coord d = along ? l.positions[j + 1] - l.positions[j]
+                                    : l.tracks[i + 1] - l.tracks[i];
+              const bool shift_x = along == l.horizontal;
+              LocatedModel swept = model(2 * z, m);
+              swept.rect = m.rect.hull(
+                  m.rect.translated(shift_x ? Point{d, 0} : Point{0, d}));
+              const auto [x2, y2]
+                  = along ? l.point(i, j + 1) : l.point(i + 1, j);
+              const RipupLevel ends = std::max(
+                  brute(classes, grid, live, model(2 * z, m), p),
+                  brute(classes, grid, live, model(2 * z, m), Point{x2, y2}));
+              need |= brute(classes, grid, live, swept, p) > ends;
             }
-            if (fg.level(z, i, j, e, wt) != want) {
-              fail(t, "edge level differs", c);
+            t.marked += need;
+            if (fg.edgeQuery(z, i, j, e) != need) {
+              fail(t, "edge query bit not exact", c);
             }
-          }
-        }
-        // Bits: set iff some fast wire type's swept wire exceeds its
-        // endpoints.
-        for (const Kind e : {kWireEdge, kJogEdge}) {
-          const bool along = e == kWireEdge;
-          if ((along ? j + 1 >= l.numPositions() : i + 1 >= l.numTracks())
-              || (!along && !l.jogs)) {
-            continue;
-          }
-          bool need = false;
-          for (int wt = 0; wt < fast; wt++) {
-            const WireModel& m
-                = along ? types[wt].preferred[z] : types[wt].non_preferred[z];
-            const Coord d = along ? l.positions[j + 1] - l.positions[j]
-                                  : l.tracks[i + 1] - l.tracks[i];
-            const bool shift_x = along == l.horizontal;
-            LocatedModel swept = model(2 * z, m);
-            swept.rect = m.rect.hull(
-                m.rect.translated(shift_x ? Point{d, 0} : Point{0, d}));
-            const auto [x2, y2] = along ? l.point(i, j + 1) : l.point(i + 1, j);
-            const RipupLevel ends = std::max(
-                brute(classes, grid, live, model(2 * z, m), p),
-                brute(classes, grid, live, model(2 * z, m), Point{x2, y2}));
-            need |= brute(classes, grid, live, swept, p) > ends;
-          }
-          t.marked += need;
-          if (fg.edgeQuery(z, i, j, e) != need) {
-            fail(t, "edge query bit not exact", c);
           }
         }
       }
     }
   }
+  g_ignored = kNoNet;
+  t.overlays += !own_shapes.empty();
   // Incremental updates equal a rebuild from scratch.
   FastGrid fresh;
   fresh.init(&graph, fast);
@@ -392,7 +458,7 @@ int main()
   std::printf(
       "fast grid: %lld cases, %lld vertex checks (%lld blocked), %lld edge "
       "checks, %lld marked edges, %lld failures | %lld vertices in %lld "
-      "wiring intervals, %lld via intervals\n",
+      "wiring intervals, %lld via intervals, %lld overlays checked\n",
       static_cast<long long>(t.cases),
       static_cast<long long>(t.vertex_checks),
       static_cast<long long>(t.blocked),
@@ -401,6 +467,7 @@ int main()
       static_cast<long long>(t.fails),
       static_cast<long long>(t.vertices),
       static_cast<long long>(t.intervals),
-      static_cast<long long>(t.via_intervals));
+      static_cast<long long>(t.via_intervals),
+      static_cast<long long>(t.overlays));
   return t.fails != 0;
 }

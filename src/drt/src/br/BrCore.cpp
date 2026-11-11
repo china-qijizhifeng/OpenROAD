@@ -49,8 +49,7 @@ Cost PathSearch::spreadCost(const int z, const int i, const int j) const
   for (const int di : {-1, 1}) {
     const int i2 = i + di;
     if (i2 >= 0 && i2 < layer.numTracks()
-        && grid_.level(graph_.vertex(z, i2, j), kWire, req_->wire_type)
-               != kLegal) {
+        && reader_.level(z, i2, j, kWire, req_->wire_type) != kLegal) {
       return req_->spread_cost;
     }
   }
@@ -75,17 +74,18 @@ Cost PathSearch::wireCost(const int z,
          + spread;
 }
 
-Cost PathSearch::vertexPenalty(const size_t v, const Kind k) const
+Cost PathSearch::vertexPenalty(const At a, const Kind k) const
 {
-  if (level(v, k) == kLegal) {
+  if (level(a, k) == kLegal) {
     return 0;
   }
-  return req_->ripup_cost * (1 + static_cast<Cost>(grid_.history(v)));
+  return req_->ripup_cost
+         * (1 + static_cast<Cost>(grid_.history(graph_.vertex(a.z, a.i, a.j))));
 }
 
-bool PathSearch::enter(const size_t v, const Kind k) const
+bool PathSearch::enter(const At a, const Kind k) const
 {
-  const RipupLevel l = level(v, k);
+  const RipupLevel l = level(a, k);
   return l == kLegal || (req_->ripup && l <= req_->max_ripup_level);
 }
 
@@ -136,8 +136,9 @@ void PathSearch::settle(const int z,
   }
   const TrackLayer& layer = graph_.layers[z];
   const Region& region = *req_->region;
+  const At av{z, i, j};
   // Jogs (non-preferred direction, adjacent tracks).
-  if (layer.jogs && (is_source || enter(v, kJog))) {
+  if (layer.jogs && (is_source || enter(av, kJog))) {
     for (const int di : {-1, 1}) {
       const int i2 = i + di;
       if (i2 < 0 || i2 >= layer.numTracks()
@@ -145,14 +146,15 @@ void PathSearch::settle(const int z,
         continue;
       }
       const size_t w = graph_.vertex(z, i2, j);
-      const size_t edge = di > 0 ? v : w;
-      if (!enter(w, kJog) || !enter(edge, kJogEdge)) {
+      const At aw{z, i2, j};
+      const At edge = di > 0 ? av : aw;
+      if (!enter(aw, kJog) || !enter(edge, kJogEdge)) {
         continue;
       }
       const Cost c
           = layer.jog_factor * std::abs(layer.tracks[i2] - layer.tracks[i])
-            + vertexPenalty(w, kJog) + vertexPenalty(edge, kJogEdge)
-            + (is_source ? 0 : vertexPenalty(v, kJog));
+            + vertexPenalty(aw, kJog) + vertexPenalty(edge, kJogEdge)
+            + (is_source ? 0 : vertexPenalty(av, kJog));
       relax(v, w, g + c, di > 0 ? kFromTrackBelow : kFromTrackAbove, 0);
     }
   }
@@ -163,10 +165,11 @@ void PathSearch::settle(const int z,
     if (i2 >= 0 && j2 >= 0
         && region.contains(graph_.layers[z + 1], z + 1, i2, j2)) {
       const size_t w = graph_.vertex(z + 1, i2, j2);
-      if (enter(v, kViaUpPad) && enter(v, kCutUp) && enter(w, kViaDownPad)) {
-        const Cost c = graph_.via_cost[z] + vertexPenalty(v, kViaUpPad)
-                       + vertexPenalty(v, kCutUp)
-                       + vertexPenalty(w, kViaDownPad);
+      const At aw{z + 1, i2, j2};
+      if (enter(av, kViaUpPad) && enter(av, kCutUp) && enter(aw, kViaDownPad)) {
+        const Cost c = graph_.via_cost[z] + vertexPenalty(av, kViaUpPad)
+                       + vertexPenalty(av, kCutUp)
+                       + vertexPenalty(aw, kViaDownPad);
         relax(v, w, g + c, kFromLayerBelow, 0);
       }
     }
@@ -178,10 +181,11 @@ void PathSearch::settle(const int z,
     if (i2 >= 0 && j2 >= 0
         && region.contains(graph_.layers[z - 1], z - 1, i2, j2)) {
       const size_t w = graph_.vertex(z - 1, i2, j2);
-      if (enter(w, kViaUpPad) && enter(w, kCutUp) && enter(v, kViaDownPad)) {
-        const Cost c = graph_.via_cost[z - 1] + vertexPenalty(w, kViaUpPad)
-                       + vertexPenalty(w, kCutUp)
-                       + vertexPenalty(v, kViaDownPad);
+      const At aw{z - 1, i2, j2};
+      if (enter(aw, kViaUpPad) && enter(aw, kCutUp) && enter(av, kViaDownPad)) {
+        const Cost c = graph_.via_cost[z - 1] + vertexPenalty(aw, kViaUpPad)
+                       + vertexPenalty(aw, kCutUp)
+                       + vertexPenalty(av, kViaDownPad);
         relax(v, w, g + c, kFromLayerAbove, 0);
       }
     }
@@ -257,6 +261,7 @@ SearchResult PathSearch::run(const SearchRequest& request)
   req_ = &request;
   res_ = &result;
   counters_ = {};
+  reader_.reset(&grid_, request.overlay);
   min_via_cost_ = graph_.minViaCost();
   min_wire_rate_ = request.discounts.empty()
                        ? graph_.wire_unit
@@ -326,7 +331,7 @@ SearchResult PathSearch::run(const SearchRequest& request)
     const bool is_source = labels_[li].source_stamp == epoch_;
     if (item.dir == 0) {
       // Vertex label: start runs in both preferred directions.
-      if (!is_source && !enter(item.v, kWire)) {
+      if (!is_source && !enter(At{z, i, j}, kWire)) {
         continue;
       }
       for (const int d : {-1, 1}) {
@@ -336,11 +341,12 @@ SearchResult PathSearch::run(const SearchRequest& request)
           continue;
         }
         const size_t w = graph_.vertex(z, i, j2);
-        const size_t edge = d > 0 ? item.v : w;
-        if (!enter(w, kWire) || !enter(edge, kWireEdge)) {
+        const At aw{z, i, j2};
+        const At edge{z, i, std::min(j, j2)};
+        if (!enter(aw, kWire) || !enter(edge, kWireEdge)) {
           continue;
         }
-        const Cost c = wireCost(z, i, j, j2) + vertexPenalty(w, kWire)
+        const Cost c = wireCost(z, i, j, j2) + vertexPenalty(aw, kWire)
                        + vertexPenalty(edge, kWireEdge);
         relax(item.v,
               w,
@@ -362,11 +368,12 @@ SearchResult PathSearch::run(const SearchRequest& request)
         break;
       }
       const size_t w = graph_.vertex(z, i, j2);
-      const size_t edge = d > 0 ? graph_.vertex(z, i, cj) : w;
-      if (!enter(w, kWire) || !enter(edge, kWireEdge)) {
+      const At aw{z, i, j2};
+      const At edge{z, i, std::min(cj, j2)};
+      if (!enter(aw, kWire) || !enter(edge, kWireEdge)) {
         break;
       }
-      const Cost ng = g + wireCost(z, i, cj, j2) + vertexPenalty(w, kWire)
+      const Cost ng = g + wireCost(z, i, cj, j2) + vertexPenalty(aw, kWire)
                       + vertexPenalty(edge, kWireEdge);
       size_t lw = 0;
       if (!local(z, i, j2, lw)) {

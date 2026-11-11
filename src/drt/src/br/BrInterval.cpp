@@ -30,23 +30,24 @@ Cost IntervalSearch::futureCost(const int z, const int i, const int j) const
   return best;
 }
 
-bool IntervalSearch::usableZero(const size_t v, const Kind k) const
+bool IntervalSearch::usableZero(const At v, const Kind k) const
 {
   return level(v, k) == kLegal;
 }
 
-bool IntervalSearch::enter(const size_t v, const Kind k) const
+bool IntervalSearch::enter(const At v, const Kind k) const
 {
   const RipupLevel l = level(v, k);
   return l == kLegal || (req_->ripup && l <= req_->max_ripup_level);
 }
 
-Cost IntervalSearch::penalty(const size_t v, const Kind k) const
+Cost IntervalSearch::penalty(const At v, const Kind k) const
 {
   if (level(v, k) == kLegal) {
     return 0;
   }
-  return req_->ripup_cost * (1 + static_cast<Cost>(grid_.history(v)));
+  return req_->ripup_cost
+         * (1 + static_cast<Cost>(grid_.history(graph_.vertex(v.z, v.i, v.j))));
 }
 
 bool IntervalSearch::inWindow(const int z,
@@ -66,9 +67,9 @@ bool IntervalSearch::inWindow(const int z,
 
 int IntervalSearch::transitionSignature(const int z,
                                         const int i,
-                                        const int j,
-                                        const size_t v) const
+                                        const int j) const
 {
+  const At v{z, i, j};
   const TrackLayer& layer = graph_.layers[z];
   int sig = 0;
   for (const int di : {-1, 1}) {
@@ -79,8 +80,8 @@ int IntervalSearch::transitionSignature(const int z,
         || !req_->region->contains(layer, z, i2, j)) {
       continue;
     }
-    const size_t w = graph_.vertex(z, i2, j);
-    const size_t edge = di > 0 ? v : w;
+    const At w{z, i2, j};
+    const At edge = di > 0 ? v : w;
     if (enter(w, kJog) && enter(edge, kJogEdge)) {
       sig |= di > 0 ? 2 : 1;
       if (!usableZero(v, kJog) || !usableZero(w, kJog)
@@ -101,9 +102,9 @@ int IntervalSearch::transitionSignature(const int z,
         || !req_->region->contains(graph_.layers[z2], z2, i2, j2)) {
       continue;
     }
-    const size_t w = graph_.vertex(z2, i2, j2);
-    const size_t lower = dz > 0 ? v : w;
-    const size_t upper = dz > 0 ? w : v;
+    const At w{z2, i2, j2};
+    const At lower = dz > 0 ? v : w;
+    const At upper = dz > 0 ? w : v;
     if (enter(lower, kViaUpPad) && enter(lower, kCutUp)
         && enter(upper, kViaDownPad)) {
       if (req_->interval_via_property) {
@@ -142,11 +143,11 @@ int IntervalSearch::buildInterval(const int z, const int i, const int j)
         || !region.contains(layer, z, i, jj)) {
       return false;
     }
-    const size_t v = graph_.vertex(z, i, jj);
+    const At v{z, i, jj};
     return usableZero(v, kWire)
            && !(labels_[li].source_stamp == epoch_ && layer.jogs
                 && !usableZero(v, kJog))
-           && !(transitionSignature(z, i, jj, v) & 16);
+           && !(transitionSignature(z, i, jj) & 16);
   };
   int ja = j;
   int jb = j;
@@ -157,17 +158,17 @@ int IntervalSearch::buildInterval(const int z, const int i, const int j)
   size_t li0 = 0;
   inWindow(z, i, j, li0);
   if (plain(j, li0)) {
-    const int sig = transitionSignature(z, i, j, graph_.vertex(z, i, j));
+    const int sig = transitionSignature(z, i, j);
     auto joins = [&](int from, int to, Cost& pi_from) {
       size_t li = 0;
       if (!plain(to, li)) {
         return false;
       }
       const int a = std::min(from, to);
-      if (!usableZero(graph_.vertex(z, i, a), kWireEdge)) {
+      if (!usableZero(At{z, i, a}, kWireEdge)) {
         return false;
       }
-      if (transitionSignature(z, i, to, graph_.vertex(z, i, to)) != sig) {
+      if (transitionSignature(z, i, to) != sig) {
         return false;
       }
       // Adjacent members must have the same slope, exactly +1 or -1.
@@ -364,8 +365,7 @@ void IntervalSearch::process(const int id, const Cost delta)
   auto j_of = [&](int k) { return dir > 0 ? ja + k : jb - k; };
   auto k_of = [&](int j) { return dir > 0 ? j - ja : jb - j; };
   res_->settled += g - f;
-  const int signature
-      = transitionSignature(z, i, j_of(f), graph_.vertex(z, i, j_of(f)));
+  const int signature = transitionSignature(z, i, j_of(f));
   auto relax_to = [&](int from_k, int z2, int i2, int j2, Cost cost) {
     const Cost pi = intervals_[id].futureCost(layer, j_of(from_k));
     const int next_id = intervalOf(z2, i2, j2);
@@ -401,15 +401,15 @@ void IntervalSearch::process(const int id, const Cost delta)
     }
     for (int k = f; k < g; k++) {
       const int j = j_of(k);
-      const size_t v = graph_.vertex(z, i, j);
+      const At v{z, i, j};
       const int i2 = dz > 0 ? layer.up_track[j] : layer.down_track[j];
       const int j2 = dz > 0 ? layer.up_pos[i] : layer.down_pos[i];
       if (i2 < 0 || j2 < 0 || !region.contains(graph_.layers[z2], z2, i2, j2)) {
         continue;
       }
-      const size_t w = graph_.vertex(z2, i2, j2);
-      const size_t lower = dz > 0 ? v : w;
-      const size_t upper = dz > 0 ? w : v;
+      const At w{z2, i2, j2};
+      const At lower = dz > 0 ? v : w;
+      const At upper = dz > 0 ? w : v;
       if (enter(lower, kViaUpPad) && enter(lower, kCutUp)
           && enter(upper, kViaDownPad)) {
         relax_to(k,
@@ -435,9 +435,9 @@ void IntervalSearch::process(const int id, const Cost delta)
       }
       for (int k = f; k < g;) {
         const int j = j_of(k);
-        const size_t v = graph_.vertex(z, i, j);
-        const size_t w = graph_.vertex(z, i2, j);
-        const size_t edge = di > 0 ? v : w;
+        const At v{z, i, j};
+        const At w{z, i2, j};
+        const At edge = di > 0 ? v : w;
         size_t li = 0;
         inWindow(z, i, j, li);
         const bool source = labels_[li].source_stamp == epoch_;
@@ -457,9 +457,9 @@ void IntervalSearch::process(const int id, const Cost delta)
         const int end = k_of(last_j) + 1;
         const int representative = end - 1;
         const int jr = j_of(representative);
-        const size_t vr = graph_.vertex(z, i, jr);
-        const size_t wr = graph_.vertex(z, i2, jr);
-        const size_t er = di > 0 ? vr : wr;
+        const At vr{z, i, jr};
+        const At wr{z, i2, jr};
+        const At er = di > 0 ? vr : wr;
         size_t lr = 0;
         inWindow(z, i, jr, lr);
         const Cost cost
@@ -481,9 +481,9 @@ void IntervalSearch::process(const int id, const Cost delta)
         || !region.contains(layer, z, i, j2)) {
       continue;
     }
-    const size_t v = graph_.vertex(z, i, j);
-    const size_t w = graph_.vertex(z, i, j2);
-    const size_t edge = dj > 0 ? v : w;
+    const At v{z, i, j};
+    const At w{z, i, j2};
+    const At edge = dj > 0 ? v : w;
     size_t li = 0;
     inWindow(z, i, j, li);
     if ((labels_[li].source_stamp != epoch_ && !enter(v, kWire))
@@ -506,6 +506,7 @@ SearchResult IntervalSearch::run(const SearchRequest& request)
   req_ = &request;
   res_ = &result;
   counters_ = {};
+  reader_.reset(&grid_, request.overlay);
   min_via_cost_ = graph_.minViaCost();
   heap_.clear();
   intervals_.clear();

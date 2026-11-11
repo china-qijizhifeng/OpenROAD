@@ -719,7 +719,8 @@ void BonnRouteDR::changeShape(const RShape& shape,
                               const br::ShapeType type,
                               const int owner,
                               const bool insert,
-                              Worker* local)
+                              Worker* local,
+                              br::FastGridBuilder::PendingRemovals* pending)
 {
   const int g = gridLayer(shape.layer);
   if (g < 0) {
@@ -736,9 +737,17 @@ void BonnRouteDR::changeShape(const RShape& shape,
       inconsistent_updates_++;
     }
     // Sec. 3.6: the fast grid follows every change of the shape grid of
-    // the track layers and their cuts.
+    // the track layers and their cuts, incrementally.
     if (!bulk_insert_ && layer < track_grid_layers_) {
-      fast_builder_.shapeChanged(layer, r);
+      const br::PlacedShape placed{r, cls, 3};
+      const br::RipupLevel level = shape_grid_.level(type, owner);
+      if (insert) {
+        fast_builder_.shapeInserted(layer, placed, level);
+      } else if (pending != nullptr) {
+        fast_builder_.shapeRemoved(layer, placed, level, *pending);
+      } else {
+        fast_builder_.shapeRemoved(layer, placed, level);
+      }
     }
   };
   apply(g, shapeClass(shape, g));
@@ -750,21 +759,43 @@ void BonnRouteDR::changeShape(const RShape& shape,
   }
 }
 
-void BonnRouteDR::setOwnShapes(NetData& net, const bool present, Worker* local)
+void BonnRouteDR::ownShapes(
+    const NetData& net,
+    std::vector<br::FastGridBuilder::OwnShape>& out) const
 {
+  out.clear();
+  auto add = [&](const RShape& shape, const br::ShapeType type) {
+    const int g = gridLayer(shape.layer);
+    if (g < 0 || g >= track_grid_layers_) {
+      return;
+    }
+    const br::RipupLevel level = shape_grid_.level(type, net.id);
+    out.push_back({g,
+                   br::PlacedShape{brRect(shape.rect), shapeClass(shape, g), 3},
+                   level});
+    const int above = projectionLayer(g);
+    if (above >= 0) {
+      RShape projection = shape;
+      projection.role = br::ShapeRole::kCutProjection;
+      out.push_back({above,
+                     br::PlacedShape{
+                         brRect(shape.rect), shapeClass(projection, above), 3},
+                     level});
+    }
+  };
   for (const RShape& pin : net.pins) {
-    changeShape(pin, br::ShapeType::kPin, net.id, present, local);
+    add(pin, br::ShapeType::kPin);
   }
   for (const Term& term : net.terms) {
     if (term.reservation_active) {
       for (const RShape& s : term.reservation) {
-        changeShape(s, br::ShapeType::kReservation, net.id, present, local);
+        add(s, br::ShapeType::kReservation);
       }
     }
   }
   if (net.input_reserved) {
     for (const RShape& s : net.input_reservation) {
-      changeShape(s, br::ShapeType::kReservation, net.id, present, local);
+      add(s, br::ShapeType::kReservation);
     }
   }
 }
@@ -2307,12 +2338,31 @@ void BonnRouteDR::setReservations(NetData& net,
                                   const bool active,
                                   Worker* local)
 {
+  if (active) {
+    for (Term& term : net.terms) {
+      setReservation(term, net.id, true, local);
+    }
+    return;
+  }
+  // Released together: one exact fast-grid recomputation.
+  br::FastGridBuilder::PendingRemovals pending;
   for (Term& term : net.terms) {
-    setReservation(term, net.id, active, local);
+    if (term.reservation_active) {
+      for (const RShape& shape : term.reservation) {
+        changeShape(
+            shape, br::ShapeType::kReservation, net.id, false, local, &pending);
+      }
+      term.reservation_active = false;
+    }
   }
-  if (!active) {
-    setInputReservation(net, false, local);
+  if (net.input_reserved) {
+    for (const RShape& shape : net.input_reservation) {
+      changeShape(
+          shape, br::ShapeType::kReservation, net.id, false, local, &pending);
+    }
+    net.input_reserved = false;
   }
+  fast_builder_.flush(pending);
 }
 
 void BonnRouteDR::setInputReservation(NetData& net,
@@ -2687,10 +2737,18 @@ bool BonnRouteDR::connect(NetData& net,
   // Sec. 4.4: "The shapes of the components that contributed to S and T,
   // including reserved pin access paths, are removed temporarily from
   // routing space in order not to block access to these vertices." All
-  // components of the net are sources or targets of its searches.
-  setOwnShapes(net, false, &worker);
+  // components of the net are sources or targets of its searches. The
+  // searches read the fast grid through an exact overlay with the net's
+  // shapes removed, and every checker query of the connection ignores them
+  // (see DataStructures.md); the routing space itself is not changed.
+  ownShapes(net, worker.own_shapes);
+  fast_builder_.buildOverlay(net.id, worker.own_shapes, worker.overlay);
+  worker.reader.reset(&grid_, &worker.overlay);
+  worker.connects++;
+  worker.own_shape_count += static_cast<int64_t>(worker.own_shapes.size());
   const bool ok = connectWithoutOwnShapes(net, ripup, worker, extra_dilation);
-  setOwnShapes(net, true, &worker);
+  worker.overlay.clear();
+  worker.reader.reset(&grid_, nullptr);
   return ok;
 }
 
@@ -2704,7 +2762,7 @@ bool BonnRouteDR::connectWithoutOwnShapes(NetData& net,
   // the guide dilation. Check them once for both clean windows.
   std::vector<std::vector<char>> valid(num_terms);
   auto option_valid = [&](const AccessOption& opt) {
-    const br::RipupLevel level = grid_.level(opt.vertex, br::kWire);
+    const br::RipupLevel level = worker.reader.level(opt.vertex, br::kWire, 0);
     bool ok = level == br::kLegal || (ripup && level <= br::kMaxRemovableLevel);
     if (ok && !ripup && opt.offtrack) {
       // Blockage-grid paths: every shape against earlier routed nets
@@ -2725,7 +2783,8 @@ bool BonnRouteDR::connectWithoutOwnShapes(NetData& net,
         feasible += valid[t][o];
         continue;
       }
-      const br::RipupLevel level = grid_.level(opt.vertex, br::kWire);
+      const br::RipupLevel level
+          = worker.reader.level(opt.vertex, br::kWire, 0);
       bool ok
           = level == br::kLegal || (ripup && level <= br::kMaxRemovableLevel);
       if (ok && !ripup) {
@@ -2799,6 +2858,7 @@ bool BonnRouteDR::connectInRegion(NetData& net,
   req.discounts = net.discount_runs;
   req.wire_type = 0;
   req.label_limit = label_limit_;
+  req.overlay = &worker.overlay;
   if (params_.spreading && !spread_tiles_.empty()) {
     req.spread_tiles = &spread_tiles_;
     req.spread_cost
@@ -3083,7 +3143,7 @@ bool BonnRouteDR::connectInRegion(NetData& net,
   // History for rip-up (Sec. 4.2): vertices whose use forces a rip-up.
   if (ripup) {
     for (const size_t v : in_tree) {
-      if (grid_.level(v, br::kWire) != br::kLegal) {
+      if (worker.reader.level(v, br::kWire, 0) != br::kLegal) {
         grid_.bumpHistory(v);
       }
     }
@@ -3102,9 +3162,12 @@ void BonnRouteDR::commitNet(NetData& net, Worker* local)
 
 void BonnRouteDR::ripupNet(NetData& net)
 {
+  // One exact fast-grid recomputation for all shapes of the net.
+  br::FastGridBuilder::PendingRemovals pending;
   for (const RShape& s : net.shapes) {
-    changeShape(s, routedType(s.role), net.id, false, nullptr);
+    changeShape(s, routedType(s.role), net.id, false, nullptr, &pending);
   }
+  fast_builder_.flush(pending);
   net.shapes.clear();
   net.wires.clear();
   net.vias.clear();
@@ -3704,11 +3767,15 @@ void BonnRouteDR::main()
   int64_t fast_grid_queries = 0;
   int64_t checker_queries = 0;
   int64_t aborted_searches = 0;
+  int64_t connects = 0;
+  int64_t own_shape_count = 0;
   size_t peak_scratch = 0;
   for (const Worker& w : workers_) {
     fast_grid_queries += w.fast_grid_queries;
     checker_queries += w.checker_queries;
     aborted_searches += w.aborted_searches;
+    connects += w.connects;
+    own_shape_count += w.own_shape_count;
     peak_scratch = std::max(
         peak_scratch,
         w.search ? w.search->peakScratchBytes()
@@ -3757,6 +3824,12 @@ void BonnRouteDR::main()
         peak_scratch / 1e6,
         params_.search_label_mb,
         aborted_searches);
+    logger_->report(
+        "BonnRoute DR own shapes: {} connects, {:.1f} own shapes (pins, "
+        "reservations, cut projections) per connect, read through the "
+        "fast-grid overlay.",
+        connects,
+        connects > 0 ? static_cast<double>(own_shape_count) / connects : 0.0);
     logger_->report(
         "BonnRoute DR: {} threads, parallel phase until {:.2f}s, {} nets "
         "to {}.",

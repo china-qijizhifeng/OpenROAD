@@ -366,6 +366,19 @@ int main(int argc, char** argv)
   const int tiles = axis.count;
   region.init(num_z, tiles, tiles);
   PathSearch search(graph, fast);
+  IntervalSearch interval_search(graph, fast);
+  double t_path = 0;
+  double t_interval = 0;
+  int64_t cost_sum = 0;
+  struct Dumped
+  {
+    size_t source;
+    size_t target;
+    int box[4];
+    int a0, a1, b0, b1;
+  };
+  std::vector<Dumped> dumped;
+  int64_t settled_interval = 0;
   t0 = std::chrono::steady_clock::now();
   for (int k = 0; k < num_searches; k++) {
     const int z = rng() % num_z;
@@ -407,7 +420,24 @@ int main(int argc, char** argv)
     q.targets = {{tv, 0, 0}};
     const auto [px, py] = graph.point(tv);
     q.target_boxes = {{px, py, px, py, z2, z2}};
+    dumped.push_back({graph.vertex(z, i, j),
+                      tv,
+                      {px, py, z2, 0},
+                      axis.of(std::min(x, tx)) - 1,
+                      axis.of(std::max(x, tx)) + 1,
+                      axis.of(std::min(y, ty)) - 1,
+                      axis.of(std::max(y, ty)) + 1});
+    auto t1 = std::chrono::steady_clock::now();
     const SearchResult r = search.run(q);
+    t_path += seconds(t1);
+    t1 = std::chrono::steady_clock::now();
+    const SearchResult ri = interval_search.run(q);
+    t_interval += seconds(t1);
+    settled_interval += ri.settled;
+    if (ri.found != r.found || (r.found && ri.cost != r.cost)) {
+      std::printf("interval / vertex search differ\n");
+    }
+    cost_sum += r.found ? r.cost : 0;
     fast_q += r.fast_grid_queries;
     checker_q += r.checker_queries;
     found += r.found;
@@ -418,6 +448,78 @@ int main(int argc, char** argv)
   std::printf(
       "| searches (found) | %d (%lld) |\n", num_searches, (long long) found);
   std::printf("| settled vertices | %lld |\n", (long long) settled);
+  std::printf("| cost checksum of found paths | %lld |\n",
+              (long long) cost_sum);
+  if (const char* path = std::getenv("BR_DUMP")) {
+    // Graph, per-vertex levels of every kind and the requests, for the
+    // original dense-grid search (ds-kit/dense_search.cpp).
+    FILE* f = std::fopen(path, "wb");
+    auto put = [&](const void* p, size_t n) { std::fwrite(p, 1, n, f); };
+    auto put_int = [&](int64_t v) { put(&v, sizeof(v)); };
+    put_int(num_z);
+    for (const TrackLayer& l : graph.layers) {
+      put_int(l.horizontal);
+      put_int(l.jogs);
+      put_int(l.jog_factor);
+      put_int(l.numTracks());
+      for (const Coord c : l.tracks) {
+        put_int(c);
+      }
+      put_int(l.numPositions());
+      for (const Coord c : l.positions) {
+        put_int(c);
+      }
+    }
+    for (const Cost c : graph.via_cost) {
+      put_int(c);
+    }
+    put_int(tile);
+    put_int(axis.count);
+    for (int z = 0; z < num_z; z++) {
+      const TrackLayer& l = graph.layers[z];
+      std::vector<uint8_t> lv(
+          static_cast<size_t>(l.numTracks()) * l.numPositions() * kNumKinds, 0);
+      for (int i = 0; i < l.numTracks(); i++) {
+        for (int j = 0; j < l.numPositions(); j++) {
+          uint8_t* out = &lv[(static_cast<size_t>(i) * l.numPositions() + j)
+                             * kNumKinds];
+          for (int k = 0; k < kNumKinds; k++) {
+            const Kind kind = static_cast<Kind>(k);
+            if ((kind == kCutUp || kind == kViaUpPad) && z + 1 >= num_z) {
+              continue;
+            }
+            if (kind == kViaDownPad && z == 0) {
+              continue;
+            }
+            if (kind == kCutUp && l.up_track[j] < 0) {
+              continue;
+            }
+            if (kind == kWireEdge && j + 1 >= l.numPositions()) {
+              continue;
+            }
+            if (kind == kJogEdge && i + 1 >= l.numTracks()) {
+              continue;
+            }
+            out[k] = fast.level(z, i, j, kind, 0);
+          }
+        }
+      }
+      put(lv.data(), lv.size());
+    }
+    put_int(static_cast<int64_t>(dumped.size()));
+    for (const Dumped& d : dumped) {
+      put(&d, sizeof(d));
+    }
+    std::fclose(f);
+  }
+  std::printf(
+      "| vertex search time (s) / per settled vertex | %.3f / %.0f ns |\n",
+      t_path,
+      1e9 * t_path / std::max<int64_t>(1, settled));
+  std::printf(
+      "| interval search time (s) / per settled vertex | %.3f / %.0f ns |\n",
+      t_interval,
+      1e9 * t_interval / std::max<int64_t>(1, settled_interval));
   std::printf("| legality queries | %lld |\n",
               (long long) (fast_q + checker_q));
   std::printf("| answered by the fast grid | %.4f%% (paper 97.89%%) |\n",
@@ -556,15 +658,97 @@ int main(int argc, char** argv)
     }
   }
   const double t_fast_q = seconds(t0) / 10;
-  std::vector<uint8_t> dense(graph.numVertices() * kNumKinds, 0);
+  // Dense per-vertex levels (the previous FastGrid layout), filled with the
+  // fast grid's values so its pages are real.
+  std::vector<uint8_t> dense(graph.numVertices() * 2, 0);
+  for (int z = 0; z < num_z; z++) {
+    const TrackLayer& l = graph.layers[z];
+    for (int i = 0; i < l.numTracks(); i++) {
+      for (int j = 0; j < l.numPositions(); j++) {
+        const size_t v = graph.vertex(z, i, j);
+        dense[2 * v] = fast.level(z, i, j, kWire, 0);
+        dense[2 * v + 1] = fast.level(z, i, j, kJog, 0);
+      }
+    }
+  }
   int64_t sum_dense = 0;
   t0 = std::chrono::steady_clock::now();
   for (int rep = 0; rep < 5; rep++) {
     for (const size_t v : verts) {
-      sum_dense += dense[v * kNumKinds] + dense[v * kNumKinds + 1];
+      sum_dense += dense[2 * v] + dense[2 * v + 1];
     }
   }
   const double t_dense_q = seconds(t0) / 10;
+  // Sequential access along the tracks of layer 1 and the search-like
+  // pattern (the vertex and its two neighbouring tracks).
+  const TrackLayer& l1 = graph.layers[1];
+  const int64_t seq_n = int64_t{l1.numTracks()} * l1.numPositions() * 2;
+  int64_t sum_seq_fast = 0;
+  t0 = std::chrono::steady_clock::now();
+  for (int i = 0; i < l1.numTracks(); i++) {
+    for (int j = 0; j < l1.numPositions(); j++) {
+      sum_seq_fast
+          += fast.level(1, i, j, kWire, 0) + fast.level(1, i, j, kJog, 0);
+    }
+  }
+  const double t_seq_fast = seconds(t0);
+  int64_t sum_seq_dense = 0;
+  t0 = std::chrono::steady_clock::now();
+  for (int i = 0; i < l1.numTracks(); i++) {
+    for (int j = 0; j < l1.numPositions(); j++) {
+      const size_t v = graph.vertex(1, i, j);
+      sum_seq_dense += dense[2 * v] + dense[2 * v + 1];
+    }
+  }
+  const double t_seq_dense = seconds(t0);
+  const int64_t nb_n = int64_t{l1.numTracks() - 2} * l1.numPositions() * 3;
+  int64_t sum_nb_fast = 0;
+  t0 = std::chrono::steady_clock::now();
+  for (int i = 1; i + 1 < l1.numTracks(); i++) {
+    for (int j = 0; j < l1.numPositions(); j++) {
+      sum_nb_fast += fast.level(1, i - 1, j, kWire, 0)
+                     + fast.level(1, i, j, kWire, 0)
+                     + fast.level(1, i + 1, j, kWire, 0);
+    }
+  }
+  const double t_nb_fast = seconds(t0);
+  int64_t sum_nb_dense = 0;
+  t0 = std::chrono::steady_clock::now();
+  for (int i = 1; i + 1 < l1.numTracks(); i++) {
+    for (int j = 0; j < l1.numPositions(); j++) {
+      sum_nb_dense += dense[2 * graph.vertex(1, i - 1, j)]
+                      + dense[2 * graph.vertex(1, i, j)]
+                      + dense[2 * graph.vertex(1, i + 1, j)];
+    }
+  }
+  const double t_nb_dense = seconds(t0);
+#ifdef BR_FAST_GRID_READER
+  FastGridReader reader;
+  reader.reset(&fast, nullptr);
+  int64_t sum_seq_reader = 0;
+  t0 = std::chrono::steady_clock::now();
+  for (int i = 0; i < l1.numTracks(); i++) {
+    for (int j = 0; j < l1.numPositions(); j++) {
+      sum_seq_reader
+          += reader.level(1, i, j, kWire, 0) + reader.level(1, i, j, kJog, 0);
+    }
+  }
+  const double t_seq_reader = seconds(t0);
+  int64_t sum_nb_reader = 0;
+  t0 = std::chrono::steady_clock::now();
+  for (int i = 1; i + 1 < l1.numTracks(); i++) {
+    for (int j = 0; j < l1.numPositions(); j++) {
+      sum_nb_reader += reader.level(1, i - 1, j, kWire, 0)
+                       + reader.level(1, i, j, kWire, 0)
+                       + reader.level(1, i + 1, j, kWire, 0);
+    }
+  }
+  const double t_nb_reader = seconds(t0);
+  if (sum_seq_reader != sum_seq_fast || sum_nb_reader != sum_nb_fast
+      || sum_seq_dense != sum_seq_fast || sum_nb_dense != sum_nb_fast) {
+    std::printf("lookup checksums differ\n");
+  }
+#endif
   std::printf("| query (%d random) | time per query |\n|---|---|\n", queries);
   std::printf("| placed wire, shape grid checker | %.0f ns |\n",
               1e9 * t_q_grid / queries);
@@ -577,10 +761,27 @@ int main(int argc, char** argv)
       "interval along the track %.0f DBU) |\n",
       1e9 * t_check / queries,
       double(interval_len) / queries);
-  std::printf("| fast grid vertex level | %.1f ns |\n",
+  std::printf("| fast grid level, random vertex | %.1f ns |\n",
               1e9 * t_fast_q / queries);
-  std::printf("| dense per-vertex array (previous) | %.1f ns |\n\n",
+  std::printf("| dense per-vertex array, random vertex | %.1f ns |\n\n",
               1e9 * t_dense_q / queries);
+  std::printf(
+      "| lookup per level (layer 1, %lld) | sequential along tracks | vertex + "
+      "2 neighbour tracks |\n|---|---|---|\n",
+      (long long) seq_n);
+  std::printf(
+      "| dense per-vertex array (previous FastGrid) | %.2f ns | %.2f ns |\n",
+      1e9 * t_seq_dense / seq_n,
+      1e9 * t_nb_dense / nb_n);
+  std::printf("| FastGrid::level(z, i, j) | %.2f ns | %.2f ns |\n",
+              1e9 * t_seq_fast / seq_n,
+              1e9 * t_nb_fast / nb_n);
+#ifdef BR_FAST_GRID_READER
+  std::printf("| FastGridReader (run cursors) | %.2f ns | %.2f ns |\n",
+              1e9 * t_seq_reader / seq_n,
+              1e9 * t_nb_reader / nb_n);
+#endif
+  std::printf("\n");
   // 5. Updates: insert + remove a routed wire, with the fast-grid update.
   const int updates = 20000;
   t0 = std::chrono::steady_clock::now();
@@ -588,11 +789,55 @@ int main(int argc, char** argv)
     const auto& [g, r] = probes[k];
     const ClassId cls = wt.preferred[g / 2].cls;
     grid.insert(g, r, cls, ShapeType::kWire, 7, cache);
+#ifdef BR_FAST_GRID_READER
+    builder.shapeInserted(
+        g, PlacedShape{r, cls, 3}, grid.level(ShapeType::kWire, 7));
+#else
     builder.shapeChanged(g, r);
+#endif
     grid.remove(g, r, cls, ShapeType::kWire, 7, cache);
+#ifdef BR_FAST_GRID_READER
+    builder.shapeRemoved(
+        g, PlacedShape{r, cls, 3}, grid.level(ShapeType::kWire, 7));
+#else
     builder.shapeChanged(g, r);
+#endif
   }
   const double t_update = seconds(t0);
+  // Insertions, then removals of the same shapes (fast grid part only).
+  double t_ins = 0;
+  double t_rem = 0;
+  {
+    const int m = 5000;
+    for (int k = 0; k < m; k++) {
+      const auto& [g, r] = probes[k];
+      grid.insert(g, r, wt.preferred[g / 2].cls, ShapeType::kWire, 7, cache);
+      auto t1 = std::chrono::steady_clock::now();
+#ifdef BR_FAST_GRID_READER
+      builder.shapeInserted(g,
+                            PlacedShape{r, wt.preferred[g / 2].cls, 3},
+                            grid.level(ShapeType::kWire, 7));
+#else
+      builder.shapeChanged(g, r);
+#endif
+      t_ins += seconds(t1);
+    }
+    for (int k = 0; k < m; k++) {
+      const auto& [g, r] = probes[k];
+      grid.remove(g, r, wt.preferred[g / 2].cls, ShapeType::kWire, 7, cache);
+      auto t1 = std::chrono::steady_clock::now();
+#ifdef BR_FAST_GRID_READER
+      builder.shapeRemoved(g,
+                           PlacedShape{r, wt.preferred[g / 2].cls, 3},
+                           grid.level(ShapeType::kWire, 7));
+#else
+      builder.shapeChanged(g, r);
+#endif
+      t_rem += seconds(t1);
+    }
+    t_ins /= m;
+    t_rem /= m;
+  }
   t0 = std::chrono::steady_clock::now();
   for (int k = 0; k < updates; k++) {
     const auto& [g, r] = probes[k];
@@ -610,10 +855,71 @@ int main(int argc, char** argv)
   std::printf(
       "| update (%d insert + remove pairs) | time per pair |\n|---|---|\n",
       updates);
-  std::printf("| shape grid + fast grid recomputation | %.1f us |\n",
+  std::printf("| shape grid + fast grid update | %.1f us |\n",
               1e6 * t_update / updates);
   std::printf("| shape grid only | %.1f us |\n", 1e6 * t_update_grid / updates);
+  std::printf("| fast grid update per shape change | %.1f us |\n",
+              1e6 * (t_update - t_update_grid) / (2 * updates));
+  std::printf(
+      "| fast grid update: insert / remove (5000 wires) | %.1f us / %.1f us "
+      "|\n",
+      1e6 * t_ins,
+      1e6 * t_rem);
   std::printf("| R-tree only | %.1f us |\n", 1e6 * t_update_tree / updates);
+  // 6. A net's own shapes around a connection (Sec. 4.4): pins as their
+  // nets' own shapes, removed and reinserted physically, or (after) read
+  // through the overlay.
+  std::vector<size_t> pin_ids;
+  for (size_t k = 0; k < shapes.size() && pin_ids.size() < 20000; k++) {
+    if (shapes[k].type == ShapeType::kPin && shapes[k].layer == 0) {
+      pin_ids.push_back(k);
+    }
+  }
+  t0 = std::chrono::steady_clock::now();
+  for (const size_t k : pin_ids) {
+    const Shape& s = shapes[k];
+    grid.remove(s.layer, s.rect, s.cls, s.type, s.owner, cache);
+#ifdef BR_FAST_GRID_READER
+    builder.shapeRemoved(s.layer, PlacedShape{s.rect, s.cls, 3}, kNotRemovable);
+#else
+    builder.shapeChanged(s.layer, s.rect);
+#endif
+    grid.insert(s.layer, s.rect, s.cls, s.type, s.owner, cache);
+#ifdef BR_FAST_GRID_READER
+    builder.shapeInserted(
+        s.layer, PlacedShape{s.rect, s.cls, 3}, kNotRemovable);
+#else
+    builder.shapeChanged(s.layer, s.rect);
+#endif
+  }
+  const double t_own_physical = seconds(t0);
+  std::printf(
+      "| own pin around a connection (%zu pins) | time per pin |\n|---|---|\n",
+      pin_ids.size());
+  std::printf("| remove + reinsert (shape grid and fast grid) | %.1f us |\n",
+              1e6 * t_own_physical / std::max<size_t>(1, pin_ids.size()));
+#ifdef BR_FAST_GRID_READER
+  FastGridOverlay overlay;
+  std::vector<FastGridBuilder::OwnShape> own;
+  int64_t overlay_positions = 0;
+  t0 = std::chrono::steady_clock::now();
+  for (const size_t k : pin_ids) {
+    const Shape& s = shapes[k];
+    own.assign(1, {s.layer, PlacedShape{s.rect, s.cls, 3}, kNotRemovable});
+    builder.buildOverlay(s.owner, own, overlay);
+    for (const auto& [key, runs] : overlay.wiring) {
+      for (const auto& run : runs) {
+        overlay_positions += run.hi - run.lo + 1;
+      }
+    }
+  }
+  const double t_own_overlay = seconds(t0);
+  std::printf(
+      "| overlay with the pin removed (after) | %.1f us (%.1f positions) |\n",
+      1e6 * t_own_overlay / std::max<size_t>(1, pin_ids.size()),
+      double(overlay_positions) / std::max<size_t>(1, pin_ids.size()));
+#endif
+  std::printf("\n");
   std::printf("| total routing-space memory per on-track vertex | %.2f B |\n",
               double(sg.bytes + fs.bytes) / fs.vertices);
   std::printf("(checksums %lld %lld %lld %lld)\n",

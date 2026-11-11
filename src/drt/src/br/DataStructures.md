@@ -136,12 +136,38 @@ segment, so constant point levels on an edge imply its level.
 * Storage: per global routing tile the runs of its tracks (`uint16` start and
   64-bit word per run; a track without runs is all legal), allocated on the
   first non-zero word. Tiles are written by one thread at a time.
-* `FastGridBuilder` recomputes, after every shape-grid change, the tracks,
-  jog pairs and edges the changed shape can affect, from the checker's
-  maximal along-track intervals (one query per interval, not per vertex).
+* `FastGridBuilder` keeps the fast grid equal to the checker ("continuously
+  updated data computed by the distance rule checking module") with exact
+  incremental updates. All of them use the checker's own violation spans
+  (`appendViolationSpans`, the Minkowski regions of model and shape on a
+  track line, as the old `forEachBlocked` marking but with the paper's
+  rules):
+  * *Insert* (`shapeInserted`): level(v) = max(old level, level of the new
+    shape where it violates v), from the new shape alone; no shape-grid
+    query. Edge bits: with S' = max(S, new level if the swept wire is hit),
+    M' >= M and S <= M where the bit was clear, a clear bit becomes set
+    exactly if the swept wire is hit and the new level exceeds M'; a set bit
+    stays set while M' = M and is rechecked exactly otherwise (rare).
+  * *Remove* (`shapeRemoved`): only levels equal to the removed shape's level
+    where it violates, and marked edges whose swept wire it hits, can change.
+    Only these candidates (with the edge bits at both sides and the jog bits
+    of the pairs below and above) are recomputed exactly
+    (`recomputeCandidates`): one shape-grid window for all of them, pieces
+    prefiltered exactly by their interaction distance, unchanged neighbours
+    read from the stored words. A group of removals (a net's rip-up, its
+    released reservations) is recomputed once (`PendingRemovals`, `flush`).
+  * The initial build computes whole tracks the same way (one window per
+    track block, no per-interval queries).
   Wire types outside the fast grid and marked edges are answered exactly
   through the same checker (`LegalityOracle`). Searches count both kinds of
   answers (`SearchResult::fast_grid_queries` / `checker_queries`).
+* Lookups: the searches read the fast grid through a `FastGridReader`
+  (per search object) with run cursors: per track the last run and the run
+  array of its tile, direct mapped, so sequential access along a track and
+  its neighbouring tracks costs a comparison per lookup and a step to the
+  next run at a run border. The searches pass (z, i, j) instead of vertex
+  ids. The interval search builds its intervals from the same cursors, so
+  consecutive vertices of a fast-grid run are read in O(1) each.
 * Rip-up history (Sec. 4.2 cost increase) is kept sparsely beside the grid.
 
 ## A5 Integration (BonnRouteDR)
@@ -156,9 +182,19 @@ segment, so constant point levels on an edge imply its level.
   `restoreRouting`).
 * Own shapes (Sec. 4.4: "The shapes of the components that contributed to S
   and T, including reserved pin access paths, are removed temporarily from
-  routing space"): `connect` removes the net's pins and active reservations
-  before its searches and reinserts them afterwards; committed reservations
-  are then released by the caller as before.
+  routing space"). *Choice*: an exact overlay instead of physical removal and
+  reinsertion. Before a net's searches, `buildOverlay` computes the words of
+  every fast-grid position the net's own shapes (pins, active reservations,
+  their cut projections) can influence, with those shapes ignored (the
+  removal candidates of all own shapes, recomputed once per layer), and the
+  searches of the net read the fast grid through it; every checker query of
+  the connection (stub and landing-pad checks, marked edges, other wire
+  types, off-track legality, victims) uses `ignored_owner` = the net. The
+  answers are exactly those with the shapes removed (`BonnRouteFastGridTest`
+  compares the overlay with the brute-force reference ignoring the owner),
+  but the routing space is not changed: no shape-grid writes, no fast-grid
+  restoration afterwards. Committed reservations are then released by the
+  caller as before. The log reports the own shapes per connect.
 * Rip-up victims: `collectVictims` asks the checker for the nets blocking each
   new shape (and its cut projection) with `ignored_owner` = the net.
 * Off-track checks keep the adapter `shapeConflicts(shape, net, worker)`

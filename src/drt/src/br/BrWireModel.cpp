@@ -4,6 +4,7 @@
 #include "br/BrWireModel.h"
 
 #include <algorithm>
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
@@ -107,6 +108,8 @@ size_t ShapeClassHash::operator()(const ShapeClass& c) const
 
 void ShapeClassTable::setLayers(std::vector<LayerRules> layers)
 {
+  static std::atomic<uint64_t> generations{0};
+  generation_ = ++generations;
   layers_ = std::move(layers);
   reach_.clear();
   for (const LayerRules& l : layers_) {

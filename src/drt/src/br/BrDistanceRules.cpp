@@ -184,6 +184,60 @@ struct Scratch
 
 }  // namespace
 
+void appendViolationSpans(const ShapeClassTable& classes,
+                          const Rect& model,
+                          const ClassId cls,
+                          const uint8_t line_end_ends,
+                          const Point at,
+                          const bool x_line,
+                          const PlacedShape& piece,
+                          std::vector<LineSpan>& out)
+{
+  const Requirement req = classes.requirement(cls, piece.cls);
+  if (!req.overlap && !req.line_end && req.facing_x == 0 && req.facing_y == 0
+      && req.diagonal == 0) {
+    return;
+  }
+  thread_local std::vector<Span> spans;
+  spans.clear();
+  const Span tmpl{0, 0, 0, 0, kNoNet, false};
+  const PlacedShape placed{model.translated(at), cls, line_end_ends};
+  // Line coordinates: u = the varying axis, v = the fixed one.
+  const Rect m
+      = x_line ? Rect{model.xlo, placed.rect.ylo, model.xhi, placed.rect.yhi}
+               : Rect{placed.rect.xlo, model.ylo, placed.rect.xhi, model.yhi}
+                     .transposed();
+  const Rect p = x_line ? piece.rect : piece.rect.transposed();
+  appendSpacingSpans(m,
+                     p,
+                     x_line ? req.facing_x : req.facing_y,
+                     x_line ? req.facing_y : req.facing_x,
+                     req.diagonal,
+                     req.overlap,
+                     tmpl,
+                     spans);
+  if (req.line_end) {
+    Rect ext[2];
+    const int model_exts = lineEndExtensions(classes, placed, ext);
+    for (int e = 0; e < model_exts; e++) {
+      const Rect& r = ext[e];
+      appendOverlapSpan(
+          x_line ? Rect{r.xlo - at.x, r.ylo, r.xhi - at.x, r.yhi}
+                 : Rect{r.xlo, r.ylo - at.y, r.xhi, r.yhi - at.y}.transposed(),
+          p,
+          tmpl,
+          spans);
+    }
+    const int piece_exts = lineEndExtensions(classes, piece, ext);
+    for (int e = 0; e < piece_exts; e++) {
+      appendOverlapSpan(m, x_line ? ext[e] : ext[e].transposed(), tmpl, spans);
+    }
+  }
+  for (const Span& s : spans) {
+    out.push_back({s.lo, s.hi});
+  }
+}
+
 void appendWireTypeModels(const WireType& type,
                           const int z,
                           const int num_wiring_layers,

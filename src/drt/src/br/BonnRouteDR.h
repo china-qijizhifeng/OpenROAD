@@ -277,6 +277,13 @@ class BonnRouteDR
     // worker updates them in place. Its configuration transitions are
     // memoised here.
     br::ShapeGridWriteCache cache;
+    // The net being connected: its own shapes, the fast-grid overlay with
+    // them removed and the reader of connect's own legality checks.
+    std::vector<br::FastGridBuilder::OwnShape> own_shapes;
+    br::FastGridOverlay overlay;
+    br::FastGridReader reader;
+    int64_t connects = 0;
+    int64_t own_shape_count = 0;
     int64_t fast_grid_queries = 0;
     int64_t checker_queries = 0;
     int64_t aborted_searches = 0;
@@ -453,14 +460,18 @@ class BonnRouteDR
   int projectionLayer(int grid_layer) const;
   // Inserts / removes a shape in the shape grid (with the inter-layer
   // projection of a cut, Sec. 3.2) and updates the fast grid (Sec. 3.6).
+  // `pending`: removals of a group, recomputed by FastGridBuilder::flush().
   void changeShape(const RShape& shape,
                    br::ShapeType type,
                    int owner,
                    bool insert,
-                   Worker* local);
+                   Worker* local,
+                   br::FastGridBuilder::PendingRemovals* pending = nullptr);
   // Sec. 4.4: the shapes of the components being connected (pins,
-  // reservations) are removed temporarily from routing space.
-  void setOwnShapes(NetData& net, bool present, Worker* local);
+  // reservations), removed from routing space during the net's searches
+  // through a fast-grid overlay.
+  void ownShapes(const NetData& net,
+                 std::vector<br::FastGridBuilder::OwnShape>& out) const;
   // Track-graph vertex kind usable by `net`: the fast grid, and where it
   // reports a blockage, the distance rule checker with the net's own
   // shapes treated as removed (Sec. 4.4).

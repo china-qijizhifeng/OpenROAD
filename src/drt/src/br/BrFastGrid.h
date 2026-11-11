@@ -40,6 +40,7 @@
 #include <array>
 #include <cstdint>
 #include <memory>
+#include <tuple>
 #include <unordered_map>
 #include <vector>
 
@@ -57,18 +58,23 @@ class LegalityOracle
 {
  public:
   virtual ~LegalityOracle() = default;
+  // ignored_owner: shapes of this net count as removed (Sec. 4.4).
   virtual RipupLevel vertexLevel(int z,
                                  int i,
                                  int j,
                                  int wire_type,
-                                 Kind kind) const = 0;
+                                 Kind kind,
+                                 int32_t ignored_owner) const = 0;
   // Level of an edge kind (see Kind): includes both endpoints.
   virtual RipupLevel edgeLevel(int z,
                                int i,
                                int j,
                                int wire_type,
-                               Kind kind) const = 0;
+                               Kind kind,
+                               int32_t ignored_owner) const = 0;
 };
+
+#define BR_FAST_GRID_READER 1
 
 // Who answered the path search's legality queries.
 struct LegalityCounters
@@ -110,6 +116,21 @@ class FastGrid
 
   uint64_t wiringWord(int z, int i, int j) const;
   uint64_t viaWord(int z, int i, int c) const;
+  // The word at (z, i, j) / via position c and the positions [lo, hi] of
+  // its run (within one tile).
+  uint64_t wiringRun(int z, int i, int j, int& lo, int& hi) const;
+  // The runs of track i in the tile of position j: positions first ..
+  // first + count - 1, n runs (n = 0: all zero).
+  struct RunsView
+  {
+    const uint16_t* starts = nullptr;
+    const uint64_t* words = nullptr;
+    int n = 0;
+    int first = 0;
+    int count = 0;
+  };
+  RunsView wiringRuns(int z, int i, int j) const;
+  uint64_t viaRun(int z, int i, int c, int& lo, int& hi) const;
   // Level of a vertex or edge kind for wire type `wire_type`; wire types
   // outside the fast grid and marked edges go to the oracle.
   RipupLevel level(int z,
@@ -132,6 +153,19 @@ class FastGrid
   // Positions [j0, j1] of track i get (word & mask) in the bits of mask.
   void assignWiring(int z, int i, int j0, int j1, uint64_t word, uint64_t mask);
   void assignVia(int z, int i, int c0, int c1, uint64_t word, uint64_t mask);
+  // Positions j0 .. j0 + n - 1 of track i get (values[k] & mask).
+  void writeWiring(int z,
+                   int i,
+                   int j0,
+                   const uint64_t* values,
+                   int n,
+                   uint64_t mask);
+  void writeVia(int z,
+                int i,
+                int c0,
+                const uint64_t* values,
+                int n,
+                uint64_t mask);
   void setLevel(size_t v, Kind kind, int wire_type, RipupLevel level);
   void setEdgeQuery(size_t v, Kind edge_kind, bool query);
 
@@ -200,6 +234,12 @@ class FastGrid
     std::vector<std::unique_ptr<TileRuns>> via;
   };
   static uint64_t lookup(const TileRuns* tile, int track, int index);
+  static uint64_t lookupRun(const TileRuns* tile,
+                            int track,
+                            int index,
+                            int count,
+                            int& lo,
+                            int& hi);
   // Positions [lo, hi] (relative) of `track` in a tile of `tracks` tracks
   // and `count` positions get (word & mask) in the bits of mask.
   static void assign(std::unique_ptr<TileRuns>& tile,
@@ -211,6 +251,14 @@ class FastGrid
                      uint64_t word,
                      uint64_t mask);
   static size_t bytes(const std::vector<std::unique_ptr<TileRuns>>& tiles);
+  static void assignWords(std::unique_ptr<TileRuns>& tile,
+                          int tracks,
+                          int track,
+                          int count,
+                          int lo,
+                          const uint64_t* values,
+                          int n,
+                          uint64_t mask);
 
   const TrackGraph* graph_ = nullptr;
   const LegalityOracle* oracle_ = nullptr;
@@ -219,10 +267,205 @@ class FastGrid
   std::unordered_map<size_t, uint16_t> history_;
 };
 
+// Exact fast-grid words of the tracks near a net's own shapes with those
+// shapes removed (Sec. 4.4: "The shapes of the components that contributed
+// to S and T [...] are removed temporarily from routing space"). The
+// searches of the net read the fast grid through it instead of the shapes
+// being removed and reinserted physically.
+struct FastGridOverlay
+{
+  struct Run
+  {
+    int32_t lo;
+    int32_t hi;
+    uint64_t word;
+  };
+  int32_t owner = kNoNet;
+  // Key (z << 32) | track; runs sorted by position (via: via position).
+  std::unordered_map<uint64_t, std::vector<Run>> wiring;
+  std::unordered_map<uint64_t, std::vector<Run>> via;
+  void clear()
+  {
+    owner = kNoNet;
+    wiring.clear();
+    via.clear();
+  }
+  static uint64_t key(const int z, const int i)
+  {
+    return (static_cast<uint64_t>(z) << 32) | static_cast<uint32_t>(i);
+  }
+};
+
+// The search-side view of the fast grid: run cursors (the last run seen
+// per track, direct mapped) make sequential access along a track and its
+// neighbours O(1), and an optional overlay replaces the words near the
+// searching net's own shapes. One reader per search object / thread.
+class FastGridReader
+{
+ public:
+  void reset(const FastGrid* grid, const FastGridOverlay* overlay);
+  RipupLevel level(int z,
+                   int i,
+                   int j,
+                   Kind kind,
+                   int wire_type,
+                   LegalityCounters* counters = nullptr);
+  RipupLevel level(size_t v,
+                   Kind kind,
+                   int wire_type,
+                   LegalityCounters* counters = nullptr)
+  {
+    int z, i, j;
+    grid_->graph().decode(v, z, i, j);
+    return level(z, i, j, kind, wire_type, counters);
+  }
+  uint64_t wiringWord(const int z, const int i, const int j)
+  {
+    Cursor& c = wiring_[slot(z, i)];
+    if (c.z == z && c.i == i && j >= c.lo && j <= c.hi) {
+      return c.word;
+    }
+    return fillWiring(c, z, i, j);
+  }
+  uint64_t viaWord(const int z, const int i, const int v)
+  {
+    Cursor& c = via_[slot(z, i)];
+    if (c.z == z && c.i == i && v >= c.lo && v <= c.hi) {
+      return c.word;
+    }
+    return fillVia(c, z, i, v);
+  }
+  const FastGrid& grid() const { return *grid_; }
+  int32_t ignoredOwner() const
+  {
+    return overlay_ != nullptr ? overlay_->owner : kNoNet;
+  }
+
+ private:
+  struct Cursor
+  {
+    int32_t z = -1;
+    int32_t i = 0;
+    int32_t lo = 0;
+    int32_t hi = -1;
+    uint64_t word = 0;
+    // The runs of the cursor's tile (wiring, without overlay).
+    FastGrid::RunsView runs;
+    int32_t run = -1;
+  };
+  static constexpr int kSlots = 256;
+  static int slot(const int z, const int i)
+  {
+    return ((i << 2) ^ z) & (kSlots - 1);
+  }
+  uint64_t fillWiring(Cursor& c, int z, int i, int j);
+  uint64_t fillVia(Cursor& c, int z, int i, int v);
+  static uint64_t applyOverlay(
+      const std::unordered_map<uint64_t, std::vector<FastGridOverlay::Run>>&
+          runs,
+      int z,
+      int i,
+      int j,
+      uint64_t word,
+      int& lo,
+      int& hi);
+
+  const FastGrid* grid_ = nullptr;
+  const FastGridOverlay* overlay_ = nullptr;
+  std::array<Cursor, kSlots> wiring_;
+  std::array<Cursor, kSlots> via_;
+};
+
+namespace detail {
+
+inline int wiringKind(const Kind kind)
+{
+  switch (kind) {
+    case kWire:
+      return 0;
+    case kJog:
+      return 1;
+    case kViaUpPad:
+      return 2;
+    case kViaDownPad:
+      return 3;
+    default:
+      return -1;
+  }
+}
+
+// Level of a vertex or edge kind from word sources (FastGrid, reader).
+template <typename Wiring, typename Via>
+inline RipupLevel levelOf(const FastGrid& grid,
+                          const int z,
+                          const int i,
+                          const int j,
+                          const Kind kind,
+                          const int wire_type,
+                          const int32_t ignored,
+                          LegalityCounters* counters,
+                          Wiring&& wiring,
+                          Via&& via)
+{
+  const bool edge = kind == kWireEdge || kind == kJogEdge;
+  const LegalityOracle* oracle = grid.oracle();
+  if (wire_type >= grid.numWireTypes()) {
+    if (counters != nullptr) {
+      counters->checker++;
+    }
+    if (oracle == nullptr) {
+      return kNotRemovable;
+    }
+    return edge ? oracle->edgeLevel(z, i, j, wire_type, kind, ignored)
+                : oracle->vertexLevel(z, i, j, wire_type, kind, ignored);
+  }
+  if (edge) {
+    const uint64_t w = wiring(z, i, j);
+    const bool along = kind == kWireEdge;
+    if ((w >> (along ? FastGrid::kWireEdgeBit : FastGrid::kJogEdgeBit)) & 1) {
+      if (counters != nullptr) {
+        counters->checker++;
+      }
+      return oracle != nullptr
+                 ? oracle->edgeLevel(z, i, j, wire_type, kind, ignored)
+                 : kNotRemovable;
+    }
+    if (counters != nullptr) {
+      counters->fast_grid++;
+    }
+    // Deduced from the vertex data at both endpoints.
+    const int shift = FastGrid::wiringShift(wire_type, along ? 0 : 1);
+    const uint64_t other = along ? wiring(z, i, j + 1) : wiring(z, i + 1, j);
+    return std::max(FastGrid::field(w, shift), FastGrid::field(other, shift));
+  }
+  if (counters != nullptr) {
+    counters->fast_grid++;
+  }
+  if (kind == kCutUp) {
+    const int c = grid.viaIndex(z, j);
+    if (c < 0) {
+      return kNotRemovable;
+    }
+    const uint64_t w = via(z, i, c);
+    return std::max(FastGrid::field(w, FastGrid::viaShift(wire_type, 0)),
+                    FastGrid::field(w, FastGrid::viaShift(wire_type, 1)));
+  }
+  return FastGrid::field(wiring(z, i, j),
+                         FastGrid::wiringShift(wire_type, wiringKind(kind)));
+}
+
+}  // namespace detail
+
 // Keeps a fast grid equal to the distance rule checker's answers ("We
 // store continuously updated data computed by the distance rule checking
 // module", Sec. 3.6) and answers the remaining queries exactly through the
 // checker. Wire types 0 .. fast - 1 of `types` are in the fast grid.
+//
+// Updates are incremental and exact: an inserted shape raises the levels
+// it violates to max(old, its level), computed from that shape alone; a
+// removed shape can only lower levels equal to its own, and only those
+// (with the affected edge bits) are recomputed exactly from the shape
+// grid, one window per track.
 class FastGridBuilder final : public LegalityOracle
 {
  public:
@@ -251,20 +494,47 @@ class FastGridBuilder final : public LegalityOracle
   // Track ranges (z, i0, i1) of whole tile rows: jobs that may run on
   // parallel threads within one phase (a tile is written by one thread).
   std::vector<std::array<int, 3>> rebuildJobs() const;
-  // Recomputes everything a shape on `grid_layer` meeting `rect` (absolute)
-  // can change; call after the shape grid changed.
+
+  // Incremental updates; call after the shape grid changed. `shape` is the
+  // inserted / removed shape (absolute) and `level` its ripup level.
+  void shapeInserted(int grid_layer,
+                     const PlacedShape& shape,
+                     RipupLevel level);
+  void shapeRemoved(int grid_layer, const PlacedShape& shape, RipupLevel level);
+  // Removals of a group of shapes (a net's rip-up, its reservations): the
+  // candidates are collected and recomputed once per layer by flush().
+  struct PendingRemovals;
+  void shapeRemoved(int grid_layer,
+                    const PlacedShape& shape,
+                    RipupLevel level,
+                    PendingRemovals& pending);
+  void flush(PendingRemovals& pending);
+  // Exact recomputation of everything a shape meeting `rect` can change.
   void shapeChanged(int grid_layer, const Rect& rect);
+
+  // The overlay of `owner` for its own shapes (grid layer, shape, level).
+  struct OwnShape
+  {
+    int grid_layer;
+    PlacedShape shape;
+    RipupLevel level;
+  };
+  void buildOverlay(int32_t owner,
+                    const std::vector<OwnShape>& shapes,
+                    FastGridOverlay& overlay) const;
 
   RipupLevel vertexLevel(int z,
                          int i,
                          int j,
                          int wire_type,
-                         Kind kind) const override;
+                         Kind kind,
+                         int32_t ignored_owner) const override;
   RipupLevel edgeLevel(int z,
                        int i,
                        int j,
                        int wire_type,
-                       Kind kind) const override;
+                       Kind kind,
+                       int32_t ignored_owner) const override;
   // Exact level of a vertex or edge kind with the shapes owned by
   // `ignored_owner` treated as removed (Sec. 4.4); kNoNet: all shapes.
   RipupLevel exactLevel(int z,
@@ -274,6 +544,14 @@ class FastGridBuilder final : public LegalityOracle
                         Kind kind,
                         int32_t ignored_owner) const;
 
+  struct UpdateStatistics
+  {
+    int64_t inserts = 0;
+    int64_t removes = 0;
+    int64_t recomputed_positions = 0;  // exact per-track recomputation
+    int64_t exact_bits = 0;            // edge bits checked exactly
+  };
+
  private:
   struct Range
   {
@@ -282,23 +560,134 @@ class FastGridBuilder final : public LegalityOracle
     int p0, p1;  // jog pairs (p, p + 1)
     int e0, e1;  // edges (j, j + 1)
   };
+  // Exact point levels of track i over positions [j0, j1] (level fields
+  // only) and, per fast wire type, the largest preferred-wire point level
+  // on each edge (j, j + 1), j in [j0, j1 - 1].
+  struct TrackLevels
+  {
+    std::vector<uint64_t> words;
+    std::vector<RipupLevel> interior;  // [t * edges + (j - j0)]
+    GridWindow pieces;
+  };
   // Tracks / positions of layer z whose models can meet `rect`.
   Range wiringRange(int z, const Rect& rect, int grid_layer) const;
-  void recomputeWiring(int z, const Range& r, bool vertices, bool jogs) const;
-  void recomputeVia(int z, int i0, int i1, int c0, int c1) const;
-  // Jog-edge bits of pair (p, p + 1) over positions [j0, j1] (reads only).
-  void jogFlags(int z,
-                int p,
-                int j0,
-                int j1,
-                std::vector<uint8_t>& flags) const;
-  void writeFlags(int z,
-                  int p,
-                  int j0,
-                  const std::vector<uint8_t>& flags,
-                  int bit) const;
+  void trackLevels(int z,
+                   int i,
+                   int j0,
+                   int j1,
+                   int32_t ignored,
+                   TrackLevels& out) const;
+  // Jog hull levels of pair (p, p + 1) over [j0, j1]: [t * n + (j - j0)].
+  void jogLevels(int z,
+                 int p,
+                 int j0,
+                 int j1,
+                 int32_t ignored,
+                 std::vector<RipupLevel>& out) const;
+  // Exact full words (levels and both edge bits) of tracks [i0, i1] over
+  // positions [j0, j1]: [(i - i0) * n + (j - j0)].
+  void computeWiring(int z,
+                     int i0,
+                     int i1,
+                     int j0,
+                     int j1,
+                     int32_t ignored,
+                     std::vector<uint64_t>& words) const;
+  // Exact via words of tracks [i0, i1] over via positions [c0, c1].
+  void computeVia(int z,
+                  int i0,
+                  int i1,
+                  int c0,
+                  int c1,
+                  int32_t ignored,
+                  std::vector<uint64_t>& words) const;
+  void writeWiring(int z,
+                   int i0,
+                   int i1,
+                   int j0,
+                   int j1,
+                   const std::vector<uint64_t>& words,
+                   uint64_t mask) const;
+  void writeVia(int z,
+                int i0,
+                int i1,
+                int c0,
+                int c1,
+                const std::vector<uint64_t>& words) const;
+  void viaRange(int z,
+                int grid_layer,
+                const Rect& rect,
+                const Rect& box,
+                int& i0,
+                int& i1,
+                int& c0,
+                int& c1) const;
+  // Candidates of a removal (or of an overlay): (track, position) whose
+  // word can change: a level equal to the removed shape's, or a marked
+  // edge whose swept wire the shape violates.
+  struct Candidates
+  {
+    std::vector<std::pair<int, int>> at;
+    int i0 = 1 << 30, i1 = -1, j0 = 1 << 30, j1 = -1;
+    void add(int i, int j)
+    {
+      at.emplace_back(i, j);
+      i0 = std::min(i0, i);
+      i1 = std::max(i1, i);
+      j0 = std::min(j0, j);
+      j1 = std::max(j1, j);
+    }
+    bool empty() const { return at.empty(); }
+  };
+
+ public:
+  struct PendingRemovals
+  {
+    std::vector<Candidates> wiring;  // per wiring layer
+    bool empty() const
+    {
+      for (const Candidates& c : wiring) {
+        if (!c.empty()) {
+          return false;
+        }
+      }
+      return true;
+    }
+  };
+
+ private:
+  // Exact words at the candidates of wiring layer z and around them (edge
+  // bits at both sides, jog bits of the pairs below and above), the shapes
+  // of `ignored` treated as removed: (track, position, word) appended to
+  // out. Words elsewhere are unchanged.
+  void recomputeCandidates(
+      int z,
+      Candidates& cand,
+      int32_t ignored,
+      std::vector<std::tuple<int, int, uint64_t>>& out) const;
+  void wiringCandidates(int z,
+                        int grid_layer,
+                        const PlacedShape& shape,
+                        RipupLevel level,
+                        Candidates& out) const;
+  void viaCandidates(int z,
+                     int grid_layer,
+                     const PlacedShape& shape,
+                     RipupLevel level,
+                     bool projection,
+                     Candidates& out) const;
+  void insertWiring(int z, int grid_layer, const PlacedShape& s, RipupLevel l);
+  void writeChanged(int z,
+                    std::vector<std::tuple<int, int, uint64_t>>& changed) const;
+  void insertVia(int z,
+                 int grid_layer,
+                 const PlacedShape& s,
+                 RipupLevel l,
+                 bool projection);
   void pointModels(int z, std::vector<LocatedModel>& out) const;
   void viaModels(int z, std::vector<LocatedModel>& out) const;
+  LocatedModel jogHull(int z, int p, int t) const;
+  Rect prefHull(int z, int i, int j, int t) const;
   Point location(int z, int i, int j) const;
   RipupLevel sweptLevel(int z,
                         int i,

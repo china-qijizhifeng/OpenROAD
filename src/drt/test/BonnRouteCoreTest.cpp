@@ -29,11 +29,13 @@ struct TestOracle : LegalityOracle
 {
   const FastGrid* grid = nullptr;
   std::map<std::pair<size_t, int>, RipupLevel> edges;
-  RipupLevel vertexLevel(int z, int i, int j, int t, Kind k) const override
+  RipupLevel vertexLevel(int z, int i, int j, int t, Kind k, int32_t)
+      const override
   {
     return grid->level(z, i, j, k, t - 1);
   }
-  RipupLevel edgeLevel(int z, int i, int j, int t, Kind k) const override
+  RipupLevel edgeLevel(int z, int i, int j, int t, Kind k, int32_t)
+      const override
   {
     if (t >= grid->numWireTypes()) {
       return grid->level(z, i, j, k, t - 1);

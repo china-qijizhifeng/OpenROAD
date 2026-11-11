@@ -136,6 +136,27 @@ class DistanceRuleChecker
   const ShapeGrid* grid_ = nullptr;
 };
 
+// Inclusive range of a location coordinate.
+struct LineSpan
+{
+  int64_t lo;
+  int64_t hi;
+};
+
+// Placements of `model` (rect relative to its location) on the line through
+// `at` -- horizontal (x varies) if x_line, else vertical -- at which it
+// violates `piece` (the rule of shapesViolate, line-end extensions of both
+// included). Appends inclusive ranges of the varying coordinate. Shared by
+// the checker and the fast-grid updates.
+void appendViolationSpans(const ShapeClassTable& classes,
+                          const Rect& model,
+                          ClassId cls,
+                          uint8_t line_end_ends,
+                          Point at,
+                          bool x_line,
+                          const PlacedShape& piece,
+                          std::vector<LineSpan>& out);
+
 // The models of `type` at wiring layer z, in WireTypeAnswer order as
 // groups base + 0..3; invalid models are left out.
 void appendWireTypeModels(const WireType& type,

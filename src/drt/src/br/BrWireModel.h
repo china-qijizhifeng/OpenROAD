@@ -221,10 +221,13 @@ class ShapeClassTable
   size_t size() const { return classes_.size(); }
   Requirement requirement(ClassId a, ClassId b) const;
   Coord reach(const int layer) const { return reach_[layer]; }
+  // Unique per setLayers() call (keys of per-thread caches).
+  uint64_t generation() const { return generation_; }
 
  private:
   std::vector<LayerRules> layers_;
   std::vector<Coord> reach_;
+  uint64_t generation_ = 0;
   std::mutex mutex_;
   std::unordered_map<ShapeClass, ClassId, ShapeClassHash> index_;
   AppendOnlyTable<ShapeClass> classes_;

@@ -24,6 +24,14 @@
 
 namespace drt::br {
 
+// A track-graph vertex by layer, track and position.
+struct At
+{
+  int z;
+  int i;
+  int j;
+};
+
 // Routing area R of one search: allowed global routing tiles per layer.
 struct Region
 {
@@ -135,6 +143,9 @@ struct SearchRequest
   bool ripup = false;
   Cost ripup_cost = 0;
   RipupLevel max_ripup_level = kMaxRemovableLevel;
+  // Fast-grid words near the searching net's own shapes with those shapes
+  // removed (Sec. 4.4); nullptr: none.
+  const FastGridOverlay* overlay = nullptr;
   // Per-vertex label budget of the search (0: unlimited); a search that
   // exceeds it stops without a path and reports `aborted`.
   size_t label_limit = 0;
@@ -300,12 +311,12 @@ class PathSearch
   };
 
   Cost futureCost(int z, Coord x, Coord y) const;
-  RipupLevel level(size_t v, Kind k) const
+  RipupLevel level(const At a, Kind k) const
   {
-    return grid_.level(v, k, req_->wire_type, &counters_);
+    return reader_.level(a.z, a.i, a.j, k, req_->wire_type, &counters_);
   }
-  Cost vertexPenalty(size_t v, Kind k) const;
-  bool enter(size_t v, Kind k) const;
+  Cost vertexPenalty(At a, Kind k) const;
+  bool enter(At a, Kind k) const;
   void push(const Item& item);
   bool relax(size_t from_v, size_t to_v, Cost g, Parent parent, int8_t dir);
   // Cost of the preferred-direction edge between positions j and j2,
@@ -319,6 +330,7 @@ class PathSearch
   const SearchRequest* req_ = nullptr;
   SearchResult* res_ = nullptr;
   mutable LegalityCounters counters_;
+  mutable FastGridReader reader_;
   Cost min_via_cost_ = 0;
   Cost min_wire_rate_ = 1;
 
@@ -439,17 +451,17 @@ class IntervalSearch
   };
 
   Cost futureCost(int z, int i, int j) const;
-  RipupLevel level(size_t v, Kind k) const
+  RipupLevel level(const At a, Kind k) const
   {
-    return grid_.level(v, k, req_->wire_type, &counters_);
+    return reader_.level(a.z, a.i, a.j, k, req_->wire_type, &counters_);
   }
-  bool usableZero(size_t v, Kind k) const;
-  bool enter(size_t v, Kind k) const;
-  Cost penalty(size_t v, Kind k) const;
+  bool usableZero(At v, Kind k) const;
+  bool enter(At v, Kind k) const;
+  Cost penalty(At v, Kind k) const;
   bool inWindow(int z, int i, int j, size_t& li) const;
   int intervalOf(int z, int i, int j);
   int buildInterval(int z, int i, int j);
-  int transitionSignature(int z, int i, int j, size_t v) const;
+  int transitionSignature(int z, int i, int j) const;
   Cost value(const Interval& iv, int k) const;
   const Label* argLabel(const Interval& iv, int k) const;
   void rebuildEnvelope(Interval& iv);
@@ -463,6 +475,7 @@ class IntervalSearch
   const SearchRequest* req_ = nullptr;
   SearchResult* res_ = nullptr;
   mutable LegalityCounters counters_;
+  mutable FastGridReader reader_;
   Cost min_via_cost_ = 0;
 
   struct Window
