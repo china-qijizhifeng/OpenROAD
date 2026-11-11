@@ -42,7 +42,7 @@ constexpr std::size_t kCacheLine = 64;
 
 void BonnRouteParams::applyProfile(const int which)
 {
-  profile = which == 1 ? 1 : 0;
+  profile = (which == 1 || which == 2) ? which : 0;
   // Both: Algorithm 2 with t = 125, epsilon = 1 (Sec. 2.3), pin vertex
   // sets (Sec. 2.1) and the Sec. 2.5 capacity estimate, goal-oriented
   // Dijkstra in the oracle (Sec. 2.2).
@@ -52,9 +52,10 @@ void BonnRouteParams::applyProfile(const int which)
   capacity_model = 1;
   goal_orientation = 1;
   gcell_scale = 1;
-  if (profile == 1) {
-    // 2013-reimpl: goal orientation with landmarks (Sec. 2.2) and
-    // volatility-tolerant concurrent price updates (Sec. 2.3).
+  if (profile >= 1) {
+    // 2013-reimpl and 2021 (the 2021 paper changes DR only): goal orientation
+    // with landmarks (Sec. 2.2) and volatility-tolerant concurrent price
+    // updates (Sec. 2.3).
     landmarks = 8;
     concurrent_prices = true;
   } else {
@@ -67,7 +68,8 @@ void BonnRouteParams::applyProfile(const int which)
 
 const char* BonnRouteParams::profileName() const
 {
-  return profile == 1 ? "2013-reimpl" : "2013-improved";
+  return profile == 2 ? "2021"
+                      : (profile == 1 ? "2013-reimpl" : "2013-improved");
 }
 
 bool BonnRouteParams::set(const std::string& name, const double value)

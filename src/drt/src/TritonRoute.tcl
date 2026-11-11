@@ -542,6 +542,8 @@ proc set_bonnroute_profile { args } {
     set value 0
   } elseif { $name == "2013-reimpl" } {
     set value 1
+  } elseif { $name == "2021" } {
+    set value 2
   } else {
     utl::error DRT 9109 "Unknown BonnRoute profile $name."
   }

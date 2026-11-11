@@ -111,7 +111,8 @@ struct BonnRouteParams
   // guides cover the coarse cells.
   int gcell_scale = 1;
   bool verbose = true;
-  // Algorithm profile: 0 = 2013-improved (default), 1 = 2013-reimpl.
+  // Algorithm profile: 0 = 2013-improved (default), 1 = 2013-reimpl,
+  // 2 = 2021 (same GR as 2013-reimpl).
   int profile = 0;
 
   // Returns false if the name is unknown.

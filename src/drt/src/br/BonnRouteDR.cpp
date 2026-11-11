@@ -57,19 +57,20 @@ using br::Kind;
 
 void BonnRouteDRParams::applyProfile(const int which)
 {
-  profile = which == 1 ? 1 : 0;
-  if (profile == 1) {
+  profile = (which == 1 || which == 2) ? which : 0;
+  if (profile >= 1) {
     // 2013-reimpl: Gester et al. 2013 as written. Interval search with
     // property (ii) for vias and the Algorithm 4 tie order (Sec. 4.1),
     // rip-up sequences (Sec. 4.4), the partition sequence to its end
-    // (Sec. 5.1), pi_H with the exact via bound (Sec. 4.1).
+    // (Sec. 5.1), pi_H with the exact via bound and the blockage-aware
+    // pi_P on detours (Sec. 4.1), wire spreading (Sec. 4.2).
     use_intervals = true;
     interval_via_property = true;
     interval_nearest_first = false;
     ripup = true;
     tail_batch = 0;
-    potential = 0;
-    spreading = false;
+    potential = 4;
+    spreading = true;
   } else {
     // 2013-improved: measured optimizations (vertex search, speculative
     // tail batches, unresolved nets to FlexDR).
@@ -89,11 +90,22 @@ void BonnRouteDRParams::applyProfile(const int which)
   postprocess = true;
   access_classes = true;
   reservations = false;
+  if (profile == 2) {
+    // 2021: the experiments of Ahrens et al., arXiv:2111.06169 on top of
+    // 2013-reimpl: the general-model potential for every search (Sec. 4,
+    // Table 3) and legal input wires as reservations of their nets at a
+    // discount of delta = 3/4 (Sec. 5.2, Tables 4 and 6).
+    potential = 3;
+    reservations = true;
+    discount_numerator = 3;
+    discount_denominator = 4;
+  }
 }
 
 const char* BonnRouteDRParams::profileName() const
 {
-  return profile == 1 ? "2013-reimpl" : "2013-improved";
+  return profile == 2 ? "2021"
+                      : (profile == 1 ? "2013-reimpl" : "2013-improved");
 }
 
 bool BonnRouteDRParams::set(const std::string& name, const double value)
@@ -3515,7 +3527,9 @@ bool BonnRouteDR::connectInRegion(NetData& net,
       // A feasible future cost leaves the shortest path cost unchanged.
       const br::FutureCostOracle* oracle = req.future_cost;
       req.future_cost = nullptr;
-      const br::SearchResult plain = worker.search->run(req);
+      const br::SearchResult plain = params_.use_intervals
+                                         ? worker.interval_search->run(req)
+                                         : worker.search->run(req);
       req.future_cost = oracle;
       worker.potential_checks++;
       if (plain.found != res.found || (res.found && plain.cost != res.cost)) {
@@ -4379,11 +4393,11 @@ void BonnRouteDR::main()
     logger_->report("BonnRoute DR profile {}.", params_.profileName());
   }
   if (modernSearch() && params_.use_intervals) {
-    // The interval search assumes unit wire costs and the l1 future cost.
+    // The interval search assumes unit wire costs (no discounted runs).
     logger_->warn(utl::DRT,
                   9106,
-                  "BonnRoute: reservations and potentials use the vertex "
-                  "search; use_intervals is ignored.");
+                  "BonnRoute: reservations use the vertex search; "
+                  "use_intervals is ignored.");
     params_.use_intervals = false;
   }
   buildTrackGraph();

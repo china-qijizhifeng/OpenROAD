@@ -174,7 +174,8 @@ struct BonnRouteDRParams
   // search that would exceed it stops without a path (counted).
   int search_label_mb = 512;
   bool verbose = true;
-  // Algorithm profile: 0 = 2013-improved (default), 1 = 2013-reimpl.
+  // Algorithm profile: 0 = 2013-improved (default), 1 = 2013-reimpl,
+  // 2 = 2021 (2013-reimpl plus Ahrens et al., arXiv:2111.06169).
   // Setting `profile` assigns the bundle in applyProfile(); parameters set
   // afterwards override it.
   int profile = 0;
@@ -471,10 +472,10 @@ class BonnRouteDR
                      int net) const;
   // Cost unit of the search: discount_denominator when discounts are used.
   br::Cost unit() const { return graph_.wire_unit; }
-  bool modernSearch() const
-  {
-    return params_.reservations || params_.potential != 0 || params_.spreading;
-  }
+  // Reservations need wire costs per DBU above 1 (discounted runs), which
+  // only the vertex search supports; spreading and potentials work with
+  // both searches.
+  bool modernSearch() const { return params_.reservations; }
   // Tiles where global routing left room for spreading (Sec. 4.2).
   void buildSpreadTiles();
   void setReservation(Term& term,
