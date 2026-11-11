@@ -88,19 +88,13 @@ Cost PathSearch::wireCost(const int z,
          + spread;
 }
 
-Cost PathSearch::vertexPenalty(const At a, const Kind k) const
+Cost PathSearch::penalty(const At a, const RipupLevel l) const
 {
-  if (level(a, k) == kLegal) {
+  if (l == kLegal) {
     return 0;
   }
   return req_->ripup_cost
          * (1 + static_cast<Cost>(grid_.history(graph_.vertex(a.z, a.i, a.j))));
-}
-
-bool PathSearch::enter(const At a, const Kind k) const
-{
-  const RipupLevel l = level(a, k);
-  return l == kLegal || (req_->ripup && l <= req_->max_ripup_level);
 }
 
 void PathSearch::push(const Item& item)
@@ -110,65 +104,74 @@ void PathSearch::push(const Item& item)
   res_->heap_pushes++;
 }
 
-bool PathSearch::relax(const size_t from_v,
-                       const size_t to_v,
+bool PathSearch::relax(const int z,
+                       const int i,
+                       const int j,
                        const Cost g,
                        const Parent parent,
                        const int8_t dir)
 {
-  (void) from_v;
-  int z, i, j;
-  graph_.decode(to_v, z, i, j);
   size_t li = 0;
   if (!local(z, i, j, li)) {
     return false;
   }
-  if (g >= labels_[li].dist) {
+  Label& label = labels_[li];
+  if (g >= label.dist) {
     return false;
   }
-  labels_[li].dist = g;
-  labels_[li].parent = parent;
+  label.dist = g;
+  label.parent = parent;
   const auto [x, y] = graph_.layers[z].point(i, j);
-  push(Item{g + futureCost(z, x, y), g, to_v, dir, 0});
+  push(Item{g + futureCost(z, x, y),
+            g,
+            i,
+            j,
+            0,
+            static_cast<int8_t>(z),
+            dir});
   return true;
 }
 
-void PathSearch::settle(const int z,
-                        const int i,
-                        const int j,
-                        const size_t v,
-                        const Cost g)
+void PathSearch::settle(const int z, const int i, const int j, const Cost g)
 {
   res_->settled++;
   size_t li = 0;
   local(z, i, j, li);
-  const bool is_source = (labels_[li].marks & kMarkSource) != 0;
-  if ((labels_[li].marks & kMarkTarget) != 0) {
-    const auto& t = req_->targets[labels_[li].target_index];
-    push(Item{g + t.cost, g, v, 2, labels_[li].target_index});
+  const Label& label = labels_[li];
+  const bool is_source = (label.marks & kMarkSource) != 0;
+  if ((label.marks & kMarkTarget) != 0) {
+    const auto& t = req_->targets[label.target_index];
+    push(Item{
+        g + t.cost, g, i, j, label.target_index, static_cast<int8_t>(z), 2});
   }
   const TrackLayer& layer = graph_.layers[z];
   const Region& region = *req_->region;
   const At av{z, i, j};
   // Jogs (non-preferred direction, adjacent tracks).
-  if (layer.jogs && (is_source || enter(av, kJog))) {
+  RipupLevel jog_level = kLegal;
+  if (layer.jogs
+      && (is_source || usable(jog_level = level(av, kJog)))) {
+    const Cost own = is_source ? 0 : penalty(av, jog_level);
     for (const int di : {-1, 1}) {
       const int i2 = i + di;
       if (i2 < 0 || i2 >= layer.numTracks()
           || !region.contains(layer, z, i2, j)) {
         continue;
       }
-      const size_t w = graph_.vertex(z, i2, j);
       const At aw{z, i2, j};
       const At edge = di > 0 ? av : aw;
-      if (!enter(aw, kJog) || !enter(edge, kJogEdge)) {
+      const RipupLevel lw = level(aw, kJog);
+      if (!usable(lw)) {
+        continue;
+      }
+      const RipupLevel le = level(edge, kJogEdge);
+      if (!usable(le)) {
         continue;
       }
       const Cost c
           = layer.jog_factor * std::abs(layer.tracks[i2] - layer.tracks[i])
-            + vertexPenalty(aw, kJog) + vertexPenalty(edge, kJogEdge)
-            + (is_source ? 0 : vertexPenalty(av, kJog));
-      relax(v, w, g + c, di > 0 ? kFromTrackBelow : kFromTrackAbove, 0);
+            + penalty(aw, lw) + penalty(edge, le) + own;
+      relax(z, i2, j, g + c, di > 0 ? kFromTrackBelow : kFromTrackAbove, 0);
     }
   }
   // Via up.
@@ -177,13 +180,18 @@ void PathSearch::settle(const int z,
     const int j2 = layer.up_pos[i];
     if (i2 >= 0 && j2 >= 0
         && region.contains(graph_.layers[z + 1], z + 1, i2, j2)) {
-      const size_t w = graph_.vertex(z + 1, i2, j2);
       const At aw{z + 1, i2, j2};
-      if (enter(av, kViaUpPad) && enter(av, kCutUp) && enter(aw, kViaDownPad)) {
-        const Cost c = graph_.via_cost[z] + vertexPenalty(av, kViaUpPad)
-                       + vertexPenalty(av, kCutUp)
-                       + vertexPenalty(aw, kViaDownPad);
-        relax(v, w, g + c, kFromLayerBelow, 0);
+      const RipupLevel pad = level(av, kViaUpPad);
+      if (usable(pad)) {
+        const RipupLevel cut = level(av, kCutUp);
+        if (usable(cut)) {
+          const RipupLevel top = level(aw, kViaDownPad);
+          if (usable(top)) {
+            const Cost c = graph_.via_cost[z] + penalty(av, pad)
+                           + penalty(av, cut) + penalty(aw, top);
+            relax(z + 1, i2, j2, g + c, kFromLayerBelow, 0);
+          }
+        }
       }
     }
   }
@@ -193,13 +201,18 @@ void PathSearch::settle(const int z,
     const int j2 = layer.down_pos[i];
     if (i2 >= 0 && j2 >= 0
         && region.contains(graph_.layers[z - 1], z - 1, i2, j2)) {
-      const size_t w = graph_.vertex(z - 1, i2, j2);
       const At aw{z - 1, i2, j2};
-      if (enter(aw, kViaUpPad) && enter(aw, kCutUp) && enter(av, kViaDownPad)) {
-        const Cost c = graph_.via_cost[z - 1] + vertexPenalty(aw, kViaUpPad)
-                       + vertexPenalty(aw, kCutUp)
-                       + vertexPenalty(av, kViaDownPad);
-        relax(v, w, g + c, kFromLayerAbove, 0);
+      const RipupLevel pad = level(aw, kViaUpPad);
+      if (usable(pad)) {
+        const RipupLevel cut = level(aw, kCutUp);
+        if (usable(cut)) {
+          const RipupLevel top = level(av, kViaDownPad);
+          if (usable(top)) {
+            const Cost c = graph_.via_cost[z - 1] + penalty(aw, pad)
+                           + penalty(aw, cut) + penalty(av, top);
+            relax(z - 1, i2, j2, g + c, kFromLayerAbove, 0);
+          }
+        }
       }
     }
   }
@@ -308,14 +321,15 @@ SearchResult PathSearch::run(const SearchRequest& request)
     if (!local(z, i, j, li)) {
       continue;
     }
-    labels_[li].marks |= kMarkSource;
-    if (labels_[li].dist <= c) {
+    Label& label = labels_[li];
+    label.marks |= kMarkSource;
+    if (label.dist <= c) {
       continue;
     }
-    labels_[li].dist = c;
-    labels_[li].parent = kSource;
+    label.dist = c;
+    label.parent = kSource;
     const auto [x, y] = graph_.layers[z].point(i, j);
-    push(Item{c + futureCost(z, x, y), c, v, 0, 0});
+    push(Item{c + futureCost(z, x, y), c, i, j, 0, static_cast<int8_t>(z), 0});
   }
 
   while (!heap_.empty()) {
@@ -327,15 +341,16 @@ SearchResult PathSearch::run(const SearchRequest& request)
     const Item item = heap_.back();
     heap_.pop_back();
     result.heap_pops++;
+    const int z = item.z;
+    const int i = item.i;
+    const int j = item.j;
     if (item.dir == 2) {
       result.found = true;
       result.cost = item.key;
       result.target_id = request.targets[item.aux].id;
-      result.target_vertex = item.v;
+      result.target_vertex = graph_.vertex(z, i, j);
       break;
     }
-    int z, i, j;
-    graph_.decode(item.v, z, i, j);
     size_t li = 0;
     local(z, i, j, li);
     if (item.g > labels_[li].dist) {
@@ -343,7 +358,7 @@ SearchResult PathSearch::run(const SearchRequest& request)
     }
     const TrackLayer& layer = graph_.layers[z];
     const Region& region = *request.region;
-    settle(z, i, j, item.v, item.g);
+    settle(z, i, j, item.g);
     const bool is_source = (labels_[li].marks & kMarkSource) != 0;
     if (item.dir == 0) {
       // Vertex label: start runs in both preferred directions.
@@ -356,16 +371,21 @@ SearchResult PathSearch::run(const SearchRequest& request)
             || !region.contains(layer, z, i, j2)) {
           continue;
         }
-        const size_t w = graph_.vertex(z, i, j2);
         const At aw{z, i, j2};
         const At edge{z, i, std::min(j, j2)};
-        if (!enter(aw, kWire) || !enter(edge, kWireEdge)) {
+        const RipupLevel lw = level(aw, kWire);
+        if (!usable(lw)) {
           continue;
         }
-        const Cost c = wireCost(z, i, j, j2) + vertexPenalty(aw, kWire)
-                       + vertexPenalty(edge, kWireEdge);
-        relax(item.v,
-              w,
+        const RipupLevel le = level(edge, kWireEdge);
+        if (!usable(le)) {
+          continue;
+        }
+        const Cost c
+            = wireCost(z, i, j, j2) + penalty(aw, lw) + penalty(edge, le);
+        relax(z,
+              i,
+              j2,
               item.g + c,
               d > 0 ? kFromLower : kFromHigher,
               static_cast<int8_t>(d));
@@ -375,36 +395,41 @@ SearchResult PathSearch::run(const SearchRequest& request)
     // Run label: continue along the track. While the reduced cost stays
     // zero, the run is labelled without heap operations.
     const int d = item.dir;
-    int cj = j;
-    Cost g = item.g;
-    while (true) {
-      const int j2 = cj + d;
-      if (j2 < 0 || j2 >= layer.numPositions()
-          || !region.contains(layer, z, i, j2)) {
-        break;
-      }
-      const size_t w = graph_.vertex(z, i, j2);
-      const At aw{z, i, j2};
-      const At edge{z, i, std::min(cj, j2)};
-      if (!enter(aw, kWire) || !enter(edge, kWireEdge)) {
-        break;
-      }
-      const Cost ng = g + wireCost(z, i, cj, j2) + vertexPenalty(aw, kWire)
-                      + vertexPenalty(edge, kWireEdge);
-      size_t lw = 0;
-      if (!local(z, i, j2, lw)) {
-        break;
-      }
-      if (ng >= labels_[lw].dist) {
-        break;
-      }
-      labels_[lw].dist = ng;
-      labels_[lw].parent = d > 0 ? kFromLower : kFromHigher;
-      const auto [x, y] = layer.point(i, j2);
-      const Cost key = ng + futureCost(z, x, y);
-      push(Item{key, ng, w, static_cast<int8_t>(d), 0});
-      break;
+    const int j2 = j + d;
+    if (j2 < 0 || j2 >= layer.numPositions()
+        || !region.contains(layer, z, i, j2)) {
+      continue;
     }
+    const At aw{z, i, j2};
+    const At edge{z, i, std::min(j, j2)};
+    const RipupLevel lw = level(aw, kWire);
+    if (!usable(lw)) {
+      continue;
+    }
+    const RipupLevel le = level(edge, kWireEdge);
+    if (!usable(le)) {
+      continue;
+    }
+    const Cost ng = item.g + wireCost(z, i, j, j2) + penalty(aw, lw)
+                    + penalty(edge, le);
+    size_t lw_index = 0;
+    if (!local(z, i, j2, lw_index)) {
+      continue;
+    }
+    Label& next = labels_[lw_index];
+    if (ng >= next.dist) {
+      continue;
+    }
+    next.dist = ng;
+    next.parent = d > 0 ? kFromLower : kFromHigher;
+    const auto [x, y] = layer.point(i, j2);
+    push(Item{ng + futureCost(z, x, y),
+              ng,
+              i,
+              j2,
+              0,
+              static_cast<int8_t>(z),
+              static_cast<int8_t>(d)});
   }
   result.fast_grid_queries = counters_.fast_grid;
   result.checker_queries = counters_.checker;

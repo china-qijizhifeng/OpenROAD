@@ -224,13 +224,12 @@ class PagedLabels
     limit_pages_ = limit == 0 ? 0 : (limit + kPageSize - 1) / kPageSize;
     overflow_ = false;
     const size_t pages = (size >> kPageBits) + 1;
-    if (page_epoch_.size() < pages) {
-      page_epoch_.resize(pages, 0);
-      page_index_.resize(pages, 0);
+    if (slots_.size() < pages) {
+      slots_.resize(pages, Slot{});
     }
     used_ = 0;
     if (++epoch_ == 0) {
-      std::fill(page_epoch_.begin(), page_epoch_.end(), 0);
+      std::fill(slots_.begin(), slots_.end(), Slot{});
       for (auto& page : pool_) {
         std::fill(page.get(), page.get() + kPageSize, Label{});
       }
@@ -240,41 +239,53 @@ class PagedLabels
   }
   Label& operator[](const size_t index)
   {
-    const size_t p = index >> kPageBits;
-    if (page_epoch_[p] != epoch_) {
-      if (limit_pages_ != 0 && used_ >= limit_pages_) {
-        overflow_ = true;
-        if (!scratch_) {
-          scratch_ = std::make_unique<Label[]>(1);
-        }
-        scratch_[0] = Label{};
-        return scratch_[0];
-      }
-      page_epoch_[p] = epoch_;
-      if (used_ == pool_.size()) {
-        pool_.push_back(std::make_unique<Label[]>(kPageSize));
-      }
-      page_index_[p] = static_cast<uint32_t>(used_++);
-      peak_pages_ = std::max(peak_pages_, used_);
-      if constexpr (kClear) {
-        Label* page = pool_[page_index_[p]].get();
-        std::fill(page, page + kPageSize, Label{});
-      }
+    const Slot& slot = slots_[index >> kPageBits];
+    if (slot.epoch == epoch_) {
+      return slot.page[index & (kPageSize - 1)];
     }
-    return pool_[page_index_[p]][index & (kPageSize - 1)];
+    return touch(index);
   }
   bool overflow() const { return overflow_; }
   size_t bytes() const
   {
-    return page_epoch_.capacity() * 2 * sizeof(uint32_t)
+    return slots_.capacity() * sizeof(Slot)
            + pool_.size() * kPageSize * sizeof(Label);
   }
   // Largest page count a search has used.
   size_t peakPages() const { return peak_pages_; }
 
  private:
-  std::vector<uint32_t> page_epoch_;
-  std::vector<uint32_t> page_index_;
+  // A page of the window: its storage while `epoch` is the current one.
+  struct Slot
+  {
+    Label* page = nullptr;
+    uint32_t epoch = 0;
+  };
+  // First touch of a page in this search.
+  [[gnu::noinline]] Label& touch(const size_t index)
+  {
+    Slot& slot = slots_[index >> kPageBits];
+    if (limit_pages_ != 0 && used_ >= limit_pages_) {
+      overflow_ = true;
+      if (!scratch_) {
+        scratch_ = std::make_unique<Label[]>(1);
+      }
+      scratch_[0] = Label{};
+      return scratch_[0];
+    }
+    if (used_ == pool_.size()) {
+      pool_.push_back(std::make_unique<Label[]>(kPageSize));
+    }
+    slot.page = pool_[used_++].get();
+    slot.epoch = epoch_;
+    peak_pages_ = std::max(peak_pages_, used_);
+    if constexpr (kClear) {
+      std::fill(slot.page, slot.page + kPageSize, Label{});
+    }
+    return slot.page[index & (kPageSize - 1)];
+  }
+
+  std::vector<Slot> slots_;
   std::vector<std::unique_ptr<Label[]>> pool_;
   std::unique_ptr<Label[]> scratch_;
   size_t used_ = 0;
@@ -310,13 +321,17 @@ class PathSearch
     kFromLayerBelow = 5,  // via from z - 1
     kFromLayerAbove = 6,  // via from z + 1
   };
+  // A heap entry at vertex (z, i, j). Ties of key and g are broken by the
+  // vertex in (z, i, j) order, which is the order of the vertex ids.
   struct Item
   {
     Cost key;
     Cost g;
-    size_t v;
-    int8_t dir;  // 0 vertex label, +1 / -1 ray, 2 sink
+    int32_t i;
+    int32_t j;
     int32_t aux;
+    int8_t z;
+    int8_t dir;  // 0 vertex label, +1 / -1 ray, 2 sink
     bool operator>(const Item& o) const
     {
       if (key != o.key) {
@@ -325,24 +340,49 @@ class PathSearch
       if (g != o.g) {
         return g < o.g;  // deeper first on ties
       }
-      return v > o.v;
+      if (z != o.z) {
+        return z > o.z;
+      }
+      if (i != o.i) {
+        return i > o.i;
+      }
+      return j > o.j;
     }
   };
 
   Cost futureCost(int z, Coord x, Coord y) const;
+  // FastGridReader::level, inlined: the run cursors answer most queries
+  // without a call.
   RipupLevel level(const At a, Kind k) const
   {
-    return reader_.level(a.z, a.i, a.j, k, req_->wire_type, &counters_);
+    return detail::levelOf(
+        grid_,
+        a.z,
+        a.i,
+        a.j,
+        k,
+        req_->wire_type,
+        reader_.ignoredOwner(),
+        &counters_,
+        [this](int z, int i, int j) { return reader_.wiringWord(z, i, j); },
+        [this](int z, int i, int c) { return reader_.viaWord(z, i, c); });
   }
-  Cost vertexPenalty(At a, Kind k) const;
-  bool enter(At a, Kind k) const;
+  // A vertex or edge of level l may be entered: legal, or removable in
+  // rip-up mode.
+  bool usable(const RipupLevel l) const
+  {
+    return l == kLegal || (req_->ripup && l <= req_->max_ripup_level);
+  }
+  // Rip-up penalty of entering a of level l.
+  Cost penalty(At a, RipupLevel l) const;
+  bool enter(const At a, const Kind k) const { return usable(level(a, k)); }
   void push(const Item& item);
-  bool relax(size_t from_v, size_t to_v, Cost g, Parent parent, int8_t dir);
+  bool relax(int z, int i, int j, Cost g, Parent parent, int8_t dir);
   // Cost of the preferred-direction edge between positions j and j2,
   // including the wire spreading cost of entering j2.
   Cost wireCost(int z, int i, int j, int j2) const;
   Cost spreadCost(int z, int i, int j) const;
-  void settle(int z, int i, int j, size_t v, Cost g);
+  void settle(int z, int i, int j, Cost g);
 
   const TrackGraph& graph_;
   const FastGrid& grid_;
