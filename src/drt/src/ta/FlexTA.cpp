@@ -28,9 +28,12 @@ using odb::dbTechLayerType;
 
 namespace drt {
 
-int FlexTAWorker::main_mt()
+int FlexTAWorker::main_mt(bool skip_routed_panel)
 {
   ProfileTask profile("TA:main_mt");
+  if (skip_routed_panel && !hasUnroutedGuides()) {
+    return 0;
+  }
   using std::chrono::high_resolution_clock;
   auto t0 = high_resolution_clock::now();
   if (router_cfg_->VERBOSE > 1) {
@@ -101,7 +104,8 @@ int FlexTA::initTA_helper(int iter,
                           int size,
                           int offset,
                           bool isH,
-                          int& numPanels)
+                          int& numPanels,
+                          bool final_pass)
 {
   auto gCellPatterns = getDesign()->getTopBlock()->getGCellPatterns();
   auto& xgp = gCellPatterns.at(0);
@@ -159,6 +163,10 @@ int FlexTA::initTA_helper(int iter,
     }
   }
 
+  // Within a batch every worker reads guides before any worker writes them.
+  // Only the last pass can omit unused panels: earlier passes feed the next
+  // direction. Retain all panels when batches can feed subsequent batches.
+  const bool skip_routed_panels = final_pass && workers.size() == 1;
   omp_set_num_threads(std::min(8, router_cfg_->MAX_THREADS));
   // parallel execution
   // multi thread
@@ -168,7 +176,7 @@ int FlexTA::initTA_helper(int iter,
 #pragma omp parallel for schedule(dynamic)
     for (int i = 0; i < (int) workerBatch.size(); i++) {
       try {
-        workerBatch[i]->main_mt();
+        workerBatch[i]->main_mt(skip_routed_panels);
 #pragma omp critical
         {
           sol += workerBatch[i]->getNumAssigned();
@@ -276,7 +284,8 @@ void FlexTA::searchRepair(int iter, int size, int offset)
     int numAssignedH = initTA_helper(iter, size, offset, true, numPanelsH);
 
     int numPanelsV;
-    int numAssignedV = initTA_helper(iter, size, offset, false, numPanelsV);
+    int numAssignedV
+        = initTA_helper(iter, size, offset, false, numPanelsV, true);
 
     if (router_cfg_->VERBOSE > 0) {
       logger_->info(DRT,
@@ -294,7 +303,8 @@ void FlexTA::searchRepair(int iter, int size, int offset)
     int numAssignedV = initTA_helper(iter, size, offset, false, numPanelsV);
 
     int numPanelsH;
-    int numAssignedH = initTA_helper(iter, size, offset, true, numPanelsH);
+    int numAssignedH
+        = initTA_helper(iter, size, offset, true, numPanelsH, true);
 
     if (router_cfg_->VERBOSE > 0) {
       logger_->info(DRT,

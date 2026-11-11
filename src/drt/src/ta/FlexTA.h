@@ -53,7 +53,12 @@ class FlexTA
   void main_helper(frLayerNum lNum, int maxOffsetIter, int panelWidth);
   void initTA(int size);
   void searchRepair(int iter, int size, int offset);
-  int initTA_helper(int iter, int size, int offset, bool isH, int& numPanels);
+  int initTA_helper(int iter,
+                    int size,
+                    int offset,
+                    bool isH,
+                    int& numPanels,
+                    bool final_pass = false);
 };
 
 class FlexTAWorker;
@@ -184,7 +189,7 @@ class FlexTAWorker
   FlexTAWorkerRegionQuery& getWorkerRegionQuery() { return rq_; }
   int getNumAssigned() const { return numAssigned_; }
   // others
-  int main_mt();
+  int main_mt(bool skip_routed_panel = false);
   // end
   void end();
 
@@ -226,6 +231,7 @@ class FlexTAWorker
                             bool isViaCost = false);
   void initTracks();
   void initIroutes();
+  bool hasUnroutedGuides() const;
   void initIroute(frGuide* guide);
   void initIroute_helper(frGuide* guide,
                          frCoord& maxBegin,

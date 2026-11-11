@@ -599,6 +599,26 @@ void FlexTAWorker::initIroutes()
   }
 }
 
+bool FlexTAWorker::hasUnroutedGuides() const
+{
+  frRegionQuery::Objects<frGuide> guides;
+  for (const auto& layer : getTech()->getLayers()) {
+    if (layer->getType() != dbTechLayerType::ROUTING
+        || layer->getDir() != getDir()) {
+      continue;
+    }
+    guides.clear();
+    getRegionQuery()->queryGuide(getRouteBox(), layer->getLayerNum(), guides);
+    for (const auto& [bounds, guide] : guides) {
+      if (!guide->getNet()->hasInitialRouting()
+          && getRouteBox().contains(guide->getBBox())) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
 void FlexTAWorker::initCosts()
 {
   bool isH = (getDir() == dbTechLayerDir::HORIZONTAL);

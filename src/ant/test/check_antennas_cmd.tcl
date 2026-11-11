@@ -12,6 +12,8 @@ check "check_net_violation first" { ant::check_net_violation net50 } 1
 
 check "returns the violating net count" { check_antennas } 1
 check "antenna_violation_count" { ant::antenna_violation_count } 1
+check "antenna_violation_signature" \
+  { expr { [string length [ant::antenna_violation_signature]] > 0 } } 1
 check "-verbose" { check_antennas -verbose } 1
 check "-net" { check_antennas -net net50 } 1
 check_error "-net with an unknown net" { check_antennas -net xxx } ANT-0012

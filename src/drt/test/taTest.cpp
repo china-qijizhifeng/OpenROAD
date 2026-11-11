@@ -180,4 +180,76 @@ TEST_F(TAFixture, two_parallel_no_coupling)
   EXPECT_EQ(path_seg2->getPoints().first.y(), 700);
 }
 
+// A final-pass panel containing only routed nets keeps its initial TA output.
+TEST_F(TAFixture, final_pass_preserves_routed_panel)
+{
+  setDieArea(0, 0, 2000, 2000);
+  createGCellPattern(1000, 1000);
+  addTrackPattern(2, false, 100, 10, 200);
+  makeSimpleSpacingConstraint(2, 100);
+  frNet* net = makeNet("routed");
+  net->setHasInitialRouting(true);
+  frGuide* guide = makeGuide(net, 2, {500, 500}, {1500, 500});
+  auto previous = std::make_unique<frPathSeg>();
+  previous->setPoints({500, 900}, {1500, 900});
+  previous->setLayerNum(2);
+  previous->setStyle(design->getTech()->getLayer(2)->getDefaultSegStyle());
+  previous->addToNet(net);
+  const frPathSeg* previous_ptr = previous.get();
+  guide->addRoute(std::move(previous));
+  initTAQueries();
+
+  FlexTAWorker worker(
+      design.get(), logger.get(), router_cfg.get(), /*save_updates=*/false);
+  worker.setRouteBox(design->getTopBlock()->getDieBox());
+  worker.setExtBox(design->getTopBlock()->getDieBox());
+  worker.setDir(odb::dbTechLayerDir::HORIZONTAL);
+  worker.setTAIter(1);
+  worker.main_mt(/*skip_routed_panel=*/true);
+  worker.end();
+
+  EXPECT_EQ(worker.getNumAssigned(), 0);
+  ASSERT_EQ(guide->getRoutes().size(), 1);
+  EXPECT_EQ(guide->getRoutes().front().get(), previous_ptr);
+  EXPECT_EQ(previous_ptr->getPoints().first.y(), 900);
+}
+
+// The routed guides inside an ECO panel still compete with the unwired net.
+// Omitting those guides would change its choice of track.
+TEST_F(TAFixture, final_pass_retains_routed_context_for_unrouted_net)
+{
+  setDieArea(0, 0, 2000, 2000);
+  createGCellPattern(1000, 1000);
+  addTrackPattern(2, false, 100, 10, 200);
+  makeSimpleSpacingConstraint(2, 100);
+  frNet* routed = makeNet("routed");
+  routed->setHasInitialRouting(true);
+  frNet* unrouted = makeNet("unrouted");
+  frGuide* g1 = makeGuide(routed, 2, {500, 500}, {1500, 500});
+  frGuide* g2 = makeGuide(unrouted, 2, {500, 500}, {1500, 500});
+  for (frGuide* guide : {g1, g2}) {
+    auto segment = std::make_unique<frPathSeg>();
+    segment->setPoints({500, 500}, {1500, 500});
+    segment->setLayerNum(2);
+    segment->setStyle(design->getTech()->getLayer(2)->getDefaultSegStyle());
+    segment->addToNet(guide->getNet());
+    guide->addRoute(std::move(segment));
+  }
+  initTAQueries();
+
+  FlexTAWorker worker(
+      design.get(), logger.get(), router_cfg.get(), /*save_updates=*/false);
+  worker.setRouteBox(design->getTopBlock()->getDieBox());
+  worker.setExtBox(design->getTopBlock()->getDieBox());
+  worker.setDir(odb::dbTechLayerDir::HORIZONTAL);
+  worker.setTAIter(1);
+  worker.main_mt(/*skip_routed_panel=*/true);
+  worker.end();
+
+  EXPECT_GT(worker.getNumAssigned(), 0);
+  const auto* segment1 = static_cast<frPathSeg*>(g1->getRoutes().front().get());
+  const auto* segment2 = static_cast<frPathSeg*>(g2->getRoutes().front().get());
+  EXPECT_NE(segment1->getPoints().first.y(), segment2->getPoints().first.y());
+}
+
 }  // namespace drt
