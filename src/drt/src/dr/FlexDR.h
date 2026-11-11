@@ -93,6 +93,17 @@ class FlexDR
     bool followGuide;
     bool isEqualIgnoringSizeAndOffset(const SearchRepairArgs& other) const;
   };
+  // Clean-up of a design whose nets carry initial routing from another
+  // router (detailed_route -bonnroute). Defaults keep FlexDR's own flow.
+  struct InitialRoutingCleanup
+  {
+    // Iteration that follows iteration 0 when nets carry initial routing;
+    // 1 keeps FlexDR's sequence, 3 omits the incremental iterations 1 and 2.
+    int resume_iteration = 1;
+    // In the incremental iterations 0-2, a worker whose nets all carry
+    // initial routing runs only the design-rule check.
+    bool check_only_workers = false;
+  };
   struct IterationProgress
   {
     int total_num_workers{0};
@@ -142,6 +153,10 @@ class FlexDR
 
   void reportGuideCoverage();
   void incIter() { ++iter_; }
+  void setInitialRoutingCleanup(const InitialRoutingCleanup& cleanup)
+  {
+    initial_routing_cleanup_ = cleanup;
+  }
   // maxSpacing fix
   void fixMaxSpacing();
 
@@ -175,6 +190,9 @@ class FlexDR
   bool increaseClipsize_;
   float clipSizeInc_;
   int iter_;
+  InitialRoutingCleanup initial_routing_cleanup_;
+  // Workers of the current iteration that ran only the design-rule check.
+  int num_check_only_workers_{0};
 
   // others
   void initFromTA();
@@ -367,6 +385,14 @@ class FlexDRWorker
   }
   void setMazeEndIter(int in) { mazeEndIter_ = in; }
   void setRipupMode(RipUpMode in) { ripupMode_ = in; }
+  // Incremental mode: when every net of the worker carries initial routing,
+  // no net can be rerouted, so the worker runs only the design-rule check
+  // (with FlexGC's patches) and skips the maze grid graph.
+  void setCheckOnlyWithoutReroutableNets(bool in)
+  {
+    check_only_without_reroutable_nets_ = in;
+  }
+  bool isCheckOnly() const { return check_only_; }
   void setFollowGuide(bool in) { followGuide_ = in; }
   void setCost(frUInt4 drcCostIn,
                frUInt4 markerCostIn,
@@ -564,6 +590,8 @@ class FlexDRWorker
   bool followGuide_{false};
   bool needRecheck_{false};
   bool skipRouting_{false};
+  bool check_only_without_reroutable_nets_{false};
+  bool check_only_{false};
   RipUpMode ripupMode_{RipUpMode::DRC};
   // drNetOrderingEnum netOrderingMode;
   frUInt4 workerDRCCost_{0};

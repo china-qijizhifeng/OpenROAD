@@ -1758,20 +1758,24 @@ void FlexDRWorker::route_queue()
     }
   }
 
-  // init net status
-  route_queue_resetRipup();
-  // init marker cost
-  route_queue_addMarkerCost();
-  // init reroute queue
-  // route_queue_init_queue(rerouteNets);
-  route_queue_init_queue(rerouteQueue);
+  // A check-only worker has no reroutable net (see init()): its route queue
+  // would be empty, and it has no grid graph for the marker costs.
+  if (!check_only_) {
+    // init net status
+    route_queue_resetRipup();
+    // init marker cost
+    route_queue_addMarkerCost();
+    // init reroute queue
+    // route_queue_init_queue(rerouteNets);
+    route_queue_init_queue(rerouteQueue);
 
-  if (graphics_ && !rerouteQueue.empty()) {
-    graphics_->startWorker(this);
+    if (graphics_ && !rerouteQueue.empty()) {
+      graphics_->startWorker(this);
+    }
+
+    // route
+    route_queue_main(rerouteQueue);
   }
-
-  // route
-  route_queue_main(rerouteQueue);
   // end
   gcWorker_->resetTargetNet();
   gcWorker_->setEnableSurgicalFix(true);
@@ -1790,7 +1794,7 @@ void FlexDRWorker::route_queue()
     graphics_->show(true);
   }
 
-  if (getDRIter() >= 7 && getDRIter() <= 30) {
+  if (!check_only_ && getDRIter() >= 7 && getDRIter() <= 30) {
     identifyCongestionLevel();
   }
 }

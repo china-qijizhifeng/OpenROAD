@@ -3296,8 +3296,18 @@ void FlexDRWorker::init(const frDesign* design)
     skipRouting_ = true;
     return;
   }
-  initGridGraph(design);
-  initMazeIdx();
+  // Incremental mode reroutes only nets without initial routing
+  // (route_queue_init_queue, canRipup); without such a net the route queue
+  // stays empty and the worker's result is its design-rule check.
+  check_only_ = check_only_without_reroutable_nets_
+                && getRipupMode() == RipUpMode::INCR
+                && std::ranges::all_of(nets_, [](const auto& net) {
+                     return net->getFrNet()->hasInitialRouting();
+                   });
+  if (!check_only_) {
+    initGridGraph(design);
+    initMazeIdx();
+  }
   std::unique_ptr<FlexGCWorker> gcWorker = std::make_unique<FlexGCWorker>(
       design->getTech(), logger_, router_cfg_, this);
   gcWorker->setExtBox(getExtBox());
@@ -3305,7 +3315,9 @@ void FlexDRWorker::init(const frDesign* design)
   gcWorker->init(design);
   gcWorker->setEnableSurgicalFix(true);
   setGCWorker(std::move(gcWorker));
-  initMazeCost(design);
+  if (!check_only_) {
+    initMazeCost(design);
+  }
 }
 
 frCoord FlexDRWorker::snapCoordToManufacturingGrid(const frCoord coord,

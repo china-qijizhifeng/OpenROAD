@@ -874,6 +874,11 @@ void TritonRoute::dr()
   if (distributed_) {
     dr_->setDistributed(dist_, dist_ip_, dist_port_, shared_volume_);
   }
+  if (bonnroute_ && !distributed_ && bonnroute_params_) {
+    dr_->setInitialRoutingCleanup(
+        {.resume_iteration = bonnroute_params_->cleanup_resume_iteration,
+         .check_only_workers = bonnroute_params_->cleanup_check_only_workers});
+  }
   if (router_cfg_->SINGLE_STEP_DR) {
     dr_->init();
   } else {
