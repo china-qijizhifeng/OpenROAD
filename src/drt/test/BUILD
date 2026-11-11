@@ -86,6 +86,13 @@ cc_test(
     deps = ["//src/drt:bonnroute_core"],
 )
 
+cc_test(
+    name = "bonnroute_tail_pipeline_test",
+    size = "small",
+    srcs = ["BonnRouteTailPipelineTest.cpp"],
+    deps = ["//src/drt:bonnroute_core"],
+)
+
 # Measurements of the routing-space data structures on random instances.
 cc_binary(
     name = "bonnroute_routing_space_bench",
