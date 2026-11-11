@@ -61,11 +61,15 @@ struct MinimumSegmentLength
 // polygon, not each segment, and the off-track paths are attached to a pin
 // or continued by on-track wiring. The post-processing handles it.
 //
-// Without any mapped rule tau is the wire width (the smallest segment that
-// does not create a boundary edge shorter than the line end).
+// Without any mapped rule there is no minimum segment length; tau is then
+// `fallback_tau` (the manufacturing grid). An earlier version used the wire
+// width here, which forced jogs of at least one width with no rule behind
+// it (detours to farther tracks).
 inline MinimumSegmentLength minimumSegmentLength(const SameNetLayerRules& r,
                                                  const bool include_notch,
-                                                 const GeoCoord override_tau)
+                                                 const GeoCoord override_tau,
+                                                 const GeoCoord fallback_tau
+                                                 = 1)
 {
   MinimumSegmentLength m;
   if (r.min_step_length > 0) {
@@ -74,9 +78,12 @@ inline MinimumSegmentLength minimumSegmentLength(const SameNetLayerRules& r,
   if (r.notch_spacing > 0) {
     m.from_notch = r.notch_spacing + r.width;
   }
-  m.tau = std::max<GeoCoord>(m.from_short_edge, r.width);
+  m.tau = m.from_short_edge;
   if (include_notch) {
     m.tau = std::max(m.tau, m.from_notch);
+  }
+  if (m.tau <= 0) {
+    m.tau = fallback_tau;
   }
   if (override_tau > 0) {
     m.tau = override_tau;

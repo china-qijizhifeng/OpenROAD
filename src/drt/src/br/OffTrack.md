@@ -39,7 +39,12 @@ segment length tau.
 - Minimum area is not mapped to tau. It constrains a connected polygon, not
   each segment, and access paths are attached to a pin or continued on-track.
   The post-processing extends isolated via-to-via pieces instead.
-- Without a mapped rule tau is the wire width; `offtrack_tau` overrides it.
+- Without a mapped rule there is no minimum segment length: tau is the
+  manufacturing grid (`offtrack_tau` overrides it), and every tau is rounded
+  up to the grid. An earlier version used the wire width, which has no rule
+  behind it: on Nangate45 (no MINSTEP, no AREA) it forbade the short jog
+  from an access point to the nearest metal2 track whenever that track was
+  closer than one width, and forced detours over the neighbouring track.
 - The Sec. 3.8 alternative ("short edge avoidance ... by introducing
   corresponding edges in G or removing edges") is available as
   `OffTrackRequest::arc_filter` but unused: tau_step already guarantees the
@@ -121,8 +126,13 @@ additionally requires the exact legality check of its three shapes.
   The restriction matters: with vias allowed anywhere, a down-and-up via
   pair resets the incoming direction and can shorten paths, and the reduced
   grid would miss those.
-- Search costs are DBU of wire plus one wire width per via (a tie-breaker):
-  the catalogue ranks paths by length as in Theorem 3.2. The on-track cost
+- Search costs are DBU of wire weighted by the on-track jog factor for the
+  non-preferred direction (1 for the preferred direction), plus one wire
+  width per via (a tie-breaker). Theorem 3.2 is stated for length; the
+  brute-force test also covers axis-weighted instances (about half of the
+  layers, weights 1-4) with equal results. Before, both directions cost 1,
+  and catalogue paths carried about twice the non-preferred metal2 of the
+  access stubs (generated gcd-like rows: 206 vs 109 DBU per path). The on-track cost
   model (jog factor for non-preferred wires, `via_cost` pitches per via, cost
   unit) gives the access option's cost used by the on-track search and the
   selection. With a via cost of four pitches the search settled about three
@@ -175,8 +185,9 @@ their own.
   (up to translation, mirroring, and rotation)"): the signature of an
   instance consists of, in the instance's local frame (inverse of its
   placement transform as a lattice isometry), all fixed shapes of the access
-  layers and cuts within the instance box expanded by the search reach
-  (clipped to it) labelled with their relation to the instance's access pins
+  layers and cuts within the instance box expanded by `access_class_margin`
+  pitches (default 0: the cell box itself; clipped to it), its access
+  points labelled with their relation to the instance's access pins
   (net group or foreign), the track coordinates of the lowest four track
   layers in that area, the via models' shapes, the access pins with their net
   groups, and the radius. Equal signatures map onto each other by
@@ -192,6 +203,13 @@ their own.
   whose endpoint is not a track vertex (possible only through track
   irregularities outside the signature area) falls back to per-instance
   generation. `access_classes 0` gives every instance its own class.
+  Since the signature area is the cell box by default, neighbours can
+  differ between members: mapped paths are re-checked at each member, and a
+  pin without a legal mapped path gets its own catalogue ("member pins
+  regenerated" in the log). On the generated rows the classes drop from 480
+  to 8 for 480 instances (margin 0) with no mapped path illegal at a member;
+  the earlier area (the search reach, about 2 radius pitches + 2 tau + 3
+  pitches) gave one class per instance, as on tinyRocket and aes.
 - Pins without any catalogue path keep the previous access stubs (counted as
   fallback); top-level pins get a catalogue each and their best legal path.
 
@@ -258,6 +276,24 @@ legality can be checked with the same adapter. Track vertices of the
 on-track path become sources of later connections only if they still carry
 metal after the post-processing.
 
+Blockage boxes and the search window are grown outward to the
+manufacturing grid, so all blockage-grid coordinates are on the grid (the
+round-8 runs had Off Grid markers on metal2 only with off-track access).
+
+Pin-layer pad and cut of an access point's via: pin access checked them
+against the fixed surroundings, so they are checked here against other
+nets' routed shapes and reservations only (`routedConflicts`; neighbouring
+access vias), the top pad against everything. Before, they were not
+checked at all, and catalogue paths could start at access points whose
+pads conflict with a neighbour's chosen access via (metal1 spacing).
+
+Macro pins: fakeram45 pins (metal3, 0.07 x 0.07 at the macro edge) abut the
+macro obstruction on their layer, which also covers metal1/metal2 under
+them. Every path from such a pin starts inside the obstruction's spacing
+halo, so the search finds none ("no tau-feasible path", 210 pins on
+tinyRocket). OpenROAD's pin access treats the abutment as intended; these
+pins keep the access stubs (`offtrack_macro_pins 0`).
+
 ## Pin contacts and FlexDR (DRT-1231)
 
 FlexDR's clean-up (`initNets_searchRepair_pin2epMap`, `initNet_term_helper`
@@ -279,11 +315,17 @@ geometry and how each keeps contacts at access points:
 | Post-processing (jog shift, U collapse, min-area extension) | moved bends, extension tips | chain ends and vias never move; no new node or tip on a pin of the net away from its access points (`CleanupRequest::node_allowed`) |
 | On-track paths | vias landing on pins of the net | unchanged; covered by the guard |
 
-Final guard in `writeNets`: every truncated wire end and both pads of every
-via (connected or not, since FlexDR marks the vias it keeps) that lie on a
-pin of the net must be one of that pin's access points
-(`br::pinContactViolations`); a net that violates it is not written and is
-left to FlexDR, and the log reports the count ("contact guard").
+Final guard in `writeNets`, aligned with FlexDR: a pin becomes a worker
+term only at truncated path-segment ends (`pin2epMap`, and
+`initNets_segmentTerms` for border segments) and at via pads marked
+bottom/top connected. FlexDR sets those marks only on vias its maze creates,
+at access points (`FlexDR_maze.cpp`, `checkViaConnectivityToAP` requires
+`hasAccessPoint`); vias of the initial routing keep the default false. So a
+net is left to FlexDR only if a truncated end (a planar pin point) lies on a
+pin of the net away from its access points (`br::pinContactViolations`); via
+pads on pins away from access points (e.g. on-track vias on top-level or
+macro pins) are only counted in the log. The earlier guard also dropped nets
+for such via pads, even with off-track access off.
 `offtrack_from_access_points 0` produces such contacts by construction and
 is therefore incompatible with FlexDR clean-up; the guard then drops most
 nets.
