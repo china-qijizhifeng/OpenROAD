@@ -462,27 +462,46 @@ static int randomCases(const int cases,
     PathSearch ps(g, f);
     IntervalSearch is(g, f);
     SearchResult ri = modern ? SearchResult{} : is.run(q);
+    // The same search with intervals that ignore via availability, and
+    // with the nearest-first order among equal keys.
+    q.interval_via_property = false;
+    q.interval_nearest_first = c % 2 == 0;
+    const SearchResult rn = modern ? SearchResult{} : is.run(q);
+    q.interval_via_property = true;
+    q.interval_nearest_first = c % 2 != 0;
+    const SearchResult rf = modern ? SearchResult{} : is.run(q);
+    q.interval_nearest_first = false;
     SearchResult rvx = ps.run(q);
     Ref ref{g, f, q};
     Cost rc = ref.run();
     Cost ci = ri.found ? ri.cost : kInfCost,
          cv = rvx.found ? rvx.cost : kInfCost;
+    Cost cn = rn.found ? rn.cost : kInfCost;
+    Cost cf = rf.found ? rf.cost : kInfCost;
     Cost pi = ri.found ? ref.pathCost(ri) : kInfCost;
+    Cost pn = rn.found ? ref.pathCost(rn) : kInfCost;
+    Cost pf = rf.found ? ref.pathCost(rf) : kInfCost;
     const Cost pv = rvx.found ? ref.pathCost(rvx) : kInfCost;
     if (modern) {
-      ci = pi = rc;
+      ci = pi = cn = pn = cf = pf = rc;
     }
-    if (ci != rc || cv != rc || pi != ci || pv != cv
-        || (ri.found && !validPath(ri, q))
+    if (ci != rc || cv != rc || cn != rc || cf != rc || pi != ci || pn != cn
+        || pf != cf || pv != cv || (ri.found && !validPath(ri, q))
+        || (rn.found && !validPath(rn, q)) || (rf.found && !validPath(rf, q))
         || (rvx.found && !validPath(rvx, q))) {
       fails++;
       if (fails < 10) {
         printf(
-            "case %d mismatch: interval %lld (path %lld) vertex %lld (path "
-            "%lld) ref %lld\n",
+            "case %d mismatch: interval %lld (path %lld) interval without "
+            "via property %lld (path %lld) other order %lld (path %lld) "
+            "vertex %lld (path %lld) ref %lld\n",
             c,
             (long long) ci,
             (long long) pi,
+            (long long) cn,
+            (long long) pn,
+            (long long) cf,
+            (long long) pf,
             (long long) cv,
             (long long) pv,
             (long long) rc);
@@ -514,6 +533,212 @@ static int randomCases(const int cases,
       (long long) settled_v,
       (long long) fast_queries,
       (long long) checker_queries);
+  return fails != 0;
+}
+
+// Larger graphs with Nangate45-like pitch ratios (M1..M5: 28, 38, 28, 56,
+// 56): the positions of M3 and M4 interleave tracks of two pitches, so vias
+// exist at alternating positions, while the positions of M2 and M5
+// coincide on both sides. Blockages and routed shapes are runs along the
+// tracks, so intervals get long, as on real designs.
+static int pitchCases(const int cases)
+{
+  std::mt19937 rng(9876);
+  int64_t fails = 0, found = 0, pops[5] = {}, settled[5] = {};
+  for (int c = 0; c < cases; c++) {
+    TrackGraph g;
+    const int Z = 3 + rng() % 3;
+    const Coord pitch[5] = {28, 38, 28, 56, 56};
+    const int span = 900 + rng() % 1500;
+    g.layers.resize(Z);
+    for (int z = 0; z < Z; z++) {
+      TrackLayer& l = g.layers[z];
+      l.horizontal = (z % 2) == 0;
+      const Coord off = rng() % 4 == 0 ? rng() % pitch[z] : pitch[z] / 2;
+      for (Coord x = off; x < span; x += pitch[z]) {
+        l.tracks.push_back(x);
+      }
+      l.jogs = rng() % 4 != 0;
+      l.jog_factor = 1 + rng() % 5;
+    }
+    for (int z = 0; z < Z; z++) {
+      std::vector<Coord> pos;
+      for (const int nz : {z - 1, z + 1}) {
+        if (nz >= 0 && nz < Z) {
+          pos.insert(
+              pos.end(), g.layers[nz].tracks.begin(), g.layers[nz].tracks.end());
+        }
+      }
+      std::sort(pos.begin(), pos.end());
+      pos.erase(std::unique(pos.begin(), pos.end()), pos.end());
+      g.layers[z].positions = pos;
+    }
+    for (int z = 0; z + 1 < Z; z++) {
+      g.via_cost.push_back(20 + rng() % 200);
+    }
+    const int tile = 150 + rng() % 400;
+    auto tf = [&](Coord x) { return x / tile; };
+    g.finalize(tf, tf);
+    const int T = span / tile + 1;
+    g.tiles_x = g.tiles_y = T;
+    FastGrid f;
+    f.init(&g, 2);
+    TestOracle legality;
+    legality.grid = &f;
+    f.setOracle(&legality);
+    std::uniform_real_distribution<double> u(0, 1);
+    const double p_fixed = (rng() % 15) / 100.0;
+    const double p_routed = (rng() % 30) / 100.0;
+    for (int z = 0; z < Z; z++) {
+      const TrackLayer& l = g.layers[z];
+      for (int i = 0; i < l.numTracks(); i++) {
+        for (int t = 0; t < 2; t++) {
+          for (int j = 0; j < l.numPositions();) {
+            const int len = 1 + rng() % 24;
+            const double x = u(rng);
+            const RipupLevel lv = x < p_fixed ? kNotRemovable
+                                  : x < p_fixed + p_routed
+                                      ? RipupLevel(1 + rng() % kMaxRemovableLevel)
+                                      : kLegal;
+            for (int jj = j; jj < std::min(l.numPositions(), j + len); jj++) {
+              const size_t v = g.vertex(z, i, jj);
+              if (lv != kLegal) {
+                for (int k = 0; k <= kViaDownPad; k++) {
+                  f.setLevel(v, (Kind) k, t, rng() % 4 == 0 ? kLegal : lv);
+                }
+              } else if (u(rng) < 0.04) {
+                // Isolated via obstructions (cuts of other nets).
+                f.setLevel(v, rng() % 2 ? kCutUp : kViaDownPad, t, kNotRemovable);
+              }
+            }
+            j += len;
+          }
+        }
+        for (int j = 0; j < l.numPositions(); j++) {
+          const size_t v = g.vertex(z, i, j);
+          for (const Kind e : {kWireEdge, kJogEdge}) {
+            if (u(rng) < 0.003) {
+              f.setEdgeQuery(v, e, true);
+              legality.edges[{v, e}] = u(rng) < 0.5
+                                           ? kNotRemovable
+                                           : 1 + rng() % kMaxRemovableLevel;
+            }
+          }
+          if (u(rng) < 0.01) {
+            f.bumpHistory(v);
+          }
+        }
+      }
+    }
+    Region reg;
+    reg.init(Z, T, T);
+    const bool full = rng() % 2;
+    for (int z = 0; z < Z; z++) {
+      for (int x = 0; x < T; x++) {
+        for (int y = 0; y < T; y++) {
+          if (full || u(rng) < 0.75) {
+            reg.allow(z, x, y);
+          }
+        }
+      }
+    }
+    SearchRequest q;
+    q.net = rng() % 3;
+    q.region = &reg;
+    q.ripup = rng() % 2;
+    q.ripup_cost = 50 + rng() % 500;
+    q.max_ripup_level = 1 + rng() % kMaxRemovableLevel;
+    q.wire_type = rng() % 8 == 0 ? 2 : rng() % 2;
+    auto rv = [&]() { return (size_t) (rng() % g.numVertices()); };
+    if (rng() % 2) {
+      for (int s = 0; s < 1 + (int) (rng() % 3); s++) {
+        q.sources.push_back({rv(), (Cost) (rng() % 3 == 0 ? rng() % 100 : 0)});
+      }
+    } else {
+      // A routed run of the tree.
+      int z, i, j;
+      g.decode(rv(), z, i, j);
+      const int n = 2 + rng() % 30;
+      for (int jj = j; jj < std::min(g.layers[z].numPositions(), j + n); jj++) {
+        q.sources.push_back({g.vertex(z, i, jj), 0});
+      }
+    }
+    const int nt = 1 + rng() % 4;
+    for (int t = 0; t < nt; t++) {
+      const size_t v = rv();
+      int z, i, j;
+      g.decode(v, z, i, j);
+      const auto [x, y] = g.layers[z].point(i, j);
+      q.targets.push_back({v, (Cost) (rng() % 100), t});
+      if (t == 0 || rng() % 2) {
+        q.target_boxes.push_back({x, y, x, y, z, z, q.targets.back().cost});
+      } else {
+        auto& b = q.target_boxes.back();
+        b.cost = std::min(b.cost, q.targets.back().cost);
+        b.xlo = std::min(b.xlo, x);
+        b.xhi = std::max(b.xhi, x);
+        b.ylo = std::min(b.ylo, y);
+        b.yhi = std::max(b.yhi, y);
+        b.zlo = std::min(b.zlo, z);
+        b.zhi = std::max(b.zhi, z);
+      }
+    }
+    if (rng() % 6 == 0) {
+      q.target_boxes.clear();
+    }
+    PathSearch ps(g, f);
+    IntervalSearch is(g, f);
+    SearchResult r[5];
+    r[0] = is.run(q);
+    q.interval_via_property = false;
+    r[1] = is.run(q);
+    q.interval_nearest_first = true;
+    r[3] = is.run(q);
+    q.interval_via_property = true;
+    r[4] = is.run(q);
+    q.interval_nearest_first = false;
+    r[2] = ps.run(q);
+    Ref ref{g, f, q};
+    const Cost rc = ref.run();
+    bool ok = true;
+    for (int m = 0; m < 5; m++) {
+      const Cost cm = r[m].found ? r[m].cost : kInfCost;
+      ok &= cm == rc;
+      ok &= !r[m].found || (ref.pathCost(r[m]) == cm && validPath(r[m], q));
+      pops[m] += r[m].heap_pops;
+      settled[m] += r[m].settled;
+    }
+    found += r[2].found;
+    if (!ok && fails++ < 10) {
+      printf(
+          "pitch case %d mismatch: interval %lld / %lld, nearest first %lld / "
+          "%lld, vertex %lld ref %lld\n",
+          c,
+          (long long) (r[0].found ? r[0].cost : kInfCost),
+          (long long) (r[1].found ? r[1].cost : kInfCost),
+          (long long) (r[4].found ? r[4].cost : kInfCost),
+          (long long) (r[3].found ? r[3].cost : kInfCost),
+          (long long) (r[2].found ? r[2].cost : kInfCost),
+          (long long) rc);
+    }
+  }
+  printf(
+      "pitch cases %d found %lld fails %lld | heap pops interval %lld / "
+      "without via property %lld / nearest first %lld / %lld / vertex %lld | "
+      "settled %lld / %lld / %lld / %lld / %lld\n",
+      cases,
+      (long long) found,
+      (long long) fails,
+      (long long) pops[0],
+      (long long) pops[1],
+      (long long) pops[4],
+      (long long) pops[3],
+      (long long) pops[2],
+      (long long) settled[0],
+      (long long) settled[1],
+      (long long) settled[4],
+      (long long) settled[3],
+      (long long) settled[2]);
   return fails != 0;
 }
 
@@ -603,7 +828,14 @@ static int obstacleDetour()
     PathSearch vertex(graph, grid);
     IntervalSearch interval(graph, grid);
     Ref reference{graph, grid, request};
-    for (const auto& result : {vertex.run(request), interval.run(request)}) {
+    const SearchResult with_vias = interval.run(request);
+    request.interval_via_property = false;
+    const SearchResult without_vias = interval.run(request);
+    request.interval_nearest_first = true;
+    for (const auto& result : {vertex.run(request),
+                               with_vias,
+                               without_vias,
+                               interval.run(request)}) {
       if (!result.found || result.cost != 1100
           || reference.pathCost(result) != result.cost) {
         std::printf("failed to detour around blocked edge: horizontal=%d\n",
@@ -680,7 +912,12 @@ static int reusedSearch()
       }
       Ref reference{graph, grid, request};
       const Cost expected = reference.run();
-      for (const auto& result : {vertex.run(request), interval.run(request)}) {
+      request.interval_via_property = query % 2 == 0;
+      request.interval_nearest_first = query % 4 >= 2;
+      const SearchResult first_mode = interval.run(request);
+      request.interval_via_property = !request.interval_via_property;
+      for (const auto& result :
+           {vertex.run(request), first_mode, interval.run(request)}) {
         const Cost actual = result.found ? result.cost : kInfCost;
         if (actual != expected
             || (result.found && reference.pathCost(result) != actual)) {
@@ -827,5 +1064,5 @@ int main()
          || randomCases(400, false, true) || randomCases(400, true, true)
          || randomCases(300, false, true, 1) || randomCases(300, true, true, 2)
          || randomCases(300, false, true, 3) || randomCases(300, true, true, 3)
-         || randomCases(300, false, false, 3);
+         || randomCases(300, false, false, 3) || pitchCases(300);
 }

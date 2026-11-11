@@ -155,6 +155,11 @@ struct SearchRequest
   // Interval property (ii) of Sec. 4.1 for vias as well as jogs. Without
   // it, intervals ignore via availability and relax vias per vertex.
   bool interval_via_property = true;
+  // Among intervals at the same key, process the one whose J_I(delta)
+  // reaches the smallest future cost first (the vertex search's deeper-
+  // first rule) instead of the largest (Algorithm 4, line 12). Both are
+  // exact; this one reaches the targets early in the last key level.
+  bool interval_nearest_first = false;
   // pi_H of Sec. 4.1 with lb_via(z) = cost of the cheapest via stack from z
   // to a target layer (exact); false keeps dz * (cheapest via).
   bool exact_future_cost = true;
@@ -455,15 +460,16 @@ class IntervalSearch
   {
     Cost key;
     Cost max_future;
-    int32_t interval;  // -1: sink (target reached)
-    int32_t aux;       // frontier at enqueue time, or target index for a sink
+    int32_t interval;  // -1: sink (target reached), kPendingEvent
+    int32_t aux;  // frontier at enqueue time, target index, pending index
     bool operator>(const Event& o) const
     {
       if (key != o.key) {
         return key > o.key;
       }
       // Algorithm 4, line 12: among intervals at delta, choose the one
-      // whose settled run contains the largest future cost.
+      // whose settled run contains the largest future cost (max_future is
+      // its negation with interval_nearest_first). Sinks come first.
       if (max_future != o.max_future) {
         return max_future < o.max_future;
       }
@@ -472,9 +478,21 @@ class IntervalSearch
   };
 
   Cost futureCost(int z, int i, int j) const;
+  // FastGridReader::level, inlined: the run cursors answer most queries
+  // of a track scan without a call.
   RipupLevel level(const At a, Kind k) const
   {
-    return reader_.level(a.z, a.i, a.j, k, req_->wire_type, &counters_);
+    return detail::levelOf(
+        grid_,
+        a.z,
+        a.i,
+        a.j,
+        k,
+        req_->wire_type,
+        reader_.ignoredOwner(),
+        &counters_,
+        [this](int z, int i, int j) { return reader_.wiringWord(z, i, j); },
+        [this](int z, int i, int c) { return reader_.viaWord(z, i, c); });
   }
   bool usableZero(At v, Kind k) const;
   bool enter(At v, Kind k) const;
@@ -482,13 +500,39 @@ class IntervalSearch
   bool inWindow(int z, int i, int j, size_t& li) const;
   int intervalOf(int z, int i, int j);
   int buildInterval(int z, int i, int j);
-  int transitionSignature(int z, int i, int j) const;
+  // What the interval search needs to know about a vertex, computed once
+  // per search into its vertex label: its jog and via transitions
+  // (property (ii)) and the levels its interval membership depends on.
+  enum : uint16_t
+  {
+    kTransJogBelow = 1,
+    kTransJogAbove = 2,
+    kTransViaBelow = 4,
+    kTransViaAbove = 8,
+    kTransPenalty = 16,  // an existing transition carries a rip-up penalty
+    kInfoWireLegal = 32,  // kWire
+    kInfoJogLegal = 64,   // kJog
+    kInfoEdgeLegal = 128,  // kWireEdge to position j + 1
+    kInfoVias = 256,       // the via bits are computed
+  };
+  struct VertexLabel;
+  uint16_t info(int z, int i, int j, VertexLabel& label) const;
+  uint16_t viaInfo(int z, int i, int j, VertexLabel& label) const;
+  // The fast-grid words of the vertex and its neighbours give all levels
+  // at once; wire types outside the fast grid and marked edges go through
+  // levelOf to the checker.
+  uint16_t computeInfo(int z, int i, int j, bool vias) const;
+  uint16_t computeVias(int z, int i, int j, uint64_t own) const;
+  // Via transitions are part of the interval property, or carry rip-up
+  // penalties that make vertices singletons: needed to build intervals.
+  bool vias_at_build_ = true;
   Cost value(const Interval& iv, int k) const;
   const Label* argLabel(const Interval& iv, int k) const;
   void rebuildEnvelope(Interval& iv);
   int frontierEnd(const Interval& iv, Cost delta) const;
   void addLabel(int interval, int k, Cost delta, int pred_interval, int pred_k);
-  void process(int interval, Cost delta);
+  // Settles J_I(delta) = [frontier, g) (g < 0: computed) and relaxes it.
+  void process(int interval, Cost delta, int g);
   void pushEvent(int interval);
 
   const TrackGraph& graph_;
@@ -512,12 +556,69 @@ class IntervalSearch
     uint32_t stamp = 0;
     uint32_t source_stamp = 0;
     uint32_t target_stamp = 0;
+    uint32_t info_stamp = 0;
     int32_t interval_id = 0;
     int32_t target_index = 0;
+    // Best deferred label of a vertex outside every interval (see
+    // relaxations in process): delta and predecessor.
+    uint32_t pending_stamp = 0;
+    int32_t pending_pred_interval = 0;
+    int32_t pending_pred_k = 0;
+    uint16_t info = 0;
+    Cost pending_delta = 0;
   };
+  bool nearest_first_ = false;
+  Cost tieKey(const Cost pi) const { return nearest_first_ ? -pi : pi; }
+  static constexpr Cost kSinkTie = kInfCost;
+  // Event::interval of a deferred label; Event::aux indexes pending_.
+  static constexpr int32_t kPendingEvent = -2;
+  struct Pending
+  {
+    int32_t z, i, j;
+  };
+  std::vector<Pending> pending_;
+  // Event::interval of the jogs of a settled run J = [f, g) of a plain
+  // interval (relaxed by relaxJogs); Event::aux indexes jog_runs_.
+  static constexpr int32_t kJogEvent = -3;
+  struct JogRun
+  {
+    int32_t interval;
+    int32_t f, g;
+    int32_t di;
+    Cost delta;
+  };
+  std::vector<JogRun> jog_runs_;
+  void relaxJogs(const JogRun& run);
+  // While direct_, pushEvent stores the event in direct_event_ instead.
+  bool direct_ = false;
+  Event direct_event_{0, 0, -1, 0};
   mutable PagedLabels<VertexLabel> labels_;
+  // labels_[li] through the last page used (most lookups stay on a track).
+  VertexLabel& label(const size_t li) const
+  {
+    if ((li >> kLabelPageBits) == label_page_) {
+      return label_base_[li & kLabelPageMask];
+    }
+    VertexLabel& l = labels_[li];
+    if (!labels_.overflow()) {
+      label_page_ = li >> kLabelPageBits;
+      label_base_ = &l - (li & kLabelPageMask);
+    }
+    return l;
+  }
+  static constexpr int kLabelPageBits = PagedLabels<VertexLabel>::kPageBits;
+  static constexpr size_t kLabelPageMask
+      = PagedLabels<VertexLabel>::kPageSize - 1;
+  mutable size_t label_page_ = ~size_t{0};
+  mutable VertexLabel* label_base_ = nullptr;
+  // Per target box of the track being built: cross cost, along range.
+  std::vector<std::array<Cost, 3>> track_future_;
   uint32_t epoch_ = 0;
+  // intervals_[0, num_used_) belong to the current search; the others keep
+  // their label storage for later searches (at most kKeptIntervals).
   std::vector<Interval> intervals_;
+  int num_used_ = 0;
+  static constexpr size_t kKeptIntervals = size_t{1} << 18;
   std::vector<Event> heap_;
   int64_t num_intervals_ = 0;
   std::array<int64_t, kNumIntervalEnds> ends_{};
