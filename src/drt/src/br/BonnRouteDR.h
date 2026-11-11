@@ -92,6 +92,9 @@ struct BonnRouteDRParams
   // otherwise. Reservations or a potential select the vertex search.
   int potential = 0;
   int potential_detour_tiles = 2;
+  // Debug: repeat every search that used a potential with pi_H and count
+  // cost differences (a feasible potential has none).
+  bool potential_check = false;
   // Sec. 4.2 wire spreading: extra cost (pitches of the layer) of a wire
   // vertex beside an occupied track, in GCells whose global routing
   // utilization (dbGCellGrid usage / capacity) is at most
@@ -203,6 +206,8 @@ class BonnRouteDR
     std::unique_ptr<br::IntervalSearch> interval_search;
     br::PotentialOracle potential;
     int64_t potential_fallbacks = 0;
+    int64_t potential_checks = 0;
+    int64_t potential_mismatches = 0;
     // Guide path of the last buildPathRegion: planar tile steps minus the
     // tile distance of its ends.
     int path_detour = 0;
@@ -309,10 +314,12 @@ class BonnRouteDR
   // Applies a worker's deferred shape-index updates (serial).
   void mergeWorker(Worker& worker);
   // Sec. 5.1: a sequence of balanced partitions into thread regions.
-  // initial_regions: regions of the first partition, 0 = parameter.
+  // initial_regions: regions of the first partition, 0 = parameter;
+  // stage names the step in the log.
   void routePartitions(const std::vector<int>& order,
                        std::vector<int>& failed,
-                       int initial_regions = 0);
+                       int initial_regions = 0,
+                       const char* stage = "partition");
   void partitionRegions(const std::vector<int>& nets,
                         const std::vector<std::array<int, 4>>& boxes,
                         int count,

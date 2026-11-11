@@ -81,6 +81,8 @@ bool BonnRouteDRParams::set(const std::string& name, const double value)
     reserve_min_layer = std::max(0, v);
   } else if (name == "potential") {
     potential = std::clamp(v, 0, 4);
+  } else if (name == "potential_check") {
+    potential_check = v != 0;
   } else if (name == "potential_detour_tiles") {
     potential_detour_tiles = std::max(0, v);
   } else if (name == "critical_nets") {
@@ -1372,6 +1374,17 @@ bool BonnRouteDR::connectInRegion(NetData& net,
     br::SearchResult res = params_.use_intervals
                                ? worker.interval_search->run(req)
                                : worker.search->run(req);
+    if (params_.potential_check && req.future_cost != nullptr) {
+      // A feasible future cost leaves the shortest path cost unchanged.
+      const br::FutureCostOracle* oracle = req.future_cost;
+      req.future_cost = nullptr;
+      const br::SearchResult plain = worker.search->run(req);
+      req.future_cost = oracle;
+      worker.potential_checks++;
+      if (plain.found != res.found || (res.found && plain.cost != res.cost)) {
+        worker.potential_mismatches++;
+      }
+    }
     worker.searches++;
     worker.heap_pops += res.heap_pops;
     worker.settled += res.settled;
@@ -1738,7 +1751,8 @@ void BonnRouteDR::partitionRegions(
 
 void BonnRouteDR::routePartitions(const std::vector<int>& order,
                                   std::vector<int>& failed,
-                                  const int initial_regions)
+                                  const int initial_regions,
+                                  const char* stage)
 {
   std::vector<std::array<int, 4>> boxes(nets_.size());
   for (const int id : order) {
@@ -1779,6 +1793,15 @@ void BonnRouteDR::routePartitions(const std::vector<int>& order,
         next.push_back(id);
       }
     }
+    if (count > 1 && next.size() == pending.size()) {
+      // No pending net fits a region of this partition: continue with the
+      // next partition of the sequence without routing this one.
+      partition++;
+      if (partition % 2 == 0) {
+        count = std::max(1, count / 2);
+      }
+      continue;
+    }
     // Each region is routed by one thread, which changes routing only
     // inside it; its nets are routed and committed in order.
 #pragma omp parallel for num_threads(threads) schedule(dynamic, 1)
@@ -1809,21 +1832,19 @@ void BonnRouteDR::routePartitions(const std::vector<int>& order,
       }
       logger_->info(utl::DRT,
                     9103,
-                    "BonnRoute partition {}: {} regions, {} nets inside, {} "
+                    "BonnRoute {} {}: {} regions, {} nets inside, {} "
                     "deferred.",
+                    stage,
                     partition,
                     regions.size(),
                     routed,
                     next.size());
     }
-    const bool placed_any = next.size() < pending.size();
     pending.swap(next);
     partition++;
-    // Fewer, larger regions in later partitions (Sec. 5.1). A partition
-    // that holds none of the pending nets is skipped in the sequence.
-    if (count > 1 && (partition % 2 == 0 || !placed_any)) {
+    // Fewer, larger regions in later partitions (Sec. 5.1).
+    if (count > 1 && partition % 2 == 0) {
       count = std::max(1, count / 2);
-      partition += partition % 2;
     }
   }
 }
@@ -2070,7 +2091,7 @@ void BonnRouteDR::main()
         .push_back(id);
   }
   if (!critical.empty()) {
-    routePartitions(critical, failed_first, 1);
+    routePartitions(critical, failed_first, 1, "critical-net partition");
   }
   if (params_.partitions) {
     routePartitions(regular, failed_first);
@@ -2123,8 +2144,12 @@ void BonnRouteDR::main()
     if (params_.potential != 0) {
       int64_t prepares[3] = {0, 0, 0};
       int64_t fallbacks = 0;
+      int64_t checks = 0;
+      int64_t mismatches = 0;
       for (const Worker& w : workers_) {
         fallbacks += w.potential_fallbacks;
+        checks += w.potential_checks;
+        mismatches += w.potential_mismatches;
         for (int m = 0; m < 3; m++) {
           prepares[m] += w.potential.prepares(
               static_cast<br::PotentialOracle::Model>(m));
@@ -2132,12 +2157,15 @@ void BonnRouteDR::main()
       }
       logger_->report(
           "BonnRoute DR: potential {}: {} l1, {} simple, {} general "
-          "preparations, {} general fallbacks to pi_H.",
+          "preparations, {} general fallbacks to pi_H, {} of {} checked "
+          "searches differ from pi_H.",
           params_.potential,
           prepares[0],
           prepares[1],
           prepares[2],
-          fallbacks);
+          fallbacks,
+          mismatches,
+          checks);
     }
     if (params_.spreading) {
       logger_->report(
