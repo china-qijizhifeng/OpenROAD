@@ -455,8 +455,8 @@ class IntervalSearch
   {
     Cost key;
     Cost max_future;
-    int32_t interval;  // -1: sink (target reached)
-    int32_t aux;       // frontier at enqueue time, or target index for a sink
+    int32_t interval;  // -1: sink (target reached), kPendingEvent
+    int32_t aux;  // frontier at enqueue time, target index, pending index
     bool operator>(const Event& o) const
     {
       if (key != o.key) {
@@ -552,8 +552,24 @@ class IntervalSearch
     uint32_t info_stamp = 0;
     int32_t interval_id = 0;
     int32_t target_index = 0;
+    // Best deferred label of a vertex outside every interval (see
+    // relaxations in process): delta and predecessor.
+    uint32_t pending_stamp = 0;
+    int32_t pending_pred_interval = 0;
+    int32_t pending_pred_k = 0;
     uint16_t info = 0;
+    Cost pending_delta = 0;
   };
+  // Event::interval of a deferred label; Event::aux indexes pending_.
+  static constexpr int32_t kPendingEvent = -2;
+  struct Pending
+  {
+    int32_t z, i, j;
+  };
+  std::vector<Pending> pending_;
+  // While direct_, pushEvent stores the event in direct_event_ instead.
+  bool direct_ = false;
+  Event direct_event_{0, 0, -1, 0};
   mutable PagedLabels<VertexLabel> labels_;
   uint32_t epoch_ = 0;
   // intervals_[0, num_used_) belong to the current search; the others keep

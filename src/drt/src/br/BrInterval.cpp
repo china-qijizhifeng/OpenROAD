@@ -500,9 +500,13 @@ void IntervalSearch::pushEvent(const int interval)
   }
   const int end = frontierEnd(iv, key);
   const Cost pi = iv.futureCost(graph_.layers[iv.z], iv.jOf(end - 1));
+  res_->heap_pushes++;
+  if (direct_) {
+    direct_event_ = Event{key, pi, interval, iv.frontier};
+    return;
+  }
   heap_.push_back(Event{key, pi, interval, iv.frontier});
   std::push_heap(heap_.begin(), heap_.end(), std::greater<>());
-  res_->heap_pushes++;
 }
 
 void IntervalSearch::addLabel(const int interval,
@@ -564,15 +568,66 @@ void IntervalSearch::process(const int id, const Cost delta)
     return viaInfo(z, i, j_of(k), labels_[li]);
   };
   const uint16_t signature = single ? 0 : bits_of(f);
+  // A vertex outside every interval gets a deferred label instead: its
+  // interval is built when the label is the cheapest one, so vertices the
+  // search only reaches at its frontier never form intervals.
   auto relax_to = [&](int from_k, int z2, int i2, int j2, Cost cost) {
-    const Cost pi = intervals_[id].futureCost(layer, j_of(from_k));
-    const int next_id = intervalOf(z2, i2, j2);
-    if (next_id < 0) {
+    size_t li = 0;
+    if (!inWindow(z2, i2, j2, li)) {
       return;
     }
-    const Interval& next = intervals_[next_id];
-    const Cost d2 = delta + cost - pi + next.futureCost(graph_.layers[z2], j2);
-    addLabel(next_id, next.kOf(j2), d2, id, from_k);
+    VertexLabel& w = labels_[li];
+    const Cost pi = intervals_[id].futureCost(layer, j_of(from_k));
+    if (w.stamp == epoch_) {
+      const int next_id = w.interval_id;
+      const Interval& next = intervals_[next_id];
+      const Cost d2
+          = delta + cost - pi + next.futureCost(graph_.layers[z2], j2);
+      addLabel(next_id, next.kOf(j2), d2, id, from_k);
+      return;
+    }
+    const Cost pi_w = futureCost(z2, i2, j2);
+    const Cost d2 = delta + cost - pi + pi_w;
+    if (w.pending_stamp == epoch_ && w.pending_delta <= d2) {
+      return;
+    }
+    w.pending_stamp = epoch_;
+    w.pending_delta = d2;
+    w.pending_pred_interval = id;
+    w.pending_pred_k = from_k;
+    pending_.push_back({z2, i2, j2});
+    heap_.push_back(Event{d2,
+                          pi_w,
+                          kPendingEvent,
+                          static_cast<int32_t>(pending_.size() - 1)});
+    std::push_heap(heap_.begin(), heap_.end(), std::greater<>());
+    res_->heap_pushes++;
+  };
+  // A relaxation that addLabel would reject with any cost >= `cost` (the
+  // vertex is outside the window, settled or already labelled at least as
+  // well): skipped before its legality is read.
+  auto redundant = [&](int from_k, int z2, int i2, int j2, Cost cost) {
+    size_t li = 0;
+    if (i2 < 0 || j2 < 0 || !inWindow(z2, i2, j2, li)) {
+      return true;
+    }
+    const VertexLabel& w = labels_[li];
+    if (w.stamp != epoch_) {
+      return w.pending_stamp == epoch_
+             && w.pending_delta
+                    <= delta + cost
+                           - intervals_[id].futureCost(layer, j_of(from_k))
+                           + futureCost(z2, i2, j2);
+    }
+    const Interval& next = intervals_[w.interval_id];
+    const int k2 = next.kOf(j2);
+    if (k2 < next.frontier) {
+      return true;
+    }
+    const Cost d2 = delta + cost
+                    - intervals_[id].futureCost(layer, j_of(from_k))
+                    + next.futureCost(graph_.layers[z2], j2);
+    return value(next, k2) <= d2;
   };
 
   // Targets are single-vertex intervals, so terminal costs are exact.
@@ -605,9 +660,13 @@ void IntervalSearch::process(const int id, const Cost delta)
       const int j = j_of(k);
       const int i2 = dz > 0 ? layer.up_track[j] : layer.down_track[j];
       const int j2 = dz > 0 ? layer.up_pos[i] : layer.down_pos[i];
+      const Cost via_cost = graph_.via_cost[std::min(z, z2)];
+      if (redundant(k, z2, i2, j2, via_cost)) {
+        continue;
+      }
       if (!single) {
         if (via_bits_of(k) & via_bit) {
-          relax_to(k, z2, i2, j2, graph_.via_cost[std::min(z, z2)]);
+          relax_to(k, z2, i2, j2, via_cost);
         }
         continue;
       }
@@ -686,6 +745,10 @@ void IntervalSearch::process(const int id, const Cost delta)
         || !region.contains(layer, z, i, j2)) {
       continue;
     }
+    const Cost length = std::abs(layer.positions[j2] - layer.positions[j]);
+    if (redundant(k, z, i, j2, length)) {
+      continue;
+    }
     const At v{z, i, j};
     const At w{z, i, j2};
     const At edge = dj > 0 ? v : w;
@@ -695,12 +758,8 @@ void IntervalSearch::process(const int id, const Cost delta)
         || !enter(w, kWire) || !enter(edge, kWireEdge)) {
       continue;
     }
-    relax_to(k,
-             z,
-             i,
-             j2,
-             std::abs(layer.positions[j2] - layer.positions[j])
-                 + penalty(w, kWire) + penalty(edge, kWireEdge));
+    relax_to(
+        k, z, i, j2, length + penalty(w, kWire) + penalty(edge, kWireEdge));
   }
   pushEvent(id);
 }
@@ -718,6 +777,7 @@ SearchResult IntervalSearch::run(const SearchRequest& request)
     via_prefix_[z] = via_prefix_[z - 1] + graph_.via_cost[z - 1];
   }
   heap_.clear();
+  pending_.clear();
   num_used_ = 0;
   if (intervals_.size() > kKeptIntervals) {
     intervals_.resize(kKeptIntervals);
@@ -817,6 +877,37 @@ SearchResult IntervalSearch::run(const SearchRequest& request)
     const Event e = heap_.back();
     heap_.pop_back();
     result.heap_pops++;
+    if (e.interval == kPendingEvent) {
+      const Pending p = pending_[e.aux];
+      size_t li = 0;
+      inWindow(p.z, p.i, p.j, li);
+      VertexLabel& w = labels_[li];
+      if (w.pending_stamp != epoch_ || w.pending_delta != e.key) {
+        continue;  // superseded by a cheaper deferred label
+      }
+      w.pending_stamp = 0;
+      const int pred_interval = w.pending_pred_interval;
+      const int pred_k = w.pending_pred_k;
+      const int id = intervalOf(p.z, p.i, p.j);
+      const Interval& iv = intervals_[id];
+      // The new interval event is usually the next one: process it without
+      // a heap round trip when no queued event precedes it.
+      direct_ = true;
+      addLabel(id, iv.kOf(p.j), e.key, pred_interval, pred_k);
+      direct_ = false;
+      if (direct_event_.interval >= 0) {
+        const Event next = direct_event_;
+        direct_event_.interval = -1;
+        if (heap_.empty() || !(next > heap_.front())) {
+          result.heap_pops++;
+          process(next.interval, next.key);
+        } else {
+          heap_.push_back(next);
+          std::push_heap(heap_.begin(), heap_.end(), std::greater<>());
+        }
+      }
+      continue;
+    }
     if (e.interval < 0) {
       result.found = true;
       result.cost = e.key;
