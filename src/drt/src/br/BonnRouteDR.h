@@ -90,13 +90,15 @@ struct BonnRouteDRParams
   // Within a batch, start the searches with the largest estimated cost
   // first (longest processing time first); results do not depend on it.
   bool tail_order = true;
-  // Pipeline instead of a barrier per batch (BrTailPipeline.h): batches of
+  // Pipeline instead of a barrier per batch (BrTailPipeline.h; off by
+  // default: 27-49% shorter tails, but TNS 1-3% outside the measured noise
+  // on sky130 designs): batches of
   // tail_batch nets keep their semantics (searched on the commits of the
   // earlier batches, decided in order), a conflicting net is searched again
   // tail_retry_delay batches later, and searches and decisions of nets with
   // disjoint tile boxes overlap across batches. Results depend on the net
   // order, tail_batch and tail_retry_delay only.
-  bool tail_pipeline = true;
+  bool tail_pipeline = false;
   int tail_retry_delay = 1;
   // Settled vertices a net may use in its speculative tail attempt; a net
   // that needs more (almost always one without a route, left to FlexDR) is
