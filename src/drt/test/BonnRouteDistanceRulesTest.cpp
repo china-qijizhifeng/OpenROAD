@@ -47,6 +47,7 @@ void runCase(std::mt19937& rng, const int c, Totals& t)
 {
   ShapeClassTable classes;
   const int num_z = randomInt(rng, 1, 3);
+  classes.setWideRatioPercent(randomWideRatio(rng));
   classes.setLayers(randomRules(rng, num_z, rng() % 2));
   const Coord extent = randomInt(rng, 120, 360);
   ShapeGrid grid;

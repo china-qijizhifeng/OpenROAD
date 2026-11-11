@@ -67,6 +67,7 @@ void runCase(std::mt19937& rng, const int c, Totals& t)
   const int num_z = randomInt(rng, 1, 3);
   const bool first_horizontal = rng() % 2;
   ShapeClassTable classes;
+  classes.setWideRatioPercent(randomWideRatio(rng));
   classes.setLayers(randomRules(rng, num_z, first_horizontal));
   const Coord extent = randomInt(rng, 150, 320);
   // Track graph: random pitches and offsets, irregular gaps.

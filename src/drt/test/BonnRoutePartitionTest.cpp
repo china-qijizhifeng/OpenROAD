@@ -218,6 +218,7 @@ int main()
     const int num_z = randomInt(rng, 2, 3);
     // One class table: classes are interned before the threads start.
     ShapeClassTable classes;
+    classes.setWideRatioPercent(randomWideRatio(rng));
     classes.setLayers(randomRules(rng, num_z, rng() % 2));
     std::vector<WireTypeGeometry> geometry(1);
     for (int z = 0; z < num_z; z++) {

@@ -552,7 +552,7 @@ void BonnRouteDR::buildRoutingSpace()
     geom.horizontal = shape_classes_.layer(g).horizontal;
     geom.cross_cell = cell(cross_pitch);
     geom.along_cell = cell(along_pitch);
-    const frCoord margin = shape_classes_.reach(g) + 4 * max_pitch;
+    const frCoord margin = shape_classes_.ruleReach(g) + 4 * max_pitch;
     const bool h = geom.horizontal;
     const frCoord cross_lo = (h ? die.yMin() : die.xMin()) - margin;
     const frCoord cross_hi = (h ? die.yMax() : die.xMax()) + margin;
@@ -604,7 +604,7 @@ void BonnRouteDR::buildRoutingSpace()
       extent(w.via[z].cut);
     }
     need = std::max<int64_t>(need,
-                             shape_classes_.reach(g) + model
+                             shape_classes_.ruleReach(g) + model
                                  + std::max(geom.cross_cell, geom.along_cell));
   }
   shape_grid_.init(&shape_classes_,
