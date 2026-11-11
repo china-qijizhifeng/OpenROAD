@@ -33,7 +33,7 @@ speed-ups is checked by the differential tests in `src/drt/test` and
 | 3.5 track graph | OpenROAD tracks. Track optimization: [TODO](#2013-todo). |
 | 3.6 fast grid | Intervals of 12-bit words per wire type, eight rip-up levels, edge query bits, via-layer words. |
 | 3.7–3.8 same-net rules, blockage grid | Minimum segment length tau from the tech, Algorithm 3, path-preserving digraph ([`src/br/OffTrack.md`](src/br/OffTrack.md)). |
-| 4.1 on-track search | Interval search (Algorithm 4 tie order, property (ii) with vias) with pi_H. Wire spreading and pi_P in the interval search: [TODO](#2013-todo). |
+| 4.1–4.2 on-track search | Interval search (Algorithm 4 tie order, property (ii) with vias) with pi_H, and pi_P (general potential) for connections whose guide path detours; wire spreading costs from global routing congestion (vertices with a spreading cost are single-vertex intervals). |
 | 4.2 rip-up mode, history | Rip-up penalties growing with history at a vertex. |
 | 4.3 off-track pin access | Catalogues per circuit class, conflict-free primary paths by destructive bounding, reservations, dynamic regeneration. Paths start at OpenROAD access points, which FlexDR clean-up requires (`offtrack_from_access_points 0` starts anywhere on the pin); macro pins keep access stubs. |
 | 4.4 connecting nets | Guide-path connection regions, temporary removal of own shapes, same-net post-processing, rip-up sequences with rollback, later passes with larger areas. |
@@ -44,7 +44,6 @@ speed-ups is checked by the differential tests in `src/drt/test` and
 
 - **Extra space and resources (Sec. 2.1–2.2):** extra space assignment s(n,e), convex power and yield resources, extra space handed to DR wire spreading.
 - **Wire types in DR (Sec. 3.2, 5.1):** NDR spacing, routing NDR nets (currently skipped), wide-wire nets in the critical step.
-- **Interval search (Sec. 4.1–4.2):** wire spreading costs and the blockage-aware future cost pi_P on detours (`potential 4`); until then these use the vertex search.
 - **Tile size (Sec. 2.1):** tiles for 50–100 wires per layer; `gcell_scale` is an experiment, and DR on coarse guides is slow.
 - **Track optimization (Sec. 3.5, Müller 2009):** maximal usable track length.
 
