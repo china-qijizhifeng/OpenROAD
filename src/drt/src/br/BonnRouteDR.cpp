@@ -98,6 +98,8 @@ bool BonnRouteDRParams::set(const std::string& name, const double value)
     potential_detour_tiles = std::max(0, v);
   } else if (name == "critical_nets") {
     critical_nets = v != 0;
+  } else if (name == "tail_batch") {
+    tail_batch = std::max(0, v);
   } else if (name == "partitions") {
     partitions = v != 0;
   } else if (name == "partition_regions") {
@@ -2815,7 +2817,7 @@ bool BonnRouteDR::connectWithoutOwnShapes(NetData& net,
     }
     // Sec. 4.4: "If no or only a small number of access paths remains
     // feasible, we dynamically generate new access paths."
-    if (!ripup && params_.offtrack_access
+    if (!ripup && params_.offtrack_access && !worker.speculative
         && feasible < params_.offtrack_regenerate) {
       const size_t before = net.terms[t].options.size();
       if (regenerateAccess(net, t, worker)) {
@@ -3399,6 +3401,105 @@ void BonnRouteDR::partitionRegions(
   }
 }
 
+void BonnRouteDR::routeSpeculative(const std::vector<int>& order,
+                                   std::vector<int>& failed,
+                                   const char* stage)
+{
+  const int threads = static_cast<int>(workers_.size());
+  const size_t batch_size = static_cast<size_t>(params_.tail_batch);
+  std::deque<int> queue(order.begin(), order.end());
+  std::vector<int> batch;
+  std::vector<char> ok;
+  std::vector<double> busy;
+  std::vector<RShape> shapes;
+  int64_t batches = 0;
+  int64_t conflicts = 0;
+  int64_t nets = 0;
+  double wall_total = 0;
+  double busy_total = 0;
+  while (!queue.empty()) {
+    batch.clear();
+    while (!queue.empty() && batch.size() < batch_size) {
+      batch.push_back(queue.front());
+      queue.pop_front();
+    }
+    ok.assign(batch.size(), 0);
+    busy.assign(batch.size(), 0);
+    const double wall_start = omp_get_wtime();
+    // Nothing writes the routing space while the batch is searched.
+#pragma omp parallel for num_threads(threads) schedule(dynamic, 1)
+    for (int k = 0; k < static_cast<int>(batch.size()); k++) {
+      Worker& w = workers_[omp_get_thread_num()];
+      const double start = omp_get_wtime();
+      w.speculative = true;
+      ok[k] = connect(nets_[batch[k]], false, w);
+      w.speculative = false;
+      busy[k] = omp_get_wtime() - start;
+    }
+    const double wall = omp_get_wtime() - wall_start;
+    wall_total += wall;
+    for (const double b : busy) {
+      busy_total += b;
+    }
+    // Commit in net order. Each route was legal on the routing space at the
+    // start of the batch, so only commits earlier in the batch can conflict
+    // with it. The first committed net of a batch is never checked, which
+    // guarantees progress.
+    std::vector<int> retry;
+    bool committed = false;
+    for (size_t k = 0; k < batch.size(); k++) {
+      NetData& net = nets_[batch[k]];
+      if (!ok[k]) {
+        net.wires.clear();
+        net.vias.clear();
+        failed.push_back(net.id);
+        continue;
+      }
+      bool clash = false;
+      if (committed) {
+        shapesOf(net, shapes);
+        clash = std::ranges::any_of(shapes, [&](const RShape& shape) {
+          return shapeConflicts(shape, net.id);
+        });
+      }
+      if (clash) {
+        net.wires.clear();
+        net.vias.clear();
+        net.pin_points.clear();
+        retry.push_back(net.id);
+        conflicts++;
+        continue;
+      }
+      commitNet(net, nullptr);
+      setReservations(net, false, nullptr);
+      committed = true;
+      nets++;
+    }
+    for (auto it = retry.rbegin(); it != retry.rend(); ++it) {
+      queue.push_front(*it);
+    }
+    batches++;
+  }
+  partition_wall_ += wall_total;
+  partition_busy_ += busy_total;
+  partition_capacity_ += wall_total * threads;
+  if (params_.verbose) {
+    logger_->info(
+        utl::DRT,
+        9105,
+        "BonnRoute {} speculative batches: {} batches of up to {} "
+        "nets, {} nets committed, {} searched again after a "
+        "conflict; {:.2f}s, thread utilization {:.0f}%.",
+        stage,
+        batches,
+        batch_size,
+        nets,
+        conflicts,
+        wall_total,
+        wall_total > 0 ? 100.0 * busy_total / (wall_total * threads) : 0.0);
+  }
+}
+
 void BonnRouteDR::routePartitions(const std::vector<int>& order,
                                   std::vector<int>& failed,
                                   const int initial_regions,
@@ -3421,6 +3522,10 @@ void BonnRouteDR::routePartitions(const std::vector<int>& order,
   std::vector<std::array<int, 4>> regions;
   int partition = 0;
   while (!pending.empty()) {
+    if (params_.tail_batch > 0 && count < threads) {
+      routeSpeculative(pending, failed, stage);
+      return;
+    }
     if (count <= 1) {
       regions.assign(1, {0, 0, tiles_x_ - 1, tiles_y_ - 1});
     } else {
