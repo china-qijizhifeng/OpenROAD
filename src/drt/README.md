@@ -121,7 +121,7 @@ set_bonnroute_profile name
 | Name | Meaning |
 | ----- | ----- |
 | `2013-improved` | Default. Gester et al. 2013 with measured optimizations: vertex search, speculative tail batches, unresolved nets to FlexDR; GR oracle with the l1 goal-oriented bound and deterministic frozen-price batches. |
-| `2021` | `2013-reimpl` plus Ahrens et al., arXiv:2111.06169: the general-model potential for every DR search and legal track-assignment wires as reservations of their nets at a 3/4 discount, as in that paper's experiments. Potentials and discounts currently use the vertex search. |
+| `2021` | `2013-reimpl` plus Ahrens et al., arXiv:2111.06169: the general-model potential for every DR search and legal track-assignment wires as reservations of their nets at a 3/4 discount, as in that paper's experiments. Placeholder: potentials and discounts currently use the vertex search; see the 2021 TODO list in [the fidelity notes](BonnRouteFidelity.md#2021-todo). |
 | `2013-reimpl` | Gester et al. 2013 as written: interval search with property (ii) for vias and the Algorithm 4 tie order, rip-up sequences, the partition sequence to its end; GR oracle with landmark goal orientation and concurrent price updates. Results vary between runs. See [the fidelity notes](BonnRouteFidelity.md) for what remains different. |
 
 ### BonnRoute Detailed Routing Parameters

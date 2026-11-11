@@ -1,91 +1,69 @@
 # BonnRoute implementation scope and paper fidelity
 
-This adapter implements parts of Gester et al., *BonnRoute: Algorithms and Data
-Structures for Fast and Good VLSI Routing*, TODAES 18(2), 2013. It is an
-experimental GR and initial-DR implementation combined with CUGR and FlexDR.
-Neither its default configuration nor its explicit interval/rip-up mode is a
-complete reproduction of the paper. The measurements section refers to code at
-`450f22fcc924cbc4084f45596fbf30762b1db207`; the tables describe the current
-source.
+BonnRoute GR (`global_route -bonnroute`, inside CUGR) and DR
+(`detailed_route -bonnroute`, before FlexDR clean-up) implement Gester et al.,
+*BonnRoute: Algorithms and Data Structures for Fast and Good VLSI Routing*,
+TODAES 18(2), 2013. `set_bonnroute_profile` selects the algorithm variant:
 
-## Models of connectivity, capacity and geometry
+| Profile | Purpose |
+| ----- | ----- |
+| `2013-reimpl` | The 2013 paper as written, as far as implemented (this document lists every remaining difference). |
+| `2013-improved` | Default. The 2013 algorithms with measured optimizations that change search order or scheduling (vertex search, speculative tail batches, l1 GR bound, deterministic price batches, unresolved nets to FlexDR). |
+| `2021` | Placeholder for Ahrens et al., arXiv:2111.06169: `2013-reimpl` plus its potentials and reservations. See [2021 TODO](#2021-todo). |
 
-| Area | Paper | Current adapter and possible consequence |
-| ----- | ----- | ----- |
-| GR pin connectivity | Branches may reach different cells of the same pin and use the pin's existing conductivity to connect. | Implemented with zero-cost pin cliques in the oracle and pin links in the tree (no demand). V_p is the set of cells of the pin's access points (shape cells when it has none), so cells without an access point are not used. Exported routes bridge pin links on routable layers. CUGR maze clean-up reroutes a net with one cell per pin. |
-| GR capacity estimation (Section 2.5) | Count usable track-graph vertices, account for prerouted single-tile nets and estimated intra-tile connections of longer nets, and statistically estimate intermediate-layer capacity loss from stacked vias. | Implemented as `capacity_model 1` (default; `0` keeps CUGR's model). Single-tile nets are routed by a track-graph shortest-path router instead of the detailed router; intra-tile lengths use a rectilinear spanning tree; via-stack counts come from the congestion-free oracle pass and only the excess over CUGR's linear via-pad demand reduces capacity. The flow's layer adjustment is still applied. Via edges keep no capacity of their own. |
-| DR geometry (Sections 3.1–3.6) | Shape grid of cell configurations in interval trees, distance rule checker with maximal intervals and blocking-net report, fast grid with edge query bits. | Implemented as described in [`src/br/DataStructures.md`](src/br/DataStructures.md), including the per-rule modelling (some drt rules are modelled conservatively, optimistically or not at all and are left to FlexDR). The shape grid also covers the pin layer and cut below the lowest track layer. |
-| DR off-track geometry (Section 3.8) | Blockage grid and path-preserving digraph for off-track paths. | Off-track access paths are shortest minimum-segment-length paths on the blockage grid (Algorithm 3, path-preserving digraph; `offtrack_access 1`, see [OffTrack.md](src/br/OffTrack.md)); their diff-net legality goes through the shape grid and the distance rule checker (`BonnRouteDR::Legality`). Some feasible connections or rule interactions can fall outside this model. |
+Both 2013 profiles share every data structure and every exact speed-up
+(cache-line alignment, per-class reach windows, tile-grouped fast-grid
+updates, per-batch reservation flushes, exact pi_H). Exactness of those
+speed-ups is checked by the differential tests in `src/drt/test` and
+`src/grt/test`.
 
-Source entry points are [`BonnRouteGlobal::oracle` and `run`](../grt/src/cugr/src/BonnRoute.cpp),
-and [`BonnRouteDR::changeShape`, `shapeConflicts` and `buildAccess`](src/br/BonnRouteDR.cpp).
-Multiple pin access candidates, off-track catalogues and swept-edge legality checks are implemented;
-their limitations should not be described as their complete absence.
+## 2013 paper, section by section
 
-These are verified model differences. Their individual effects on runtime,
-wirelength, vias and final routing quality have not been isolated by controlled
-experiments. They cannot yet be assigned shares of the measured regression.
+| Section | Status in `2013-reimpl` |
+| ----- | ----- |
+| 2.1 GR graph, pins as vertex sets | Implemented on OpenROAD GCells; pins connect through zero-cost cliques over the cells of their access points. |
+| 2.1–2.2 resources, extra space | Edge capacities and the wirelength/via objective. Extra space and power/yield resources: [TODO](#2013-todo). |
+| 2.2 oracle (Algorithm 1) | Path composition with goal-oriented Dijkstra (l1 and landmark bounds). |
+| 2.3 resource sharing (Algorithm 2) | t = 125, epsilon = 1, reuse rule, concurrent price updates. |
+| 2.4 rounding, rip-up and reroute | Randomized rounding, re-choose, CUGR maze clean-up. |
+| 2.5 capacity estimation | Usable track vertices, single-tile net prerouting (track-graph shortest paths), intra-tile Steiner estimates (rectilinear spanning trees), statistical stacked-via correction. |
+| 3.1–3.2 rules, wire and via models, wire types | Spacing tables, line-end model as in the paper, one wire type per NDR; see [`src/br/DataStructures.md`](src/br/DataStructures.md) for the treatment of each drt rule. |
+| 3.3 shape grid | Cells, configuration table, interval trees per row and GCell chunk, owners and rip-up levels. |
+| 3.4 distance rule checking | Allowed models, maximal intervals, blocking-net report. |
+| 3.5 track graph | OpenROAD tracks. Track optimization: [TODO](#2013-todo). |
+| 3.6 fast grid | Intervals of 12-bit words per wire type, eight rip-up levels, edge query bits, via-layer words. |
+| 3.7–3.8 same-net rules, blockage grid | Minimum segment length tau from the tech, Algorithm 3, path-preserving digraph ([`src/br/OffTrack.md`](src/br/OffTrack.md)). |
+| 4.1 on-track search | Interval search (Algorithm 4 tie order, property (ii) with vias) with pi_H. Wire spreading and pi_P in the interval search: [TODO](#2013-todo). |
+| 4.2 rip-up mode, history | Rip-up penalties growing with history at a vertex. |
+| 4.3 off-track pin access | Catalogues per circuit class, conflict-free primary paths by destructive bounding, reservations, dynamic regeneration. Paths start at OpenROAD access points, which FlexDR clean-up requires (`offtrack_from_access_points 0` starts anywhere on the pin); macro pins keep access stubs. |
+| 4.4 connecting nets | Guide-path connection regions, temporary removal of own shapes, same-net post-processing, rip-up sequences with rollback, later passes with larger areas. |
+| 5.1 parallelization | Balanced partition sequence with fewer regions later; critical (clock) nets first. Wide-wire (NDR) nets: [TODO](#2013-todo). |
+| 5.2 external clean-up | FlexDR cleans up; logs report the nets and violations it receives. |
 
-## DR execution
+## 2013 TODO
 
-| Area | Paper | Adapter |
-| ----- | ----- | ----- |
-| Interval search (Section 4.1, Algorithm 4) | Among intervals active at the same reduced distance, choose by maximum future cost; relax each neighbouring interval once from the member of J_I(delta) with maximum future cost. | Equal-key events are ordered by the maximum future cost of their flat run; label values come from prefix/suffix minima in O(log labels); jogs to a neighbouring interval are relaxed once from the representative. Property (ii) includes vias (`interval_via_property 1`), so via-heterogeneous runs split; with `0` vias are relaxed per settled vertex. Only the l1 future cost and unit wire costs are supported. |
-| Pin access reservations (Sections 4.3–4.4) | Conflict-free primary access paths reserved before routing; removed temporarily for the connecting components; released once connected. Paths can be generated on the fly. | With `offtrack_access 1`, catalogues and a conflict-free primary path per pin are computed per circuit class (signature in the instance frame up to the eight lattice isometries) by destructive bounding over a weighted cost of length, blocked tracks, continuation directions and endpoint spreading (the weights are this implementation's; the paper gives none); class solutions are re-verified per instance against earlier reservations. Primary paths are reserved as complete geometry and released when the net is committed; catalogues are regenerated on the fly when fewer than `offtrack_regenerate` paths remain feasible. `offtrack_access 0` keeps the previous greedy first-conflict-free stub per pin. |
-| Connection regions (Section 4.4) | Route along a shortest global-routing path from the source component to another component; the area is the tiles of that path plus adjacent layers. | `component_regions 1`: breadth-first tile path over the guides from the current tree to the nearest unconnected terminal; the search runs in those tiles plus `layer_dilation` layers and falls back to all guide tiles if it fails. |
-| Rip-up sequences (Section 4.4) | Bounded depth; restore the original situation if the sequence fails; later passes with more effort and larger areas. | Recursive sequence bounded by `ripup_depth` with a journal of every touched net; failure restores all of them. `ripup_passes` later passes enlarge the area by one tile each. Sequences are serial. |
-| Parallel routing (Section 5.1) | Sequence of balanced partitions; threads change routing only inside their region; fewer regions later; critical nets first. | `partitions 1`: weighted-quantile column/row partitions of pending nets' boxes, alternating shifted cuts, region count halved every two partitions down to one. A net is routed in a partition only if its box (with halo) lies inside one region. There is no separate critical-net step. |
+- **Extra space and resources (Sec. 2.1–2.2):** extra space assignment s(n,e), convex power and yield resources, extra space handed to DR wire spreading.
+- **Wire types in DR (Sec. 3.2, 5.1):** NDR spacing, routing NDR nets (currently skipped), wide-wire nets in the critical step.
+- **Interval search (Sec. 4.1–4.2):** wire spreading costs and the blockage-aware future cost pi_P on detours (`potential 4`); until then these use the vertex search.
+- **Tile size (Sec. 2.1):** tiles for 50–100 wires per layer; `gcell_scale` is an experiment, and DR on coarse guides is slow.
+- **Track optimization (Sec. 3.5, Müller 2009):** maximal usable track length.
 
-The default leaves unresolved nets to FlexDR (`ripup 0`) and uses the vertex
-search (`use_intervals 0`). Section 5.2 of the 2013 paper uses an external
-router for DRC cleanup, so the combination itself is compatible; the counts
-of nets left to FlexDR are reported per run.
+## 2021 TODO
 
-## arXiv:2111.06169 (reservations and potentials)
+The `2021` profile currently sets `2013-reimpl` plus the general-model
+potential (`potential 3`) and track-assignment reservations at a 3/4 discount
+(`reservations 1`), which run in the vertex search. Open items of
+arXiv:2111.06169:
 
-`reservations 1` implements Section 5.2 of Ahrens et al.: preferred-direction
-track-assignment wires on track whose pieces (cut at GCell boundaries) conflict
-neither with fixed shapes, pin reservations nor other nets' input wires become
-reservations of their net. They block other nets and cost
-`discount_numerator / discount_denominator` of normal wire cost for the owner;
-costs use an integral unit of `discount_denominator`. The future cost hook
-(`FutureCostOracle`) accepts the potentials of Sections 2–4; with `potential 0`
-the l1 bound uses the minimum of normal and discounted rates and stays
-feasible. Paper statements about multi-labeling, path post-processing and
-backup rip-up searches are not modelled.
+- Discount rates and oracle potentials in the interval search.
+- Via reservations; dropping short wires that only connect to illegal input wires.
+- The incremental scenario: keep pin-to-pin paths of legal detailed wires, replace the rest by global wires, re-route with reservations.
+- Region-dependent costs (layer-range penalties).
+- Theorem 7 and Theorem 14 query structures (the paper uses the Sec. 5.1 variant in practice, as implemented).
 
-## Future cost and external cleanup
+## Measurements
 
-Section 4.1 explicitly describes DR's Dijkstra-based search with a future cost
-similar to A*. A future cost in DR therefore does not by itself depart from the
-paper. The adapter has a geometric future-cost lower bound, but not the full
-blockage-aware future cost. A proposed A* change to the GR oracle is a separate
-variant whose fidelity and guarantees require their own justification.
-
-Section 5.2 explicitly combines BonnRoute with an external industrial router
-for DRC cleanup. Using FlexDR is compatible with that integration pattern.
-The amount of connection and rerouting work delegated to FlexDR still matters:
-final DRC=0 establishes the combined flow's final result, not BonnRoute-alone
-legality, completeness or paper fidelity.
-
-## What the measurements establish
-
-At the measured code revision, switching DR defaults to vertex search with
-serial rip-up disabled reduces total PA+GR+DR from 231.842 to 108.356 seconds
-on tinyRocket and from 188.863 to 151.465 seconds on AES Nangate45. More
-unresolved nets go to FlexDR. These are configuration and combined-flow gains;
-they do not demonstrate an optimization of a faithful reproduction.
-
-The current flow remains 50.3% and 121.0% slower than original upstream
-OpenROAD on those designs. The upstream comparison includes other fork
-changes, so the entire difference cannot be attributed solely to BonnRoute.
-Current AES CPU sampling identifies the GR oracle call stack as 92.59% of
-user-mode samples for the profiled PA+GR process. This locates work in the
-current implementation; it does not prove that missing paper features caused
-the slowdown or that the paper algorithm itself is slower.
-
-Implementation optimizations should preserve the selected algorithm's search
-order, cost model and update semantics. GR A*, changed reuse rules, altered
-price batches and adaptive stopping require separate algorithm-variant
-comparisons. A fidelity experiment must also record the unresolved differences
-above rather than identify a parameter switch as a complete paper mode.
+Results are generated from run logs; see the PR description and the E2E
+reports. Results with BonnRoute GR or DR describe the combined flow with
+FlexDR clean-up; the logs report how many nets and violations FlexDR
+receives.
