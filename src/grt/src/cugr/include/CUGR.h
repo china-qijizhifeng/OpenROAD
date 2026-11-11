@@ -88,6 +88,9 @@ struct Constants
   double congestion_gate_penalty = 4.0;
 
   bool write_heatmap = false;
+
+  // BonnRoute gcell_scale: gcells of this many default tiles per side.
+  int gcell_scale = 1;
 };
 
 class CUGR
@@ -160,6 +163,10 @@ class CUGR
   // BonnRoute resource-sharing global routing replaces the pattern stages of
   // a full (non-incremental) route; see BonnRoute.h.
   void setBonnRoute(bool enabled) { bonnroute_ = enabled; }
+  // Side of a CUGR gcell in DBU (0 before init).
+  int getGridlineSize() const;
+  // Union of the CUGR gcells that contain (x0, y0) and (x1, y1).
+  odb::Rect gcellUnion(int x0, int y0, int x1, int y1) const;
   bool isBonnRoute() const { return bonnroute_; }
   // Returns false for an unknown parameter name.
   bool setBonnRouteParam(const std::string& name, double value);
