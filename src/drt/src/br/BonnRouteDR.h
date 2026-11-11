@@ -84,6 +84,9 @@ struct BonnRouteDRParams
   // Results depend on the net order and the batch size only. 0 keeps the
   // partition sequence to its end.
   int tail_batch = 32;
+  // Threads of the speculative batches; 0 uses all router threads. The
+  // batch results do not depend on it (a check of that determinism).
+  int tail_threads = 0;
   // Sec. 5.1: a critical net routing step before the partitions; clock
   // nets are routed first, serially, on the whole chip.
   bool critical_nets = true;

@@ -161,6 +161,8 @@ bool BonnRouteDRParams::set(const std::string& name, const double value)
     critical_nets = v != 0;
   } else if (name == "tail_batch") {
     tail_batch = std::max(0, v);
+  } else if (name == "tail_threads") {
+    tail_threads = std::max(0, v);
   } else if (name == "partitions") {
     partitions = v != 0;
   } else if (name == "partition_regions") {
@@ -4190,12 +4192,16 @@ void BonnRouteDR::routeSpeculative(const std::vector<int>& order,
                                    std::vector<int>& failed,
                                    const char* stage)
 {
-  const int threads = static_cast<int>(workers_.size());
+  const int threads
+      = params_.tail_threads > 0
+            ? std::min(params_.tail_threads, static_cast<int>(workers_.size()))
+            : static_cast<int>(workers_.size());
   const size_t batch_size = static_cast<size_t>(params_.tail_batch);
   std::deque<int> queue(order.begin(), order.end());
   std::vector<int> batch;
   std::vector<char> ok;
   std::vector<double> busy;
+  std::vector<int64_t> settled;
   std::vector<RShape> shapes;
   int64_t batches = 0;
   int64_t conflicts = 0;
@@ -4206,6 +4212,11 @@ void BonnRouteDR::routeSpeculative(const std::vector<int>& order,
   double flush_seconds = 0;
   double wall_total = 0;
   double busy_total = 0;
+  // Balance of the batches: the longest search of each batch, the thread
+  // time idle at the batch barriers, and every search time of the stage.
+  double longest_total = 0;
+  double idle_total = 0;
+  std::vector<double> search_times;
   while (!queue.empty()) {
     batch.clear();
     while (!queue.empty() && batch.size() < batch_size) {
@@ -4214,22 +4225,43 @@ void BonnRouteDR::routeSpeculative(const std::vector<int>& order,
     }
     ok.assign(batch.size(), 0);
     busy.assign(batch.size(), 0);
+    settled.assign(batch.size(), 0);
     const double wall_start = omp_get_wtime();
     // Nothing writes the routing space while the batch is searched.
 #pragma omp parallel for num_threads(threads) schedule(dynamic, 1)
     for (int k = 0; k < static_cast<int>(batch.size()); k++) {
       Worker& w = workers_[omp_get_thread_num()];
       const double start = omp_get_wtime();
+      const int64_t settled_before = w.settled;
       w.speculative = true;
       ok[k] = connect(nets_[batch[k]], false, w);
       w.speculative = false;
+      settled[k] = w.settled - settled_before;
       busy[k] = omp_get_wtime() - start;
     }
     const double wall = omp_get_wtime() - wall_start;
     wall_total += wall;
+    double batch_busy = 0;
+    double longest = 0;
     for (const double b : busy) {
-      busy_total += b;
+      batch_busy += b;
+      longest = std::max(longest, b);
+      search_times.push_back(b);
     }
+    busy_total += batch_busy;
+    longest_total += longest;
+    idle_total += wall * threads - batch_busy;
+    debugPrint(logger_,
+               utl::DRT,
+               "bonnroute_tail",
+               1,
+               "tail batch {} nets {} wall_ms {:.3f} longest_ms {:.3f} "
+               "busy_ms {:.3f}",
+               batches,
+               batch.size(),
+               1e3 * wall,
+               1e3 * longest,
+               1e3 * batch_busy);
     // Commit in net order. Each route was legal on the routing space at the
     // start of the batch, so only commits earlier in the batch can conflict
     // with it. The first committed net of a batch is never checked, which
@@ -4248,54 +4280,83 @@ void BonnRouteDR::routeSpeculative(const std::vector<int>& order,
     std::vector<odb::Rect> committed_boxes;
     for (size_t k = 0; k < batch.size(); k++) {
       NetData& net = nets_[batch[k]];
+      // Per-net trace: 0 failed, 1 committed, 2 conflict; exact check run.
+      int outcome = 0;
+      bool exact = false;
       if (!ok[k]) {
         net.wires.clear();
         net.vias.clear();
         failed.push_back(net.id);
-        continue;
-      }
-      bool clash = false;
-      if (!committed_boxes.empty()) {
-        shapesOf(net, shapes);
-        odb::Rect box;
-        box.mergeInit();
-        for (const RShape& shape : shapes) {
-          box.merge(shape.rect);
+      } else {
+        bool clash = false;
+        if (!committed_boxes.empty()) {
+          shapesOf(net, shapes);
+          odb::Rect box;
+          box.mergeInit();
+          for (const RShape& shape : shapes) {
+            box.merge(shape.rect);
+          }
+          const bool near = !box.isInverted()
+                            && std::ranges::any_of(
+                                committed_boxes, [&](const odb::Rect& other) {
+                                  return other.intersects(box);
+                                });
+          if (near) {
+            const double check_start = omp_get_wtime();
+            clash = std::ranges::any_of(shapes, [&](const RShape& shape) {
+              return shapeConflicts(shape, net.id);
+            });
+            check_seconds += omp_get_wtime() - check_start;
+            checked++;
+            exact = true;
+          }
         }
-        const bool near = !box.isInverted()
-                          && std::ranges::any_of(committed_boxes,
-                                                 [&](const odb::Rect& other) {
-                                                   return other.intersects(box);
-                                                 });
-        if (near) {
-          const double check_start = omp_get_wtime();
-          clash = std::ranges::any_of(shapes, [&](const RShape& shape) {
-            return shapeConflicts(shape, net.id);
-          });
-          check_seconds += omp_get_wtime() - check_start;
-          checked++;
+        if (clash) {
+          net.wires.clear();
+          net.vias.clear();
+          net.pin_points.clear();
+          retry.push_back(net.id);
+          conflicts++;
+          outcome = 2;
+        } else {
+          commitNet(net, nullptr);
+          setReservations(net, false, nullptr, &released);
+          odb::Rect box;
+          box.mergeInit();
+          for (const RShape& shape : net.shapes) {
+            box.merge(shape.rect);
+          }
+          if (!box.isInverted()) {
+            box.bloat(static_cast<int>(interaction_reach_), box);
+            committed_boxes.push_back(box);
+          }
+          nets++;
+          outcome = 1;
         }
       }
-      if (clash) {
-        net.wires.clear();
-        net.vias.clear();
-        net.pin_points.clear();
-        retry.push_back(net.id);
-        conflicts++;
-        continue;
+      if (logger_->debugCheck(utl::DRT, "bonnroute_tail", 1)) {
+        int xlo, ylo, xhi, yhi;
+        netTileBox(net, xlo, ylo, xhi, yhi);
+        logger_->debug(utl::DRT,
+                       "bonnroute_tail",
+                       "tail net batch {} slot {} net {} search_ms {:.3f} "
+                       "settled {} outcome {} exact {} box {} {} {} {} "
+                       "guide_tiles {} terms {} hpwl {}",
+                       batches,
+                       k,
+                       net.id,
+                       1e3 * busy[k],
+                       settled[k],
+                       outcome,
+                       exact ? 1 : 0,
+                       std::max(xlo, 0),
+                       std::max(ylo, 0),
+                       std::min(xhi, tiles_x_ - 1),
+                       std::min(yhi, tiles_y_ - 1),
+                       net.guide_tiles.size(),
+                       net.terms.size(),
+                       net.hpwl);
       }
-      commitNet(net, nullptr);
-      setReservations(net, false, nullptr, &released);
-      odb::Rect box;
-      box.mergeInit();
-      for (const RShape& shape : net.shapes) {
-        box.merge(shape.rect);
-      }
-      if (!box.isInverted()) {
-        box.bloat(static_cast<int>(interaction_reach_), box);
-        committed_boxes.push_back(box);
-      }
-      nets++;
     }
     const double flush_start = omp_get_wtime();
     fast_builder_.flush(released);
@@ -4329,6 +4390,66 @@ void BonnRouteDR::routeSpeculative(const std::vector<int>& order,
         checked,
         check_seconds,
         flush_seconds);
+    std::ranges::sort(search_times);
+    auto quantile_ms = [&](const double q) {
+      if (search_times.empty()) {
+        return 0.0;
+      }
+      const size_t i = std::min(
+          search_times.size() - 1,
+          static_cast<size_t>(q * static_cast<double>(search_times.size())));
+      return 1e3 * search_times[i];
+    };
+    // Routing digest of all nets after the stage (FNV-1a over net id,
+    // routed flag, wires, vias and pin points): equal runs print equal
+    // digests, whatever the thread count.
+    uint64_t digest = 1469598103934665603ULL;
+    auto add = [&digest](const int64_t v) {
+      digest ^= static_cast<uint64_t>(v);
+      digest *= 1099511628211ULL;
+    };
+    for (const NetData& net : nets_) {
+      add(net.id);
+      add(net.routed);
+      for (const OutWire& w : net.wires) {
+        add(w.layer);
+        add(w.begin.x());
+        add(w.begin.y());
+        add(w.end.x());
+        add(w.end.y());
+        add(w.patch);
+      }
+      for (const OutVia& v : net.vias) {
+        add(v.def->getCutLayerNum());
+        add(static_cast<int64_t>(std::hash<std::string>()(v.def->getName())));
+        add(v.point.x());
+        add(v.point.y());
+      }
+      for (const auto& [layer, p] : net.pin_points) {
+        add(layer);
+        add(p.x());
+        add(p.y());
+      }
+    }
+    logger_->info(
+        utl::DRT,
+        9125,
+        "BonnRoute {} speculative batch balance on {} threads: longest "
+        "search per batch {:.2f}s in total ({:.0f}% of the parallel search "
+        "wall), idle thread time at the batch barriers {:.2f}s; {} searches, "
+        "search time p50 {:.1f} ms, p90 {:.1f} ms, p99 {:.1f} ms, max {:.1f} "
+        "ms; routing digest {:016x}.",
+        stage,
+        threads,
+        longest_total,
+        wall_total > 0 ? 100.0 * longest_total / wall_total : 0.0,
+        idle_total,
+        search_times.size(),
+        quantile_ms(0.5),
+        quantile_ms(0.9),
+        quantile_ms(0.99),
+        search_times.empty() ? 0.0 : 1e3 * search_times.back(),
+        digest);
   }
 }
 
