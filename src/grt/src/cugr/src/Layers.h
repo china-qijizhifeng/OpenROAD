@@ -30,6 +30,7 @@ class MetalLayer
   // layer, i.e. the via from this layer to the next routing layer up.
   double getViaResistance() const { return via_resistance_; }
   int getTrackLocation(int track_index) const;
+  int getNumTracks() const { return num_tracks_; }
   IntervalT rangeSearchTracks(const IntervalT& loc_range,
                               bool include_bound = true) const;
 
@@ -37,6 +38,15 @@ class MetalLayer
   int getMinLength() const { return min_length_; }
   int getDefaultSpacing() const { return default_spacing_; }
   int getParallelSpacing(int width, int length = 0) const;
+  const std::vector<int>& getParallelWidths() const { return parallel_width_; }
+  const std::vector<int>& getParallelLengths() const
+  {
+    return parallel_length_;
+  }
+  const std::vector<std::vector<int>>& getParallelSpacingTable() const
+  {
+    return parallel_spacing_;
+  }
   int getMaxEolSpacing() const { return max_eol_spacing_; }
   float getAdjustment() const { return adjustment_; }
   void setAdjustment(float adjustment) { adjustment_ = adjustment; }

@@ -308,6 +308,18 @@ class GridGraph
   // BonnRoute: grid cells (layer, x, y) of all ODB access points of one pin
   // (all APs, not only the preferred one); empty if the pin has none.
   std::vector<GRPoint> pinAccessCells(const GRNet* net, int pin_idx) const;
+  // BonnRoute: DBU locations and layer indices of the same access points,
+  // in the same order as pinAccessCells.
+  std::vector<std::pair<odb::Point, int>> pinAccessLocations(const GRNet* net,
+                                                             int pin_idx) const;
+  // BonnRoute capacity estimation (Sec. 2.5) replaces edge capacities.
+  void setEdgeCapacity(int layer_index, int x, int y, CapacityT capacity);
+  const Design* getDesign() const { return design_; }
+  int getMinRoutingLayer() const { return constants_.min_routing_layer; }
+  int getGridCenter(int dimension, int index) const
+  {
+    return grid_centers_[dimension][index];
+  }
   // Visits every edge charge addTreeUsage would deposit for a native tree;
   // `demand` already includes the layer's NDR factor.
   void forEachTreeDemand(

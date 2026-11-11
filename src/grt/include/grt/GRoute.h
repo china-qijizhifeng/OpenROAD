@@ -28,6 +28,9 @@ struct GSegment
   int final_layer;
   bool is_jumper;
   bool is_3d_route = false;
+  // Connects two cells of one pin through the pin's own metal (BonnRoute
+  // pin links); not counted as routed wirelength.
+  bool is_pin_bridge = false;
   GSegment() = default;
   GSegment(int x0, int y0, int l0, int x1, int y1, int l1, bool jumper = false);
   bool isVia() const { return (init_x == final_x && init_y == final_y); }
