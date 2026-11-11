@@ -406,8 +406,54 @@ class BonnRouteDR
     int64_t macro_pins = 0;
     int64_t member_regenerated = 0;
     std::vector<std::string> empty_examples;
+    // Thread seconds of the catalogue steps besides the search: on-track
+    // targets, obstacle collection, blockage grid, exact path checks, and
+    // the conflict-free selection.
+    double target_seconds = 0;
+    double blockage_seconds = 0;
+    double grid_seconds = 0;
+    double check_seconds = 0;
+    double selection_seconds = 0;
     void add(const AccessStats& o);
   };
+  // Wall seconds of the steps of buildOffTrackAccess (verbose log).
+  struct AccessPhases
+  {
+    double pin_map = 0;
+    double signatures = 0;
+    double classification = 0;
+    double class_catalogues = 0;
+    double members = 0;
+    double member_mapping = 0;
+    double member_legality = 0;
+    double member_catalogues = 0;
+    double member_solve = 0;
+    double member_reservations = 0;
+    double top_level_pins = 0;
+  };
+  AccessPhases access_phases_;
+  // Wall seconds of the setup steps of main() (verbose log).
+  struct SetupPhases
+  {
+    double track_graph = 0;
+    double routing_space = 0;
+    double spreading = 0;
+    double workers = 0;
+    double nets = 0;
+    double fixed_insert = 0;
+    double fast_grid_rebuild = 0;
+    double compaction = 0;
+    double same_net_rules = 0;
+    double guide_tiles_and_stubs = 0;
+    double offtrack_access = 0;
+    double stub_reservations = 0;
+    double input_wires = 0;
+  };
+  SetupPhases setup_phases_;
+  // Fingerprints of the access catalogues, primaries and reservations after
+  // setup, and of the routing before writeNets (verbose log).
+  uint64_t accessDigest() const;
+  uint64_t routingDigest() const;
   void buildSameNetRules();
   // pre_skip: net skip flags before buildAccess.
   void buildOffTrackAccess(const std::vector<char>& pre_skip);

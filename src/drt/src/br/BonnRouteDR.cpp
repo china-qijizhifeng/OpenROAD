@@ -1003,6 +1003,7 @@ void BonnRouteDR::buildFixed()
 {
   // Blockages and pins (Sec. 3.3 shape types); pins are owned by their net
   // and removed temporarily while it is connected (Sec. 4.4).
+  utl::Timer timer;
   frRegionQuery* rq = design_->getRegionQuery();
   const odb::Rect die = design_->getTopBlock()->getDieBox();
   const int num_fr = static_cast<int>(z_of_fr_.size());
@@ -1039,9 +1040,14 @@ void BonnRouteDR::buildFixed()
     }
   }
   bulk_insert_ = false;
+  setup_phases_.fixed_insert = timer.elapsed();
   rebuildFastGrid();
+  setup_phases_.fast_grid_rebuild
+      = timer.elapsed() - setup_phases_.fixed_insert;
   shape_grid_.compact();
   grid_.compact();
+  setup_phases_.compaction = timer.elapsed() - setup_phases_.fixed_insert
+                             - setup_phases_.fast_grid_rebuild;
 }
 
 bool BonnRouteDR::treeConflicts(const RTree<int>& tree,
@@ -1536,6 +1542,11 @@ void BonnRouteDR::AccessStats::add(const AccessStats& o)
   empty_rejected += o.empty_rejected;
   macro_pins += o.macro_pins;
   member_regenerated += o.member_regenerated;
+  target_seconds += o.target_seconds;
+  blockage_seconds += o.blockage_seconds;
+  grid_seconds += o.grid_seconds;
+  check_seconds += o.check_seconds;
+  selection_seconds += o.selection_seconds;
   for (const std::string& e : o.empty_examples) {
     if (empty_examples.size() < 10) {
       empty_examples.push_back(e);
@@ -1953,6 +1964,7 @@ void BonnRouteDR::offTrackCatalogue(const int net,
 {
   out.clear();
   stats.pins++;
+  utl::Timer step_timer;
   auto empty = [&](int64_t& reason, const char* why) {
     reason++;
     stats.empty++;
@@ -2091,10 +2103,12 @@ void BonnRouteDR::offTrackCatalogue(const int net,
       }
     }
   }
+  stats.target_seconds += step_timer.elapsed();
   if (targets.empty()) {
     empty(stats.empty_no_targets, "no usable on-track point");
     return;
   }
+  step_timer.reset();
   odb::Rect area = pin_box;
   for (const Target& t : targets) {
     area.merge(odb::Rect(t.p, t.p));
@@ -2169,8 +2183,11 @@ void BonnRouteDR::offTrackCatalogue(const int net,
     }
   }
   grid_in.borders.push_back(window);
+  stats.blockage_seconds += step_timer.elapsed();
+  step_timer.reset();
   const std::vector<br::BlockageGridLayer> grid
       = br::buildBlockageGrid(grid_in);
+  stats.grid_seconds += step_timer.elapsed();
   for (size_t s = 0; s < frs.size(); s++) {
     req.layers[s].grid = grid[s];
   }
@@ -2266,6 +2283,7 @@ void BonnRouteDR::offTrackCatalogue(const int net,
   stats.searches++;
   stats.grid_vertices += res.grid_vertices;
   stats.settled += res.settled;
+  step_timer.reset();
   for (const br::OffTrackPath& path : res.paths) {
     const Target& target = targets[path.target_id];
     AccessOption opt;
@@ -2354,6 +2372,7 @@ void BonnRouteDR::offTrackCatalogue(const int net,
       break;
     }
   }
+  stats.check_seconds += step_timer.elapsed();
   stats.paths += static_cast<int64_t>(out.size());
   if (out.empty()) {
     if (res.paths.empty()) {
@@ -2433,6 +2452,7 @@ std::vector<int> BonnRouteDR::choosePrimaries(
     const std::vector<int>& nets,
     AccessStats& stats) const
 {
+  utl::Timer selection_timer;
   const int n = static_cast<int>(catalogues.size());
   br::SelectionInput in;
   in.pins.resize(n);
@@ -2477,6 +2497,7 @@ std::vector<int> BonnRouteDR::choosePrimaries(
   stats.selections++;
   stats.selection_nodes += r.nodes;
   stats.selection_optimal += r.optimal;
+  stats.selection_seconds += selection_timer.elapsed();
   return r.choice;
 }
 
@@ -2486,6 +2507,8 @@ void BonnRouteDR::buildOffTrackAccess(const std::vector<char>& pre_skip)
   frBlock* block = design_->getTopBlock();
   frRegionQuery* rq = design_->getRegionQuery();
   AccessStats& stats = access_stats_;
+  AccessPhases& phases = access_phases_;
+  utl::Timer phase_timer;
   // Pins of the terms (same order as buildAccess).
   std::unordered_map<const frInstTerm*, std::pair<int, int>> term_of;
   std::vector<std::pair<int, int>> bterm_terms;
@@ -2536,6 +2559,8 @@ void BonnRouteDR::buildOffTrackAccess(const std::vector<char>& pre_skip)
       instances.push_back(std::move(ia));
     }
   }
+  phases.pin_map = phase_timer.elapsed();
+  phase_timer.reset();
   const int num_z = static_cast<int>(layers_.size());
   frCoord max_pitch = 0;
   br::GeoCoord max_tau = 1;
@@ -2639,6 +2664,8 @@ void BonnRouteDR::buildOffTrackAccess(const std::vector<char>& pre_skip)
     }
     ia.signature = sig.finish();
   }
+  phases.signatures = phase_timer.elapsed();
+  phase_timer.reset();
   br::CircuitClassTable table;
   std::vector<int> representative;
   for (int k = 0; k < static_cast<int>(instances.size()); k++) {
@@ -2652,6 +2679,8 @@ void BonnRouteDR::buildOffTrackAccess(const std::vector<char>& pre_skip)
   }
   stats.instances = static_cast<int64_t>(instances.size());
   stats.classes = table.numClasses();
+  phases.classification = phase_timer.elapsed();
+  phase_timer.reset();
   // Catalogues and conflict-free solution of each class representative,
   // against fixed shapes and pins only (preprocessing).
   struct ClassData
@@ -2677,9 +2706,14 @@ void BonnRouteDR::buildOffTrackAccess(const std::vector<char>& pre_skip)
     }
     cd.choice = choosePrimaries(cats, nets, class_stats[c]);
   }
+  AccessStats class_total;
   for (const AccessStats& s : class_stats) {
     stats.add(s);
+    class_total.add(s);
   }
+  phases.class_catalogues = phase_timer.elapsed();
+  phase_timer.reset();
+  utl::Timer step_timer;
   // Per instance: map the class solution, check it against the routing
   // space (reservations of earlier instances), re-solve if needed, and
   // reserve the primary paths.
@@ -2786,6 +2820,7 @@ void BonnRouteDR::buildOffTrackAccess(const std::vector<char>& pre_skip)
     std::vector<std::vector<AccessOption>> cats(n);
     std::vector<int> nets;
     bool mapped = true;
+    step_timer.reset();
     for (int p = 0; p < n; p++) {
       const auto [net, t] = ia.terms[p];
       nets.push_back(net);
@@ -2807,15 +2842,18 @@ void BonnRouteDR::buildOffTrackAccess(const std::vector<char>& pre_skip)
         break;
       }
     }
+    phases.member_mapping += step_timer.elapsed();
     if (!mapped) {
       // Equal signatures with unequal track positions outside the window or
       // a mapped start that is not an access point (other via); generate
       // this instance's catalogues directly.
       stats.mapping_failed++;
+      step_timer.reset();
       for (int p = 0; p < n; p++) {
         const auto [net, t] = ia.terms[p];
         offTrackCatalogue(net, nets_[net].terms[t], nullptr, cats[p], stats);
       }
+      phases.member_catalogues += step_timer.elapsed();
     }
     std::vector<int> choice = mapped ? cd.choice : std::vector<int>(n, -1);
     bool reuse = mapped;
@@ -2824,28 +2862,39 @@ void BonnRouteDR::buildOffTrackAccess(const std::vector<char>& pre_skip)
       // this member; a pin left without a legal path gets its own
       // catalogue.
       for (int p = 0; p < n; p++) {
-        if (cats[p].empty()
-            || std::ranges::any_of(cats[p], [&](const AccessOption& o) {
-                 return optionLegal(o, nets[p], nullptr);
-               })) {
+        step_timer.reset();
+        const bool any_legal
+            = cats[p].empty()
+              || std::ranges::any_of(cats[p], [&](const AccessOption& o) {
+                   return optionLegal(o, nets[p], nullptr);
+                 });
+        phases.member_legality += step_timer.elapsed();
+        if (any_legal) {
           continue;
         }
+        step_timer.reset();
         const auto [net, t] = ia.terms[p];
         offTrackCatalogue(net, nets_[net].terms[t], nullptr, cats[p], stats);
         stats.member_regenerated++;
         reuse = false;
+        phases.member_catalogues += step_timer.elapsed();
       }
     }
+    step_timer.reset();
     for (int p = 0; p < n && reuse; p++) {
       reuse = choice[p] < 0 ? cats[p].empty()
                             : optionLegal(cats[p][choice[p]], nets[p], nullptr);
     }
+    phases.member_legality += step_timer.elapsed();
     if (reuse) {
       stats.class_reused += k != rep;
     } else {
+      step_timer.reset();
       stats.reselected++;
       choice = solve(cats, nets);
+      phases.member_solve += step_timer.elapsed();
     }
+    step_timer.reset();
     for (int p = 0; p < n; p++) {
       const auto [net_id, t] = ia.terms[p];
       NetData& net = nets_[net_id];
@@ -2859,7 +2908,10 @@ void BonnRouteDR::buildOffTrackAccess(const std::vector<char>& pre_skip)
         reserve(net, term, choice[p]);
       }
     }
+    phases.member_reservations += step_timer.elapsed();
   }
+  phases.members = phase_timer.elapsed();
+  phase_timer.reset();
   // Top-level pins: catalogue and best feasible path each.
   for (const auto& [net_id, t] : bterm_terms) {
     NetData& net = nets_[net_id];
@@ -2876,6 +2928,7 @@ void BonnRouteDR::buildOffTrackAccess(const std::vector<char>& pre_skip)
       reserve(net, term, choice[0]);
     }
   }
+  phases.top_level_pins = phase_timer.elapsed();
   for (NetData& net : nets_) {
     if (pre_skip[net.id]) {
       continue;
@@ -2929,6 +2982,34 @@ void BonnRouteDR::buildOffTrackAccess(const std::vector<char>& pre_skip)
           }
           return list;
         }());
+    logger_->report(
+        "BonnRoute off-track access phases: pin map {:.2f}s, signatures "
+        "{:.2f}s, classification {:.2f}s, class catalogues {:.2f}s wall "
+        "({:.2f}s thread: targets {:.2f}s, blockages {:.2f}s, blockage grid "
+        "{:.2f}s, search {:.2f}s, path checks {:.2f}s, selection {:.2f}s), "
+        "members {:.2f}s (mapping {:.2f}s, legality {:.2f}s, own catalogues "
+        "{:.2f}s, re-solve {:.2f}s, reservations {:.2f}s), top-level pins "
+        "{:.2f}s.",
+        phases.pin_map,
+        phases.signatures,
+        phases.classification,
+        phases.class_catalogues,
+        class_total.target_seconds + class_total.blockage_seconds
+            + class_total.grid_seconds + class_total.search_seconds
+            + class_total.check_seconds + class_total.selection_seconds,
+        class_total.target_seconds,
+        class_total.blockage_seconds,
+        class_total.grid_seconds,
+        class_total.search_seconds,
+        class_total.check_seconds,
+        class_total.selection_seconds,
+        phases.members,
+        phases.member_mapping,
+        phases.member_legality,
+        phases.member_catalogues,
+        phases.member_solve,
+        phases.member_reservations,
+        phases.top_level_pins);
   }
 }
 
@@ -4682,6 +4763,106 @@ void BonnRouteDR::writeNets()
   }
 }
 
+namespace {
+
+// FNV-1a style 64-bit digest of integer sequences (log fingerprints of the
+// setup and routing results; equal runs print equal digests).
+struct Digest
+{
+  uint64_t value = 1469598103934665603ULL;
+  void add(const int64_t v)
+  {
+    value ^= static_cast<uint64_t>(v);
+    value *= 1099511628211ULL;
+  }
+  void add(const odb::Point& p)
+  {
+    add(p.x());
+    add(p.y());
+  }
+  void add(const odb::Rect& r)
+  {
+    add(r.xMin());
+    add(r.yMin());
+    add(r.xMax());
+    add(r.yMax());
+  }
+};
+
+}  // namespace
+
+uint64_t BonnRouteDR::accessDigest() const
+{
+  Digest d;
+  for (const NetData& net : nets_) {
+    d.add(net.id);
+    d.add(net.skip);
+    for (const Term& term : net.terms) {
+      d.add(static_cast<int64_t>(term.options.size()));
+      d.add(term.primary);
+      d.add(term.reservation_active);
+      for (const AccessOption& o : term.options) {
+        d.add(static_cast<int64_t>(o.vertex));
+        d.add(o.cost);
+        d.add(o.z);
+        d.add(o.planar);
+        d.add(o.ap);
+        d.add(o.ap_layer);
+        d.add(o.offtrack);
+        d.add(o.pin_via);
+        for (const OutWire& w : o.wires) {
+          d.add(w.layer);
+          d.add(w.begin);
+          d.add(w.end);
+          d.add(w.patch);
+        }
+        for (const OutVia& v : o.vias) {
+          d.add(v.def->getCutLayerNum());
+          d.add(
+              static_cast<int64_t>(std::hash<std::string>()(v.def->getName())));
+          d.add(v.point);
+        }
+        for (const br::RouteNode& n : o.route) {
+          d.add(n.layer);
+          d.add(n.p.x);
+          d.add(n.p.y);
+        }
+      }
+      for (const RShape& r : term.reservation) {
+        d.add(r.layer);
+        d.add(r.rect);
+        d.add(static_cast<int64_t>(r.role));
+      }
+    }
+  }
+  return d.value;
+}
+
+uint64_t BonnRouteDR::routingDigest() const
+{
+  Digest d;
+  for (const NetData& net : nets_) {
+    d.add(net.id);
+    d.add(net.routed);
+    for (const OutWire& w : net.wires) {
+      d.add(w.layer);
+      d.add(w.begin);
+      d.add(w.end);
+      d.add(w.patch);
+    }
+    for (const OutVia& v : net.vias) {
+      d.add(v.def->getCutLayerNum());
+      d.add(static_cast<int64_t>(std::hash<std::string>()(v.def->getName())));
+      d.add(v.point);
+    }
+    for (const auto& [layer, p] : net.pin_points) {
+      d.add(layer);
+      d.add(p);
+    }
+  }
+  return d.value;
+}
+
 void BonnRouteDR::main()
 {
   utl::Timer timer;
@@ -4697,17 +4878,28 @@ void BonnRouteDR::main()
                   "use_intervals is ignored.");
     params_.use_intervals = false;
   }
+  SetupPhases& phases = setup_phases_;
+  utl::Timer phase_timer;
+  // Wall seconds since the previous lap.
+  auto lap = [&phase_timer]() {
+    const double t = phase_timer.elapsed();
+    phase_timer.reset();
+    return t;
+  };
   buildTrackGraph();
+  phases.track_graph = lap();
   if (layers_.empty()) {
     return;
   }
   buildRoutingSpace();
+  phases.routing_space = lap();
   if (params_.spreading) {
     buildSpreadTiles();
     if (params_.spread_from_extra_space) {
       loadExtraSpace();
     }
   }
+  phases.spreading = lap();
   workers_.resize(std::max(1, router_cfg_->MAX_THREADS));
   for (Worker& w : workers_) {
     w.region.init(graph_.numLayers(), tiles_x_, tiles_y_);
@@ -4717,9 +4909,13 @@ void BonnRouteDR::main()
       w.search = std::make_unique<br::PathSearch>(graph_, grid_);
     }
   }
+  phases.workers = lap();
   buildNets();
+  phases.nets = lap();
   buildFixed();
+  lap();
   buildSameNetRules();
+  phases.same_net_rules = lap();
   std::vector<char> pre_skip(nets_.size());
   for (const NetData& net : nets_) {
     pre_skip[net.id] = net.skip;
@@ -4730,19 +4926,47 @@ void BonnRouteDR::main()
       buildAccess(net);
     }
   }
+  phases.guide_tiles_and_stubs = lap();
   if (params_.offtrack_access) {
     buildOffTrackAccess(pre_skip);
+    phases.offtrack_access = lap();
   } else {
     for (NetData& net : nets_) {
       if (!net.skip) {
         reserveAccess(net);
       }
     }
+    phases.stub_reservations = lap();
   }
   if (params_.reservations) {
     reserveInputWires();
   }
+  phases.input_wires = lap();
   const double setup_time = timer.elapsed();
+  if (params_.verbose) {
+    logger_->report(
+        "BonnRoute DR setup phases: track graph {:.2f}s, routing space "
+        "{:.2f}s, spreading tiles {:.2f}s, workers {:.2f}s, nets {:.2f}s, "
+        "fixed shapes {:.2f}s, fast grid rebuild {:.2f}s, compaction "
+        "{:.2f}s, same-net rules {:.2f}s, guide tiles and access stubs "
+        "{:.2f}s, off-track access {:.2f}s, stub reservations {:.2f}s, input "
+        "wire reservations {:.2f}s; setup {:.2f}s.",
+        phases.track_graph,
+        phases.routing_space,
+        phases.spreading,
+        phases.workers,
+        phases.nets,
+        phases.fixed_insert,
+        phases.fast_grid_rebuild,
+        phases.compaction,
+        phases.same_net_rules,
+        phases.guide_tiles_and_stubs,
+        phases.offtrack_access,
+        phases.stub_reservations,
+        phases.input_wires,
+        setup_time);
+    logger_->report("BonnRoute DR access digest {:016x}.", accessDigest());
+  }
   std::vector<int> order;
   for (const NetData& net : nets_) {
     if (!net.skip) {
@@ -4771,6 +4995,9 @@ void BonnRouteDR::main()
   // FlexDR handles unresolved nets unless serial rip-up is requested.
   if (params_.ripup) {
     routeRipupQueue(failed_first);
+  }
+  if (params_.verbose) {
+    logger_->report("BonnRoute DR routing digest {:016x}.", routingDigest());
   }
   writeNets();
   int routed = 0;
