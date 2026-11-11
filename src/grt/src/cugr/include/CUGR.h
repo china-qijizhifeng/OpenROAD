@@ -285,6 +285,8 @@ class CUGR
   void patternRoute(std::vector<int>& net_indices);
   void bonnRoute(std::vector<int>& net_indices);
   void reportBonnRouteCapacityOverflow() const;
+  void exportBonnRouteExtraSpace(bool incremental,
+                                 const std::vector<int>& net_indices);
   // Layers (horizontal, vertical) of the bridges exported for pin links.
   std::array<int, 2> pinBridgeLayers(const GRNet* net) const;
   // Re-route the critical nets on real 3D-tree resistance, right after the
@@ -443,6 +445,14 @@ class CUGR
   // CUGR's edge capacities before BonnRoute's Sec. 2.5 estimate replaced
   // them (GridGraph::edgeFlatIndex order); empty otherwise.
   std::vector<double> bonnroute_cugr_capacity_;
+  // Extra space of the BonnRoute trees, encoded, until the end of route().
+  struct BonnRouteSpace
+  {
+    GRNet* net;
+    std::shared_ptr<GRTreeNode> tree;
+    std::string encoded;
+  };
+  std::vector<BonnRouteSpace> bonnroute_space_;
 
   // Suppresses the global parasitics re-estimate during incremental routing.
   bool incremental_routing_ = false;

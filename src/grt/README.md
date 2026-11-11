@@ -99,6 +99,11 @@ VLSI Routing*, TODAES 18(2), 2013, Sections 2.1–2.5.
 | `capacity_single_tile_layers`, `capacity_single_tile_margin` | `2`, `0.25` | Layers above the lowest routable one, and the gcell growth fraction, available to single-gcell nets. |
 | `full_graph` | `0` | Search the whole grid instead of the expanded bounding box. |
 | `maze_cleanup` | `1` | Run CUGR maze routing and iterative rip-up and reroute after BonnRoute. |
+| `extra_space` | `0` (`1` in profiles `2013-reimpl` and `2021`) | Extra space assignment s(n, e) with the power and yield resources (Section 2.1, Fig. 1). |
+| `extra_space_step`, `extra_space_max` | `0.5`, `2.0` | Grid of extra-space values in tracks: 0, step, ..., max. |
+| `power_target`, `yield_target` | `1.0`, `1.0` | Bound of the power / yield resource as a multiple of its congestion-free value without extra space; a value `<= 0` drops the resource. |
+| `coupling_fraction` | `0.5` | Share of a wire's capacitance per length that couples to the neighbor wires at minimum spacing. |
+| `resource_adapt` | `1` | Raise a power / yield bound when that resource's load exceeds the larger of 1 and the largest edge load (checked after phase 1 and every 25 phases). |
 | `verbose` | `1` | Print resource-sharing and oracle-cost diagnostics. |
 
 For an experiment with full-grid searches, sequential price updates and no
@@ -113,8 +118,30 @@ global_route -bonnroute -allow_congestion -guide_file bonnroute.guide
 
 These settings isolate more of the resource-sharing algorithm, but do not
 reproduce every feature of the paper. Resources are wire edges with CUGR's
-via-pad demand plus a wirelength/via objective. Extra-space optimization and
-power/yield resources are absent.
+via-pad demand plus a wirelength/via objective.
+
+With `extra_space 1` a net may take extra space s >= 0 (in tracks) next to
+its wire on each edge it uses: the edge then carries w(n, e) + s, where w is
+the net's NDR factor. Two more resources follow Fig. 1 of the paper, both
+convex and decreasing in s: power, the wire's switched capacitance (ground
+capacitance plus coupling to both neighbors, inversely proportional to the
+gap pitch - width + s * pitch / 2), and yield loss, the critical area of
+shorts to both neighbors (x0^2 / gap for a defect density proportional to
+x0^2 / x^3) plus that of opens (x0^2 / (2 width)). The capacitance per
+length is odb's area capacitance times the width plus twice its edge
+capacitance (the LEF `CPERSQDIST` / `EDGECAPACITANCE` values, or what
+`set_layer_rc` stores, which keeps the whole wire capacitance in the area
+term), split by `coupling_fraction` into coupling and ground; x0 is the smallest
+width or gap of the routing layers; all nets have activity 1. The oracle
+prices each wire edge with the s that minimizes its cost, in closed form on
+the grid of s values, and the candidate keeps s through rounding and
+re-choosing. The power and yield bounds start at their targets times the
+congestion-free value and are adapted as described for `resource_adapt`.
+After rounding, the extra space of each edge is scaled down to the capacity
+left after all wires; CUGR's demand holds the wires only. Detailed routing
+reads the result from the net property defined in
+`include/grt/BonnRouteExtraSpace.h`; nets that CUGR's clean-up reroutes keep
+no extra space.
 
 A pin's cells are joined at zero cost, so branches of one net can attach to
 different cells of the same pin. The routing tree keeps such a connection as

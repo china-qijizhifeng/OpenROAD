@@ -6,6 +6,8 @@
 // zero-cost cliques) and the capacity estimate of Sec. 2.5.
 
 #include <array>
+#include <cstdint>
+#include <map>
 #include <memory>
 #include <set>
 #include <string>
@@ -20,6 +22,7 @@
 #include "GRTree.h"
 #include "GridGraph.h"
 #include "geo.h"
+#include "grt/BonnRouteExtraSpace.h"
 #include "gtest/gtest.h"
 #include "odb/PtrSetMap.h"
 #include "odb/db.h"
@@ -28,6 +31,44 @@
 #include "utl/Logger.h"
 
 namespace grt {
+
+// Reads BonnRouteGlobal's committed candidates and statistics.
+class BonnRouteTestPeer
+{
+ public:
+  // (resource, use) of the chosen candidate of net `index`, and its extra
+  // space per edge resource.
+  static std::vector<std::pair<uint32_t, double>> usage(
+      const BonnRouteGlobal& router,
+      int index)
+  {
+    const auto& state = router.states_[index];
+    return state.candidates[state.chosen].usage;
+  }
+  static std::vector<std::pair<uint32_t, float>> space(
+      const BonnRouteGlobal& router,
+      int index)
+  {
+    const auto& state = router.states_[index];
+    return state.candidates[state.chosen].space;
+  }
+  static int64_t costChecks(const BonnRouteGlobal& router)
+  {
+    return router.cost_checks_;
+  }
+  static int64_t costMismatches(const BonnRouteGlobal& router)
+  {
+    return router.cost_mismatches_;
+  }
+  static uint32_t edgeIndex(const BonnRouteGlobal& router,
+                            int layer,
+                            int x,
+                            int y)
+  {
+    return router.edgeIndex(layer, x, y);
+  }
+};
+
 namespace {
 
 // 9000 x 6000 die, M1 (V) / M2 (H) / M3 (V), all with a 100 pitch, tracks at
@@ -290,6 +331,111 @@ TEST(BonnRoutePinBridge, PlanarRunsUseTheGivenRoutableLayers)
 INSTANTIATE_TEST_SUITE_P(CapacityModels,
                          BonnRoutePinModel,
                          testing::Values(0, 1));
+
+class BonnRouteExtraSpace : public BonnRouteModels,
+                            public testing::WithParamInterface<bool>
+{
+};
+
+TEST_P(BonnRouteExtraSpace, EdgeUseIsWidthPlusSpace)
+{
+  // A straight M2 connection from cell (0, 1) to cell (3, 1). Small power
+  // and yield bounds make their prices dominate the space price, so every
+  // wire edge takes the largest extra space (Sec. 2.1, Fig. 1).
+  addNet("n", {{1, 100, 1600, 140, 1640}, {1, 4600, 1600, 4640, 1640}});
+  build();
+  const bool extra = GetParam();
+  BonnRouteParams params;
+  params.phases = 2;
+  params.repair_passes = 0;
+  params.verbose = false;
+  params.full_graph = true;
+  params.capacity_model = 0;
+  params.concurrent_prices = false;
+  params.extra_space = extra;
+  params.extra_space_step = 0.5;
+  params.extra_space_max = 2.0;
+  params.power_target = 0.01;
+  params.yield_target = 0.01;
+  BonnRouteGlobal router(grid_.get(), {nets_.front().get()}, params, &logger_);
+  router.run();
+  const auto usage = BonnRouteTestPeer::usage(router, 0);
+  const auto space = BonnRouteTestPeer::space(router, 0);
+  auto use = [&](uint32_t r) {
+    for (const auto& [resource, d] : usage) {
+      if (resource == r) {
+        return d;
+      }
+    }
+    return 0.0;
+  };
+  for (int x = 0; x < 3; x++) {
+    const uint32_t r = BonnRouteTestPeer::edgeIndex(router, 1, x, 1);
+    const double s = extra ? 2.0 : 0.0;
+    // Capacity resource: w(n, e) + s(n, e) with w = 1 track.
+    EXPECT_DOUBLE_EQ(use(r), 1.0 + s) << x;
+  }
+  EXPECT_EQ(space.size(), extra ? 3u : 0u);
+  // The oracle's edge costs equal the candidate's priced resource use.
+  EXPECT_GT(BonnRouteTestPeer::costChecks(router), 0);
+  EXPECT_EQ(BonnRouteTestPeer::costMismatches(router), 0);
+  // Export for detailed routing: routing level 2 (M2), lower cells x 0..2.
+  const auto& exported = router.extraSpace();
+  if (extra) {
+    ASSERT_EQ(exported.size(), 1u);
+    EXPECT_EQ(exported.front().net, nets_.front().get());
+    EXPECT_EQ(exported.front().tree, nets_.front()->getRoutingTree());
+    const std::vector<bonnroute::ExtraSpaceEdge> expected{
+        {2, 0, 1, 2.0f}, {2, 1, 1, 2.0f}, {2, 2, 1, 2.0f}};
+    EXPECT_EQ(exported.front().edges, expected);
+  } else {
+    EXPECT_TRUE(exported.empty());
+  }
+}
+
+TEST_F(BonnRouteModels, ExtraSpaceIsTrimmedToTheCapacityLeft)
+{
+  // Twenty nets along the same row: capacity 15 tracks per M2 edge, plus M3
+  // around. Whatever the routes, no edge may hold more wire plus extra
+  // space than its capacity after trimming.
+  for (int i = 0; i < 20; i++) {
+    const int y = 1510 + 10 * i;
+    addNet("n" + std::to_string(i),
+           {{1, 100, y, 140, y + 5}, {1, 4600, y, 4640, y + 5}});
+  }
+  build();
+  BonnRouteParams params;
+  params.phases = 3;
+  params.repair_passes = 0;
+  params.verbose = false;
+  params.full_graph = true;
+  params.capacity_model = 0;
+  params.extra_space = true;
+  params.power_target = 0.01;
+  params.yield_target = 0.01;
+  std::vector<GRNet*> nets;
+  for (auto& net : nets_) {
+    nets.push_back(net.get());
+  }
+  BonnRouteGlobal router(grid_.get(), nets, params, &logger_);
+  router.run();
+  std::map<std::array<int, 3>, double> space;
+  for (const auto& ns : router.extraSpace()) {
+    for (const auto& e : ns.edges) {
+      space[{e.level - 1, e.x, e.y}] += e.space;
+      EXPECT_GT(e.space, 0.0f);
+      EXPECT_LE(e.space, 2.0f);
+    }
+  }
+  EXPECT_FALSE(space.empty());
+  for (const auto& [edge, s] : space) {
+    const GraphEdge ge = grid_->getEdge(edge[0], edge[1], edge[2]);
+    EXPECT_LE(ge.demand + s, ge.capacity + 1e-9)
+        << edge[0] << " " << edge[1] << " " << edge[2];
+  }
+}
+
+INSTANTIATE_TEST_SUITE_P(Enabled, BonnRouteExtraSpace, testing::Bool());
 
 TEST_F(BonnRouteModels, UnblockedEstimateCountsTracks)
 {

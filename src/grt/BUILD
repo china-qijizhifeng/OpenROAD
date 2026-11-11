@@ -48,6 +48,16 @@ cc_library(
     deps = ["//src/odb/src/db"],
 )
 
+# Extra space of BonnRoute global routing for detailed routing (odb
+# property format, header only).
+cc_library(
+    name = "bonnroute_extra_space",
+    hdrs = ["include/grt/BonnRouteExtraSpace.h"],
+    includes = [
+        "include",
+    ],
+)
+
 cc_library(
     name = "route_pt",
     hdrs = ["include/grt/RoutePt.h"],
@@ -101,6 +111,7 @@ cc_library(
     srcs = [
         "src/cugr/src/BonnRoute.cpp",
         "src/cugr/src/BonnRouteCapacity.cpp",
+        "src/cugr/src/BonnRouteResources.cpp",
         "src/cugr/src/CUGR.cpp",
         "src/cugr/src/Design.cpp",
         "src/cugr/src/GRNet.cpp",
@@ -120,6 +131,7 @@ cc_library(
         "src/cugr/include/CUGR.h",
         "src/cugr/src/BonnRoute.h",
         "src/cugr/src/BonnRouteCapacity.h",
+        "src/cugr/src/BonnRouteResources.h",
         "src/cugr/src/Design.h",
         "src/cugr/src/GRNet.h",
         "src/cugr/src/GRTree.h",
@@ -140,6 +152,7 @@ cc_library(
         "src/cugr/src",
     ],
     deps = [
+        ":bonnroute_extra_space",
         ":abstract-cugr",
         ":groute",
         "//src/dbSta",
