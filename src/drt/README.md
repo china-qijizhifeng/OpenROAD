@@ -149,6 +149,7 @@ set_bonnroute_dr_param name value
 | `discount_numerator` / `discount_denominator` | `3` / `4` | Cost factor of reserved edges for their own net. |
 | `reserve_min_layer` | `0` | Lowest track-graph layer whose input wires become reservations. |
 | `potential` | `0` | Future cost: `0` l1 bound of the 2013 paper; arXiv:2111.06169 potentials `1` l1 (Table 3), `2` simple model (Theorem 3), `3` general model on the search area with discounts (Section 4); `4` uses the general model only for connections whose guide path detours (Gester et al. 2013, Section 4.1), the l1 bound otherwise. |
+| `exact_future_cost` | `1` | The l1 future cost uses the exact via-stack cost to the nearest target layer (`lb_via` of Section 4.1) and the cheapest terminal cost of each target box; `0` uses the layer distance times the cheapest via. |
 | `potential_check` | `0` | Debug: repeat each search that used a potential with the l1 bound and report how many shortest path costs differ (expected 0). |
 | `potential_detour_tiles` | `2` | Detour, in GCells beyond the tile distance of its ends, from which `potential 4` uses the general model. |
 | `spreading` | `0` | Wire spreading (Section 4.2): in GCells whose global routing utilization is at most `spread_utilization` percent, a wire vertex beside an occupied track costs `spread_cost` pitches more. Reads the congestion that `global_route` stores in the database. Selects the vertex search. |

@@ -24,10 +24,24 @@ Cost PathSearch::futureCost(const int z, const Coord x, const Coord y) const
   for (const TargetBox& b : req_->target_boxes) {
     const Cost dx = std::max({0, b.xlo - x, x - b.xhi});
     const Cost dy = std::max({0, b.ylo - y, y - b.yhi});
-    const Cost dz = z < b.zlo ? b.zlo - z : (z > b.zhi ? z - b.zhi : 0);
-    best = std::min(best, (dx + dy) * min_wire_rate_ + dz * min_via_cost_);
+    best = std::min(best,
+                    (dx + dy) * min_wire_rate_ + viaBound(z, b)
+                        + (req_->exact_future_cost ? b.cost : 0));
   }
   return best;
+}
+
+Cost PathSearch::viaBound(const int z, const TargetBox& box) const
+{
+  if (z < box.zlo) {
+    return req_->exact_future_cost ? via_prefix_[box.zlo] - via_prefix_[z]
+                                   : (box.zlo - z) * min_via_cost_;
+  }
+  if (z > box.zhi) {
+    return req_->exact_future_cost ? via_prefix_[z] - via_prefix_[box.zhi]
+                                   : (z - box.zhi) * min_via_cost_;
+  }
+  return 0;
 }
 
 Cost PathSearch::spreadCost(const int z, const int i, const int j) const
@@ -258,6 +272,10 @@ SearchResult PathSearch::run(const SearchRequest& request)
   res_ = &result;
   counters_ = {};
   min_via_cost_ = graph_.minViaCost();
+  via_prefix_.assign(graph_.numLayers(), 0);
+  for (int z = 1; z < graph_.numLayers(); z++) {
+    via_prefix_[z] = via_prefix_[z - 1] + graph_.via_cost[z - 1];
+  }
   min_wire_rate_ = request.discounts.empty()
                        ? graph_.wire_unit
                        : std::min(graph_.wire_unit, request.discount_rate);

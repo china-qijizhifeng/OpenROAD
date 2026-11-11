@@ -90,6 +90,8 @@ struct TargetBox
 {
   Coord xlo, ylo, xhi, yhi;
   int zlo, zhi;
+  // Smallest terminal cost of the targets in the box; added to the bound.
+  Cost cost = 0;
 };
 
 // Lower bound on the cost from a location to the targets of a search
@@ -142,6 +144,9 @@ struct SearchRequest
   // Interval property (ii) of Sec. 4.1 for vias as well as jogs. Without
   // it, intervals ignore via availability and relax vias per vertex.
   bool interval_via_property = true;
+  // pi_H of Sec. 4.1 with lb_via(z) = cost of the cheapest via stack from z
+  // to a target layer (exact); false keeps dz * (cheapest via).
+  bool exact_future_cost = true;
   // Optional future cost; nullptr selects the l1 bound pi_H on the target
   // boxes. Only the vertex search supports an oracle and discounts.
   const FutureCostOracle* future_cost = nullptr;
@@ -320,6 +325,8 @@ class PathSearch
   SearchResult* res_ = nullptr;
   mutable LegalityCounters counters_;
   Cost min_via_cost_ = 0;
+  std::vector<Cost> via_prefix_;  // via_prefix_[z] = cost of vias 0 -> z
+  Cost viaBound(int z, const TargetBox& box) const;
   Cost min_wire_rate_ = 1;
 
   // Search window: per layer track range [i0, i0 + ni) and position range
@@ -464,6 +471,8 @@ class IntervalSearch
   SearchResult* res_ = nullptr;
   mutable LegalityCounters counters_;
   Cost min_via_cost_ = 0;
+  std::vector<Cost> via_prefix_;  // via_prefix_[z] = cost of vias 0 -> z
+  Cost viaBound(int z, const TargetBox& box) const;
 
   struct Window
   {

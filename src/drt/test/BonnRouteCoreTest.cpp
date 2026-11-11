@@ -415,11 +415,12 @@ static int randomCases(const int cases,
       g.decode(v, z, i, j);
       auto [x, y] = g.layers[z].point(i, j);
       q.targets.push_back({v, (Cost) (rng() % 100), t});
-      // Boxes may cover several targets.
+      // Boxes may cover several targets; their cost is the cheapest one.
       if (t == 0 || rng() % 2) {
-        q.target_boxes.push_back({x, y, x, y, z, z});
+        q.target_boxes.push_back({x, y, x, y, z, z, q.targets.back().cost});
       } else {
         auto& b = q.target_boxes.back();
+        b.cost = std::min(b.cost, q.targets.back().cost);
         b.xlo = std::min(b.xlo, x);
         b.xhi = std::max(b.xhi, x);
         b.ylo = std::min(b.ylo, y);

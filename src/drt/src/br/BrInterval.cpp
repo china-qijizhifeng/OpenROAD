@@ -24,10 +24,24 @@ Cost IntervalSearch::futureCost(const int z, const int i, const int j) const
   for (const TargetBox& b : req_->target_boxes) {
     const Cost dx = std::max({0, b.xlo - x, x - b.xhi});
     const Cost dy = std::max({0, b.ylo - y, y - b.yhi});
-    const Cost dz = z < b.zlo ? b.zlo - z : (z > b.zhi ? z - b.zhi : 0);
-    best = std::min(best, dx + dy + dz * min_via_cost_);
+    best = std::min(
+        best,
+        dx + dy + viaBound(z, b) + (req_->exact_future_cost ? b.cost : 0));
   }
   return best;
+}
+
+Cost IntervalSearch::viaBound(const int z, const TargetBox& box) const
+{
+  if (z < box.zlo) {
+    return req_->exact_future_cost ? via_prefix_[box.zlo] - via_prefix_[z]
+                                   : (box.zlo - z) * min_via_cost_;
+  }
+  if (z > box.zhi) {
+    return req_->exact_future_cost ? via_prefix_[z] - via_prefix_[box.zhi]
+                                   : (z - box.zhi) * min_via_cost_;
+  }
+  return 0;
 }
 
 bool IntervalSearch::usableZero(const size_t v, const Kind k) const
@@ -383,7 +397,11 @@ void IntervalSearch::process(const int id, const Cost delta)
     inWindow(z, i, ja, li);
     if (labels_[li].target_stamp == epoch_) {
       const auto& t = req_->targets[labels_[li].target_index];
-      heap_.push_back(Event{delta + t.cost, 0, -1, labels_[li].target_index});
+      // delta includes pi(t) <= t.cost (the box cost is the cheapest
+      // terminal cost), so the sink key stays >= delta.
+      const Cost pi_t = intervals_[id].futureCost(layer, ja);
+      heap_.push_back(
+          Event{delta - pi_t + t.cost, 0, -1, labels_[li].target_index});
       std::push_heap(heap_.begin(), heap_.end(), std::greater<>());
       res_->heap_pushes++;
     }
@@ -507,6 +525,10 @@ SearchResult IntervalSearch::run(const SearchRequest& request)
   res_ = &result;
   counters_ = {};
   min_via_cost_ = graph_.minViaCost();
+  via_prefix_.assign(graph_.numLayers(), 0);
+  for (int z = 1; z < graph_.numLayers(); z++) {
+    via_prefix_[z] = via_prefix_[z - 1] + graph_.via_cost[z - 1];
+  }
   heap_.clear();
   intervals_.clear();
   // Search window over the region and the terminals (as in PathSearch).
