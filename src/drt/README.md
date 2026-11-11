@@ -127,8 +127,8 @@ set_bonnroute_dr_param name value
 | `pin_cost` | `2` | Extra cost of a non-preferred access point, in pitches. |
 | `layer_dilation` | `1` | Extra routing layers around a guide. |
 | `retry_dilation` | `2` | Extra guide tiles for a retry. |
-| `use_intervals` | `1` | Use interval label sets; `0` selects the vertex-search reference. |
-| `ripup` | `1` | Enable the rip-up phase for failed nets. |
+| `use_intervals` | `0` | Use vertex search by default; `1` selects interval label sets. |
+| `ripup` | `0` | Leave unresolved nets to FlexDR by default; `1` enables serial rip-up and rerouting. |
 | `verbose` | `1` | Print coverage and search statistics. |
 
 The interval search maintains reduced-distance label envelopes on tracks,
@@ -144,6 +144,11 @@ checker, off-track blockage-grid search, or blockage-aware future cost.
 Unrouted nets and rule violations are handled by FlexDR. Final DRC, wirelength
 and runtime therefore describe the combined flow. The log reports BonnRoute's
 own routed/skipped/failed counts, search effort and elapsed time separately.
+
+By default, nets unresolved after the parallel phase go straight to FlexDR.
+If serial rip-up is enabled, removing a committed route can open a clean
+route for a previously failed net, so the serial queue still retries those
+nets.
 
 The database-independent search core has a Bazel regression target:
 

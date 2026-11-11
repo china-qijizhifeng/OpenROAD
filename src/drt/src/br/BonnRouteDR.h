@@ -48,8 +48,8 @@ struct BonnRouteDRParams
   // Routing area: guide tiles plus this many adjacent layers / tiles.
   int layer_dilation = 1;
   int retry_dilation = 2;
-  bool use_intervals = true;
-  bool ripup = true;
+  bool use_intervals = false;
+  bool ripup = false;
   bool verbose = true;
 
   bool set(const std::string& name, double value);
@@ -150,8 +150,12 @@ class BonnRouteDR
   void buildNets();
   void buildAccess(NetData& net);
   void reserveAccess(NetData& net);
-  bool routeNet(NetData& net, bool allow_ripup);
-  bool connect(NetData& net, int dilation, bool ripup, Worker& worker);
+  bool connect(NetData& net, bool ripup, Worker& worker);
+  bool connectInRegion(NetData& net,
+                       int dilation,
+                       bool ripup,
+                       const std::vector<std::vector<char>>& valid,
+                       Worker& worker);
   void buildRegion(const NetData& net, int dilation, br::Region& region);
   // Tile box of everything the net's searches may touch, with halo.
   void netTileBox(const NetData& net,
@@ -159,7 +163,8 @@ class BonnRouteDR
                   int& ylo,
                   int& xhi,
                   int& yhi) const;
-  void routeParallel(std::vector<int>& order, std::vector<int>& failed);
+  void routeParallel(const std::vector<int>& order, std::vector<int>& failed);
+  void routeRipupQueue(const std::vector<int>& failed);
   void pathToGeometry(const std::vector<size_t>& path, NetData& net) const;
   void shapesOf(const NetData& net, std::vector<RShape>& shapes) const;
   void viaShapes(const OutVia& via, std::vector<RShape>& shapes) const;
@@ -202,9 +207,6 @@ class BonnRouteDR
 
   std::vector<NetData> nets_;
   std::unordered_map<const frNet*, int> net_index_;
-  // Nets ripped up by the last routeNet().
-  std::vector<int> pending_victims_;
-
   // Statistics.
   int64_t ripup_events_ = 0;
 };

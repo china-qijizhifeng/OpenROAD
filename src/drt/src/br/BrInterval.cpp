@@ -115,27 +115,17 @@ int IntervalSearch::buildInterval(const int z, const int i, const int j)
     }
     return usableZero(graph_.vertex(z, i, jj), kWire);
   };
-  // Slope class of pi on (a, a + 1): +1 / -1 if it changes by exactly the
-  // distance (property (i)), 0 otherwise.
-  auto slope = [&](int a) {
-    const Cost dpi = futureCost(z, i, a + 1) - futureCost(z, i, a);
-    const Cost dist = layer.positions[a + 1] - layer.positions[a];
-    if (dpi == dist) {
-      return 1;
-    }
-    if (dpi == -dist) {
-      return -1;
-    }
-    return 0;
-  };
   int ja = j;
   int jb = j;
   int cls = 0;
+  const Cost pi0 = futureCost(z, i, j);
+  Cost pi_a = pi0;
+  Cost pi_b = pi0;
   size_t li0;
   inWindow(z, i, j, li0);
   if (plain(j, li0)) {
     const int sig = jogSignature(z, i, j, graph_.vertex(z, i, j));
-    auto joins = [&](int from, int to) {
+    auto joins = [&](int from, int to, Cost& pi_from) {
       size_t li;
       if (!plain(to, li)) {
         return false;
@@ -147,17 +137,23 @@ int IntervalSearch::buildInterval(const int z, const int i, const int j)
       if (jogSignature(z, i, to, graph_.vertex(z, i, to)) != sig) {
         return false;
       }
-      const int c = slope(a);
+      // Adjacent members must have the same slope, exactly +1 or -1.
+      const Cost pi_to = futureCost(z, i, to);
+      const Cost step
+          = static_cast<Cost>(layer.positions[to]) - layer.positions[from];
+      const Cost dpi = pi_to - pi_from;
+      const int c = dpi == step ? 1 : (dpi == -step ? -1 : 0);
       if (c == 0 || (cls != 0 && c != cls)) {
         return false;
       }
       cls = c;
+      pi_from = pi_to;
       return true;
     };
-    while (jb + 1 < layer.numPositions() && joins(jb, jb + 1)) {
+    while (jb + 1 < layer.numPositions() && joins(jb, jb + 1, pi_b)) {
       jb++;
     }
-    while (ja - 1 >= 0 && joins(ja, ja - 1)) {
+    while (ja > 0 && joins(ja, ja - 1, pi_a)) {
       ja--;
     }
   }
@@ -168,6 +164,8 @@ int IntervalSearch::buildInterval(const int z, const int i, const int j)
   iv.jb = jb;
   // pi increases with j (cls +1): the target end is ja.
   iv.dir = cls >= 0 ? 1 : -1;
+  // The checked slope determines pi everywhere in the interval.
+  iv.future_at_ja = pi_a;
   const int id = static_cast<int>(intervals_.size());
   intervals_.push_back(std::move(iv));
   for (int jj = ja; jj <= jb; jj++) {
@@ -254,23 +252,22 @@ void IntervalSearch::addLabel(const int interval,
   pushEvent(interval);
 }
 
-void IntervalSearch::process(const int id)
+void IntervalSearch::process(const int id, const Cost delta)
 {
   // J_I(delta): the settled frontier moves over the flat run at delta.
-  const Cost delta = value(intervals_[id], intervals_[id].frontier);
-  int g = intervals_[id].frontier;
+  const int f = intervals_[id].frontier;
+  int g = f;
   const int n = intervals_[id].n();
   while (g < n && value(intervals_[id], g) == delta) {
     g++;
   }
-  const int f = intervals_[id].frontier;
   intervals_[id].frontier = g;
   const int z = intervals_[id].z;
   const int i = intervals_[id].i;
   const int ja = intervals_[id].ja;
   const int jb = intervals_[id].jb;
   const int dir = intervals_[id].dir;
-  const bool single = n == 1;
+  const bool single = ja == jb;
   const TrackLayer& layer = graph_.layers[z];
   const Region& region = *req_->region;
   auto j_of = [&](int k) { return dir > 0 ? ja + k : jb - k; };
@@ -293,7 +290,7 @@ void IntervalSearch::process(const int id)
     inWindow(z, i, j, li);
     res_->settled++;
     const bool is_source = source_stamp_[li] == epoch_;
-    const Cost pi_v = futureCost(z, i, j);
+    const Cost pi_v = intervals_[id].futureCost(layer, j);
     if (target_stamp_[li] == epoch_) {
       const auto& t = req_->targets[target_index_[li]];
       heap_.push_back(Event{delta + t.cost, -1, target_index_[li]});
@@ -305,8 +302,10 @@ void IntervalSearch::process(const int id)
       if (iv2 < 0) {
         return;
       }
-      const Cost d2 = delta + cost - pi_v + futureCost(z2, i2, j2);
-      addLabel(iv2, intervals_[iv2].kOf(j2), d2, id, k);
+      const Interval& next = intervals_[iv2];
+      const Cost d2
+          = delta + cost - pi_v + next.futureCost(graph_.layers[z2], j2);
+      addLabel(iv2, next.kOf(j2), d2, id, k);
     };
     // Vias, per vertex.
     if (z + 1 < graph_.numLayers()) {
@@ -361,12 +360,13 @@ void IntervalSearch::process(const int id)
         const Cost cost
             = layer.jog_factor * std::abs(layer.tracks[i2] - layer.tracks[i])
               + pen;
-        const Cost d2 = delta + cost - pi_v + futureCost(z, i2, j);
-        const int k2 = intervals_[iv2].kOf(j);
+        const Interval& next = intervals_[iv2];
+        const Cost d2 = delta + cost - pi_v + next.futureCost(layer, j);
+        const int k2 = next.kOf(j);
         // Plain interval pairs with the same orientation: the landing of the
         // vertex with maximum pi dominates the others (Algorithm 4, line 14).
-        const bool shortcut = !single && pen == 0 && intervals_[iv2].n() > 1
-                              && intervals_[iv2].dir == dir;
+        const bool shortcut
+            = !single && pen == 0 && next.n() > 1 && next.dir == dir;
         if (!shortcut) {
           addLabel(iv2, k2, d2, id, k);
           continue;
@@ -511,7 +511,8 @@ SearchResult IntervalSearch::run(const SearchRequest& request)
     graph_.decode(v, z, i, j);
     const int id = intervalOf(z, i, j);
     if (id >= 0) {
-      addLabel(id, intervals_[id].kOf(j), c + futureCost(z, i, j), -1, -1);
+      const Interval& iv = intervals_[id];
+      addLabel(id, iv.kOf(j), c + iv.futureCost(graph_.layers[z], j), -1, -1);
     }
   }
   while (!heap_.empty()) {
@@ -530,7 +531,7 @@ SearchResult IntervalSearch::run(const SearchRequest& request)
     if (iv.frontier >= iv.n() || value(iv, iv.frontier) != e.key) {
       continue;
     }
-    process(e.interval);
+    process(e.interval, e.key);
   }
   if (!result.found) {
     return result;

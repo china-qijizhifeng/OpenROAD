@@ -462,9 +462,86 @@ static int obstacleDetour()
   return 0;
 }
 
+// Real workers reuse search objects as targets, windows and occupancy change.
+// Exercise long track runs and multiple source labels against plain Dijkstra.
+static int reusedSearch()
+{
+  for (const bool horizontal : {false, true}) {
+    TrackGraph graph;
+    graph.layers.resize(2);
+    graph.via_cost = {90};
+    for (int z = 0; z < 2; z++) {
+      TrackLayer& layer = graph.layers[z];
+      layer.horizontal = horizontal != (z == 1);
+      layer.tracks = {0, 100, 200, 300, 400};
+      for (int j = 0; j <= 40; j++) {
+        layer.positions.push_back(j * 10);
+      }
+    }
+    auto tile = [](Coord c) { return c / 100; };
+    graph.finalize(tile, tile);
+    FastGrid grid;
+    grid.init(graph.numVertices());
+    Region region;
+    region.init(2, 5, 5);
+    PathSearch vertex(graph, grid);
+    IntervalSearch interval(graph, grid);
+    std::mt19937 rng(287);
+    for (int query = 0; query < 48; query++) {
+      region.reset();
+      const int first = query % 3 == 0 ? 1 : 0;
+      const int last = query % 3 == 1 ? 3 : 4;
+      for (int z = 0; z < 2; z++) {
+        for (int x = first; x <= last; x++) {
+          for (int y = first; y <= last; y++) {
+            region.allow(z, x, y);
+          }
+        }
+      }
+      const size_t obstacle = graph.vertex(0, 2, 20);
+      const int occupied = query % 2;
+      grid.addRouted(obstacle, kWireEdge, occupied);
+      SearchRequest request;
+      request.net = 0;
+      request.region = &region;
+      request.ripup = query % 4 == 1;
+      request.ripup_cost = 80;
+      for (int s = 0; s < 4; s++) {
+        request.sources.emplace_back(
+            graph.vertex(0, 2, first * 10 + rng() % ((last - first) * 10 + 1)),
+            rng() % 200);
+      }
+      for (int t = 0; t < 3; t++) {
+        const size_t v
+            = graph.vertex(t % 2, first + t, (query % 2 ? first : last) * 10);
+        request.targets.push_back({v, static_cast<Cost>(rng() % 80), t});
+        const auto [x, y] = graph.point(v);
+        request.target_boxes.push_back({x, y, x, y, t % 2, t % 2});
+      }
+      if (query % 5 == 0) {
+        request.target_boxes.clear();
+      }
+      Ref reference{graph, grid, request};
+      const Cost expected = reference.run();
+      for (const auto& result : {vertex.run(request), interval.run(request)}) {
+        const Cost actual = result.found ? result.cost : kInfCost;
+        if (actual != expected
+            || (result.found && reference.pathCost(result) != actual)) {
+          std::printf("reused search mismatch: horizontal=%d query=%d\n",
+                      horizontal,
+                      query);
+          return 1;
+        }
+      }
+      grid.addRouted(obstacle, kWireEdge, -occupied);
+    }
+  }
+  return 0;
+}
+
 int main()
 {
-  if (blockedGeometry() || obstacleDetour()) {
+  if (blockedGeometry() || obstacleDetour() || reusedSearch()) {
     return 1;
   }
   return randomCases(400, false) || randomCases(400, true);

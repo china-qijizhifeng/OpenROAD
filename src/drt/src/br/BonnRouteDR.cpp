@@ -733,21 +733,11 @@ void BonnRouteDR::pathToGeometry(const std::vector<size_t>& path,
   }
 }
 
-bool BonnRouteDR::connect(NetData& net,
-                          const int dilation,
-                          const bool ripup,
-                          Worker& worker)
+bool BonnRouteDR::connect(NetData& net, const bool ripup, Worker& worker)
 {
-  net.wires.clear();
-  net.vias.clear();
-  net.pin_points.clear();
-  for (Term& t : net.terms) {
-    t.chosen = -1;
-  }
-  buildRegion(net, dilation, worker.region);
   const int num_terms = static_cast<int>(net.terms.size());
-  // Options usable now: stub free of routed foreign shapes (unless rip-up)
-  // and an enterable attachment vertex.
+  // Stub and attachment legality depend on the committed shapes, not on
+  // the guide dilation. Check them once for both clean windows.
   std::vector<std::vector<char>> valid(num_terms);
   for (int t = 0; t < num_terms; t++) {
     const Term& term = net.terms[t];
@@ -768,9 +758,9 @@ bool BonnRouteDR::connect(NetData& net,
           if (!ok) {
             break;
           }
-          std::vector<RShape> vs;
-          viaShapes(v, vs);
-          ok = !shapeConflicts(vs.back(), net.id);
+          const frVia via(v.def, v.point);
+          ok = !shapeConflicts({v.def->getLayer2Num(), via.getLayer2BBox()},
+                               net.id);
         }
       }
       valid[t][o] = ok;
@@ -779,13 +769,35 @@ bool BonnRouteDR::connect(NetData& net,
       return false;
     }
   }
+  if (ripup) {
+    return connectInRegion(net, params_.retry_dilation, true, valid, worker);
+  }
+  return connectInRegion(net, 0, false, valid, worker)
+         || (params_.retry_dilation != 0
+             && connectInRegion(
+                 net, params_.retry_dilation, false, valid, worker));
+}
+
+bool BonnRouteDR::connectInRegion(NetData& net,
+                                  const int dilation,
+                                  const bool ripup,
+                                  const std::vector<std::vector<char>>& valid,
+                                  Worker& worker)
+{
+  net.wires.clear();
+  net.vias.clear();
+  net.pin_points.clear();
+  for (Term& term : net.terms) {
+    term.chosen = -1;
+  }
+  buildRegion(net, dilation, worker.region);
+  const int num_terms = static_cast<int>(net.terms.size());
   br::SearchRequest req;
   req.net = net.id;
   req.region = &worker.region;
   req.ripup = ripup;
   req.ripup_cost = static_cast<Cost>(params_.ripup_cost) * layers_[0].pitch;
   req.use_intervals = params_.use_intervals;
-  std::vector<size_t> tree;
   std::unordered_set<size_t> in_tree;
   std::vector<char> connected(num_terms, 0);
   connected[0] = 1;
@@ -874,7 +886,6 @@ bool BonnRouteDR::connect(NetData& net,
     pathToGeometry(res.path, net);
     for (const size_t v : res.path) {
       if (in_tree.insert(v).second) {
-        tree.push_back(v);
         req.sources.emplace_back(v, 0);
       }
     }
@@ -892,7 +903,7 @@ bool BonnRouteDR::connect(NetData& net,
   }
   // History for rip-up (Sec. 4.2): vertices whose use forces a rip-up.
   if (ripup) {
-    for (const size_t v : tree) {
+    for (const size_t v : in_tree) {
       if (!grid_.usable(v, br::kWire, net.id)) {
         grid_.bumpHistory(v);
       }
@@ -1010,7 +1021,7 @@ void BonnRouteDR::netTileBox(const NetData& net,
   yhi += halo;
 }
 
-void BonnRouteDR::routeParallel(std::vector<int>& order,
+void BonnRouteDR::routeParallel(const std::vector<int>& order,
                                 std::vector<int>& failed)
 {
   // Batches of nets whose tile boxes are pairwise disjoint are routed in
@@ -1063,8 +1074,7 @@ void BonnRouteDR::routeParallel(std::vector<int>& order,
     for (int k = 0; k < static_cast<int>(batch.size()); k++) {
       Worker& w = workers_[omp_get_thread_num()];
       NetData& net = nets_[batch[k]];
-      ok[k] = connect(net, 0, false, w)
-              || connect(net, params_.retry_dilation, false, w);
+      ok[k] = connect(net, false, w);
     }
     for (size_t k = 0; k < batch.size(); k++) {
       NetData& net = nets_[batch[k]];
@@ -1080,39 +1090,43 @@ void BonnRouteDR::routeParallel(std::vector<int>& order,
   }
 }
 
-bool BonnRouteDR::routeNet(NetData& net, const bool allow_ripup)
+void BonnRouteDR::routeRipupQueue(const std::vector<int>& failed)
 {
-  if (net.skip || net.failed) {
-    return false;
-  }
-  Worker& w = workers_[0];
-  if (connect(net, 0, false, w)
-      || connect(net, params_.retry_dilation, false, w)) {
-    commitNet(net);
-    return true;
-  }
-  if (!allow_ripup || !connect(net, params_.retry_dilation, true, w)) {
-    net.wires.clear();
-    net.vias.clear();
-    net.failed = true;
-    return false;
-  }
+  std::deque<int> queue(failed.begin(), failed.end());
+  Worker& worker = workers_.front();
   std::vector<int> victims;
-  collectVictims(net, victims);
-  for (const int v : victims) {
-    ripupNet(nets_[v]);
-    ripup_events_++;
-  }
-  commitNet(net);
-  // Victims are rerouted by the caller.
-  for (const int v : victims) {
-    nets_[v].ripups++;
-    if (nets_[v].ripups > params_.max_ripups) {
-      nets_[v].failed = true;
+  while (!queue.empty()) {
+    NetData& net = nets_[queue.front()];
+    queue.pop_front();
+    if (net.routed || net.failed) {
+      continue;
     }
+    // The occupancy may differ from the parallel attempt, especially
+    // after removing a committed route.
+    if (connect(net, false, worker)) {
+      commitNet(net);
+      continue;
+    }
+    if (!connect(net, true, worker)) {
+      net.wires.clear();
+      net.vias.clear();
+      net.failed = true;
+      continue;
+    }
+    collectVictims(net, victims);
+    for (const int id : victims) {
+      NetData& victim = nets_[id];
+      ripupNet(victim);
+      ripup_events_++;
+      if (++victim.ripups > params_.max_ripups) {
+        victim.failed = true;
+      }
+      if (!victim.failed) {
+        queue.push_back(id);
+      }
+    }
+    commitNet(net);
   }
-  pending_victims_ = std::move(victims);
-  return true;
 }
 
 void BonnRouteDR::writeNets()
@@ -1192,8 +1206,11 @@ void BonnRouteDR::main()
   workers_.resize(std::max(1, router_cfg_->MAX_THREADS));
   for (Worker& w : workers_) {
     w.region.init(graph_.numLayers(), tiles_x_, tiles_y_);
-    w.search = std::make_unique<br::PathSearch>(graph_, grid_);
-    w.interval_search = std::make_unique<br::IntervalSearch>(graph_, grid_);
+    if (params_.use_intervals) {
+      w.interval_search = std::make_unique<br::IntervalSearch>(graph_, grid_);
+    } else {
+      w.search = std::make_unique<br::PathSearch>(graph_, grid_);
+    }
   }
   buildNets();
   buildFixed();
@@ -1219,22 +1236,9 @@ void BonnRouteDR::main()
   std::vector<int> failed_first;
   routeParallel(order, failed_first);
   const double parallel_time = timer.elapsed();
-  // Nets without a rip-up-free route: serial rip-up and reroute.
-  std::deque<int> queue(failed_first.begin(), failed_first.end());
-  while (!queue.empty()) {
-    const int id = queue.front();
-    queue.pop_front();
-    NetData& net = nets_[id];
-    if (net.routed || net.failed) {
-      continue;
-    }
-    pending_victims_.clear();
-    routeNet(net, params_.ripup);
-    for (const int v : pending_victims_) {
-      if (!nets_[v].failed) {
-        queue.push_back(v);
-      }
-    }
+  // FlexDR handles unresolved nets unless serial rip-up is requested.
+  if (params_.ripup) {
+    routeRipupQueue(failed_first);
   }
   writeNets();
   int routed = 0;
@@ -1254,16 +1258,19 @@ void BonnRouteDR::main()
     searches += w.searches;
     heap_pops += w.heap_pops;
     settled += w.settled;
-    intervals += w.interval_search->intervals();
-    labels += w.interval_search->labels();
+    if (w.interval_search) {
+      intervals += w.interval_search->intervals();
+      labels += w.interval_search->labels();
+    }
   }
   if (params_.verbose) {
     logger_->report(
         "BonnRoute DR: {} threads, parallel phase until {:.2f}s, {} nets "
-        "to the rip-up phase.",
+        "to {}.",
         workers_.size(),
         parallel_time,
-        failed_first.size());
+        failed_first.size(),
+        params_.ripup ? "the rip-up phase" : "FlexDR");
     logger_->report(
         "BonnRoute DR: {} layers, {} track-graph vertices, setup {:.2f}s.",
         graph_.numLayers(),

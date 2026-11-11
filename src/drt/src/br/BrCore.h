@@ -28,8 +28,8 @@ constexpr Cost kInfCost = std::numeric_limits<Cost>::max() / 4;
 struct TrackLayer
 {
   bool horizontal = true;
-  std::vector<Coord> tracks;     // cross coordinates, sorted
-  std::vector<Coord> positions;  // along coordinates, sorted
+  std::vector<Coord> tracks;     // cross coordinates, sorted and unique
+  std::vector<Coord> positions;  // along coordinates, sorted and unique
   // Per position: track index of layer z +/- 1 at this coordinate, or -1.
   std::vector<int> up_track;
   std::vector<int> down_track;
@@ -390,8 +390,7 @@ struct SearchResult
   int64_t settled = 0;
 };
 
-// Vertex-by-vertex Dijkstra with future cost on the track graph: the
-// reference for IntervalSearch (differential tests, use_intervals = 0).
+// Vertex search with future cost on the track graph (use_intervals = 0).
 class PathSearch
 {
  public:
@@ -510,11 +509,19 @@ class IntervalSearch
     int z, i;
     int ja, jb;  // position range, inclusive
     int dir;     // +1: k = j - ja (target end at ja); -1: k = jb - j
+    Cost future_at_ja;
     std::vector<Label> labels;
     int frontier = 0;  // vertices with k < frontier are settled
     int n() const { return jb - ja + 1; }
     int jOf(int k) const { return dir > 0 ? ja + k : jb - k; }
     int kOf(int j) const { return dir > 0 ? j - ja : jb - j; }
+    Cost futureCost(const TrackLayer& layer, int j) const
+    {
+      return future_at_ja
+             + dir
+                   * (static_cast<Cost>(layer.positions[j])
+                      - layer.positions[ja]);
+    }
   };
   struct Event
   {
@@ -538,7 +545,7 @@ class IntervalSearch
   Cost value(const Interval& iv, int k) const;
   const Label* argLabel(const Interval& iv, int k) const;
   void addLabel(int interval, int k, Cost delta, int pred_interval, int pred_k);
-  void process(int interval);
+  void process(int interval, Cost delta);
   void pushEvent(int interval);
 
   const TrackGraph& graph_;
