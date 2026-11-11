@@ -79,7 +79,9 @@ bool BonnRouteDRParams::set(const std::string& name, const double value)
   } else if (name == "reserve_min_layer") {
     reserve_min_layer = std::max(0, v);
   } else if (name == "potential") {
-    potential = std::clamp(v, 0, 3);
+    potential = std::clamp(v, 0, 4);
+  } else if (name == "potential_detour_tiles") {
+    potential_detour_tiles = std::max(0, v);
   } else if (name == "partitions") {
     partitions = v != 0;
   } else if (name == "partition_regions") {
@@ -237,6 +239,7 @@ void BonnRouteDR::buildTrackGraph()
     graph_.via_cost.push_back(static_cast<Cost>(params_.via_cost)
                               * std::max(info.pitch, 1) * graph_.wire_unit);
   }
+  die_ = block->getDieBox();
   const auto& gp = block->getGCellPatterns();
   tile_x0_ = gp[0].getStartCoord();
   tile_dx_ = std::max<frCoord>(1, gp[0].getSpacing());
@@ -1061,14 +1064,31 @@ bool BonnRouteDR::buildPathRegion(const NetData& net,
   }
   br::Region& region = worker.region;
   region.reset();
+  int steps = 0;
+  int first_x = 0;
+  int first_y = 0;
+  int last_x = 0;
+  int last_y = 0;
+  bool first = true;
   for (int64_t at = found; at >= 0; at = worker.tile_parent[at]) {
     const int z = static_cast<int>(at / (static_cast<int64_t>(nx) * ny));
     const int x = xlo + static_cast<int>((at / ny) % nx);
     const int y = ylo + static_cast<int>(at % ny);
+    if (first) {
+      first_x = x;
+      first_y = y;
+      first = false;
+    } else if (x != last_x || y != last_y) {
+      steps++;
+    }
+    last_x = x;
+    last_y = y;
     for (int dz = -params_.layer_dilation; dz <= params_.layer_dilation; dz++) {
       region.allow(z + dz, x, y);
     }
   }
+  worker.path_detour
+      = steps - std::abs(last_x - first_x) - std::abs(last_y - first_y);
   return true;
 }
 
@@ -1242,7 +1262,58 @@ bool BonnRouteDR::connectInRegion(NetData& net,
     }
     return !req.targets.empty();
   };
-  auto run = [&]() {
+  // Future cost of one search (Sec. 4.1 / arXiv:2111.06169 Table 3).
+  const br::GCellGrid gcells{tile_x0_,
+                             tile_y0_,
+                             tile_dx_,
+                             tile_dy_,
+                             die_.xMin(),
+                             die_.yMin(),
+                             die_.xMax(),
+                             die_.yMax()};
+  auto choose_potential = [&](const bool path_region) {
+    req.future_cost = nullptr;
+    using Model = br::PotentialOracle::Model;
+    Model model;
+    switch (params_.potential) {
+      case 1:
+        model = Model::kL1;
+        break;
+      case 2:
+        model = Model::kSimple;
+        break;
+      case 3:
+        model = Model::kGeneral;
+        break;
+      case 4:
+        if (!path_region
+            || worker.path_detour < params_.potential_detour_tiles) {
+          return;
+        }
+        model = Model::kGeneral;
+        break;
+      default:
+        return;
+    }
+    // The general model bounds distances in the routing area; a source
+    // outside it could leave through edges the model does not contain.
+    if (model == Model::kGeneral
+        && !std::ranges::all_of(req.sources, [&](const auto& source) {
+             return in_region(source.first);
+           })) {
+      worker.potential_fallbacks++;
+      return;
+    }
+    worker.potential.prepare(model,
+                             graph_,
+                             req,
+                             gcells,
+                             params_.discount_numerator,
+                             params_.discount_denominator);
+    req.future_cost = &worker.potential;
+  };
+  auto run = [&](const bool path_region) {
+    choose_potential(path_region);
     br::SearchResult res = params_.use_intervals
                                ? worker.interval_search->run(req)
                                : worker.search->run(req);
@@ -1267,7 +1338,7 @@ bool BonnRouteDR::connectInRegion(NetData& net,
         }
       }
       if (!req.sources.empty() && set_targets(true)) {
-        res = run();
+        res = run(true);
         worker.path_region_searches++;
       }
     }
@@ -1280,7 +1351,7 @@ bool BonnRouteDR::connectInRegion(NetData& net,
       if (!set_targets(false)) {
         return false;
       }
-      res = run();
+      res = run(false);
     }
     if (!res.found) {
       return false;
@@ -1976,6 +2047,25 @@ void BonnRouteDR::main()
         graph_.numLayers(),
         graph_.numVertices(),
         setup_time);
+    if (params_.potential != 0) {
+      int64_t prepares[3] = {0, 0, 0};
+      int64_t fallbacks = 0;
+      for (const Worker& w : workers_) {
+        fallbacks += w.potential_fallbacks;
+        for (int m = 0; m < 3; m++) {
+          prepares[m] += w.potential.prepares(
+              static_cast<br::PotentialOracle::Model>(m));
+        }
+      }
+      logger_->report(
+          "BonnRoute DR: potential {}: {} l1, {} simple, {} general "
+          "preparations, {} general fallbacks to pi_H.",
+          params_.potential,
+          prepares[0],
+          prepares[1],
+          prepares[2],
+          fallbacks);
+    }
     if (params_.reservations) {
       logger_->report(
           "BonnRoute DR: {} input wires, {} reserved runs, discount {}/{}.",

@@ -17,6 +17,7 @@
 #include <vector>
 
 #include "br/BrCore.h"
+#include "br/BrPotentialOracle.h"
 #include "frBaseTypes.h"
 #include "frRTree.h"
 #include "odb/geom.h"
@@ -78,9 +79,12 @@ struct BonnRouteDRParams
   int reserve_min_layer = 0;
   // Future cost: 0 = pi_H of the 2013 paper (Sec. 4.1); arXiv:2111.06169
   // potentials 1 = l1 (Table 3), 2 = simple model (Theorem 3), 3 = general
-  // model (Section 4, guide area and discounts). Reservations or a
-  // potential select the vertex search.
+  // model (Section 4, guide area and discounts), 4 = Gester et al. 2013,
+  // Sec. 4.1: the general (blockage-aware) model only for connections
+  // whose guide path detours by at least potential_detour_tiles, pi_H
+  // otherwise. Reservations or a potential select the vertex search.
   int potential = 0;
+  int potential_detour_tiles = 2;
   bool verbose = true;
 
   bool set(const std::string& name, double value);
@@ -180,6 +184,11 @@ class BonnRouteDR
     br::Region region;
     std::unique_ptr<br::PathSearch> search;
     std::unique_ptr<br::IntervalSearch> interval_search;
+    br::PotentialOracle potential;
+    int64_t potential_fallbacks = 0;
+    // Guide path of the last buildPathRegion: planar tile steps minus the
+    // tile distance of its ends.
+    int path_detour = 0;
     // Scratch of the guide-path search for connection regions.
     std::vector<uint32_t> tile_guide;
     std::vector<uint32_t> tile_seen;
@@ -314,6 +323,7 @@ class BonnRouteDR
   frCoord tile_dx_ = 1;
   frCoord tile_dy_ = 1;
   int tiles_x_ = 1;
+  odb::Rect die_;
   int tiles_y_ = 1;
 
   // Shape index (shape grid of Sec. 3.3, reduced to what the off-track

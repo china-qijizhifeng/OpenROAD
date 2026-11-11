@@ -13,6 +13,7 @@
 #include <vector>
 
 #include "br/BrCore.h"
+#include "br/BrPotentialOracle.h"
 
 using namespace drt::br;
 
@@ -225,8 +226,12 @@ static bool validPath(const SearchResult& r, const SearchRequest& q)
 }
 
 // modern: wire unit 4 with discounted runs (arXiv:2111.06169 Sec. 5.2);
-// only the vertex search supports it.
-static int randomCases(const int cases, const bool sparse, const bool modern)
+// only the vertex search supports it. potential: 0 = l1 target boxes,
+// 1..3 = PotentialOracle l1 / simple / general on the request's Region.
+static int randomCases(const int cases,
+                       const bool sparse,
+                       const bool modern,
+                       const int potential = 0)
 {
   std::mt19937 rng(sparse ? 23456 : 12345);
   int64_t pops_i = 0, pops_v = 0, fails = 0, found = 0, labels = 0, ivs = 0,
@@ -347,6 +352,30 @@ static int randomCases(const int cases, const bool sparse, const bool modern)
         b.zlo = std::min(b.zlo, z);
         b.zhi = std::max(b.zhi, z);
       }
+    }
+    PotentialOracle oracle;
+    if (potential == 3) {
+      // Contract of the general model (and of BonnRouteDR): sources and
+      // targets lie in the routing area, so every search edge is an edge of
+      // the grid graph whose distances the potential holds.
+      for (const auto& [v, c] : q.sources) {
+        int z, i, j;
+        g.decode(v, z, i, j);
+        const TrackLayer& l = g.layers[z];
+        const int t = l.track_tile[i];
+        const int p = l.pos_tile[j];
+        reg.allow(z, l.horizontal ? p : t, l.horizontal ? t : p);
+      }
+    }
+    if (potential > 0) {
+      const GCellGrid gcells{0, 0, tile, tile, 0, 0, span, span};
+      oracle.prepare(static_cast<PotentialOracle::Model>(potential - 1),
+                     g,
+                     q,
+                     gcells,
+                     3,
+                     4);
+      q.future_cost = &oracle;
     }
     PathSearch ps(g, f);
     IntervalSearch is(g, f);
@@ -627,5 +656,8 @@ int main()
     return 1;
   }
   return randomCases(400, false, false) || randomCases(400, true, false)
-         || randomCases(400, false, true) || randomCases(400, true, true);
+         || randomCases(400, false, true) || randomCases(400, true, true)
+         || randomCases(300, false, true, 1) || randomCases(300, true, true, 2)
+         || randomCases(300, false, true, 3) || randomCases(300, true, true, 3)
+         || randomCases(300, false, false, 3);
 }

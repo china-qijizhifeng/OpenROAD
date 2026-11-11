@@ -48,6 +48,7 @@ cc_library(
     hdrs = [
         "src/br/BrCore.h",
         "src/br/BrPotential.h",
+        "src/br/BrPotentialOracle.h",
     ],
     includes = ["src"],
 )
