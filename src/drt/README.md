@@ -176,6 +176,7 @@ set_bonnroute_dr_param name value
 | `potential_check` | `0` | Debug: repeat each search that used a potential with the l1 bound and report how many shortest path costs differ (expected 0). |
 | `potential_detour_tiles` | `2` | Detour, in GCells beyond the tile distance of its ends, from which `potential 4` uses the general model. |
 | `spreading` | `0` | Wire spreading (Section 4.2): in GCells whose global routing utilization is at most `spread_utilization` percent, a wire vertex beside an occupied track costs `spread_cost` pitches more. Reads the congestion that `global_route` stores in the database. Selects the vertex search. |
+| `spread_from_extra_space` | `1` | With `spreading 1`, spread a net where BonnRoute global routing assigned it extra space (`set_bonnroute_param extra_space 1`, Section 2.1); designs without that information use the GCell congestion tiles. |
 | `spread_cost` / `spread_utilization` | `1` / `70` | Spreading cost in pitches of the bottom layer; utilization threshold in percent. |
 | `verbose` | `1` | Print coverage and search statistics. |
 

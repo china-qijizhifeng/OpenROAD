@@ -130,6 +130,10 @@ struct BonnRouteDRParams
   bool spreading = false;
   int spread_cost = 1;
   int spread_utilization = 70;
+  // Sec. 2.1 / 4.2: spread where global routing assigned the net extra
+  // space (net property of `global_route -bonnroute` with extra_space 1);
+  // without any such property the GCell congestion tiles are used.
+  bool spread_from_extra_space = true;
   // Off-track pin access (Sec. 3.7, 3.8, 4.3, 4.4): per pin a catalogue of
   // shortest tau-feasible paths on the blockage grid to on-track points
   // within `offtrack_radius` pitches, primary paths per circuit class by
@@ -289,6 +293,8 @@ class BonnRouteDR
     std::vector<br::DiscountRun> discount_runs;
     // Guide tiles (z, tile x, tile y), deduplicated.
     std::vector<std::array<int, 3>> guide_tiles;
+    // Tiles (z, tile x * tiles_y + tile y) with GR extra space for the net.
+    std::vector<std::pair<int, int>> extra_space_tiles;
     int ripups = 0;
     bool routed = false;
     bool failed = false;
@@ -302,6 +308,8 @@ class BonnRouteDR
   {
     // Searching in a speculative batch: read-only on shared routing space.
     bool speculative = false;
+    // Spreading tiles of the net being routed (extra space mode).
+    std::vector<std::vector<uint8_t>> spread_mask;
     br::Region region;
     std::unique_ptr<br::PathSearch> search;
     std::unique_ptr<br::IntervalSearch> interval_search;
@@ -657,6 +665,10 @@ class BonnRouteDR
   odb::Rect die_;
   odb::dbBlock* block_ = nullptr;
   std::vector<std::vector<uint8_t>> spread_tiles_;
+  // Global routing extra space (Sec. 2.1) per net, read from odb.
+  void loadExtraSpace();
+  int64_t extra_space_nets_ = 0;
+  int64_t extra_space_tiles_ = 0;
   int64_t spread_tile_count_ = 0;
   int tiles_y_ = 1;
 

@@ -15,6 +15,7 @@
 #include <functional>
 #include <limits>
 #include <memory>
+#include <optional>
 #include <string>
 #include <tuple>
 #include <unordered_set>
@@ -43,6 +44,7 @@
 #include "drt-global.h"
 #include "frDesign.h"
 #include "frRegionQuery.h"
+#include "grt/BonnRouteExtraSpace.h"
 #include "odb/db.h"
 #include "odb/dbTransform.h"
 #include "odb/dbTypes.h"
@@ -163,6 +165,8 @@ bool BonnRouteDRParams::set(const std::string& name, const double value)
     partitions = v != 0;
   } else if (name == "partition_regions") {
     partition_regions = std::max(0, v);
+  } else if (name == "spread_from_extra_space") {
+    spread_from_extra_space = v != 0;
   } else if (name == "spreading") {
     spreading = v != 0;
   } else if (name == "spread_cost") {
@@ -226,6 +230,81 @@ BonnRouteDR::BonnRouteDR(frDesign* design,
       params_(params),
       block_(block)
 {
+}
+
+void BonnRouteDR::loadExtraSpace()
+{
+  extra_space_nets_ = 0;
+  extra_space_tiles_ = 0;
+  odb::dbGCellGrid* gcells
+      = block_ != nullptr ? block_->getGCellGrid() : nullptr;
+  if (gcells == nullptr) {
+    return;
+  }
+  std::vector<int> grid_x;
+  std::vector<int> grid_y;
+  gcells->getGridX(grid_x);
+  gcells->getGridY(grid_y);
+  odb::dbTech* tech = block_->getDb()->getTech();
+  std::vector<grt::bonnroute::ExtraSpaceEdge> edges;
+  for (NetData& net : nets_) {
+    net.extra_space_tiles.clear();
+    if (net.skip) {
+      continue;
+    }
+    odb::dbNet* db_net = block_->findNet(net.net->getName().c_str());
+    if (db_net == nullptr) {
+      continue;
+    }
+    odb::dbStringProperty* property = odb::dbStringProperty::find(
+        db_net, grt::bonnroute::kExtraSpaceProperty);
+    if (property == nullptr
+        || !grt::bonnroute::decodeExtraSpace(property->getValue(), edges)) {
+      continue;
+    }
+    for (const grt::bonnroute::ExtraSpaceEdge& e : edges) {
+      odb::dbTechLayer* layer = tech->findRoutingLayer(e.level);
+      if (layer == nullptr || e.space <= 0) {
+        continue;
+      }
+      frLayer* fr_layer = design_->getTech()->getLayer(layer->getName());
+      if (fr_layer == nullptr) {
+        continue;
+      }
+      const frLayerNum fr = fr_layer->getLayerNum();
+      if (fr < 0 || fr >= static_cast<int>(z_of_fr_.size())
+          || z_of_fr_[fr] < 0) {
+        continue;
+      }
+      const int z = z_of_fr_[fr];
+      // Both gcells of the edge, mapped through their centres.
+      const bool horizontal
+          = layer->getDirection() == odb::dbTechLayerDir::HORIZONTAL;
+      for (int k = 0; k < 2; k++) {
+        const int gx = e.x + (horizontal ? k : 0);
+        const int gy = e.y + (horizontal ? 0 : k);
+        if (gx < 0 || gy < 0 || gx >= static_cast<int>(grid_x.size())
+            || gy >= static_cast<int>(grid_y.size())) {
+          continue;
+        }
+        const int cx = gx + 1 < static_cast<int>(grid_x.size())
+                           ? (grid_x[gx] + grid_x[gx + 1]) / 2
+                           : grid_x[gx] + tile_dx_ / 2;
+        const int cy = gy + 1 < static_cast<int>(grid_y.size())
+                           ? (grid_y[gy] + grid_y[gy + 1]) / 2
+                           : grid_y[gy] + tile_dy_ / 2;
+        net.extra_space_tiles.emplace_back(z, tileX(cx) * tiles_y_ + tileY(cy));
+      }
+    }
+    std::ranges::sort(net.extra_space_tiles);
+    net.extra_space_tiles.erase(
+        std::ranges::unique(net.extra_space_tiles).begin(),
+        net.extra_space_tiles.end());
+    if (!net.extra_space_tiles.empty()) {
+      extra_space_nets_++;
+      extra_space_tiles_ += static_cast<int64_t>(net.extra_space_tiles.size());
+    }
+  }
 }
 
 void BonnRouteDR::buildSpreadTiles()
@@ -3496,7 +3575,34 @@ bool BonnRouteDR::connectInRegion(NetData& net,
   req.wire_type = 0;
   req.label_limit = label_limit_;
   req.overlay = &worker.overlay;
-  if (params_.spreading && !spread_tiles_.empty()) {
+  // Clears the net's spreading mask when the connection ends.
+  struct MaskGuard
+  {
+    Worker& worker;
+    const NetData& net;
+    ~MaskGuard()
+    {
+      for (const auto& [z, tile] : net.extra_space_tiles) {
+        worker.spread_mask[z][tile] = 0;
+      }
+    }
+  };
+  std::optional<MaskGuard> mask_guard;
+  if (params_.spreading && extra_space_nets_ > 0) {
+    // Sec. 2.1 / 4.2: keep tracks free where GR gave this net extra space.
+    if (worker.spread_mask.size() != static_cast<size_t>(graph_.numLayers())) {
+      worker.spread_mask.assign(
+          graph_.numLayers(),
+          std::vector<uint8_t>(static_cast<size_t>(tiles_x_) * tiles_y_, 0));
+    }
+    for (const auto& [z, tile] : net.extra_space_tiles) {
+      worker.spread_mask[z][tile] = 1;
+    }
+    mask_guard.emplace(MaskGuard{worker, net});
+    req.spread_tiles = &worker.spread_mask;
+    req.spread_cost
+        = static_cast<Cost>(params_.spread_cost) * layers_[0].pitch * unit();
+  } else if (params_.spreading && !spread_tiles_.empty()) {
     req.spread_tiles = &spread_tiles_;
     req.spread_cost
         = static_cast<Cost>(params_.spread_cost) * layers_[0].pitch * unit();
@@ -4554,6 +4660,9 @@ void BonnRouteDR::main()
   buildRoutingSpace();
   if (params_.spreading) {
     buildSpreadTiles();
+    if (params_.spread_from_extra_space) {
+      loadExtraSpace();
+    }
   }
   workers_.resize(std::max(1, router_cfg_->MAX_THREADS));
   for (Worker& w : workers_) {
@@ -4781,6 +4890,13 @@ void BonnRouteDR::main()
           fallbacks,
           mismatches,
           checks);
+    }
+    if (params_.spreading && extra_space_nets_ > 0) {
+      logger_->report(
+          "BonnRoute DR: wire spreading from global routing extra space: "
+          "{} nets, {} net layer tiles.",
+          extra_space_nets_,
+          extra_space_tiles_);
     }
     if (params_.spreading) {
       logger_->report(

@@ -56,6 +56,7 @@ cc_library(
     includes = [
         "include",
     ],
+    visibility = ["//src/drt:__subpackages__"],
 )
 
 cc_library(
