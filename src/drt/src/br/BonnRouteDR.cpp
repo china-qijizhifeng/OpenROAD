@@ -15,6 +15,7 @@
 #include <limits>
 #include <memory>
 #include <string>
+#include <tuple>
 #include <unordered_set>
 #include <utility>
 #include <vector>
@@ -136,6 +137,8 @@ bool BonnRouteDRParams::set(const std::string& name, const double value)
     access_spread_weight = std::max(0, v);
   } else if (name == "postprocess") {
     postprocess = v != 0;
+  } else if (name == "offtrack_from_access_points") {
+    offtrack_from_access_points = v != 0;
   } else if (name == "search_label_mb") {
     search_label_mb = std::max(0, v);
   } else if (name == "verbose") {
@@ -1345,6 +1348,173 @@ void BonnRouteDR::AccessStats::add(const AccessStats& o)
   selection_nodes += o.selection_nodes;
   selection_optimal += o.selection_optimal;
   primaries += o.primaries;
+  empty_no_pin += o.empty_no_pin;
+  empty_no_targets += o.empty_no_targets;
+  empty_no_path += o.empty_no_path;
+  empty_rejected += o.empty_rejected;
+  for (const std::string& e : o.empty_examples) {
+    if (empty_examples.size() < 10) {
+      empty_examples.push_back(e);
+    }
+  }
+}
+
+void BonnRouteDR::accessSources(const Term& term,
+                                std::vector<AccessSource>& out) const
+{
+  out.clear();
+  auto add = [&](const frAccessPoint* ap, const odb::Point& p) {
+    const frViaDef* via = nullptr;
+    if (ap->hasAccess(frDirEnum::U) && ap->hasViaDef()) {
+      via = ap->getViaDefs(1).front();
+    }
+    out.push_back({ap->getLayerNum(), p, via});
+  };
+  if (term.inst_term != nullptr) {
+    frInst* inst = term.inst_term->getInst();
+    const int pa_idx = inst->getPinAccessIdx();
+    const odb::dbTransform xform = inst->getNoRotationTransform();
+    for (const auto& pin : term.inst_term->getTerm()->getPins()) {
+      if (!pin->hasPinAccess() || pa_idx < 0
+          || pa_idx >= pin->getNumPinAccess()) {
+        continue;
+      }
+      for (const auto& ap : pin->getPinAccess(pa_idx)->getAccessPoints()) {
+        odb::Point p = ap->getPoint();
+        xform.apply(p);
+        add(ap.get(), p);
+      }
+    }
+  } else if (term.bterm != nullptr) {
+    for (const auto& pin : term.bterm->getPins()) {
+      if (!pin->hasPinAccess()) {
+        continue;
+      }
+      for (const auto& ap : pin->getPinAccess(0)->getAccessPoints()) {
+        add(ap.get(), ap->getPoint());
+      }
+    }
+  }
+}
+
+void BonnRouteDR::accessPointsOf(const frBlockObject* pin,
+                                 std::vector<br::RouteNode>& out) const
+{
+  out.clear();
+  Term term;
+  if (pin->typeId() == frcInstTerm) {
+    term.inst_term
+        = const_cast<frInstTerm*>(static_cast<const frInstTerm*>(pin));
+  } else if (pin->typeId() == frcBTerm) {
+    term.bterm = const_cast<frBTerm*>(static_cast<const frBTerm*>(pin));
+  } else {
+    return;
+  }
+  std::vector<AccessSource> sources;
+  accessSources(term, sources);
+  for (const AccessSource& s : sources) {
+    out.push_back({s.layer, toGrid(s.point)});
+  }
+}
+
+namespace {
+
+// The net's pins (instance and top-level terms) whose shapes on `layer`
+// contain p, with those shapes.
+template <typename F>
+void forEachNetPinAt(frRegionQuery* rq,
+                     const frNet* net,
+                     const frLayerNum layer,
+                     const odb::Point& p,
+                     F&& fn)
+{
+  frRegionQuery::Objects<frBlockObject> result;
+  rq->query(odb::Rect(p, p), layer, result);
+  for (const auto& [rect, obj] : result) {
+    const frNet* owner = nullptr;
+    if (obj->typeId() == frcInstTerm) {
+      owner = static_cast<const frInstTerm*>(obj)->getNet();
+    } else if (obj->typeId() == frcBTerm) {
+      owner = static_cast<const frBTerm*>(obj)->getNet();
+    }
+    if (owner == net && rect.intersects(p)) {
+      fn(obj, rect);
+    }
+  }
+}
+
+}  // namespace
+
+int64_t BonnRouteDR::pinContactViolations(const NetData& net,
+                                          const std::vector<OutWire>& wires,
+                                          const std::vector<OutVia>& vias) const
+{
+  // FlexDR (initNets_searchRepair_pin2epMap) makes a pin a term of a worker
+  // at every truncated path-segment end and every connected via pad on the
+  // pin, and then needs one of the pin's access points inside the worker's
+  // box. Truncated ends are the planar pin points; vias are checked
+  // whether connected or not, since FlexDR marks vias it keeps.
+  std::vector<br::RouteNode> contacts;
+  for (const OutWire& w : wires) {
+    for (const auto& [layer, p] : net.pin_points) {
+      if (layer == w.layer && (p == w.begin || p == w.end)) {
+        contacts.push_back({layer, toGrid(p)});
+      }
+    }
+  }
+  for (const OutVia& v : vias) {
+    contacts.push_back({v.def->getLayer1Num(), toGrid(v.point)});
+    contacts.push_back({v.def->getLayer2Num(), toGrid(v.point)});
+  }
+  std::ranges::sort(contacts,
+                    [](const br::RouteNode& a, const br::RouteNode& b) {
+                      return std::tie(a.layer, a.p.x, a.p.y)
+                             < std::tie(b.layer, b.p.x, b.p.y);
+                    });
+  contacts.erase(std::ranges::unique(contacts).begin(), contacts.end());
+  frRegionQuery* rq = design_->getRegionQuery();
+  int64_t violations = 0;
+  for (const br::RouteNode& c : contacts) {
+    std::vector<br::ContactPin> pins;
+    std::vector<const frBlockObject*> objs;
+    forEachNetPinAt(rq,
+                    net.net,
+                    c.layer,
+                    toPoint(c.p),
+                    [&](const frBlockObject* obj, const odb::Rect& rect) {
+                      auto it = std::ranges::find(objs, obj);
+                      if (it == objs.end()) {
+                        objs.push_back(obj);
+                        pins.emplace_back();
+                        accessPointsOf(obj, pins.back().access_points);
+                        it = objs.end() - 1;
+                      }
+                      pins[it - objs.begin()].shapes.emplace_back(c.layer,
+                                                                  toBox(rect));
+                    });
+    violations += br::pinContactViolations({c}, pins);
+  }
+  return violations;
+}
+
+bool BonnRouteDR::nodeAllowed(const int net,
+                              const frLayerNum layer,
+                              const odb::Point& p) const
+{
+  bool ok = true;
+  forEachNetPinAt(design_->getRegionQuery(),
+                  nets_[net].net,
+                  layer,
+                  p,
+                  [&](const frBlockObject* obj, const odb::Rect&) {
+                    std::vector<br::RouteNode> aps;
+                    accessPointsOf(obj, aps);
+                    ok = ok
+                         && std::ranges::find(aps,
+                                              br::RouteNode{layer, toGrid(p)})
+                                != aps.end();
+                  });
+  return ok;
 }
 
 void BonnRouteDR::buildSameNetRules()
@@ -1468,7 +1638,20 @@ bool BonnRouteDR::optionLegal(const AccessOption& option,
   }
   const Legality legality(*this, worker);
   std::vector<RShape> shapes;
-  accessShapes(option, shapes);
+  for (const OutWire& wire : option.wires) {
+    shapes.push_back(wireShape(wire));
+  }
+  for (size_t k = 0; k < option.vias.size(); k++) {
+    std::vector<RShape> via;
+    viaShapes(option.vias[k], via);
+    if (static_cast<int>(k) == option.pin_via) {
+      // Pin access checked the pin-layer pad and the cut (as for the
+      // access stubs); the top pad meets the routing space.
+      shapes.push_back(via.back());
+    } else {
+      shapes.insert(shapes.end(), via.begin(), via.end());
+    }
+  }
   return std::ranges::all_of(shapes, [&](const RShape& s) {
     return legality.allowed(s.layer, toBox(s.rect), net);
   });
@@ -1482,14 +1665,53 @@ void BonnRouteDR::offTrackCatalogue(const int net,
 {
   out.clear();
   stats.pins++;
+  auto empty = [&](int64_t& reason, const char* why) {
+    reason++;
+    stats.empty++;
+    if (stats.empty_examples.size() < 10) {
+      const std::string name = term.inst_term != nullptr
+                                   ? term.inst_term->getName()
+                               : term.bterm != nullptr ? term.bterm->getName()
+                                                       : std::string("?");
+      stats.empty_examples.push_back(name + " (" + why + ")");
+    }
+  };
   frLayerNum pin_layer = -1;
   std::vector<odb::Rect> pin;
-  if (!pinShapes(term, pin_layer, pin)) {
-    stats.empty++;
-    return;
-  }
+  const bool from_aps = params_.offtrack_from_access_points;
   const int num_fr = static_cast<int>(z_of_fr_.size());
   const int num_z = static_cast<int>(layers_.size());
+  // Sources (Sec. 4.3 paths "connecting it to on-track points"): the
+  // pin's access points, or the whole pin with `from_aps` false.
+  std::vector<AccessSource> aps;
+  if (from_aps) {
+    std::vector<AccessSource> all;
+    accessSources(term, all);
+    const frLayerNum bottom = layers_.front().fr;
+    for (const AccessSource& a : all) {
+      const bool usable
+          = (a.layer >= 0 && a.layer < num_fr && z_of_fr_[a.layer] >= 0)
+            || (a.layer == bottom - 2 && a.via != nullptr
+                && a.via->getLayer2Num() == bottom);
+      if (usable && (pin_layer < 0 || a.layer < pin_layer)) {
+        pin_layer = a.layer;
+      }
+    }
+    for (const AccessSource& a : all) {
+      if (a.layer == pin_layer
+          && (z_of_fr_[a.layer] >= 0 || a.via != nullptr)) {
+        aps.push_back(a);
+        pin.emplace_back(a.point, a.point);
+      }
+    }
+    if (aps.empty()) {
+      empty(stats.empty_no_pin, "no usable access point");
+      return;
+    }
+  } else if (!pinShapes(term, pin_layer, pin)) {
+    empty(stats.empty_no_pin, "no pin shape");
+    return;
+  }
   const int pin_z = z_of_fr_[pin_layer];
   frLayerNum upper = -1;
   if (pin_z >= 0) {
@@ -1503,10 +1725,20 @@ void BonnRouteDR::offTrackCatalogue(const int net,
   if (via != nullptr && via->getLayer2Num() != upper) {
     via = nullptr;
   }
+  // A pin layer without wires is used only at the access points, each with
+  // its own via (points_only in the blockage grid).
+  const bool points_only = from_aps && pin_z < 0;
+  if (points_only) {
+    via = nullptr;
+  }
+  const bool ap_vias
+      = from_aps && upper >= 0 && std::ranges::any_of(aps, [&](const auto& a) {
+          return a.via != nullptr && a.via->getLayer2Num() == upper;
+        });
   // Search layers: the pin layer and the next routing layer (Sec. 4.3:
   // access paths "connecting it to on-track points within a small radius").
   std::vector<frLayerNum> frs{pin_layer};
-  if (via != nullptr) {
+  if (via != nullptr || ap_vias) {
     frs.push_back(upper);
   }
   odb::Rect pin_box;
@@ -1553,7 +1785,7 @@ void BonnRouteDR::offTrackCatalogue(const int net,
     }
   }
   if (targets.empty()) {
-    stats.empty++;
+    empty(stats.empty_no_targets, "no usable on-track point");
     return;
   }
   odb::Rect area = pin_box;
@@ -1574,7 +1806,9 @@ void BonnRouteDR::offTrackCatalogue(const int net,
       legality.blockages(
           fr, window, net, {-half, -half, half, half}, layer.obstacles);
     }
-    grid_in.layers.push_back({z >= 0 ? tau_[z] : 1, layer.obstacles});
+    grid_in.layers.push_back({z >= 0 ? tau_[z] : 1,
+                              layer.obstacles,
+                              points_only && fr == pin_layer});
     req.layers.push_back(std::move(layer));
   }
   std::vector<br::Box> via_blocks;
@@ -1592,8 +1826,14 @@ void BonnRouteDR::offTrackCatalogue(const int net,
   for (const Target& t : targets) {
     grid_in.points.push_back(toGrid(t.p));
   }
-  for (const odb::Rect& r : pin) {
-    grid_in.borders.push_back(toBox(r));
+  if (from_aps) {
+    for (const AccessSource& a : aps) {
+      grid_in.points.push_back(toGrid(a.point));
+    }
+  } else {
+    for (const odb::Rect& r : pin) {
+      grid_in.borders.push_back(toBox(r));
+    }
   }
   grid_in.borders.push_back(window);
   const std::vector<br::BlockageGridLayer> grid
@@ -1615,7 +1855,22 @@ void BonnRouteDR::offTrackCatalogue(const int net,
   req.via_cost = layers_[z_of_fr_[frs.back()]].width;
   // The nearest on-track points; some may fail the exact checks below.
   req.max_targets = 2 * params_.max_access_options;
-  req.via_allowed = [&](int, const br::GridPoint& p) {
+  req.via_allowed = [&](int lower, const br::GridPoint& p) {
+    if (lower == 0) {
+      // An access point's own via: pin access checked its pin-layer pad
+      // and cut; its top pad must meet the routing space.
+      for (const AccessSource& a : aps) {
+        if (a.via != nullptr && a.via->getLayer2Num() == upper
+            && toGrid(a.point) == p) {
+          const frVia v(a.via, a.point);
+          return legality.allowed(
+              a.via->getLayer2Num(), toBox(v.getLayer2BBox()), net);
+        }
+      }
+    }
+    if (via == nullptr) {
+      return false;
+    }
     for (const br::Box& b : via_blocks) {
       if (b.containsOpen(p.x, p.y)) {
         return false;
@@ -1653,7 +1908,17 @@ void BonnRouteDR::offTrackCatalogue(const int net,
       const br::RouteNode& b = opt.route[k + 1];
       if (a.layer != b.layer) {
         const frLayerNum lower = std::min(a.layer, b.layer);
-        opt.vias.push_back({viaDefAbove(lower), toPoint(a.p)});
+        const frViaDef* def = viaDefAbove(lower);
+        if (lower == pin_layer) {
+          for (const AccessSource& ap : aps) {
+            if (ap.via != nullptr && toGrid(ap.point) == a.p) {
+              def = ap.via;
+              opt.pin_via = static_cast<int>(opt.vias.size());
+              break;
+            }
+          }
+        }
+        opt.vias.push_back({def, toPoint(a.p)});
         const int lz = z_of_fr_[lower];
         cost += lz >= 0 ? graph_.via_cost[lz]
                         : static_cast<Cost>(params_.via_cost) * layers_[0].pitch
@@ -1708,7 +1973,11 @@ void BonnRouteDR::offTrackCatalogue(const int net,
   }
   stats.paths += static_cast<int64_t>(out.size());
   if (out.empty()) {
-    stats.empty++;
+    if (res.paths.empty()) {
+      empty(stats.empty_no_path, "no tau-feasible path");
+    } else {
+      empty(stats.empty_rejected, "all paths rejected");
+    }
   }
 }
 
@@ -1916,6 +2185,16 @@ void BonnRouteDR::buildOffTrackAccess(const std::vector<char>& pre_skip)
       }
       groups.push_back(g);
       sig.addPin(ia.pin_index[p], g);
+      if (params_.offtrack_from_access_points) {
+        // The access points the catalogue paths start at (label -1 - p).
+        std::vector<AccessSource> aps;
+        accessSources(nets_[ia.terms[p].first].terms[ia.terms[p].second], aps);
+        for (const AccessSource& a : aps) {
+          sig.addShape(a.layer,
+                       {a.point.x(), a.point.y(), a.point.x(), a.point.y()},
+                       -1 - static_cast<int>(p));
+        }
+      }
     }
     for (frLayerNum fr = std::max(0, bottom - 2); fr <= sig_top; fr++) {
       frRegionQuery::Objects<frBlockObject> result;
@@ -2011,36 +2290,55 @@ void BonnRouteDR::buildOffTrackAccess(const std::vector<char>& pre_skip)
   // Per instance: map the class solution, check it against the routing
   // space (reservations of earlier instances), re-solve if needed, and
   // reserve the primary paths.
-  auto map_option =
-      [&](const AccessOption& in, const br::Isometry& m, AccessOption& out) {
-        out = in;
-        for (br::RouteNode& n : out.route) {
-          n.p = m.apply(n.p);
+  auto map_option = [&](const AccessOption& in,
+                        const br::Isometry& m,
+                        const std::vector<AccessSource>& member_aps,
+                        AccessOption& out) {
+    out = in;
+    for (br::RouteNode& n : out.route) {
+      n.p = m.apply(n.p);
+    }
+    for (OutWire& w : out.wires) {
+      w.begin = toPoint(m.apply(toGrid(w.begin)));
+      w.end = toPoint(m.apply(toGrid(w.end)));
+    }
+    for (OutVia& v : out.vias) {
+      v.point = toPoint(m.apply(toGrid(v.point)));
+    }
+    out.ap = toPoint(m.apply(toGrid(in.ap)));
+    const auto [x, y] = graph_.point(in.vertex);
+    const br::GridPoint e = m.apply(br::GridPoint{x, y});
+    const br::TrackLayer& l = graph_.layers[in.z];
+    const frCoord cross = l.horizontal ? e.y : e.x;
+    const frCoord along = l.horizontal ? e.x : e.y;
+    auto ti = std::ranges::lower_bound(l.tracks, cross);
+    auto pj = std::ranges::lower_bound(l.positions, along);
+    if (ti == l.tracks.end() || *ti != cross || pj == l.positions.end()
+        || *pj != along) {
+      return false;
+    }
+    out.vertex = graph_.vertex(in.z,
+                               static_cast<int>(ti - l.tracks.begin()),
+                               static_cast<int>(pj - l.positions.begin()));
+    if (!params_.offtrack_from_access_points || out.route.empty()) {
+      return true;
+    }
+    // The mapped start must be one of the member's access points (they are
+    // in the signature; this also checks the via), with its via.
+    const br::RouteNode& start = out.route.front();
+    for (const AccessSource& a : member_aps) {
+      if (a.layer == start.layer && toGrid(a.point) == start.p) {
+        if (out.pin_via >= 0) {
+          if (a.via == nullptr) {
+            return false;
+          }
+          out.vias[out.pin_via].def = a.via;
         }
-        for (OutWire& w : out.wires) {
-          w.begin = toPoint(m.apply(toGrid(w.begin)));
-          w.end = toPoint(m.apply(toGrid(w.end)));
-        }
-        for (OutVia& v : out.vias) {
-          v.point = toPoint(m.apply(toGrid(v.point)));
-        }
-        out.ap = toPoint(m.apply(toGrid(in.ap)));
-        const auto [x, y] = graph_.point(in.vertex);
-        const br::GridPoint e = m.apply(br::GridPoint{x, y});
-        const br::TrackLayer& l = graph_.layers[in.z];
-        const frCoord cross = l.horizontal ? e.y : e.x;
-        const frCoord along = l.horizontal ? e.x : e.y;
-        auto ti = std::ranges::lower_bound(l.tracks, cross);
-        auto pj = std::ranges::lower_bound(l.positions, along);
-        if (ti == l.tracks.end() || *ti != cross || pj == l.positions.end()
-            || *pj != along) {
-          return false;
-        }
-        out.vertex = graph_.vertex(in.z,
-                                   static_cast<int>(ti - l.tracks.begin()),
-                                   static_cast<int>(pj - l.positions.begin()));
         return true;
-      };
+      }
+    }
+    return false;
+  };
   auto reserve = [&](NetData& net, Term& term, const int primary) {
     term.primary = primary;
     accessShapes(term.options[primary], term.reservation);
@@ -2102,9 +2400,11 @@ void BonnRouteDR::buildOffTrackAccess(const std::vector<char>& pre_skip)
         cats[p] = cd.catalogues[p];
         continue;
       }
+      std::vector<AccessSource> member_aps;
+      accessSources(nets_[net].terms[t], member_aps);
       for (const AccessOption& opt : cd.catalogues[p]) {
         AccessOption mo;
-        if (!map_option(opt, m, mo)) {
+        if (!map_option(opt, m, member_aps, mo)) {
           mapped = false;
           break;
         }
@@ -2115,8 +2415,9 @@ void BonnRouteDR::buildOffTrackAccess(const std::vector<char>& pre_skip)
       }
     }
     if (!mapped) {
-      // Equal signatures with unequal track positions outside the window;
-      // generate this instance's catalogues directly.
+      // Equal signatures with unequal track positions outside the window or
+      // a mapped start that is not an access point (other via); generate
+      // this instance's catalogues directly.
       stats.mapping_failed++;
       for (int p = 0; p < n; p++) {
         const auto [net, t] = ia.terms[p];
@@ -2180,7 +2481,9 @@ void BonnRouteDR::buildOffTrackAccess(const std::vector<char>& pre_skip)
         "catalogues, {} paths ({:.2f} per pin), {} empty, {} fallback stubs; "
         "{} DRC-rejected, {} same-net-rejected; {} blockage-grid vertices, "
         "{} settled; search {:.2f}s; {} selections ({} optimal, {} nodes); "
-        "{} primary paths; {:.2f}s.",
+        "{} primary paths; {:.2f}s. Empty catalogues: {} without usable "
+        "access point or pin shape, {} without usable on-track point, {} "
+        "without path, {} with all paths rejected{}{}.",
         stats.instances,
         stats.classes,
         stats.class_reused,
@@ -2200,7 +2503,19 @@ void BonnRouteDR::buildOffTrackAccess(const std::vector<char>& pre_skip)
         stats.selection_optimal,
         stats.selection_nodes,
         stats.primaries,
-        stats.seconds);
+        stats.seconds,
+        stats.empty_no_pin,
+        stats.empty_no_targets,
+        stats.empty_no_path,
+        stats.empty_rejected,
+        stats.empty_examples.empty() ? "" : "; e.g. ",
+        [&] {
+          std::string list;
+          for (const std::string& e : stats.empty_examples) {
+            list += (list.empty() ? "" : ", ") + e;
+          }
+          return list;
+        }());
   }
 }
 
@@ -2276,6 +2591,9 @@ void BonnRouteDR::postprocessConnection(std::vector<br::RouteNode>& nodes,
   req.layers = cleanup_layers_;
   req.allowed = [&](const int layer, const br::Box& box) {
     return legality.allowed(layer, box, net);
+  };
+  req.node_allowed = [&](const int layer, const br::GridPoint& p) {
+    return nodeAllowed(net, static_cast<frLayerNum>(layer), toPoint(p));
   };
   req.via_pads = [&](const int layer,
                      const br::GridPoint& p,
@@ -3656,6 +3974,16 @@ void BonnRouteDR::writeNets()
         wires.push_back({w.layer, cuts[k], cuts[k + 1]});
       }
     }
+    // Contact guard: FlexDR's clean-up needs every pin contact at one of the
+    // pin's access points; otherwise the net is left to FlexDR.
+    if (const int64_t bad = pinContactViolations(data, wires, data.vias)) {
+      guard_nets_++;
+      guard_contacts_ += bad;
+      data.routed = false;
+      data.wires.clear();
+      data.vias.clear();
+      continue;
+    }
     for (const OutWire& w : wires) {
       if (w.begin == w.end) {
         continue;
@@ -3986,6 +4314,11 @@ void BonnRouteDR::main()
           regenerations,
           regenerated_paths);
     }
+    logger_->report(
+        "BonnRoute DR contact guard: {} nets with {} pin contacts away from "
+        "access points left to FlexDR.",
+        guard_nets_,
+        guard_contacts_);
     if (params_.postprocess) {
       logger_->report(
           "BonnRoute DR post-processing: {} layer runs, same-net violations "

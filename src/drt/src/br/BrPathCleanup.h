@@ -40,6 +40,11 @@ struct CleanupRequest
   // (false), for minimum area.
   std::function<void(int layer, const GridPoint& p, bool up, std::vector<Box>&)>
       via_pads;
+  // False for points where the post-processing must not create a node
+  // (wire end, bend or extension tip), e.g. a pin of the net away from its
+  // access points: FlexDR treats pin-touching ends as pin connections.
+  // Existing nodes stay where they are.
+  std::function<bool(int layer, const GridPoint& p)> node_allowed;
 };
 
 struct CleanupPatch
@@ -87,6 +92,8 @@ struct CleanupResult
 //     if its new metal is `allowed` and it reduces the run's inner
 //     violations without adding end violations;
 //  3. extend via-to-via pieces below the minimum area beyond a via.
+// Chain ends and vias never move, and no change creates a node where
+// `node_allowed` is false.
 CleanupResult cleanupConnection(const CleanupRequest& request);
 
 }  // namespace drt::br

@@ -146,6 +146,11 @@ struct BonnRouteDRParams
   int access_spread_weight = 1;
   // Same-net post-processing of each connection (Sec. 4.4).
   bool postprocess = true;
+  // Catalogue paths start at the pin's OpenROAD access points (1) or
+  // anywhere on the pin (0, as in the paper). FlexDR's clean-up needs every
+  // pin contact at an access point, so 0 is incompatible with it (see
+  // OffTrack.md; the final contact guard then drops affected nets).
+  bool offtrack_from_access_points = true;
   // Sec. 4.1 searches: per-worker label budget in MB (0: unlimited); a
   // search that would exceed it stops without a path (counted).
   int search_label_mb = 512;
@@ -220,6 +225,9 @@ class BonnRouteDR
     std::vector<br::RouteNode> route;
     // Generated on the blockage grid (legality is checked for all shapes).
     bool offtrack = false;
+    // Index in `vias` of the access point's own via, whose pin-layer pad
+    // and cut pin access has checked; -1 if none.
+    int pin_via = -1;
   };
   struct Term
   {
@@ -343,6 +351,12 @@ class BonnRouteDR
     int64_t selection_optimal = 0;
     int64_t primaries = 0;
     double seconds = 0;
+    // Why catalogues stayed empty, and the first such pins.
+    int64_t empty_no_pin = 0;
+    int64_t empty_no_targets = 0;
+    int64_t empty_no_path = 0;
+    int64_t empty_rejected = 0;
+    std::vector<std::string> empty_examples;
     void add(const AccessStats& o);
   };
   void buildSameNetRules();
@@ -350,6 +364,29 @@ class BonnRouteDR
   void buildOffTrackAccess(const std::vector<char>& pre_skip);
   // Rectangles of the pin on its access layer (the lowest routing layer
   // that is a track layer or directly below the lowest one).
+  // A start of catalogue paths: an access point with its up via, if any.
+  struct AccessSource
+  {
+    frLayerNum layer = 0;
+    odb::Point point;
+    const frViaDef* via = nullptr;
+  };
+  // The access points of the pin of `term` (FlexDR's: the instance's pin
+  // access index, no-rotation transform; index 0 for top-level pins).
+  void accessSources(const Term& term, std::vector<AccessSource>& out) const;
+  void accessPointsOf(const frBlockObject* pin,
+                      std::vector<br::RouteNode>& out) const;
+  // Pin contacts of the net's geometry that are not access points (wire
+  // ends truncated on a pin and via pads at the via origin); see
+  // br::pinContactViolations.
+  int64_t pinContactViolations(const NetData& net,
+                               const std::vector<OutWire>& wires,
+                               const std::vector<OutVia>& vias) const;
+  // True unless p lies on a pin of `net` on `layer` away from its access
+  // points (no new nodes there in the post-processing).
+  bool nodeAllowed(int net, frLayerNum layer, const odb::Point& p) const;
+  int64_t guard_nets_ = 0;
+  int64_t guard_contacts_ = 0;
   bool pinShapes(const Term& term,
                  frLayerNum& layer,
                  std::vector<odb::Rect>& rects) const;

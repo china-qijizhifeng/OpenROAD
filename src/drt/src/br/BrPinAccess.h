@@ -132,4 +132,21 @@ SelectionResult selectConflictFree(const SelectionInput& in);
 // first candidate compatible with the earlier choices.
 SelectionResult selectGreedy(const SelectionInput& in);
 
+// A pin of the routed net for the pin-contact guard: its shapes and its
+// access points (layer, point).
+struct ContactPin
+{
+  std::vector<std::pair<int, Box>> shapes;
+  std::vector<RouteNode> access_points;
+};
+
+// Number of contacts (layer, point: wire ends and via pads at the via
+// origin) that lie on a pin's shape of that layer (closed) but are not one
+// of that pin's access points on that layer. FlexDR's clean-up turns a
+// contact into a connection of the pin and then needs one of the pin's
+// access points inside the worker's route box (DRT-1231); a contact at an
+// access point always brings it along.
+int64_t pinContactViolations(const std::vector<RouteNode>& contacts,
+                             const std::vector<ContactPin>& pins);
+
 }  // namespace drt::br

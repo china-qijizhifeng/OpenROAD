@@ -82,21 +82,25 @@ std::vector<BlockageGridLayer> buildBlockageGrid(const BlockageGridInput& in)
           hy.push_back(b.ylo);
           hy.push_back(b.yhi);
         };
+  auto pointsOnly = [&](const int k) { return in.layers[k].points_only; };
   for (int z = 0; z < num; z++) {
     std::vector<GeoCoord> hx;
     std::vector<GeoCoord> hy;
-    for (int nz = z - 1; nz <= z + 1; nz++) {
-      if (nz < 0 || nz >= num) {
-        continue;
-      }
-      for (const Box& b : in.layers[nz].blockages) {
-        add_box(hx, hy, b);
-      }
-    }
-    for (const int vz : {z - 1, z}) {
-      if (vz >= 0 && vz < static_cast<int>(in.via_blockages.size())) {
-        for (const Box& b : in.via_blockages[vz]) {
+    if (!pointsOnly(z)) {
+      for (int nz = z - 1; nz <= z + 1; nz++) {
+        if (nz < 0 || nz >= num || pointsOnly(nz)) {
+          continue;
+        }
+        for (const Box& b : in.layers[nz].blockages) {
           add_box(hx, hy, b);
+        }
+      }
+      for (const int vz : {z - 1, z}) {
+        if (vz >= 0 && vz < static_cast<int>(in.via_blockages.size())
+            && !pointsOnly(vz) && !pointsOnly(vz + 1)) {
+          for (const Box& b : in.via_blockages[vz]) {
+            add_box(hx, hy, b);
+          }
         }
       }
     }
@@ -115,7 +119,7 @@ std::vector<BlockageGridLayer> buildBlockageGrid(const BlockageGridInput& in)
     BlockageGridLayer& g = out[z];
     g.tau = in.layers[z].tau;
     for (int nz = z - 1; nz <= z + 1; nz++) {
-      if (nz < 0 || nz >= num) {
+      if (nz < 0 || nz >= num || (pointsOnly(z) && nz != z)) {
         continue;
       }
       g.xs.insert(g.xs.end(), own_x[nz].begin(), own_x[nz].end());

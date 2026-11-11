@@ -131,6 +131,15 @@ class RunCleaner
   bool accept(std::vector<RunPoint>& r, std::vector<RunPoint>& cand)
   {
     normalize(cand);
+    if (req_.node_allowed) {
+      for (const RunPoint& q : cand) {
+        const bool existing = std::any_of(
+            r.begin(), r.end(), [&](const RunPoint& o) { return o.p == q.p; });
+        if (!existing && !req_.node_allowed(layer_, q.p)) {
+          return false;
+        }
+      }
+    }
     if (score(cand, rules_).betterThan(score(r, rules_))) {
       r.swap(cand);
       return true;
@@ -259,7 +268,8 @@ void fixMinArea(const CleanupRequest& req,
       const GridPoint tip{anchor.x + static_cast<GeoCoord>(u.x * need),
                           anchor.y + static_cast<GeoCoord>(u.y * need)};
       const Box ext = wireBox(anchor, tip, l.half_width);
-      if (req.allowed && !req.allowed(layer, ext)) {
+      if ((req.allowed && !req.allowed(layer, ext))
+          || (req.node_allowed && !req.node_allowed(layer, tip))) {
         break;
       }
       std::vector<Box> with = boxes;

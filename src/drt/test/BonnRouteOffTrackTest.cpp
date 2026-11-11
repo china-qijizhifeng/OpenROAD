@@ -148,6 +148,9 @@ struct Instance
   };
   std::vector<Layer> layers;
   std::vector<Box> via_obstacles;  // between layer 0 and 1
+  // If not empty: vias only at these points (pin access on a layer without
+  // wires: only at the access points).
+  std::vector<GridPoint> via_points;
   int64_t via_cost = 0;
   RouteNode s;
   RouteNode t;
@@ -167,6 +170,11 @@ bool edgeBlocked(const std::vector<Box>& obs,
 
 bool viaBlocked(const Instance& in, const GridPoint& p)
 {
+  if (!in.via_points.empty()
+      && std::find(in.via_points.begin(), in.via_points.end(), p)
+             == in.via_points.end()) {
+    return true;
+  }
   for (const Box& o : in.via_obstacles) {
     if (o.containsOpen(p.x, p.y)) {
       return true;
@@ -263,7 +271,9 @@ OffTrackRequest makeRequest(const Instance& in,
 {
   BlockageGridInput gin;
   for (const auto& l : in.layers) {
-    gin.layers.push_back({l.tau, l.obstacles});
+    // points_only is valid where vias into the layer exist only at points.
+    gin.layers.push_back(
+        {l.tau, l.obstacles, !l.wires && !in.via_points.empty()});
   }
   if (in.layers.size() > 1) {
     gin.via_blockages.push_back(in.via_obstacles);
@@ -365,6 +375,7 @@ void testTheorem(std::mt19937& rng, const int layers, const int count)
   OffTrackSearch search;
   int64_t astar_settled = 0;
   int64_t dijkstra_settled = 0;
+  int points_only_cases = 0;
   for (int it = 0; it < count; it++) {
     Instance in;
     const int size = 20 + static_cast<int>(rng() % 20);
@@ -388,6 +399,10 @@ void testTheorem(std::mt19937& rng, const int layers, const int count)
     in.t.layer = static_cast<int>(rng() % layers);
     in.s.p = freePoint(rng, in.layers[in.s.layer].obstacles, size);
     in.t.p = freePoint(rng, in.layers[in.t.layer].obstacles, size);
+    if (layers > 1 && !in.layers[0].wires && rng() % 2 == 0) {
+      in.via_points = {in.s.p, in.t.p};
+      points_only_cases++;
+    }
     std::vector<BlockageGridLayer> grid;
     OffTrackRequest req = makeRequest(in, grid);
     const OffTrackResult res = search.run(req);
@@ -453,14 +468,16 @@ void testTheorem(std::mt19937& rng, const int layers, const int count)
   CHECK(bad_paths == 0, "%d returned paths not tau-feasible", bad_paths);
   std::printf(
       "theorem 3.2 (%d layer%s): %d/%d instances G == brute force (%d without "
-      "path), %d infeasible returned paths; max grid vertices %lld\n",
+      "path), %d infeasible returned paths; max grid vertices %lld; %d "
+      "with a points_only first layer\n",
       layers,
       layers > 1 ? "s" : "",
       equal,
       count,
       unreachable,
       bad_paths,
-      static_cast<long long>(max_vertices));
+      static_cast<long long>(max_vertices),
+      points_only_cases);
   std::printf(
       "  A* (3 nearest of 6 targets) settled %.1f%% of the states plain "
       "Dijkstra settles for all targets, same costs\n",
@@ -934,6 +951,21 @@ void testCleanup(std::mt19937& rng)
       out.push_back(
           {p.x - half - 1, p.y - half - 1, p.x + half + 1, p.y + half + 1});
     };
+    // Pins away from their access points: no new nodes there.
+    std::vector<std::pair<int, Box>> forbidden;
+    if (rng() % 2 == 0) {
+      for (const Box& b : randomBoxes(rng, 3, 70, 12)) {
+        forbidden.emplace_back(static_cast<int>(rng() % 3), b);
+      }
+    }
+    req.node_allowed = [&forbidden](int layer, const GridPoint& p) {
+      for (const auto& [l, b] : forbidden) {
+        if (l == layer && b.containsClosed(p.x, p.y)) {
+          return false;
+        }
+      }
+      return true;
+    };
     // Layer 0 run, via, layer 1 piece, via, layer 2 run.
     const bool via_chain = rng() % 3 == 0;
     std::vector<GridPoint> run0 = randomPath(rng, tau, 1, half, 3 + rng() % 6);
@@ -1006,7 +1038,13 @@ void testCleanup(std::mt19937& rng)
     for (const CleanupPatch& p : r.patches) {
       CHECK(req.allowed(p.layer, wireBox(p.begin, p.end, half)),
             "illegal patch");
+      CHECK(req.node_allowed(p.layer, p.end), "patch tip on a pin");
       area_cases++;
+    }
+    for (const RouteNode& n : r.nodes) {
+      const bool existing
+          = std::find(nodes.begin(), nodes.end(), n) != nodes.end();
+      CHECK(existing || req.node_allowed(n.layer, n.p), "new node on a pin");
     }
   }
   std::printf(
@@ -1024,6 +1062,178 @@ void testCleanup(std::mt19937& rng)
       area_cases);
 }
 
+// ---------------------------------------------------------------------------
+// Pin contacts (DRT-1231 regression): FlexDR needs every pin contact of the
+// initial routing at an access point. Paths from access-point sources on a
+// pin layer without wires (points_only) touch the pin only there, also
+// after post-processing with node_allowed; region sources (the paper's
+// "anywhere on the pin") do not.
+void testPinContacts(std::mt19937& rng)
+{
+  int64_t ap_paths = 0;
+  int64_t ap_violations = 0;
+  int64_t region_paths = 0;
+  int64_t region_violating_paths = 0;
+  int64_t ap_vertices = 0;
+  int64_t region_vertices = 0;
+  int64_t guard_cases = 0;
+  OffTrackSearch search;
+  for (int it = 0; it < 1500; it++) {
+    const GeoCoord tau = 4 + static_cast<GeoCoord>(rng() % 6);
+    const Box pin{20,
+                  20,
+                  20 + 4 + static_cast<GeoCoord>(rng() % 8),
+                  20 + 10 + static_cast<GeoCoord>(rng() % 20)};
+    std::vector<GridPoint> aps;
+    const int num_aps = 1 + static_cast<int>(rng() % 3);
+    for (int k = 0; k < num_aps; k++) {
+      aps.push_back(
+          {pin.xlo + static_cast<GeoCoord>(rng() % (pin.width() + 1)),
+           pin.ylo + static_cast<GeoCoord>(rng() % (pin.height() + 1))});
+    }
+    // Other pins on layer 0 (via blockages) and obstacles on layer 1.
+    std::vector<Box> neighbours = randomBoxes(rng, 6, 60, 10);
+    std::erase_if(neighbours, [&](const Box& b) { return b.touches(pin); });
+    const std::vector<Box> upper = randomBoxes(rng, 4, 60, 8);
+    std::vector<OffTrackTarget> targets;
+    for (GeoCoord x = 4; x <= 56; x += 9) {
+      for (GeoCoord y = 4; y <= 56; y += 7) {
+        targets.push_back({1, {x, y}, static_cast<int>(targets.size())});
+      }
+    }
+    auto via_free = [&](const GridPoint& p) {
+      for (const Box& b : neighbours) {
+        if (b.bloated(2).containsOpen(p.x, p.y)) {
+          return false;
+        }
+      }
+      return true;
+    };
+    std::vector<ContactPin> pins(1);
+    pins[0].shapes.emplace_back(0, pin);
+    for (const GridPoint& a : aps) {
+      pins[0].access_points.push_back({0, a});
+    }
+    auto contacts = [](const std::vector<RouteNode>& nodes) {
+      std::vector<RouteNode> c{nodes.front(), nodes.back()};
+      for (size_t k = 0; k + 1 < nodes.size(); k++) {
+        if (nodes[k].layer != nodes[k + 1].layer) {
+          c.push_back(nodes[k]);
+          c.push_back(nodes[k + 1]);
+        }
+      }
+      return c;
+    };
+    for (const bool from_aps : {true, false}) {
+      BlockageGridInput gin;
+      OffTrackRequest req;
+      req.window = {-10, -10, 70, 70};
+      OffTrackLayer l0;
+      l0.wires = false;
+      OffTrackLayer l1;
+      l1.obstacles = upper;
+      gin.layers.push_back({1, {}, from_aps});
+      gin.layers.push_back({tau, upper});
+      std::vector<Box> via_blocks;
+      for (const Box& b : neighbours) {
+        via_blocks.push_back(b.bloated(2));
+      }
+      gin.via_blockages.push_back(via_blocks);
+      for (const OffTrackTarget& t : targets) {
+        gin.points.push_back(t.p);
+      }
+      if (from_aps) {
+        for (const GridPoint& a : aps) {
+          gin.points.push_back(a);
+          req.sources.push_back({0, {a.x, a.y, a.x, a.y}});
+        }
+      } else {
+        gin.borders.push_back(pin);
+        req.sources.push_back({0, pin});
+      }
+      gin.borders.push_back(req.window);
+      const auto grid = buildBlockageGrid(gin);
+      l0.grid = grid[0];
+      l1.grid = grid[1];
+      req.layers = {l0, l1};
+      req.targets = targets;
+      req.via_cost = 1;
+      req.max_targets = 8;
+      // As BonnRouteDR: from access points, vias into the pin layer only at
+      // the access points (points_only).
+      req.via_allowed = [&](int, const GridPoint& p) {
+        return via_free(p)
+               && (!from_aps
+                   || std::find(aps.begin(), aps.end(), p) != aps.end());
+      };
+      const OffTrackResult res = search.run(req);
+      (from_aps ? ap_vertices : region_vertices) += res.grid_vertices;
+      for (const OffTrackPath& path : res.paths) {
+        const int64_t v = pinContactViolations(contacts(path.nodes), pins);
+        if (from_aps) {
+          ap_paths++;
+          ap_violations += v;
+          CHECK(std::find(aps.begin(), aps.end(), path.nodes.front().p)
+                    != aps.end(),
+                "path does not start at an access point");
+          // Post-processing the path with an on-track tail keeps it.
+          CleanupRequest creq;
+          creq.nodes = path.nodes;
+          const RouteNode end = path.nodes.back();
+          creq.nodes.push_back({end.layer, {end.p.x + 1, end.p.y}});
+          creq.nodes.push_back({end.layer, {end.p.x + 1, end.p.y + 20}});
+          CleanupLayer cl;
+          cl.tau = tau;
+          cl.half_width = 1;
+          creq.layers = {cl, cl};
+          creq.node_allowed = [&](int layer, const GridPoint& p) {
+            return pinContactViolations({{layer, p}}, pins) == 0;
+          };
+          const CleanupResult cr = cleanupConnection(creq);
+          ap_violations += pinContactViolations(contacts(cr.nodes), pins);
+        } else {
+          region_paths++;
+          region_violating_paths += v > 0;
+        }
+      }
+    }
+    // The decision itself against a direct count.
+    std::vector<RouteNode> probe;
+    for (int k = 0; k < 6; k++) {
+      probe.push_back(
+          {static_cast<int>(rng() % 2),
+           k < 2 ? aps[rng() % aps.size()]
+                 : GridPoint{static_cast<GeoCoord>(18 + rng() % 16),
+                             static_cast<GeoCoord>(18 + rng() % 34)}});
+    }
+    int64_t want = 0;
+    for (const RouteNode& c : probe) {
+      const bool on = c.layer == 0 && pin.containsClosed(c.p.x, c.p.y);
+      const bool at_ap
+          = c.layer == 0 && std::find(aps.begin(), aps.end(), c.p) != aps.end();
+      want += on && !at_ap;
+    }
+    CHECK(pinContactViolations(probe, pins) == want, "guard count");
+    guard_cases++;
+  }
+  CHECK(ap_violations == 0,
+        "%lld contacts away from access points",
+        static_cast<long long>(ap_violations));
+  CHECK(region_violating_paths > 0, "control found no violating path");
+  std::printf(
+      "pin contacts: access-point sources %lld paths (post-processed), %lld "
+      "contacts away from access points; region sources %lld/%lld paths "
+      "touch the pin away from an access point; grid vertices %lld vs %lld "
+      "(points_only vs region); %lld guard counts checked\n",
+      static_cast<long long>(ap_paths),
+      static_cast<long long>(ap_violations),
+      static_cast<long long>(region_violating_paths),
+      static_cast<long long>(region_paths),
+      static_cast<long long>(ap_vertices),
+      static_cast<long long>(region_vertices),
+      static_cast<long long>(guard_cases));
+}
+
 }  // namespace
 
 int main()
@@ -1038,6 +1248,7 @@ int main()
   testSelection(rng);
   testSignatures(rng);
   testCleanup(rng);
+  testPinContacts(rng);
   const double secs
       = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0)
             .count();

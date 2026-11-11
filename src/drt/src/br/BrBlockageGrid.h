@@ -56,6 +56,8 @@ struct BlockageGridInput
   {
     GeoCoord tau = 1;
     std::vector<Box> blockages;
+    // The caller uses this layer only at `points` (see buildBlockageGrid).
+    bool points_only = false;
   };
   std::vector<Layer> layers;
   std::vector<std::vector<Box>> via_blockages;  // size layers.size() - 1
@@ -74,6 +76,13 @@ struct BlockageGridInput
 //   via layer z | z + 1 grid = X_z u X_{z+1};
 //   final wiring layer grid = X_{z-1} u X_z u X_{z+1}
 // so every via-layer vertex is a vertex of both wiring layers it connects.
+// A `points_only` layer is one the caller connects only at `points`: a pin
+// layer without wires whose vias are allowed only at the access points
+// (sources). It keeps H_z = `points`/`borders` and its own coordinates, and
+// neither its blockages nor the via blockages next to it induce coordinates
+// elsewhere. (If vias were allowed elsewhere, a down-and-up via pair would
+// reset the incoming direction and could shorten paths, so the reduction
+// needs that restriction.)
 // Adding lines keeps Theorem 3.2's guarantee (a superset of the grid still
 // contains the endpoints of some shortest tau-feasible path).
 std::vector<BlockageGridLayer> buildBlockageGrid(const BlockageGridInput& in);

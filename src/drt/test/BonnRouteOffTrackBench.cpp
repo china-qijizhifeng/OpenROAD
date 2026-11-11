@@ -11,12 +11,14 @@
 // and the class solution mapped to every member and re-verified there.
 //
 // usage: bonnroute_offtrack_bench [rows] [cells_per_row] [seed] [patterns]
+//        bonnroute_offtrack_bench gcd [rows] [cells_per_row] [seed]
 #include <algorithm>
 #include <chrono>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <random>
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -374,10 +376,216 @@ double percentile(std::vector<double> v, double q)
   return v[static_cast<size_t>(q * (v.size() - 1))];
 }
 
+// gcd_nangate45-like pin access (DBU 2000 per micron): pins on metal1
+// below the track graph (no wires there), metal2 vertical tracks of pitch
+// 380 with tau = width = 140, via1 pads 140 x 270 / 270 x 140, metal1
+// spacing 130, pin coordinates on a 10 DBU grid. Compares the catalogue
+// search from the whole pin (region sources, the previous behaviour) with
+// the search from OpenROAD-like access points (points_only pin layer).
+void runGcdLike(int rows, int cells, unsigned seed)
+{
+  constexpr GeoCoord kScale = 2;
+  constexpr GeoCoord kPitch2 = 380;
+  constexpr GeoCoord kOffset2 = 190;
+  constexpr GeoCoord kPitch1 = 280;
+  constexpr GeoCoord kOffset1 = 140;
+  constexpr GeoCoord kTau = 140;
+  constexpr GeoCoord kSpace1 = 130;
+  const Box pad1{-70, -135, 70, 135};
+  std::mt19937 rng(seed);
+  const std::vector<Master> masters = makeMasters(rng);
+  const Chip chip0 = makeChip(rng, masters, rows, cells, 0);
+  // Scale to DBU 2000 with a 10 DBU jitter of every pin rectangle.
+  std::vector<Shape> shapes;
+  for (const Shape& sh : chip0.shapes) {
+    Box b{sh.box.xlo * kScale,
+          sh.box.ylo * kScale,
+          sh.box.xhi * kScale,
+          sh.box.yhi * kScale};
+    if (sh.net >= 0) {
+      const GeoCoord j = 10 * static_cast<GeoCoord>(rng() % 3);
+      b = {b.xlo + j, b.ylo, b.xhi + j, b.yhi};
+    }
+    shapes.push_back({0, b, sh.net});
+  }
+  // Pins: rectangles per net.
+  std::vector<std::vector<Box>> pins;
+  for (const Shape& sh : shapes) {
+    if (sh.net >= 0) {
+      if (static_cast<int>(pins.size()) <= sh.net) {
+        pins.resize(sh.net + 1);
+      }
+      pins[sh.net].push_back(sh.box);
+    }
+  }
+  struct Mode
+  {
+    const char* name = "";
+    bool from_aps = false;
+    std::vector<double> vertices;
+    std::vector<double> settled;
+    std::vector<double> micros;
+    int64_t empty = 0;
+    int64_t paths = 0;
+  };
+  Mode modes[2];
+  modes[0].name = "region sources";
+  modes[0].from_aps = false;
+  modes[1].name = "access points";
+  modes[1].from_aps = true;
+  OffTrackSearch search;
+  for (int net = 0; net < static_cast<int>(pins.size()); net++) {
+    const std::vector<Box>& pin = pins[net];
+    if (pin.empty()) {
+      continue;
+    }
+    Box pin_box = pin.front();
+    for (const Box& b : pin) {
+      pin_box = pin_box.merged(b);
+    }
+    // Access points: metal2 track or rectangle centre in x, metal1 track
+    // or centre in y, inside a pin rectangle, via1 pad clear of others.
+    std::vector<GridPoint> aps;
+    for (const Box& b : pin) {
+      std::vector<GeoCoord> xs = tracks(kOffset2, kPitch2, b.xlo, b.xhi);
+      xs.push_back((b.xlo + b.xhi) / 2);
+      std::vector<GeoCoord> ys = tracks(kOffset1, kPitch1, b.ylo, b.yhi);
+      ys.push_back((b.ylo + b.yhi) / 2);
+      for (const GeoCoord x : xs) {
+        for (const GeoCoord y : ys) {
+          const Box pad = Isometry{1, 0, 0, 1, x, y}.apply(pad1);
+          bool ok = true;
+          for (const Shape& sh : shapes) {
+            ok = ok && (sh.net == net || !violates(sh.box, pad, kSpace1));
+          }
+          if (ok && aps.size() < 4) {
+            aps.push_back({x, y});
+          }
+        }
+      }
+    }
+    const Box reach{pin_box.xlo - 2 * kPitch2,
+                    pin_box.ylo - 2 * kPitch2,
+                    pin_box.xhi + 2 * kPitch2,
+                    pin_box.yhi + 2 * kPitch2};
+    std::vector<OffTrackTarget> targets;
+    for (const GeoCoord x : tracks(kOffset2, kPitch2, reach.xlo, reach.xhi)) {
+      for (const GeoCoord y : tracks(kOffset1, kPitch1, reach.ylo, reach.yhi)) {
+        targets.push_back({1, {x, y}, static_cast<int>(targets.size())});
+      }
+    }
+    const Box window = reach.bloated(2 * kTau + kPitch2);
+    std::vector<Box> via_blocks;
+    for (const Shape& sh : shapes) {
+      if (sh.net != net && sh.box.bloated(1000).touches(window)) {
+        via_blocks.push_back({sh.box.xlo - kSpace1 - pad1.xhi,
+                              sh.box.ylo - kSpace1 - pad1.yhi,
+                              sh.box.xhi + kSpace1 - pad1.xlo,
+                              sh.box.yhi + kSpace1 - pad1.ylo});
+      }
+    }
+    for (Mode& mode : modes) {
+      if (mode.from_aps && aps.empty()) {
+        mode.empty++;
+        continue;
+      }
+      const auto t0 = std::chrono::steady_clock::now();
+      BlockageGridInput gin;
+      OffTrackRequest req;
+      OffTrackLayer l1;
+      l1.wires = false;
+      OffTrackLayer l2;
+      gin.layers.push_back({1, {}, mode.from_aps});
+      gin.layers.push_back({kTau, {}});
+      gin.via_blockages.push_back(via_blocks);
+      for (const OffTrackTarget& t : targets) {
+        gin.points.push_back(t.p);
+      }
+      if (mode.from_aps) {
+        for (const GridPoint& a : aps) {
+          gin.points.push_back(a);
+          req.sources.push_back({0, {a.x, a.y, a.x, a.y}});
+        }
+      } else {
+        for (const Box& b : pin) {
+          gin.borders.push_back(b);
+          req.sources.push_back({0, b});
+        }
+      }
+      gin.borders.push_back(window);
+      const auto grid = buildBlockageGrid(gin);
+      l1.grid = grid[0];
+      l2.grid = grid[1];
+      req.layers = {l1, l2};
+      req.window = window;
+      req.targets = targets;
+      req.via_cost = 140;
+      req.max_targets = 16;
+      req.via_allowed = [&](int, const GridPoint& p) {
+        if (mode.from_aps) {
+          return std::find(aps.begin(), aps.end(), p) != aps.end();
+        }
+        for (const Box& b : via_blocks) {
+          if (b.containsOpen(p.x, p.y)) {
+            return false;
+          }
+        }
+        return true;
+      };
+      const OffTrackResult res = search.run(req);
+      mode.micros.push_back(std::chrono::duration<double, std::micro>(
+                                std::chrono::steady_clock::now() - t0)
+                                .count());
+      mode.vertices.push_back(static_cast<double>(res.grid_vertices));
+      mode.settled.push_back(static_cast<double>(res.settled));
+      mode.paths += static_cast<int64_t>(std::min<size_t>(8, res.paths.size()));
+      mode.empty += res.paths.empty();
+    }
+  }
+  std::printf(
+      "gcd-like rows=%d cells/row=%d seed=%u pins=%zu (DBU 2000, "
+      "metal1 pins, metal2 tau %d)\n",
+      rows,
+      cells,
+      seed,
+      pins.size(),
+      kTau);
+  for (const Mode& m : modes) {
+    double sum_v = 0;
+    double sum_s = 0;
+    double sum_t = 0;
+    for (size_t k = 0; k < m.vertices.size(); k++) {
+      sum_v += m.vertices[k];
+      sum_s += m.settled[k];
+      sum_t += m.micros[k];
+    }
+    std::printf(
+        "  %-15s searches %zu, empty %lld, paths %lld; grid vertices "
+        "total %.0f (p50 %.0f, max %.0f); settled total %.0f; search "
+        "%.2f s (p50 %.0f us)\n",
+        m.name,
+        m.vertices.size(),
+        static_cast<long long>(m.empty),
+        static_cast<long long>(m.paths),
+        sum_v,
+        percentile(m.vertices, 0.5),
+        percentile(m.vertices, 1.0),
+        sum_s,
+        sum_t / 1e6,
+        percentile(m.micros, 0.5));
+  }
+}
+
 }  // namespace
 
 int main(int argc, char** argv)
 {
+  if (argc > 1 && std::string(argv[1]) == "gcd") {
+    runGcdLike(argc > 2 ? std::atoi(argv[2]) : 12,
+               argc > 3 ? std::atoi(argv[3]) : 30,
+               argc > 4 ? std::atoi(argv[4]) : 1);
+    return 0;
+  }
   const int rows = argc > 1 ? std::atoi(argv[1]) : 12;
   const int cells = argc > 2 ? std::atoi(argv[2]) : 40;
   const unsigned seed = argc > 3 ? std::atoi(argv[3]) : 1;

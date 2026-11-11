@@ -25,4 +25,7 @@ $CXX -std=c++20 -O2 -I"$DRT/src" -o "$BIN/bench" \
   for args in "12 40 1 0" "12 40 2 0" "24 60 3 0" "12 40 1 4" "24 60 3 8"; do
     "$BIN/bench" $args
   done
+  echo "## gcd-like pin access: region sources vs access points"
+  "$BIN/bench" gcd 12 30 1
+  "$BIN/bench" gcd 24 40 2
 } | tee "$OUT"

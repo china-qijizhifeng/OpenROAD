@@ -107,9 +107,20 @@ additionally requires the exact legality check of its three shapes.
   direction, run length) on the integer grid with a margin of 4 tau + 4
   around the instance, and every returned path is re-verified as
   tau-feasible and obstacle-free with the reported cost.
-- Sources are regions (all grid vertices inside the pin rectangles), not the
-  theorem's single point. With the pin borders as Hanan lines this is the
-  natural extension; it is not covered by the brute-force test.
+- Sources are, by default (`offtrack_from_access_points 1`), the pin's
+  OpenROAD access points: points, as in the theorem. With
+  `offtrack_from_access_points 0` they are regions (all grid vertices inside
+  the pin rectangles, pin borders as Hanan lines), the paper's "anywhere on
+  the pin"; that extension is not covered by the brute-force test, and it is
+  incompatible with FlexDR clean-up (see "Pin contacts" below).
+- A pin layer without wires (below the track graph) whose vias are allowed
+  only at the access points is a `points_only` layer of the blockage grid:
+  its blockages and the via blockages next to it induce no coordinates, and
+  it keeps only the given points. The two-layer brute-force test includes
+  such instances (vias restricted to the given points) with equal results.
+  The restriction matters: with vias allowed anywhere, a down-and-up via
+  pair resets the incoming direction and can shorten paths, and the reduced
+  grid would miss those.
 - Search costs are DBU of wire plus one wire width per via (a tie-breaker):
   the catalogue ranks paths by length as in Theorem 3.2. The on-track cost
   model (jog factor for non-preferred wires, `via_cost` pitches per via, cost
@@ -144,10 +155,14 @@ their own.
 
 ## Pin access catalogues and circuit classes (Section 4.3)
 
-- Access layer: the lowest layer with pin shapes among the track layers and
-  the routing layer directly below the lowest track layer. The search uses
-  that layer (planar wires only if it is a track layer) and the next routing
-  layer through its default via.
+- Access layer: the lowest layer of the pin's access points among the track
+  layers and the routing layer directly below the lowest track layer (with
+  `offtrack_from_access_points 0`: the lowest layer with pin shapes). The
+  search uses that layer (planar wires only if it is a track layer) and the
+  next routing layer. A via at an access point is the access point's own via
+  (OpenROAD's choice); pin access checked its pin-layer pad and cut, so only
+  its top pad is checked against the routing space, as for the previous
+  access stubs. Other vias use the default via with all three shapes.
 - Targets: track-graph vertices within `offtrack_radius` pitches (Chebyshev,
   around the pin's bounding box) on these layers that the fast grid allows
   for a preferred wire. Search window: bounding box of pin and targets plus
@@ -242,6 +257,36 @@ The paper does not list the operations; these are the local repairs whose
 legality can be checked with the same adapter. Track vertices of the
 on-track path become sources of later connections only if they still carry
 metal after the post-processing.
+
+## Pin contacts and FlexDR (DRT-1231)
+
+FlexDR's clean-up (`initNets_searchRepair_pin2epMap`, `initNet_term_helper`
+in `FlexDR_init.cpp`) makes a pin a term of a worker wherever a truncated
+path-segment end or a connected via pad of the net lies on the pin, and then
+requires one of the pin's access points (`getPinAccess(inst pin access
+index)`) inside the worker's route box; otherwise it stops with
+`DRT-1231 Pin ... does not have access point`. The previous access stubs
+always touched pins at access points. The producers of pin-touching
+geometry and how each keeps contacts at access points:
+
+| Producer | Contact | Handling |
+| ----- | ----- | ----- |
+| Catalogue paths (preprocessing) | first node on the pin; access via | start at the access points; on a pin layer without wires vias only there (`points_only`) |
+| Dynamic regeneration (Sec. 4.4) | same | same code path as the catalogue |
+| Circuit-class mapping | mapped first node | mapped access points are the member's access points for equal signatures; the guard catches the rest |
+| Fallback stubs | jog start / access via | start at an access point (unchanged) |
+| Planar `pin_points` (truncated ends) | truncated wire end | only the first node of a planar option, an access point |
+| Post-processing (jog shift, U collapse, min-area extension) | moved bends, extension tips | chain ends and vias never move; no new node or tip on a pin of the net away from its access points (`CleanupRequest::node_allowed`) |
+| On-track paths | vias landing on pins of the net | unchanged; covered by the guard |
+
+Final guard in `writeNets`: every truncated wire end and both pads of every
+via (connected or not, since FlexDR marks the vias it keeps) that lie on a
+pin of the net must be one of that pin's access points
+(`br::pinContactViolations`); a net that violates it is not written and is
+left to FlexDR, and the log reports the count ("contact guard").
+`offtrack_from_access_points 0` produces such contacts by construction and
+is therefore incompatible with FlexDR clean-up; the guard then drops most
+nets.
 
 ## Parameters and A/B
 

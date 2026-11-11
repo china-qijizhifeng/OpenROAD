@@ -411,4 +411,24 @@ SelectionResult selectGreedy(const SelectionInput& in)
   return r;
 }
 
+int64_t pinContactViolations(const std::vector<RouteNode>& contacts,
+                             const std::vector<ContactPin>& pins)
+{
+  int64_t violations = 0;
+  for (const RouteNode& c : contacts) {
+    for (const ContactPin& pin : pins) {
+      const bool touches = std::any_of(
+          pin.shapes.begin(), pin.shapes.end(), [&](const auto& s) {
+            return s.first == c.layer && s.second.containsClosed(c.p.x, c.p.y);
+          });
+      if (touches
+          && std::find(pin.access_points.begin(), pin.access_points.end(), c)
+                 == pin.access_points.end()) {
+        violations++;
+      }
+    }
+  }
+  return violations;
+}
+
 }  // namespace drt::br
