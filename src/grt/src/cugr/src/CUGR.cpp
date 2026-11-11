@@ -144,7 +144,8 @@ std::shared_ptr<GRTreeNode> splitEdgeAt(const std::shared_ptr<GRTreeNode>& tree,
       return;
     }
     for (const auto& c : node->getChildren()) {
-      if (edgePassesThrough(*node, *c, point)) {
+      // A pin link is no wire; nothing to split.
+      if (!c->isPinLink() && edgePassesThrough(*node, *c, point)) {
         parent = node;
         child = c;
         return;
@@ -240,9 +241,14 @@ void rerootAt(const std::shared_ptr<GRTreeNode>& tree,
 {
   std::vector<std::shared_ptr<GRTreeNode>> path;
   findPath(tree, node, path);
+  // Each edge keeps its kind (wire/via or pin link) when reversed.
+  std::vector<int> pins;
+  for (size_t i = 1; i < path.size(); ++i) {
+    pins.push_back(path[i]->getLinkPin());
+  }
   for (size_t i = 0; i + 1 < path.size(); ++i) {
     path[i]->removeChild(path[i + 1]);
-    path[i + 1]->addChild(path[i]);
+    path[i + 1]->addChild(path[i], pins[i]);
   }
 }
 
@@ -784,6 +790,7 @@ void CUGR::bonnRoute(std::vector<int>& net_indices)
   }
   BonnRouteGlobal router(grid_graph_.get(), nets, params, logger_);
   router.run();
+  bonnroute_cugr_capacity_ = router.cugrCapacity();
   // Nets without a BonnRoute tree fall back to pattern routing.
   for (GRNet* net : nets) {
     if (net->getRoutingTree() != nullptr) {
@@ -1145,6 +1152,7 @@ std::vector<odb::dbNet*> CUGR::route(bool incremental)
   }
 
   printStatistics();
+  reportBonnRouteCapacityOverflow();
 
   if (incremental) {
     incremental_routing_ = false;
@@ -1744,16 +1752,77 @@ int CUGR::gridlineCenter(const int dimension, const int index) const
          + design_->getGridlineSize() / 2;
 }
 
+std::array<int, 2> CUGR::pinBridgeLayers(const GRNet* net) const
+{
+  // Lowest routable layer of each preferred direction in the net's range:
+  // layers below the minimum routing layer only take via-access guides.
+  std::array<int, 2> layers{-1, -1};
+  const int low
+      = std::max(constants_.min_routing_layer, net->getLayerRange().min_layer);
+  const int high = std::min(net->getLayerRange().max_layer,
+                            grid_graph_->getNumLayers() - 1);
+  for (int l = low; l <= high; l++) {
+    int& slot
+        = layers[grid_graph_->getLayerDirection(l) == MetalLayer::H ? 0 : 1];
+    if (slot < 0) {
+      slot = l;
+    }
+  }
+  for (int& slot : layers) {
+    if (slot < 0) {
+      slot = std::max(0, low);
+    }
+  }
+  return layers;
+}
+
 void CUGR::buildNetRoute(const GRNet* net, GRoute& route) const
 {
   const auto& routing_tree = net->getRoutingTree();
   if (!routing_tree) {
     return;
   }
+  const std::array<int, 2> bridge = pinBridgeLayers(net);
 
   GRTreeNode::preorder(
       routing_tree, [&](const std::shared_ptr<GRTreeNode>& node) {
         for (const auto& child : node->getChildren()) {
+          if (child->isPinLink()) {
+            // The pin's metal joins the two cells. A bridge keeps the
+            // segment route connected for GRT's checks and the guides; it
+            // is flagged so wirelength reports leave it out.
+            const std::vector<GRPoint> path
+                = pinLinkPath(*node, *child, bridge[0], bridge[1]);
+            for (size_t i = 0; i + 1 < path.size(); i++) {
+              const GRPoint& a = path[i];
+              const GRPoint& b = path[i + 1];
+              if (a.getLayerIdx() == b.getLayerIdx()) {
+                const auto [min_x, max_x] = std::minmax({a.x(), b.x()});
+                const auto [min_y, max_y] = std::minmax({a.y(), b.y()});
+                route.emplace_back(gridlineCenter(0, min_x),
+                                   gridlineCenter(1, min_y),
+                                   a.getLayerIdx() + 1,
+                                   gridlineCenter(0, max_x),
+                                   gridlineCenter(1, max_y),
+                                   a.getLayerIdx() + 1,
+                                   false);
+                route.back().setIs3DRoute(true);
+                route.back().is_pin_bridge = true;
+              } else {
+                const auto [bottom, top]
+                    = std::minmax({a.getLayerIdx(), b.getLayerIdx()});
+                const int x = gridlineCenter(0, a.x());
+                const int y = gridlineCenter(1, a.y());
+                for (int layer_idx = bottom; layer_idx < top; layer_idx++) {
+                  route.emplace_back(
+                      x, y, layer_idx + 1, x, y, layer_idx + 2, true);
+                  route.back().setIs3DRoute(true);
+                  route.back().is_pin_bridge = true;
+                }
+              }
+            }
+            continue;
+          }
           if (node->getLayerIdx() == child->getLayerIdx()) {
             // Degenerate tree edges (same gcell and layer) would become
             // zero-length segments, which segmentIsLine rejects.
@@ -1878,10 +1947,30 @@ void CUGR::getGuides(const GRNet* net,
   if (!routing_tree) {
     return;
   }
+  const std::array<int, 2> bridge = pinBridgeLayers(net);
   // 0. Basic guides
   GRTreeNode::preorder(
       routing_tree, [&](const std::shared_ptr<GRTreeNode>& node) {
         for (const auto& child : node->getChildren()) {
+          if (child->isPinLink()) {
+            // Bridge over the pin's metal, as in buildNetRoute.
+            const std::vector<GRPoint> path
+                = pinLinkPath(*node, *child, bridge[0], bridge[1]);
+            for (size_t i = 0; i + 1 < path.size(); i++) {
+              const GRPoint& a = path[i];
+              const GRPoint& b = path[i + 1];
+              const auto [low, high]
+                  = std::minmax({a.getLayerIdx(), b.getLayerIdx()});
+              for (int layer_idx = low; layer_idx <= high; layer_idx++) {
+                guides.emplace_back(layer_idx,
+                                    BoxT(std::min(a.x(), b.x()),
+                                         std::min(a.y(), b.y()),
+                                         std::max(a.x(), b.x()),
+                                         std::max(a.y(), b.y())));
+              }
+            }
+            continue;
+          }
           if (node->getLayerIdx() == child->getLayerIdx()) {
             guides.emplace_back(node->getLayerIdx(),
                                 BoxT(std::min(node->x(), child->x()),
@@ -1956,6 +2045,9 @@ void CUGR::getGuides(const GRNet* net,
   GRTreeNode::preorder(
       routing_tree, [&](const std::shared_ptr<GRTreeNode>& node) {
         for (const auto& child : node->getChildren()) {
+          if (child->isPinLink()) {
+            continue;
+          }
           if (node->getLayerIdx() == child->getLayerIdx()) {
             double wire_patch_threshold = constants_.wire_patch_threshold;
             const int direction
@@ -1996,6 +2088,35 @@ void CUGR::getGuides(const GRNet* net,
       });
 }
 
+void CUGR::reportBonnRouteCapacityOverflow() const
+{
+  if (!verbose_ || bonnroute_cugr_capacity_.empty()) {
+    return;
+  }
+  // With the Sec. 2.5 capacity model the congestion report measures
+  // overflow against the estimate; this line adds CUGR's capacity model for
+  // comparisons with runs that use it.
+  double estimated = 0.0;
+  double cugr = 0.0;
+  for (int l = constants_.min_routing_layer; l < grid_graph_->getNumLayers();
+       l++) {
+    for (int x = 0; x < grid_graph_->getXSize(); x++) {
+      for (int y = 0; y < grid_graph_->getYSize(); y++) {
+        const GraphEdge edge = grid_graph_->getEdge(l, x, y);
+        const double reference
+            = bonnroute_cugr_capacity_[grid_graph_->edgeFlatIndex(l, x, y)];
+        estimated += std::max(0.0, edge.demand - std::max(edge.capacity, 0.0));
+        cugr += std::max(0.0, edge.demand - std::max(reference, 0.0));
+      }
+    }
+  }
+  logger_->report(
+      "BonnRoute final overflow: estimated capacity {:.2f}, CUGR capacity "
+      "{:.2f}.",
+      estimated,
+      cugr);
+}
+
 void CUGR::printStatistics() const
 {
   if (!verbose_) {
@@ -2014,6 +2135,9 @@ void CUGR::printStatistics() const
     GRTreeNode::preorder(
         net->getRoutingTree(), [&](const std::shared_ptr<GRTreeNode>& node) {
           for (const auto& child : node->getChildren()) {
+            if (child->isPinLink()) {
+              continue;
+            }
             if (node->getLayerIdx() == child->getLayerIdx()) {
               const int direction
                   = grid_graph_->getLayerDirection(node->getLayerIdx());
@@ -2779,6 +2903,9 @@ void CUGR::saveCongestion()
     GRTreeNode::preorder(
         gr_net->getRoutingTree(), [&](const std::shared_ptr<GRTreeNode>& node) {
           for (const auto& child : node->getChildren()) {
+            if (child->isPinLink()) {
+              continue;
+            }
             if (node->getLayerIdx() == child->getLayerIdx()) {
               const int l = node->getLayerIdx();
               const int dir = grid_graph_->getLayerDirection(l);

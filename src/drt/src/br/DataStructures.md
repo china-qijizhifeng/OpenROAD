@@ -180,6 +180,41 @@ segment, so constant point levels on an edge imply its level.
   search touches them (`PagedLabels`), so a die-spanning window costs a page
   table, not 29 B per window vertex per worker.
 
+## Merge with the potentials, spreading, critical nets and off-track work
+
+* Input-wire reservations (arXiv:2111.06169) and pin-access reservations are
+  both net-owned `kReservation` shapes in the shape grid (`setReservation`,
+  `setInputReservation`); both are removed while their net is connected
+  and restored by rip-up rollback.
+* Potentials and the `potential_check` fallback guard are unchanged; they
+  only use the track graph and the search request.
+* Wire spreading reads the fast grid: a neighbouring track is occupied where
+  its wire vertex is not legal (`PathSearch::spreadCost`, level != 0), the
+  core-test reference uses the same expression. Because the net's own shapes
+  are removed during its searches, "occupied" means occupied by other nets,
+  as before.
+* Critical nets first and the empty-partition skip are kept; every partition
+  (the critical one on the whole chip by one thread) updates the routing
+  space in place, so the sequence semantics are those of the deferred
+  version: a thread sees its own commits at once and nothing of other
+  regions.
+* Low layers: the pin layer and cut directly below the lowest track layer are
+  further shape-grid layers (after the track layers, outside the fast grid).
+  They replace the previous read-only R-tree of those layers, so pins there
+  are owned shapes (removed while connecting) and access reservations there
+  block other nets.
+* Off-track legality (`BonnRouteDR::Legality`, `optionLegal`,
+  `regenerateAccess`, `postprocessConnection`) goes through the shape grid
+  and checker. Track-graph usability for a given net
+  (`BonnRouteDR::usable`): the fast grid, and where it reports a blockage the
+  exact checker with that net's shapes ignored
+  (`FastGridBuilder::exactLevel`), since the fast grid is net-agnostic.
+* Search scratch: `search_label_mb` (default 512 MB per worker) bounds the
+  labels of one search; a search that exceeds it stops without a path
+  (`SearchResult::aborted`, counted and reported with the peak scratch) and
+  the net goes the usual way of a failed connection. Between searches at most
+  64 MB of pages stay allocated per worker.
+
 ## Deviations and their reasons
 
 * Row chunks per global routing tile (not one AVL tree per full row): needed
@@ -194,6 +229,8 @@ segment, so constant point levels on an edge imply its level.
   lengths; queries stay O(window) instead of following empty rows arbitrarily
   far.
 * Shared cells exist only for inputs that already violate diff-net rules.
+* No inter-layer via rule between the cut below the lowest track layer and the
+  first track via layer is modelled.
 
 ## Tests and measurements
 

@@ -135,6 +135,9 @@ struct SearchRequest
   bool ripup = false;
   Cost ripup_cost = 0;
   RipupLevel max_ripup_level = kMaxRemovableLevel;
+  // Per-vertex label budget of the search (0: unlimited); a search that
+  // exceeds it stops without a path and reports `aborted`.
+  size_t label_limit = 0;
   bool use_intervals = true;
   // Interval property (ii) of Sec. 4.1 for vias as well as jogs. Without
   // it, intervals ignore via availability and relax vias per vertex.
@@ -144,6 +147,12 @@ struct SearchRequest
   const FutureCostOracle* future_cost = nullptr;
   std::vector<DiscountRun> discounts;
   Cost discount_rate = 0;  // cost per DBU of a discounted edge
+  // Wire spreading (Gester et al. 2013, Sec. 4.2): in tiles where global
+  // routing left room ([z][tx * tiles_y + ty] != 0), entering a wire vertex
+  // next to an occupied track costs spread_cost, which keeps the tracks
+  // beside routed wires free where space allows. Vertex search only.
+  const std::vector<std::vector<uint8_t>>* spread_tiles = nullptr;
+  Cost spread_cost = 0;
 };
 
 struct SearchResult
@@ -160,23 +169,34 @@ struct SearchResult
   // Legality queries answered by the fast grid / the distance rule checker.
   int64_t fast_grid_queries = 0;
   int64_t checker_queries = 0;
+  bool aborted = false;  // label budget exceeded
 };
 
 // Per-vertex labels of a search window, stored in pages that a search
 // allocates when it touches them: memory follows the explored part of the
 // window, not its bounding box (a net spanning the die has a window of
 // most of the track graph). Pages are reused by later searches; stale
-// labels carry older epochs.
+// labels carry older epochs. A search may be limited to a number of pages;
+// beyond it, labels go to a scratch page and overflow() is set (the search
+// then stops). Between searches at most kKeptBytes of pages stay allocated.
 template <typename Label>
 class PagedLabels
 {
  public:
   static constexpr int kPageBits = 10;
   static constexpr size_t kPageSize = size_t{1} << kPageBits;
+  static constexpr size_t kKeptBytes = size_t{64} << 20;
 
-  // Starts a search over `size` window vertices; returns its epoch.
-  uint32_t reset(const size_t size)
+  // Starts a search over `size` window vertices with at most `limit`
+  // labels (0: unlimited); returns its epoch.
+  uint32_t reset(const size_t size, const size_t limit = 0)
   {
+    const size_t kept = kKeptBytes / (kPageSize * sizeof(Label));
+    if (pool_.size() > kept) {
+      pool_.resize(kept);
+    }
+    limit_pages_ = limit == 0 ? 0 : (limit + kPageSize - 1) / kPageSize;
+    overflow_ = false;
     const size_t pages = (size >> kPageBits) + 1;
     if (page_epoch_.size() < pages) {
       page_epoch_.resize(pages, 0);
@@ -196,25 +216,41 @@ class PagedLabels
   {
     const size_t p = index >> kPageBits;
     if (page_epoch_[p] != epoch_) {
+      if (limit_pages_ != 0 && used_ >= limit_pages_) {
+        overflow_ = true;
+        if (!scratch_) {
+          scratch_ = std::make_unique<Label[]>(1);
+        }
+        scratch_[0] = Label{};
+        return scratch_[0];
+      }
       page_epoch_[p] = epoch_;
       if (used_ == pool_.size()) {
         pool_.push_back(std::make_unique<Label[]>(kPageSize));
       }
       page_index_[p] = static_cast<uint32_t>(used_++);
+      peak_pages_ = std::max(peak_pages_, used_);
     }
     return pool_[page_index_[p]][index & (kPageSize - 1)];
   }
+  bool overflow() const { return overflow_; }
   size_t bytes() const
   {
     return page_epoch_.capacity() * 2 * sizeof(uint32_t)
            + pool_.size() * kPageSize * sizeof(Label);
   }
+  // Largest page count a search has used.
+  size_t peakPages() const { return peak_pages_; }
 
  private:
   std::vector<uint32_t> page_epoch_;
   std::vector<uint32_t> page_index_;
   std::vector<std::unique_ptr<Label[]>> pool_;
+  std::unique_ptr<Label[]> scratch_;
   size_t used_ = 0;
+  size_t limit_pages_ = 0;
+  size_t peak_pages_ = 0;
+  bool overflow_ = false;
   uint32_t epoch_ = 0;
 };
 
@@ -228,6 +264,10 @@ class PathSearch
   }
   SearchResult run(const SearchRequest& request);
   size_t scratchBytes() const { return labels_.bytes(); }
+  size_t peakScratchBytes() const
+  {
+    return labels_.peakPages() * PagedLabels<Label>::kPageSize * sizeof(Label);
+  }
 
  private:
   enum Parent : uint8_t
@@ -268,8 +308,10 @@ class PathSearch
   bool enter(size_t v, Kind k) const;
   void push(const Item& item);
   bool relax(size_t from_v, size_t to_v, Cost g, Parent parent, int8_t dir);
-  // Cost of the preferred-direction edge between positions j and j2.
+  // Cost of the preferred-direction edge between positions j and j2,
+  // including the wire spreading cost of entering j2.
   Cost wireCost(int z, int i, int j, int j2) const;
+  Cost spreadCost(int z, int i, int j) const;
   void settle(int z, int i, int j, size_t v, Cost g);
 
   const TrackGraph& graph_;
@@ -336,6 +378,11 @@ class IntervalSearch
   }
   SearchResult run(const SearchRequest& request);
   size_t scratchBytes() const { return labels_.bytes(); }
+  size_t peakScratchBytes() const
+  {
+    return labels_.peakPages() * PagedLabels<VertexLabel>::kPageSize
+           * sizeof(VertexLabel);
+  }
   int64_t intervals() const { return num_intervals_; }
   int64_t labels() const { return num_labels_; }
 

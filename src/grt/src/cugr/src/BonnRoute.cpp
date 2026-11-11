@@ -18,6 +18,7 @@
 #include <utility>
 #include <vector>
 
+#include "BonnRouteCapacity.h"
 #include "GRNet.h"
 #include "GRTree.h"
 #include "GridGraph.h"
@@ -70,6 +71,20 @@ bool BonnRouteParams::set(const std::string& name, const double value)
     full_graph = value != 0.0;
   } else if (name == "maze_cleanup") {
     maze_cleanup = value != 0.0;
+  } else if (name == "capacity_model") {
+    capacity_model = std::clamp(static_cast<int>(value), 0, 1);
+  } else if (name == "capacity_single_tile") {
+    capacity_single_tile = value != 0.0;
+  } else if (name == "capacity_intra_tile") {
+    capacity_intra_tile = value != 0.0;
+  } else if (name == "capacity_stacked_vias") {
+    capacity_stacked_vias = value != 0.0;
+  } else if (name == "capacity_blockage_extension") {
+    capacity_blockage_extension = std::max(0.0, value);
+  } else if (name == "capacity_single_tile_layers") {
+    capacity_single_tile_layers = std::max(1, static_cast<int>(value));
+  } else if (name == "capacity_single_tile_margin") {
+    capacity_single_tile_margin = std::max(0.0, value);
   } else if (name == "verbose") {
     verbose = value != 0.0;
   } else {
@@ -218,9 +233,19 @@ void BonnRouteGlobal::prepareNets()
       Terminal t;
       t.pin_index = p;
       if (params_.pin_sets) {
+        // Sec. 2.1: "Each pin p has shapes in one or more tiles, and is
+        // represented by the respective set V_p of vertices." The tiles of
+        // the pin's access points are those the detailed router can use;
+        // a pin without access points uses the tiles of its shapes.
         for (const GRPoint& g : grid_graph_->pinAccessCells(net, p)) {
           t.cells.push_back(
               {std::clamp(g.getLayerIdx(), 0, top_limit), g.x(), g.y()});
+        }
+        if (t.cells.empty()) {
+          for (const GRPoint& g : net->getPinAccessPoints()[p]) {
+            t.cells.push_back(
+                {std::clamp(g.getLayerIdx(), 0, top_limit), g.x(), g.y()});
+          }
         }
       }
       if (t.cells.empty()) {
@@ -328,12 +353,6 @@ BonnRouteGlobal::OracleResult BonnRouteGlobal::oracle(
   const int num_terminals = static_cast<int>(state.terminals.size());
   std::vector<std::vector<int>> pins_at;  // terminal lists per marked vertex
   std::vector<int64_t> marked;
-  auto mark_terminals = [&]() {
-    for (size_t k = 0; k < marked.size(); k++) {
-      scratch.term_stamp[marked[k]] = scratch.epoch;
-      scratch.term[marked[k]] = static_cast<int32_t>(k);
-    }
-  };
   for (int t = 0; t < num_terminals; t++) {
     for (const auto& c : state.terminals[t].cells) {
       if (c[0] >= num_layers) {
@@ -350,21 +369,9 @@ BonnRouteGlobal::OracleResult BonnRouteGlobal::oracle(
     }
   }
   std::vector<char> connected(num_terminals, 0);
-  std::vector<int64_t> chosen(num_terminals, -1);  // vertex per terminal
-  std::vector<int64_t> tree;                       // tree vertices
   int remaining = num_terminals;
-  auto connect_at = [&](int64_t v) {
-    if (scratch.term_stamp[v] != scratch.epoch) {
-      return;
-    }
-    for (const int t : pins_at[scratch.term[v]]) {
-      if (!connected[t]) {
-        connected[t] = 1;
-        chosen[t] = v;
-        remaining--;
-      }
-    }
-  };
+  std::vector<std::array<int64_t, 2>> edges;  // vertex pairs
+  std::vector<int> edge_pins;                 // pin of a clique edge, or -1
   auto add_source = [&](int64_t v) {
     scratch.tree_stamp[v] = scratch.epoch;
     const int64_t node = v * 3;
@@ -373,42 +380,48 @@ BonnRouteGlobal::OracleResult BonnRouteGlobal::oracle(
     scratch.parent[node] = -1;
     push(0.0, node);
   };
-  // Root component: all cells of terminal 0 (zero-cost clique). If one of
-  // them also hosts other terminals, it is the root cell.
-  bool root_open = true;
-  for (const auto& c : state.terminals[0].cells) {
-    if (c[0] >= num_layers) {
-      continue;
-    }
-    const int64_t v = index(c[0], c[1], c[2]);
-    if (pins_at[scratch.term[v]].size() > 1) {
-      tree.push_back(v);
-      add_source(v);
-      connect_at(v);
-      root_open = false;
-      break;
-    }
-  }
-  if (root_open) {
-    int sources = 0;
-    for (const auto& c : state.terminals[0].cells) {
-      if (c[0] < num_layers) {
-        add_source(index(c[0], c[1], c[2]));
-        sources++;
+  // Sec. 2.2: "To find T*, we can add the edges of the clique K(V_p) for
+  // each pin p in n with zero cost, and use an approximation algorithm for
+  // the Steiner tree problem in weighted graphs." Algorithm 1 runs in G plus
+  // these cliques: once a vertex of V_p joins the tree, every vertex of V_p
+  // is reached at no cost and becomes a source. The clique edges are kept as
+  // pin links; buildCandidate prunes the ones no branch uses.
+  std::vector<int64_t> pending;
+  auto connect_at = [&](int64_t first) {
+    pending.assign(1, first);
+    for (size_t k = 0; k < pending.size(); k++) {
+      const int64_t v = pending[k];
+      if (scratch.term_stamp[v] != scratch.epoch) {
+        continue;
+      }
+      for (const int t : pins_at[scratch.term[v]]) {
+        if (connected[t]) {
+          continue;
+        }
+        connected[t] = 1;
+        remaining--;
+        for (const auto& c : state.terminals[t].cells) {
+          if (c[0] >= num_layers) {
+            continue;
+          }
+          const int64_t w = index(c[0], c[1], c[2]);
+          if (scratch.tree_stamp[w] != scratch.epoch) {
+            edges.push_back({v, w});
+            edge_pins.push_back(state.terminals[t].pin_index);
+            add_source(w);
+            pending.push_back(w);
+          }
+        }
       }
     }
-    if (sources == 1) {
-      const auto& c = state.terminals[0].cells.front();
-      const int64_t v = index(c[0], c[1], c[2]);
-      tree.push_back(v);
-      connect_at(v);
-      root_open = false;
-    } else {
-      connected[0] = 1;
-      remaining--;
-    }
+  };
+  // Algorithm 1, step 1: the component of the first terminal (driver).
+  {
+    const auto& c = state.terminals[0].cells.front();
+    const int64_t root = index(c[0], c[1], c[2]);
+    add_source(root);
+    connect_at(root);
   }
-  std::vector<std::array<int64_t, 2>> edges;  // vertex pairs
   const double obj = objective_weight_;
   double last_connection_cost = 0.0;
   while (!scratch.heap.empty() && remaining > 0) {
@@ -424,35 +437,24 @@ BonnRouteGlobal::OracleResult BonnRouteGlobal::oracle(
         && scratch.term_stamp[u] == scratch.epoch
         && std::ranges::any_of(pins_at[scratch.term[u]],
                                [&](int t) { return !connected[t]; })) {
-      // Algorithm 1, step 5: add the path to the tree.
+      // Algorithm 1, step 5: add the path to the tree, then let the pins
+      // it reached join with all their vertices.
       last_connection_cost = d;
       int64_t cur = node;
       std::vector<int64_t> added;
       while (scratch.tree_stamp[cur / 3] != scratch.epoch) {
         const int64_t p = scratch.parent[cur];
         edges.push_back({cur / 3, p / 3});
+        edge_pins.push_back(-1);
         scratch.tree_stamp[cur / 3] = scratch.epoch;
         added.push_back(cur / 3);
-        connect_at(cur / 3);
         cur = p;
       }
-      if (root_open) {
-        // The path fixes the root cell; restart from the actual tree, since
-        // labels of the other root cells are no longer distances to it.
-        root_open = false;
-        chosen[0] = cur / 3;
-        tree.push_back(cur / 3);
-        tree.insert(tree.end(), added.begin(), added.end());
-        scratch.prepare(n);
-        mark_terminals();
-        for (const int64_t v : tree) {
-          add_source(v);
-        }
-      } else {
-        tree.insert(tree.end(), added.begin(), added.end());
-        for (const int64_t v : added) {
-          add_source(v);
-        }
+      for (const int64_t v : added) {
+        add_source(v);
+      }
+      for (const int64_t v : added) {
+        connect_at(v);
       }
       continue;
     }
@@ -527,11 +529,7 @@ BonnRouteGlobal::OracleResult BonnRouteGlobal::oracle(
     tree_edges.push_back(cell(a));
     tree_edges.push_back(cell(b));
   }
-  std::vector<std::array<int, 3>> pin_cells(num_terminals);
-  for (int t = 0; t < num_terminals; t++) {
-    pin_cells[t] = cell(chosen[t]);
-  }
-  if (!buildCandidate(state, tree_edges, pin_cells, result.candidate)) {
+  if (!buildCandidate(state, tree_edges, edge_pins, result.candidate)) {
     return result;
   }
   result.ok = true;
@@ -541,10 +539,9 @@ BonnRouteGlobal::OracleResult BonnRouteGlobal::oracle(
 bool BonnRouteGlobal::buildCandidate(
     const NetState& state,
     const std::vector<std::array<int, 3>>& tree_edges,
-    const std::vector<std::array<int, 3>>& pin_cells,
+    const std::vector<int>& edge_pins,
     Candidate& candidate) const
 {
-  (void) state;
   auto key = [&](int l, int x, int y) -> uint64_t {
     return (static_cast<uint64_t>(l) * x_size_ + x) * y_size_ + y;
   };
@@ -554,27 +551,127 @@ bool BonnRouteGlobal::buildCandidate(
     const int x = static_cast<int>(k % x_size_);
     return {static_cast<int>(k / x_size_), x, y};
   };
-  std::unordered_map<uint64_t, std::vector<uint64_t>> adjacency;
-  auto add_edge = [&](uint64_t a, uint64_t b) {
-    adjacency[a].push_back(b);
-    adjacency[b].push_back(a);
-  };
+  // Neighbor and the GRNet pin of the edge (-1 = wire or via).
+  using Link = std::pair<uint64_t, int>;
+  std::unordered_map<uint64_t, std::vector<Link>> adjacency;
   for (size_t i = 0; i + 1 < tree_edges.size(); i += 2) {
     const auto& a = tree_edges[i];
     const auto& b = tree_edges[i + 1];
-    add_edge(key(a[0], a[1], a[2]), key(b[0], b[1], b[2]));
+    const uint64_t ka = key(a[0], a[1], a[2]);
+    const uint64_t kb = key(b[0], b[1], b[2]);
+    if (ka == kb) {
+      continue;
+    }
+    const int pin = edge_pins[i / 2];
+    adjacency[ka].emplace_back(kb, pin);
+    adjacency[kb].emplace_back(ka, pin);
+  }
+  for (auto& [k, list] : adjacency) {
+    // A wire or via (-1) sorts before a pin link between the same cells.
+    std::ranges::sort(list);
+    list.erase(std::ranges::unique(list, {}, &Link::first).begin(), list.end());
+  }
+  const int num_terminals = static_cast<int>(state.terminals.size());
+  std::vector<std::vector<uint64_t>> terminal_cells(num_terminals);
+  std::unordered_map<uint64_t, std::vector<int>> terminals_at;
+  for (int t = 0; t < num_terminals; t++) {
+    for (const auto& c : state.terminals[t].cells) {
+      const uint64_t k = key(c[0], c[1], c[2]);
+      terminal_cells[t].push_back(k);
+      terminals_at[k].push_back(t);
+    }
+  }
+  auto in_forest = [&](uint64_t k) { return adjacency.contains(k); };
+  // Prune clique edges that end in a cell no branch uses, unless that cell
+  // is the only one of some pin in the forest.
+  std::vector<int> present(num_terminals, 0);
+  for (int t = 0; t < num_terminals; t++) {
+    for (const uint64_t k : terminal_cells[t]) {
+      present[t] += in_forest(k);
+    }
+  }
+  auto prunable = [&](uint64_t v) {
+    auto it = adjacency.find(v);
+    if (it == adjacency.end() || it->second.size() != 1
+        || it->second.front().second < 0) {
+      return false;
+    }
+    auto at = terminals_at.find(v);
+    if (at != terminals_at.end()) {
+      for (const int t : at->second) {
+        if (present[t] <= 1) {
+          return false;
+        }
+      }
+    }
+    return true;
+  };
+  // Without any edge left, every pin contains this one cell.
+  const auto& start = state.terminals[0].cells.front();
+  uint64_t sole = key(start[0], start[1], start[2]);
+  std::vector<uint64_t> leaves;
+  for (const auto& [v, list] : adjacency) {
+    if (prunable(v)) {
+      leaves.push_back(v);
+    }
+  }
+  std::ranges::sort(leaves);  // deterministic order
+  for (size_t i = 0; i < leaves.size(); i++) {
+    const uint64_t v = leaves[i];
+    if (!prunable(v)) {
+      continue;
+    }
+    const uint64_t w = adjacency[v].front().first;
+    std::erase_if(adjacency[w],
+                  [&](const Link& link) { return link.first == v; });
+    adjacency.erase(v);
+    if (auto at = terminals_at.find(v); at != terminals_at.end()) {
+      for (const int t : at->second) {
+        present[t]--;
+      }
+    }
+    if (adjacency[w].empty()) {
+      adjacency.erase(w);
+      sole = w;
+    } else if (prunable(w)) {
+      leaves.push_back(w);
+    }
+  }
+  // Representative cell of each pin: one in the forest, preferably with a
+  // wire or via.
+  std::vector<uint64_t> representative(num_terminals);
+  const bool single_cell = adjacency.empty();
+  for (int t = 0; t < num_terminals; t++) {
+    int best = -1;
+    for (size_t i = 0; i < terminal_cells[t].size(); i++) {
+      const uint64_t k = terminal_cells[t][i];
+      if (single_cell ? k != sole : !in_forest(k)) {
+        continue;
+      }
+      const bool physical
+          = !single_cell
+            && std::ranges::any_of(adjacency.at(k),
+                                   [](const Link& l) { return l.second < 0; });
+      if (best < 0 || physical) {
+        best = static_cast<int>(i);
+        if (physical) {
+          break;
+        }
+      }
+    }
+    if (best < 0) {
+      return false;
+    }
+    representative[t] = terminal_cells[t][best];
   }
   std::unordered_map<uint64_t, char> pinned;
   candidate.pin_cells.clear();
-  for (const auto& c : pin_cells) {
-    pinned[key(c[0], c[1], c[2])] = 1;
+  for (const uint64_t k : representative) {
+    pinned[k] = 1;
+    const auto c = decode(k);
     candidate.pin_cells.push_back({static_cast<int16_t>(c[0]),
                                    static_cast<int16_t>(c[1]),
                                    static_cast<int16_t>(c[2])});
-  }
-  for (auto& [k, list] : adjacency) {
-    std::ranges::sort(list);
-    list.erase(std::ranges::unique(list).begin(), list.end());
   }
   // Axis of a unit edge: 0 = x, 1 = y, 2 = via.
   auto axis = [&](uint64_t a, uint64_t b) {
@@ -586,7 +683,7 @@ bool BonnRouteGlobal::buildCandidate(
     return pa[1] != pb[1] ? 0 : 1;
   };
 
-  const uint64_t root = key(pin_cells[0][0], pin_cells[0][1], pin_cells[0][2]);
+  const uint64_t root = representative[0];
   candidate.nodes.clear();
   candidate.objective = 0.0;
   std::unordered_map<uint64_t, char> visited;
@@ -604,11 +701,29 @@ bool BonnRouteGlobal::buildCandidate(
   while (!stack.empty()) {
     const auto [node_index, vertex] = stack.back();
     stack.pop_back();
-    for (const uint64_t next : adjacency[vertex]) {
+    auto it = adjacency.find(vertex);
+    if (it == adjacency.end()) {
+      continue;
+    }
+    const std::vector<Link> links = it->second;
+    for (const auto& [next, pin] : links) {
       if (visited.contains(next)) {
         continue;
       }
-      // Walk a straight run of unit edges.
+      if (pin >= 0) {
+        // Pin link: the pin's own metal, no wire or via.
+        visited[next] = 1;
+        const auto pc = decode(next);
+        candidate.nodes.push_back({static_cast<int16_t>(pc[0]),
+                                   static_cast<int16_t>(pc[1]),
+                                   static_cast<int16_t>(pc[2]),
+                                   node_index,
+                                   pin});
+        stack.emplace_back(static_cast<int32_t>(candidate.nodes.size() - 1),
+                           next);
+        continue;
+      }
+      // Walk a straight run of wire or via unit edges.
       const int run_axis = axis(vertex, next);
       uint64_t prev = vertex;
       uint64_t cur = next;
@@ -626,12 +741,13 @@ bool BonnRouteGlobal::buildCandidate(
         if (pinned.contains(cur) || list.size() != 2) {
           break;
         }
-        const uint64_t after = list[0] == prev ? list[1] : list[0];
-        if (visited.contains(after) || axis(cur, after) != run_axis) {
+        const Link& after = list[0].first == prev ? list[1] : list[0];
+        if (after.second >= 0 || visited.contains(after.first)
+            || axis(cur, after.first) != run_axis) {
           break;
         }
         prev = cur;
-        cur = after;
+        cur = after.first;
       }
       const auto pc = decode(cur);
       candidate.nodes.push_back({static_cast<int16_t>(pc[0]),
@@ -680,7 +796,7 @@ std::shared_ptr<GRTreeNode> BonnRouteGlobal::buildTree(
   for (const NodeRec& rec : candidate.nodes) {
     nodes.push_back(std::make_shared<GRTreeNode>(rec.layer, rec.x, rec.y));
     if (rec.parent >= 0) {
-      nodes[rec.parent]->addChild(nodes.back());
+      nodes[rec.parent]->addChild(nodes.back(), rec.pin);
     }
   }
   return nodes.front();
@@ -743,33 +859,250 @@ int BonnRouteGlobal::insertCandidate(NetState& state, Candidate&& candidate)
   return static_cast<int>(state.candidates.size() - 1);
 }
 
+void BonnRouteGlobal::pilot(std::vector<double>* stack_counts)
+{
+  const int threads = std::max(1, params_.threads);
+  std::vector<Scratch> scratch(threads);
+  const int num_nets = static_cast<int>(order_.size());
+  // Congestion-free objective: guess for the objective resource bound.
+  std::vector<double> objective(num_nets, 0.0);
+  // Via columns (x, y, low, high) of each net's congestion-free tree.
+  std::vector<std::vector<std::array<int, 4>>> columns(
+      stack_counts != nullptr ? num_nets : 0);
+#pragma omp parallel for num_threads(threads) schedule(dynamic, 16)
+  for (int i = 0; i < num_nets; i++) {
+    Scratch& s = scratch[omp_get_thread_num()];
+    OracleResult r = oracle(states_[order_[i]], s, true, false);
+    if (!r.ok) {
+      r = oracle(states_[order_[i]], s, true, true);
+    }
+    objective[i] = r.ok ? r.candidate.objective : 0.0;
+    states_[order_[i]].log_base_objective
+        = r.ok && r.candidate.objective > 0.0 ? std::log(r.candidate.objective)
+                                              : -1e300;
+    if (stack_counts != nullptr && r.ok) {
+      const auto& nodes = r.candidate.nodes;
+      for (const NodeRec& rec : nodes) {
+        if (rec.parent < 0 || rec.pin >= 0) {
+          continue;
+        }
+        const NodeRec& up = nodes[rec.parent];
+        if (up.layer != rec.layer) {
+          columns[i].push_back({rec.x,
+                                rec.y,
+                                std::min<int>(rec.layer, up.layer),
+                                std::max<int>(rec.layer, up.layer)});
+        }
+      }
+    }
+  }
+  base_objective_ = 0.0;
+  for (const double o : objective) {
+    base_objective_ += o;
+  }
+  if (stack_counts == nullptr) {
+    return;
+  }
+  // Sec. 2.5: "A stacked via from layer l to layer l + 2 of course also
+  // consumes space on layer l + 1." Merge each net's columns per cell like
+  // GridGraph's via-column model and count the layers strictly inside.
+  stack_counts->assign(static_cast<size_t>(num_layers_) * x_size_ * y_size_,
+                       0.0);
+  for (auto& spans : columns) {
+    std::ranges::sort(spans);
+    for (size_t i = 0; i < spans.size();) {
+      const auto [x, y, low, first_high] = spans[i];
+      int high = first_high;
+      for (i++; i < spans.size() && spans[i][0] == x && spans[i][1] == y
+                && spans[i][2] <= high;
+           i++) {
+        high = std::max(high, spans[i][3]);
+      }
+      for (int l = low + 1; l < high; l++) {
+        (*stack_counts)[grid_graph_->edgeFlatIndex(l, x, y)] += 1.0;
+      }
+    }
+  }
+}
+
+bonnroute::CapacityGrid capacityGridFromCugr(const GridGraph& grid_graph)
+{
+  const Design* design = grid_graph.getDesign();
+  bonnroute::CapacityGrid grid;
+  for (int d = 0; d < 2; d++) {
+    for (int i = 0; i <= grid_graph.getSize(d); i++) {
+      grid.gridlines[d].push_back(grid_graph.getGridline(d, i));
+    }
+  }
+  const BoxT die = design->getDieRegion();
+  grid.die = odb::Rect(die.lx(), die.ly(), die.hx(), die.hy());
+  grid.linear_via_demand = grid_graph.isViaDemandEnabled();
+  std::vector<std::vector<BoxT>> obstacles;
+  design->getAllObstacles(obstacles, true);
+  const int num_layers = design->getNumLayers();
+  for (int l = 0; l < num_layers; l++) {
+    const MetalLayer& metal = design->getLayer(l);
+    bonnroute::CapacityLayer layer;
+    layer.name = metal.getName();
+    layer.direction = metal.getDirection() == MetalLayer::H
+                          ? bonnroute::kHorizontal
+                          : bonnroute::kVertical;
+    for (int t = 0; t < metal.getNumTracks(); t++) {
+      layer.tracks.push_back(metal.getTrackLocation(t));
+    }
+    layer.pitch = metal.getPitch();
+    layer.width = metal.getWidth();
+    layer.spacing_widths = metal.getParallelWidths();
+    layer.spacing_lengths = metal.getParallelLengths();
+    layer.spacing = metal.getParallelSpacingTable();
+    layer.routable = l >= grid_graph.getMinRoutingLayer();
+    layer.adjustment = metal.getAdjustment();
+    if (l >= 1 && l + 1 < num_layers) {
+      // A column through l puts the larger of the pads of the vias below
+      // and above on it (GridGraph::stackPadLength).
+      const double lower = design->getViaDemandLengthLower(l);
+      const double upper = design->getViaDemandLengthUpper(l - 1);
+      const bool use_lower = lower >= upper;
+      layer.through_pad_length = std::max(lower, upper);
+      layer.through_pad_along = use_lower ? design->getViaPadAlongLower(l)
+                                          : design->getViaPadAlongUpper(l - 1);
+      layer.through_pad_tracks = use_lower
+                                     ? design->getViaPadTracksLower(l)
+                                     : design->getViaPadTracksUpper(l - 1);
+    }
+    if (l < static_cast<int>(obstacles.size())) {
+      for (const BoxT& box : obstacles[l]) {
+        layer.obstacles.emplace_back(box.lx(), box.ly(), box.hx(), box.hy());
+      }
+    }
+    grid.layers.push_back(std::move(layer));
+  }
+  return grid;
+}
+
+void BonnRouteGlobal::estimateCapacities()
+{
+  utl::Timer timer;
+  cugr_capacity_.assign(static_cast<size_t>(num_layers_) * x_size_ * y_size_,
+                        0.0);
+  for (int l = 0; l < num_layers_; l++) {
+    for (int x = 0; x < x_size_; x++) {
+      for (int y = 0; y < y_size_; y++) {
+        cugr_capacity_[grid_graph_->edgeFlatIndex(l, x, y)]
+            = grid_graph_->getEdge(l, x, y).capacity;
+      }
+    }
+  }
+  bonnroute::CapacityEstimatorOptions options;
+  options.blockage_extension = params_.capacity_blockage_extension;
+  options.single_tile_nets = params_.capacity_single_tile;
+  options.intra_tile = params_.capacity_intra_tile;
+  options.stacked_vias = params_.capacity_stacked_vias;
+  options.single_tile_layers = params_.capacity_single_tile_layers;
+  options.single_tile_margin = params_.capacity_single_tile_margin;
+  estimator_ = std::make_unique<bonnroute::CapacityEstimator>(
+      capacityGridFromCugr(*grid_graph_), options);
+  estimator_->buildTrackGraph();
+  std::vector<bonnroute::EstimatorNet> nets;
+  nets.reserve(states_.size());
+  for (const NetState& state : states_) {
+    if (state.trivial && state.trivial_low < 0) {
+      continue;
+    }
+    const GRNet* net = state.net;
+    bonnroute::EstimatorNet en;
+    en.single_tile = state.trivial;
+    en.tile_x = state.trivial_point.x();
+    en.tile_y = state.trivial_point.y();
+    en.min_layer = net->getLayerRange().min_layer;
+    en.max_layer = std::min(net->getLayerRange().max_layer, num_layers_ - 1);
+    const auto& preferred = net->getPreferredAccessPoints();
+    for (int p = 0; p < net->getNumPins(); p++) {
+      bonnroute::EstimatorPin pin;
+      pin.points = grid_graph_->pinAccessLocations(net, p);
+      if (auto it = preferred.find(p); it != preferred.end()) {
+        pin.cell_x = it->second.point.x();
+        pin.cell_y = it->second.point.y();
+        if (pin.points.empty()) {
+          pin.points.emplace_back(
+              odb::Point(grid_graph_->getGridCenter(0, pin.cell_x),
+                         grid_graph_->getGridCenter(1, pin.cell_y)),
+              it->second.layers.low());
+        }
+      }
+      en.pins.push_back(std::move(pin));
+    }
+    nets.push_back(std::move(en));
+  }
+  estimator_->addNets(nets);
+  applyCapacities(estimator_->capacities());
+  estimate_time_ = timer.elapsed();
+}
+
+void BonnRouteGlobal::applyCapacities(const std::vector<double>& capacities)
+{
+  for (int l = std::max(0, grid_graph_->getMinRoutingLayer()); l < num_layers_;
+       l++) {
+    for (int x = 0; x < x_size_; x++) {
+      for (int y = 0; y < y_size_; y++) {
+        grid_graph_->setEdgeCapacity(
+            l, x, y, capacities[grid_graph_->edgeFlatIndex(l, x, y)]);
+      }
+    }
+  }
+}
+
+void BonnRouteGlobal::reportCapacities() const
+{
+  if (!params_.verbose || !estimator_) {
+    return;
+  }
+  const bonnroute::CapacityTotals& totals = estimator_->totals();
+  std::vector<double> cugr_layer(num_layers_, 0.0);
+  for (int l = 0; l < num_layers_; l++) {
+    for (int x = 0; x < x_size_; x++) {
+      for (int y = 0; y < y_size_; y++) {
+        cugr_layer[l] += cugr_capacity_[grid_graph_->edgeFlatIndex(l, x, y)];
+      }
+    }
+  }
+  double cugr = 0.0;
+  double estimate = 0.0;
+  for (int l = std::max(0, grid_graph_->getMinRoutingLayer()); l < num_layers_;
+       l++) {
+    cugr += cugr_layer[l];
+    estimate += totals.estimate[l];
+    logger_->report(
+        "BonnRoute capacity {}: CUGR {:.1f}, estimate {:.1f} (tracks {:.1f}, "
+        "single-tile nets -{:.1f}, intra-tile -{:.1f}, stacked vias -{:.1f}, "
+        "adjustment {:.2f}).",
+        grid_graph_->getLayerName(l),
+        cugr_layer[l],
+        totals.estimate[l],
+        totals.tracks[l],
+        totals.single_tile[l],
+        totals.intra_tile[l],
+        totals.stacked_vias[l],
+        grid_graph_->getDesign()->getLayer(l).getAdjustment());
+  }
+  logger_->report(
+      "BonnRoute capacity total: CUGR {:.1f}, estimate {:.1f}; single-tile "
+      "nets routed {}, unroutable {}, vertices {}; estimation {:.2f}s.",
+      cugr,
+      estimate,
+      totals.single_tile_routed,
+      totals.single_tile_failed,
+      totals.single_tile_vertices,
+      estimate_time_);
+}
+
 void BonnRouteGlobal::resourceSharing()
 {
   const int threads = std::max(1, params_.threads);
   std::vector<Scratch> scratch(threads);
   const int num_nets = static_cast<int>(order_.size());
 
-  // Congestion-free objective: guess for the objective resource bound.
-  double base_objective = 0.0;
-  {
-    std::vector<double> objective(num_nets, 0.0);
-#pragma omp parallel for num_threads(threads) schedule(dynamic, 16)
-    for (int i = 0; i < num_nets; i++) {
-      Scratch& s = scratch[omp_get_thread_num()];
-      OracleResult r = oracle(states_[order_[i]], s, true, false);
-      if (!r.ok) {
-        r = oracle(states_[order_[i]], s, true, true);
-      }
-      objective[i] = r.ok ? r.candidate.objective : 0.0;
-      states_[order_[i]].log_base_objective
-          = r.ok && r.candidate.objective > 0.0
-                ? std::log(r.candidate.objective)
-                : -1e300;
-    }
-    for (const double o : objective) {
-      base_objective += o;
-    }
-  }
+  const double base_objective = base_objective_;
   objective_bound_
       = std::max(1.0, (1.0 + params_.objective_slack) * base_objective);
 
@@ -1115,19 +1448,38 @@ void BonnRouteGlobal::run()
   for (const GRNet* net : nets_) {
     min_layer_ = std::min(min_layer_, net->getLayerRange().min_layer);
   }
+  const bool estimate = params_.capacity_model == 1;
+  if (estimate) {
+    estimateCapacities();
+  }
   // Single-gcell nets keep their pin stack; their usage is background.
+  // With the Sec. 2.5 estimate, their routes inside the tile are already
+  // part of the capacities, so they keep only the pin's cell.
+  const bool single_tile_in_capacity = estimate && params_.capacity_single_tile;
   for (NetState& state : states_) {
     if (!state.trivial || state.trivial_low < 0) {
       continue;
     }
     const PointT& pt = state.trivial_point;
     auto node = std::make_shared<GRTreeNode>(state.trivial_low, pt.x(), pt.y());
-    if (state.trivial_top != state.trivial_low) {
+    if (state.trivial_top != state.trivial_low && !single_tile_in_capacity) {
       node->addChild(
           std::make_shared<GRTreeNode>(state.trivial_top, pt.x(), pt.y()));
     }
     state.net->setRoutingTree(node);
     grid_graph_->addTreeUsage(node, state.net->getNdrCosts());
+  }
+  std::vector<double> stack_counts;
+  const bool count_stacks = estimate && params_.capacity_stacked_vias;
+  pilot(count_stacks ? &stack_counts : nullptr);
+  if (estimate) {
+    utl::Timer stack_timer;
+    if (count_stacks) {
+      estimator_->addStackedVias(stack_counts);
+      applyCapacities(estimator_->capacities());
+    }
+    estimate_time_ += stack_timer.elapsed();
+    reportCapacities();
   }
   const size_t num_resources
       = static_cast<size_t>(num_layers_) * x_size_ * y_size_;

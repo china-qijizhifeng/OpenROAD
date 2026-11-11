@@ -4876,6 +4876,9 @@ int GlobalRouter::computeNetWirelength(odb::dbNet* db_net)
   const GRoute& route = iter->second;
   int net_wl = 0;
   for (const GSegment& segment : route) {
+    if (segment.is_pin_bridge) {
+      continue;
+    }
     const int segment_wl = std::abs(segment.final_x - segment.init_x)
                            + std::abs(segment.final_y - segment.init_y);
     if (segment_wl > 0) {

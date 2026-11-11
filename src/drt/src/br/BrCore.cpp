@@ -30,6 +30,33 @@ Cost PathSearch::futureCost(const int z, const Coord x, const Coord y) const
   return best;
 }
 
+Cost PathSearch::spreadCost(const int z, const int i, const int j) const
+{
+  if (req_->spread_cost == 0 || req_->spread_tiles == nullptr) {
+    return 0;
+  }
+  const TrackLayer& layer = graph_.layers[z];
+  const int t = layer.track_tile[i];
+  const int p = layer.pos_tile[j];
+  const int tx = layer.horizontal ? p : t;
+  const int ty = layer.horizontal ? t : p;
+  if ((*req_->spread_tiles)[z][static_cast<size_t>(tx) * graph_.tiles_y + ty]
+      == 0) {
+    return 0;
+  }
+  // A neighbouring track is occupied where its wire vertex is not legal
+  // (fast grid, not counted as a legality query of the path).
+  for (const int di : {-1, 1}) {
+    const int i2 = i + di;
+    if (i2 >= 0 && i2 < layer.numTracks()
+        && grid_.level(graph_.vertex(z, i2, j), kWire, req_->wire_type)
+               != kLegal) {
+      return req_->spread_cost;
+    }
+  }
+  return 0;
+}
+
 Cost PathSearch::wireCost(const int z,
                           const int i,
                           const int j,
@@ -37,13 +64,15 @@ Cost PathSearch::wireCost(const int z,
 {
   const TrackLayer& layer = graph_.layers[z];
   const Cost length = std::abs(layer.positions[j2] - layer.positions[j]);
+  const Cost spread = spreadCost(z, i, j2);
   if (req_->discounts.empty()) {
-    return length * graph_.wire_unit;
+    return length * graph_.wire_unit + spread;
   }
   size_t li = 0;
   const bool discounted = local(z, i, std::min(j, j2), li)
                           && labels_[li].discount_stamp == epoch_;
-  return length * (discounted ? req_->discount_rate : graph_.wire_unit);
+  return length * (discounted ? req_->discount_rate : graph_.wire_unit)
+         + spread;
 }
 
 Cost PathSearch::vertexPenalty(const size_t v, const Kind k) const
@@ -211,7 +240,7 @@ void PathSearch::setupWindow(const SearchRequest& request)
     w.wbase = total;
     total += static_cast<size_t>(w.ni) * w.nj;
   }
-  epoch_ = labels_.reset(total);
+  epoch_ = labels_.reset(total, request.label_limit);
   for (const DiscountRun& run : request.discounts) {
     for (int j = run.jlo; j < run.jhi; j++) {
       size_t li = 0;
@@ -269,6 +298,10 @@ SearchResult PathSearch::run(const SearchRequest& request)
   }
 
   while (!heap_.empty()) {
+    if (labels_.overflow()) {
+      result.aborted = true;
+      break;
+    }
     std::pop_heap(heap_.begin(), heap_.end(), std::greater<>());
     const Item item = heap_.back();
     heap_.pop_back();
@@ -353,6 +386,10 @@ SearchResult PathSearch::run(const SearchRequest& request)
   }
   result.fast_grid_queries = counters_.fast_grid;
   result.checker_queries = counters_.checker;
+  if (labels_.overflow()) {
+    result.aborted = true;
+    result.found = false;
+  }
   if (!result.found) {
     return result;
   }

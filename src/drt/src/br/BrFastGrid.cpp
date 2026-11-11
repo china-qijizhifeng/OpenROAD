@@ -618,7 +618,7 @@ void FastGridBuilder::recomputeWiring(const int z,
           const int shift = FastGrid::wiringShift(t, 0);
           const RipupLevel ends = std::max(FastGrid::field(wa, shift),
                                            FastGrid::field(wb, shift));
-          if (sweptLevel(z, i, j, t, kWireEdge) > ends) {
+          if (sweptLevel(z, i, j, t, kWireEdge, kNoNet) > ends) {
             flags[j - r.e0] = 1;
             break;
           }
@@ -916,6 +916,25 @@ RipupLevel FastGridBuilder::vertexLevel(const int z,
                                         const int wire_type,
                                         const Kind kind) const
 {
+  return exactLevel(z, i, j, wire_type, kind, kNoNet);
+}
+
+RipupLevel FastGridBuilder::edgeLevel(const int z,
+                                      const int i,
+                                      const int j,
+                                      const int wire_type,
+                                      const Kind kind) const
+{
+  return exactLevel(z, i, j, wire_type, kind, kNoNet);
+}
+
+RipupLevel FastGridBuilder::exactLevel(const int z,
+                                       const int i,
+                                       const int j,
+                                       const int wire_type,
+                                       const Kind kind,
+                                       const int32_t ignored_owner) const
+{
   const WireType& w = (*types_)[wire_type];
   const int num_z = graph_->numLayers();
   thread_local std::vector<LocatedModel> models;
@@ -948,14 +967,24 @@ RipupLevel FastGridBuilder::vertexLevel(const int z,
         add(viaGridLayer(z + 1), w.via[z].projection);
       }
       break;
-    default:
-      return edgeLevel(z, i, j, wire_type, kind);
+    default: {
+      // Edge kinds: both endpoints and the swept wire.
+      const bool along = kind == kWireEdge;
+      const Kind vertex_kind = along ? kWire : kJog;
+      return std::max(
+          {exactLevel(z, i, j, wire_type, vertex_kind, ignored_owner),
+           along
+               ? exactLevel(z, i, j + 1, wire_type, vertex_kind, ignored_owner)
+               : exactLevel(z, i + 1, j, wire_type, vertex_kind, ignored_owner),
+           sweptLevel(z, i, j, wire_type, kind, ignored_owner)});
+    }
   }
   if (models.empty()) {
     return kNotRemovable;
   }
   CheckOptions opts;
   opts.intervals = false;
+  opts.ignored_owner = ignored_owner;
   CheckResult res;
   checker_->check(location(z, i, j), models, opts, res);
   return res.levels[0];
@@ -965,7 +994,8 @@ RipupLevel FastGridBuilder::sweptLevel(const int z,
                                        const int i,
                                        const int j,
                                        const int wire_type,
-                                       const Kind kind) const
+                                       const Kind kind,
+                                       const int32_t ignored_owner) const
 {
   const TrackLayer& layer = graph_->layers[z];
   const bool along = kind == kWireEdge;
@@ -983,23 +1013,10 @@ RipupLevel FastGridBuilder::sweptLevel(const int z,
   const LocatedModel model{wiringGridLayer(z), swept, m.cls, 3, 0};
   CheckOptions opts;
   opts.intervals = false;
+  opts.ignored_owner = ignored_owner;
   CheckResult res;
   checker_->check(location(z, i, j), std::span(&model, 1), opts, res);
   return res.levels[0];
-}
-
-RipupLevel FastGridBuilder::edgeLevel(const int z,
-                                      const int i,
-                                      const int j,
-                                      const int wire_type,
-                                      const Kind kind) const
-{
-  const bool along = kind == kWireEdge;
-  const Kind vertex_kind = along ? kWire : kJog;
-  return std::max({vertexLevel(z, i, j, wire_type, vertex_kind),
-                   along ? vertexLevel(z, i, j + 1, wire_type, vertex_kind)
-                         : vertexLevel(z, i + 1, j, wire_type, vertex_kind),
-                   sweptLevel(z, i, j, wire_type, kind)});
 }
 
 }  // namespace drt::br

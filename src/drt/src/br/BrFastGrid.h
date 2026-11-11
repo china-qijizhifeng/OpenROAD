@@ -265,6 +265,14 @@ class FastGridBuilder final : public LegalityOracle
                        int j,
                        int wire_type,
                        Kind kind) const override;
+  // Exact level of a vertex or edge kind with the shapes owned by
+  // `ignored_owner` treated as removed (Sec. 4.4); kNoNet: all shapes.
+  RipupLevel exactLevel(int z,
+                        int i,
+                        int j,
+                        int wire_type,
+                        Kind kind,
+                        int32_t ignored_owner) const;
 
  private:
   struct Range
@@ -292,7 +300,12 @@ class FastGridBuilder final : public LegalityOracle
   void pointModels(int z, std::vector<LocatedModel>& out) const;
   void viaModels(int z, std::vector<LocatedModel>& out) const;
   Point location(int z, int i, int j) const;
-  RipupLevel sweptLevel(int z, int i, int j, int wire_type, Kind kind) const;
+  RipupLevel sweptLevel(int z,
+                        int i,
+                        int j,
+                        int wire_type,
+                        Kind kind,
+                        int32_t ignored_owner) const;
 
   const TrackGraph* graph_ = nullptr;
   const std::vector<WireType>* types_ = nullptr;

@@ -560,7 +560,7 @@ SearchResult IntervalSearch::run(const SearchRequest& request)
     w.wbase = total;
     total += static_cast<size_t>(w.ni) * w.nj;
   }
-  epoch_ = labels_.reset(total);
+  epoch_ = labels_.reset(total, request.label_limit);
   for (size_t t = 0; t < request.targets.size(); t++) {
     int z, i, j;
     graph_.decode(request.targets[t].vertex, z, i, j);
@@ -595,6 +595,10 @@ SearchResult IntervalSearch::run(const SearchRequest& request)
     }
   }
   while (!heap_.empty()) {
+    if (labels_.overflow()) {
+      result.aborted = true;
+      break;
+    }
     std::pop_heap(heap_.begin(), heap_.end(), std::greater<>());
     const Event e = heap_.back();
     heap_.pop_back();
@@ -618,6 +622,10 @@ SearchResult IntervalSearch::run(const SearchRequest& request)
   }
   result.fast_grid_queries = counters_.fast_grid;
   result.checker_queries = counters_.checker;
+  if (labels_.overflow()) {
+    result.aborted = true;
+    result.found = false;
+  }
   if (!result.found) {
     return result;
   }

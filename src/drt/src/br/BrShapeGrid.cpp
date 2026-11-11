@@ -635,10 +635,10 @@ bool ShapeGrid::update(const int layer_index,
   if (a_lo >= a_hi || c_lo >= c_hi) {
     return true;
   }
-  const int64_t c0 = floorDiv(a_lo - g.along_origin, g.along_cell);
-  const int64_t c1 = floorDiv(a_hi - 1 - g.along_origin, g.along_cell);
-  const int64_t r0 = floorDiv(c_lo - g.cross_origin, g.cross_cell);
-  const int64_t r1 = floorDiv(c_hi - 1 - g.cross_origin, g.cross_cell);
+  const int64_t c0 = floorDivide(a_lo - g.along_origin, g.along_cell);
+  const int64_t c1 = floorDivide(a_hi - 1 - g.along_origin, g.along_cell);
+  const int64_t r0 = floorDivide(c_lo - g.cross_origin, g.cross_cell);
+  const int64_t r1 = floorDivide(c_hi - 1 - g.cross_origin, g.cross_cell);
   if (c1 < 0 || c0 >= g.along_cells || r1 < 0 || r0 >= g.cross_cells) {
     return true;
   }
@@ -675,10 +675,10 @@ bool ShapeGrid::apply(const int layer_index,
   const Coord a_hi = g.horizontal ? rect.xhi : rect.yhi;
   const Coord c_lo = g.horizontal ? rect.ylo : rect.xlo;
   const Coord c_hi = g.horizontal ? rect.yhi : rect.xhi;
-  const int64_t c0_raw = floorDiv(a_lo - g.along_origin, g.along_cell);
-  const int64_t c1_raw = floorDiv(a_hi - 1 - g.along_origin, g.along_cell);
-  const int64_t r0_raw = floorDiv(c_lo - g.cross_origin, g.cross_cell);
-  const int64_t r1_raw = floorDiv(c_hi - 1 - g.cross_origin, g.cross_cell);
+  const int64_t c0_raw = floorDivide(a_lo - g.along_origin, g.along_cell);
+  const int64_t c1_raw = floorDivide(a_hi - 1 - g.along_origin, g.along_cell);
+  const int64_t r0_raw = floorDivide(c_lo - g.cross_origin, g.cross_cell);
+  const int64_t r1_raw = floorDivide(c_hi - 1 - g.cross_origin, g.cross_cell);
   const int c0 = static_cast<int>(std::max<int64_t>(c0_raw, 0));
   const int c1 = static_cast<int>(std::min<int64_t>(c1_raw, g.along_cells - 1));
   const int r0 = static_cast<int>(std::max<int64_t>(r0_raw, 0));
@@ -840,10 +840,10 @@ void ShapeGrid::collect(const int layer_index,
   auto clampRow = [&](int64_t r) {
     return static_cast<int>(std::clamp<int64_t>(r, 0, g.cross_cells - 1));
   };
-  const int c0 = clampCell(floorDiv(a_lo - g.along_origin, g.along_cell));
-  const int c1 = clampCell(floorDiv(a_hi - g.along_origin, g.along_cell));
-  const int r0 = clampRow(floorDiv(c_lo - g.cross_origin, g.cross_cell));
-  const int r1 = clampRow(floorDiv(c_hi - g.cross_origin, g.cross_cell));
+  const int c0 = clampCell(floorDivide(a_lo - g.along_origin, g.along_cell));
+  const int c1 = clampCell(floorDivide(a_hi - g.along_origin, g.along_cell));
+  const int r0 = clampRow(floorDivide(c_lo - g.cross_origin, g.cross_cell));
+  const int r1 = clampRow(floorDivide(c_hi - g.cross_origin, g.cross_cell));
   const int k0 = layer.cell_chunk[c0];
   const int k1 = layer.cell_chunk[c1];
   thread_local std::vector<int32_t> found;

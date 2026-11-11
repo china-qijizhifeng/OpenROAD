@@ -38,10 +38,20 @@ class GRTreeNode : public GRPoint
     return children_;
   }
 
-  void addChild(std::shared_ptr<GRTreeNode> child)
+  // A nonnegative pin_index makes the edge to `child` a pin link: the two
+  // cells are connected by the existing metal of that pin (the zero-cost
+  // clique K(V_p) of Gester et al., TODAES 2013, Sec. 2.1/2.2). A pin link
+  // is a topological edge only; it carries no wire or via demand.
+  void addChild(std::shared_ptr<GRTreeNode> child, int pin_index = -1)
   {
+    child->incoming_pin_ = pin_index;
     children_.push_back(std::move(child));
   }
+
+  // True if the edge from this node's parent is a pin link.
+  bool isPinLink() const { return incoming_pin_ >= 0; }
+  // Pin index (GRNet numbering) of the incoming pin link, -1 otherwise.
+  int getLinkPin() const { return incoming_pin_; }
 
   void removeChild(const std::shared_ptr<GRTreeNode>& child)
   {
@@ -60,7 +70,20 @@ class GRTreeNode : public GRPoint
                     utl::Logger* logger);
 
  private:
+  int incoming_pin_ = -1;
   std::vector<std::shared_ptr<GRTreeNode>> children_;
 };
+
+// Corner points of the bridge that represents a pin link between `from` and
+// `to` in a segment-based route export: the x run on `horizontal_layer`, the
+// y run on `vertical_layer` (routable layers of those preferred
+// directions), joined to the two pin cells by via stacks. Consecutive points
+// differ in exactly one coordinate. The bridge only keeps exported routes
+// connected; the pin's own metal provides the connection, so it is never
+// charged as routing demand.
+std::vector<GRPoint> pinLinkPath(const GRPoint& from,
+                                 const GRPoint& to,
+                                 int horizontal_layer,
+                                 int vertical_layer);
 
 }  // namespace grt

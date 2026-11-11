@@ -70,7 +70,7 @@ set_bonnroute_param name value
 
 This implementation follows the path-composition and resource-sharing framework
 of Gester et al., *BonnRoute: Algorithms and Data Structures for Fast and Good
-VLSI Routing*, TODAES 18(2), 2013, Sections 2.2–2.4.
+VLSI Routing*, TODAES 18(2), 2013, Sections 2.1–2.5.
 
 | Name | Default | Meaning |
 | ----- | ----- | ----- |
@@ -85,7 +85,13 @@ VLSI Routing*, TODAES 18(2), 2013, Sections 2.2–2.4.
 | `threads` | OpenROAD thread count | Number of parallel oracle workers. |
 | `seed` | `1` | Randomized-rounding seed. |
 | `repair_passes` | `8` | Candidate re-selection passes after rounding. |
-| `pin_sets` | `1` | Let the oracle choose among each pin's access cells; `0` uses CUGR's pre-selected cell. |
+| `pin_sets` | `1` | Represent each pin by the cells of its access points (its shape cells if it has none), joined by zero-cost pin connections (Sections 2.1–2.2); `0` uses CUGR's pre-selected cell. |
+| `capacity_model` | `1` | Edge capacities: `1` estimates them as in Section 2.5; `0` keeps CUGR's capacity model. |
+| `capacity_single_tile` | `1` | Route nets whose pins share one gcell inside that gcell first and remove the track-graph vertices they use. |
+| `capacity_intra_tile` | `1` | Reduce capacities by the in-gcell Steiner length of the other nets. |
+| `capacity_stacked_vias` | `1` | Reduce intermediate-layer capacities by the statistical loss from stacked vias. |
+| `capacity_blockage_extension` | `1.0` | Blockage extension along the tracks, in units of the wire keep-out across them. |
+| `capacity_single_tile_layers`, `capacity_single_tile_margin` | `2`, `0.25` | Layers above the lowest routable one, and the gcell growth fraction, available to single-gcell nets. |
 | `full_graph` | `0` | Search the whole grid instead of the expanded bounding box. |
 | `maze_cleanup` | `1` | Run CUGR maze routing and iterative rip-up and reroute after BonnRoute. |
 | `verbose` | `1` | Print resource-sharing and oracle-cost diagnostics. |
@@ -101,11 +107,31 @@ global_route -bonnroute -allow_congestion -guide_file bonnroute.guide
 ```
 
 These settings isolate more of the resource-sharing algorithm, but do not
-reproduce every feature of the paper. Resources use CUGR wire capacity and
-via-pad demand plus a wirelength/via objective. Extra-space optimization,
-power/yield resources and the paper's capacity estimator are absent. A pin uses
-one chosen access cell in the output tree; arbitrary zero-cost connections
-between multiple cells of the same pin are not represented. The reuse bound
+reproduce every feature of the paper. Resources are wire edges with CUGR's
+via-pad demand plus a wirelength/via objective. Extra-space optimization and
+power/yield resources are absent.
+
+A pin's cells are joined at zero cost, so branches of one net can attach to
+different cells of the same pin. The routing tree keeps such a connection as
+a pin link that carries no demand; the exported route and guides bridge it on
+the lowest routable horizontal and vertical layers so that they stay
+connected, and GRT's wirelength report leaves the bridge out.
+
+With `capacity_model 1` the edge capacities (in tracks) count the usable
+track-graph vertices between the gcell centers after blockage extension,
+minus the vertices of single-gcell nets routed in their gcell, minus the
+in-gcell Steiner length of the other nets, minus the expected excess loss of
+stacked vias on intermediate layers over CUGR's linear via-pad demand; the
+via-stack counts come from the congestion-free oracle pass. The user layer
+adjustment is applied afterwards as for CUGR's capacities. They replace
+CUGR's capacities for the whole run, so the congestion report measures
+overflow against them; `BonnRoute final overflow` also reports the overflow
+against CUGR's capacity model. The estimator (`BonnRouteCapacity.h`) takes
+plain grid, track, blockage and pin data, so other global routers can use it.
+The single-gcell routes come from a shortest-path router on the track graph
+rather than BonnRoute's detailed router.
+
+The reuse bound
 preserves an oracle approximation factor only when that factor is valid for
 the selected graph and cost model; the paper's approximation theorem has not
 been established for this adapter. Report cleanup settings alongside quality

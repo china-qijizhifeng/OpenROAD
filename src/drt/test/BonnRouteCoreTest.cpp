@@ -17,6 +17,7 @@
 
 #include "br/BrCore.h"
 #include "br/BrDistanceRules.h"
+#include "br/BrPotentialOracle.h"
 #include "br/BrShapeGrid.h"
 #include "br/BrWireModel.h"
 
@@ -81,8 +82,24 @@ struct Ref
           rate = r.discount_rate;
         }
       }
+      Cost spread = 0;
+      if (r.spread_cost != 0 && r.spread_tiles != nullptr) {
+        const int t = l.track_tile[i];
+        const int p = l.pos_tile[j2];
+        const int tx = l.horizontal ? p : t;
+        const int ty = l.horizontal ? t : p;
+        if ((*r.spread_tiles)[z][static_cast<size_t>(tx) * g.tiles_y + ty]) {
+          for (const int di : {-1, 1}) {
+            if (i + di >= 0 && i + di < l.numTracks()
+                && f.level(g.vertex(z, i + di, j2), kWire, r.wire_type)
+                       != kLegal) {
+              spread = r.spread_cost;
+            }
+          }
+        }
+      }
       return std::abs(l.positions[j2] - l.positions[j]) * rate + pen(w, kWire)
-             + pen(e, kWireEdge);
+             + pen(e, kWireEdge) + spread;
     }
     if (z == z2 && j == j2 && std::abs(i - i2) == 1) {
       size_t e = i2 > i ? u : w;
@@ -254,8 +271,12 @@ static bool validPath(const SearchResult& r, const SearchRequest& q)
 }
 
 // modern: wire unit 4 with discounted runs (arXiv:2111.06169 Sec. 5.2);
-// only the vertex search supports it.
-static int randomCases(const int cases, const bool sparse, const bool modern)
+// only the vertex search supports it. potential: 0 = l1 target boxes,
+// 1..3 = PotentialOracle l1 / simple / general on the request's Region.
+static int randomCases(const int cases,
+                       const bool sparse,
+                       const bool modern,
+                       const int potential = 0)
 {
   std::mt19937 rng(sparse ? 23456 : 12345);
   int64_t pops_i = 0, pops_v = 0, fails = 0, found = 0, labels = 0, ivs = 0,
@@ -304,11 +325,12 @@ static int randomCases(const int cases, const bool sparse, const bool modern)
     auto tf = [&](Coord c) { return c / tile; };
     g.finalize(tf, tf);
     const int T = span / tile + 1;
+    g.tiles_x = g.tiles_y = T;
     FastGrid f;
     f.init(&g, 2);
-    TestOracle oracle;
-    oracle.grid = &f;
-    f.setOracle(&oracle);
+    TestOracle legality;
+    legality.grid = &f;
+    f.setOracle(&legality);
     double pfix = sparse ? 0.005 : (rng() % 30) / 100.0;
     double prout = sparse ? 0.005 : (rng() % 20) / 100.0;
     std::uniform_real_distribution<double> u(0, 1);
@@ -330,7 +352,7 @@ static int randomCases(const int cases, const bool sparse, const bool modern)
       for (const Kind e : {kWireEdge, kJogEdge}) {
         if (u(rng) < (sparse ? 0.002 : 0.05)) {
           f.setEdgeQuery(v, e, true);
-          oracle.edges[{v, e}]
+          legality.edges[{v, e}]
               = u(rng) < 0.5 ? kNotRemovable : 1 + rng() % kMaxRemovableLevel;
         }
       }
@@ -358,6 +380,17 @@ static int randomCases(const int cases, const bool sparse, const bool modern)
     q.max_ripup_level = 1 + rng() % kMaxRemovableLevel;
     // Wire type 2 is outside the fast grid: the checker answers.
     q.wire_type = rng() % 3;
+    std::vector<std::vector<uint8_t>> spread_tiles;
+    if (modern && rng() % 2) {
+      spread_tiles.assign(Z, std::vector<uint8_t>(size_t(T) * T, 0));
+      for (auto& layer_tiles : spread_tiles) {
+        for (auto& tile_flag : layer_tiles) {
+          tile_flag = rng() % 2;
+        }
+      }
+      q.spread_tiles = &spread_tiles;
+      q.spread_cost = 4 * (1 + rng() % 60);
+    }
     if (modern) {
       q.discount_rate = 3;
       const int discounts = rng() % 6;
@@ -394,6 +427,30 @@ static int randomCases(const int cases, const bool sparse, const bool modern)
         b.zlo = std::min(b.zlo, z);
         b.zhi = std::max(b.zhi, z);
       }
+    }
+    PotentialOracle oracle;
+    if (potential == 3) {
+      // Contract of the general model (and of BonnRouteDR): sources and
+      // targets lie in the routing area, so every search edge is an edge of
+      // the grid graph whose distances the potential holds.
+      for (const auto& [v, c] : q.sources) {
+        int z, i, j;
+        g.decode(v, z, i, j);
+        const TrackLayer& l = g.layers[z];
+        const int t = l.track_tile[i];
+        const int p = l.pos_tile[j];
+        reg.allow(z, l.horizontal ? p : t, l.horizontal ? t : p);
+      }
+    }
+    if (potential > 0) {
+      const GCellGrid gcells{0, 0, tile, tile, 0, 0, span, span};
+      oracle.prepare(static_cast<PotentialOracle::Model>(potential - 1),
+                     g,
+                     q,
+                     gcells,
+                     3,
+                     4);
+      q.future_cost = &oracle;
     }
     PathSearch ps(g, f);
     IntervalSearch is(g, f);
@@ -717,12 +774,51 @@ static int reservationCases()
   return fails != 0;
 }
 
+// A search whose label budget is exceeded stops without a path and says
+// so; the same search without a budget finds the path.
+static int labelBudget()
+{
+  TrackGraph graph;
+  graph.layers.resize(1);
+  TrackLayer& layer = graph.layers[0];
+  layer.tracks = {0, 100, 200};
+  for (int j = 0; j < 4000; j++) {
+    layer.positions.push_back(j * 10);
+  }
+  graph.finalize([](int) { return 0; }, [](int) { return 0; });
+  FastGrid grid;
+  grid.init(&graph, 1);
+  Region region;
+  region.init(1, 1, 1);
+  region.allow(0, 0, 0);
+  SearchRequest request;
+  request.region = &region;
+  request.sources = {{graph.vertex(0, 0, 0), 0}};
+  request.targets = {{graph.vertex(0, 2, 3999), 0, 0}};
+  PathSearch search(graph, grid);
+  request.label_limit = 1500;
+  const SearchResult capped = search.run(request);
+  request.label_limit = 0;
+  const SearchResult full = search.run(request);
+  if (!capped.aborted || capped.found || full.aborted || !full.found) {
+    std::printf("label budget: capped aborted=%d found=%d, full found=%d\n",
+                capped.aborted,
+                capped.found,
+                full.found);
+    return 1;
+  }
+  return 0;
+}
+
 int main()
 {
   if (blockedGeometry() || obstacleDetour() || reusedSearch()
-      || reservationCases()) {
+      || reservationCases() || labelBudget()) {
     return 1;
   }
   return randomCases(400, false, false) || randomCases(400, true, false)
-         || randomCases(400, false, true) || randomCases(400, true, true);
+         || randomCases(400, false, true) || randomCases(400, true, true)
+         || randomCases(300, false, true, 1) || randomCases(300, true, true, 2)
+         || randomCases(300, false, true, 3) || randomCases(300, true, true, 3)
+         || randomCases(300, false, false, 3);
 }
