@@ -178,9 +178,12 @@ class BonnRouteGlobal
                       bool whole_grid) const;
   // tree_edges holds vertex pairs; edge_pins[i] is the GRNet pin index of
   // pair i if it is a pin-clique edge, else -1.
+  // Without need_usage (the congestion-free pilot reads only the tree and
+  // its objective) the demand list and hash stay empty.
   bool buildCandidate(const NetState& state,
                       const std::vector<std::array<int, 3>>& tree_edges,
                       const std::vector<int>& edge_pins,
+                      bool need_usage,
                       Candidate& candidate) const;
   // Congestion-free oracle pass: objective bound and reuse certificate;
   // with stack_counts, the via stacks through each (layer, x, y).
@@ -192,7 +195,10 @@ class BonnRouteGlobal
   std::shared_ptr<GRTreeNode> buildTree(const Candidate& candidate) const;
   double logCost(const Candidate& candidate) const;
   double linearCost(const Candidate& candidate) const;
+  // Adds the candidate's usage to the log prices; the weights of the touched
+  // resources are refreshed once per batch by refreshWeights().
   void applyPrices(const Candidate& candidate);
+  void refreshWeights();
   void renormalize();
   int insertCandidate(NetState& state, Candidate&& candidate);
   void resourceSharing();
@@ -230,6 +236,22 @@ class BonnRouteGlobal
   // (lower pad on l, upper pad on l + 1).
   std::vector<double> via_pad_lower_;
   std::vector<double> via_pad_upper_;
+  // Static grid geometry of the cost functions, per layer: preferred
+  // direction, wire objective per edge index, and the flank edges a via pad
+  // at index c spreads over (lengths of edges c - 1 and c, and their sum).
+  struct PadFlank
+  {
+    int sum = 0;
+    bool lower = false;
+    bool higher = false;
+  };
+  std::vector<int> layer_direction_;
+  std::array<std::vector<double>, 2> wire_objective_;  // [direction][index]
+  std::vector<std::vector<PadFlank>> pad_flank_;       // [layer][index]
+  // Resources whose log price changed in the current batch.
+  std::vector<uint32_t> touched_;
+  std::vector<uint32_t> touched_stamp_;
+  uint32_t touched_epoch_ = 0;
   bool via_demand_ = true;
   // Layers below this hold no routing capacity (pin layers): not priced.
   int min_layer_ = 0;

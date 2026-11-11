@@ -151,6 +151,32 @@ BonnRouteGlobal::BonnRouteGlobal(GridGraph* grid_graph,
     via_pad_lower_[l] = grid_graph_->getStackPadLength(l, l, l + 1);
     via_pad_upper_[l] = grid_graph_->getStackPadLength(l + 1, l, l + 1);
   }
+  // Same expressions as GridGraph's getters, evaluated once.
+  for (int direction = 0; direction < 2; direction++) {
+    const int size = grid_graph_->getSize(direction);
+    wire_objective_[direction].assign(std::max(size, 1), 0.0);
+    for (int c = 0; c + 1 < size; c++) {
+      wire_objective_[direction][c] = params_.wire_weight
+                                      * grid_graph_->getEdgeLength(direction, c)
+                                      / m2_pitch_;
+    }
+  }
+  layer_direction_.resize(num_layers_);
+  pad_flank_.resize(num_layers_);
+  for (int l = 0; l < num_layers_; l++) {
+    const int direction = grid_graph_->getLayerDirection(l);
+    layer_direction_[l] = direction;
+    const int size = grid_graph_->getSize(direction);
+    pad_flank_[l].resize(size);
+    for (int c = 0; c < size; c++) {
+      const int lower_len
+          = c > 0 ? grid_graph_->getEdgeLength(direction, c - 1) : 0;
+      const int higher_len
+          = c < size - 1 ? grid_graph_->getEdgeLength(direction, c) : 0;
+      pad_flank_[l][c]
+          = {lower_len + higher_len, lower_len > 0, higher_len > 0};
+    }
+  }
 }
 
 BonnRouteGlobal::~BonnRouteGlobal() = default;
@@ -159,10 +185,8 @@ double BonnRouteGlobal::wireObjective(const int layer,
                                       const int x,
                                       const int y) const
 {
-  const int direction = grid_graph_->getLayerDirection(layer);
-  const int index = direction == MetalLayer::H ? x : y;
-  return params_.wire_weight * grid_graph_->getEdgeLength(direction, index)
-         / m2_pitch_;
+  const int direction = layer_direction_[layer];
+  return wire_objective_[direction][direction == MetalLayer::H ? x : y];
 }
 
 double BonnRouteGlobal::wireCost(const int layer,
@@ -183,25 +207,19 @@ double BonnRouteGlobal::padCost(const int layer,
   if (!via_demand_ || pad <= 0.0) {
     return 0.0;
   }
-  const int direction = grid_graph_->getLayerDirection(layer);
-  const int c = direction == MetalLayer::H ? x : y;
-  const int size = grid_graph_->getSize(direction);
-  const int lower_len
-      = c > 0 ? grid_graph_->getEdgeLength(direction, c - 1) : 0;
-  const int higher_len
-      = c < size - 1 ? grid_graph_->getEdgeLength(direction, c) : 0;
-  const int sum = lower_len + higher_len;
-  if (sum == 0) {
+  const int direction = layer_direction_[layer];
+  const PadFlank& flank = pad_flank_[layer][direction == MetalLayer::H ? x : y];
+  if (flank.sum == 0) {
     return 0.0;
   }
-  const double demand = pad / sum * net->getNdrCost(layer);
+  const double demand = pad / flank.sum * net->getNdrCost(layer);
   double cost = 0.0;
-  if (lower_len > 0) {
+  if (flank.lower) {
     const int lx = direction == MetalLayer::H ? x - 1 : x;
     const int ly = direction == MetalLayer::H ? y : y - 1;
     cost += weight_[edgeIndex(layer, lx, ly)] * demand;
   }
-  if (higher_len > 0) {
+  if (flank.higher) {
     cost += weight_[edgeIndex(layer, x, y)] * demand;
   }
   return cost;
@@ -473,7 +491,7 @@ BonnRouteGlobal::OracleResult BonnRouteGlobal::oracle(
         return objective_only ? wireObjective(l, ex, ey)
                               : wireCost(l, ex, ey, factor);
       };
-      if (grid_graph_->getLayerDirection(l) == MetalLayer::H) {
+      if (layer_direction_[l] == MetalLayer::H) {
         if (x > x0) {
           relax(node, (u - height) * 3, d + wire(x - 1, y));
         }
@@ -534,7 +552,8 @@ BonnRouteGlobal::OracleResult BonnRouteGlobal::oracle(
     tree_edges.push_back(cell(a));
     tree_edges.push_back(cell(b));
   }
-  if (!buildCandidate(state, tree_edges, edge_pins, result.candidate)) {
+  if (!buildCandidate(
+          state, tree_edges, edge_pins, !objective_only, result.candidate)) {
     return result;
   }
   result.ok = true;
@@ -545,6 +564,7 @@ bool BonnRouteGlobal::buildCandidate(
     const NetState& state,
     const std::vector<std::array<int, 3>>& tree_edges,
     const std::vector<int>& edge_pins,
+    const bool need_usage,
     Candidate& candidate) const
 {
   auto key = [&](int l, int x, int y) -> uint64_t {
@@ -763,6 +783,12 @@ bool BonnRouteGlobal::buildCandidate(
     }
   }
   candidate.objective += params_.via_weight * num_vias;
+  candidate.usage.clear();
+  candidate.hash = 0;
+  candidate.count = 0;
+  if (!need_usage) {
+    return true;
+  }
 
   const std::shared_ptr<GRTreeNode> tree = buildTree(candidate);
   std::vector<std::pair<uint32_t, double>> usage;
@@ -830,16 +856,34 @@ void BonnRouteGlobal::applyPrices(const Candidate& candidate)
   const double eps = params_.epsilon;
   for (const auto& [r, d] : candidate.usage) {
     const double lp = (log_price_[r] += eps * d / norm_capacity_[r]);
-    weight_[r] = std::exp(lp - shift_) / norm_capacity_[r];
     max_log_price_ = std::max(max_log_price_, lp);
+    if (touched_stamp_[r] != touched_epoch_) {
+      touched_stamp_[r] = touched_epoch_;
+      touched_.push_back(r);
+    }
   }
   log_objective_price_ += eps * candidate.objective / objective_bound_;
-  objective_weight_
-      = std::exp(log_objective_price_ - shift_) / objective_bound_;
   if (std::max(max_log_price_, log_objective_price_) - shift_
       > kRenormalizeAbove) {
     renormalize();
   }
+}
+
+// Within a batch nothing reads the weights, so each touched resource gets
+// exp(ln y_r - shift_) / u_r once, from its final log price: the same value
+// the last per-net update (or a renormalize after it) would have stored.
+void BonnRouteGlobal::refreshWeights()
+{
+  for (const uint32_t r : touched_) {
+    weight_[r] = std::exp(log_price_[r] - shift_) / norm_capacity_[r];
+  }
+  touched_.clear();
+  if (++touched_epoch_ == 0) {
+    std::ranges::fill(touched_stamp_, 0);
+    touched_epoch_ = 1;
+  }
+  objective_weight_
+      = std::exp(log_objective_price_ - shift_) / objective_bound_;
 }
 
 void BonnRouteGlobal::renormalize()
@@ -1140,6 +1184,9 @@ void BonnRouteGlobal::resourceSharing()
   for (size_t r = 0; r < log_price_.size(); r++) {
     weight_[r] = 1.0 / norm_capacity_[r];
   }
+  touched_.clear();
+  touched_stamp_.assign(log_price_.size(), 0);
+  touched_epoch_ = 1;
   objective_weight_ = std::exp(log_objective_price_) / objective_bound_;
   if (log_objective_price_ > kRenormalizeAbove) {
     renormalize();
@@ -1259,6 +1306,7 @@ void BonnRouteGlobal::resourceSharing()
         chosen.count++;
         applyPrices(chosen);
       }
+      refreshWeights();
     }
     oracle_calls_ += phase_calls;
     const int done = phase + 1;
