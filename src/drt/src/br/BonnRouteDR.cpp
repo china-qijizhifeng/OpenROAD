@@ -783,7 +783,9 @@ void BonnRouteDR::buildRoutingSpace()
   interaction_reach_ = need + max_pitch;
   halo_tiles_ = static_cast<int>(
       std::max<int64_t>(1, (2 * need + max_pitch + tile - 1) / tile));
-  // Search label budget (labels of the vertex search: 32 bytes).
+  // Search label budget: a label count, search_label_mb MiB of 32-byte
+  // labels (the vertex-search label size when the budget was introduced;
+  // the count is kept so that searches stop at the same label).
   label_limit_ = static_cast<size_t>(std::max(0, params_.search_label_mb))
                  * (size_t{1} << 20) / 32;
 }
@@ -4774,6 +4776,41 @@ void BonnRouteDR::main()
     routeRipupQueue(failed_first);
   }
   writeNets();
+  if (params_.verbose) {
+    // Fingerprint of the routes handed to FlexDR (FNV-1a over nets, wires
+    // and vias in net order): equal routes give equal digests across builds.
+    uint64_t digest = 14695981039346656037ULL;
+    auto mix = [&digest](const int64_t value) {
+      digest = (digest ^ static_cast<uint64_t>(value)) * 1099511628211ULL;
+    };
+    int64_t digest_wires = 0;
+    int64_t digest_vias = 0;
+    for (const NetData& net : nets_) {
+      mix(net.id);
+      mix(net.routed);
+      for (const OutWire& w : net.wires) {
+        mix(w.layer);
+        mix(w.begin.x());
+        mix(w.begin.y());
+        mix(w.end.x());
+        mix(w.end.y());
+        mix(w.patch);
+        digest_wires++;
+      }
+      for (const OutVia& v : net.vias) {
+        for (const char c : v.def->getName()) {
+          mix(c);
+        }
+        mix(v.point.x());
+        mix(v.point.y());
+        digest_vias++;
+      }
+    }
+    logger_->report("BonnRoute DR output digest {:016x}: {} wires, {} vias.",
+                    digest,
+                    digest_wires,
+                    digest_vias);
+  }
   int routed = 0;
   int failed = 0;
   int skipped = 0;

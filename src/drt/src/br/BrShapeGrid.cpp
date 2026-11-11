@@ -170,7 +170,7 @@ ShapeGrid::Block& ShapeGrid::block(Layer& layer,
     b->rows = layer.chunk_first_row[row_chunk + 1] - b->row_first;
     b->cell_first = layer.chunk_first_cell[cell_chunk];
     b->cells = layer.chunk_first_cell[cell_chunk + 1] - b->cell_first;
-    b->roots.assign(b->rows, -1);
+    b->row_offset.assign(b->rows + 1, 0);
   }
   return *b;
 }
@@ -184,176 +184,74 @@ const ShapeGrid::Block* ShapeGrid::block(const Layer& layer,
       .get();
 }
 
-// AVL tree (Sec. 3.3) keyed by the first cell of an interval.
+// Interval sets of the rows (Sec. 3.3: "intervals which are stored in an
+// AVL-tree in each row"): per row chunk a sorted array of disjoint
+// intervals, the rows of a block concatenated (compressed rows). Row
+// chunks hold few intervals, so binary search and shifting the block's
+// tail replace the tree's rotations; the enumeration order (increasing
+// first cell) is the same.
 
-int32_t ShapeGrid::height(const Block& b, const int32_t n)
+const ShapeGrid::Interval* ShapeGrid::firstEndingAtOrAfter(const Block& b,
+                                                           const int local,
+                                                           const int32_t cell)
 {
-  return n < 0 ? 0 : b.nodes[n].height;
+  return std::partition_point(
+      rowBegin(b, local), rowEnd(b, local), [cell](const Interval& n) {
+        return n.end < cell;
+      });
 }
 
-void ShapeGrid::update(Block& b, const int32_t n)
+const ShapeGrid::Interval* ShapeGrid::findLast(const Block& b,
+                                               const int local,
+                                               const int32_t cell)
 {
-  b.nodes[n].height
-      = 1 + std::max(height(b, b.nodes[n].left), height(b, b.nodes[n].right));
+  const Interval* first = rowBegin(b, local);
+  const Interval* it = std::partition_point(
+      first, rowEnd(b, local), [cell](const Interval& n) {
+        return n.begin <= cell;
+      });
+  return it == first ? nullptr : it - 1;
 }
 
-int32_t ShapeGrid::rotateLeft(Block& b, const int32_t n)
+const ShapeGrid::Interval* ShapeGrid::findFirst(const Block& b,
+                                                const int local,
+                                                const int32_t cell)
 {
-  const int32_t r = b.nodes[n].right;
-  b.nodes[n].right = b.nodes[r].left;
-  b.nodes[r].left = n;
-  update(b, n);
-  update(b, r);
-  return r;
+  const Interval* last = rowEnd(b, local);
+  const Interval* it = std::partition_point(
+      rowBegin(b, local), last, [cell](const Interval& n) {
+        return n.begin < cell;
+      });
+  return it == last ? nullptr : it;
 }
 
-int32_t ShapeGrid::rotateRight(Block& b, const int32_t n)
+void ShapeGrid::replaceRow(Block& b,
+                           const int local,
+                           const uint32_t first,
+                           const uint32_t last,
+                           const std::vector<Interval>& with)
 {
-  const int32_t l = b.nodes[n].left;
-  b.nodes[n].left = b.nodes[l].right;
-  b.nodes[l].right = n;
-  update(b, n);
-  update(b, l);
-  return l;
-}
-
-int32_t ShapeGrid::rebalance(Block& b, const int32_t n)
-{
-  update(b, n);
-  const int32_t l = b.nodes[n].left;
-  const int32_t r = b.nodes[n].right;
-  const int balance = height(b, l) - height(b, r);
-  if (balance > 1) {
-    if (height(b, b.nodes[l].left) < height(b, b.nodes[l].right)) {
-      b.nodes[n].left = rotateLeft(b, l);
+  const uint32_t base = b.row_offset[local];
+  const auto n = static_cast<int64_t>(with.size());
+  const auto m = static_cast<int64_t>(last - first);
+  const int64_t delta = n - m;
+  if (delta > 0) {
+    // Grow by an eighth: blocks keep little spare room.
+    const size_t need = b.pool.size() + delta;
+    if (need > b.pool.capacity()) {
+      b.pool.reserve(need + need / 8 + 4);
     }
-    return rotateRight(b, n);
+    b.pool.insert(b.pool.begin() + base + last, delta, Interval{});
+  } else if (delta < 0) {
+    b.pool.erase(b.pool.begin() + base + first + n,
+                 b.pool.begin() + base + last);
   }
-  if (balance < -1) {
-    if (height(b, b.nodes[r].right) < height(b, b.nodes[r].left)) {
-      b.nodes[n].right = rotateRight(b, r);
-    }
-    return rotateLeft(b, n);
-  }
-  return n;
-}
-
-int32_t ShapeGrid::insertNode(Block& b, const int32_t root, const int32_t n)
-{
-  if (root < 0) {
-    return n;
-  }
-  if (b.nodes[n].begin < b.nodes[root].begin) {
-    const int32_t l = insertNode(b, b.nodes[root].left, n);
-    b.nodes[root].left = l;
-  } else {
-    const int32_t r = insertNode(b, b.nodes[root].right, n);
-    b.nodes[root].right = r;
-  }
-  return rebalance(b, root);
-}
-
-int32_t ShapeGrid::eraseMin(Block& b, const int32_t root, int32_t& min)
-{
-  if (b.nodes[root].left < 0) {
-    min = root;
-    return b.nodes[root].right;
-  }
-  const int32_t l = eraseMin(b, b.nodes[root].left, min);
-  b.nodes[root].left = l;
-  return rebalance(b, root);
-}
-
-int32_t ShapeGrid::eraseNode(Block& b, const int32_t root, const int32_t begin)
-{
-  if (root < 0) {
-    return -1;
-  }
-  if (begin < b.nodes[root].begin) {
-    const int32_t l = eraseNode(b, b.nodes[root].left, begin);
-    b.nodes[root].left = l;
-  } else if (begin > b.nodes[root].begin) {
-    const int32_t r = eraseNode(b, b.nodes[root].right, begin);
-    b.nodes[root].right = r;
-  } else {
-    const int32_t l = b.nodes[root].left;
-    const int32_t r = b.nodes[root].right;
-    b.free_nodes.push_back(root);
-    if (r < 0) {
-      return l;
-    }
-    int32_t min = -1;
-    const int32_t rest = eraseMin(b, r, min);
-    b.nodes[min].left = l;
-    b.nodes[min].right = rest;
-    return rebalance(b, min);
-  }
-  return rebalance(b, root);
-}
-
-int32_t ShapeGrid::newNode(Block& b, const Segment& s)
-{
-  int32_t n;
-  if (!b.free_nodes.empty()) {
-    n = b.free_nodes.back();
-    b.free_nodes.pop_back();
-  } else {
-    n = static_cast<int32_t>(b.nodes.size());
-    b.nodes.emplace_back();
-  }
-  b.nodes[n] = Node{s.begin, s.end, s.value, s.owner, -1, -1, 1};
-  return n;
-}
-
-int32_t ShapeGrid::findLast(const Block& b, int32_t root, const int32_t cell)
-{
-  int32_t best = -1;
-  while (root >= 0) {
-    if (b.nodes[root].begin <= cell) {
-      best = root;
-      root = b.nodes[root].right;
-    } else {
-      root = b.nodes[root].left;
+  std::ranges::copy(with, b.pool.begin() + base + first);
+  if (delta != 0) {
+    for (int r = local + 1; r <= b.rows; r++) {
+      b.row_offset[r] = static_cast<uint32_t>(b.row_offset[r] + delta);
     }
   }
-  return best;
-}
-
-int32_t ShapeGrid::findFirst(const Block& b, int32_t root, const int32_t cell)
-{
-  int32_t best = -1;
-  while (root >= 0) {
-    if (b.nodes[root].begin >= cell) {
-      best = root;
-      root = b.nodes[root].left;
-    } else {
-      root = b.nodes[root].right;
-    }
-  }
-  return best;
-}
-
-void ShapeGrid::collectNodes(const Block& b,
-                             const int32_t root,
-                             const int32_t lo,
-                             const int32_t hi,
-                             std::vector<int32_t>& out)
-{
-  if (root < 0) {
-    return;
-  }
-  const Node& n = b.nodes[root];
-  if (n.begin > hi) {
-    collectNodes(b, n.left, lo, hi, out);
-    return;
-  }
-  if (n.end < lo) {
-    collectNodes(b, n.right, lo, hi, out);
-    return;
-  }
-  collectNodes(b, n.left, lo, hi, out);
-  out.push_back(root);
-  collectNodes(b, n.right, lo, hi, out);
 }
 
 uint32_t ShapeGrid::transition(const uint32_t config,
@@ -510,13 +408,14 @@ bool ShapeGrid::containsRun(const Layer& layer,
   if (b == nullptr) {
     return false;
   }
-  thread_local std::vector<int32_t> found;
-  found.clear();
-  collectNodes(*b, b->roots[row - b->row_first], cell_begin, cell_end, found);
+  const int local = row - b->row_first;
   int next = cell_begin;
   const int32_t target = isOwned(piece.type) ? owner : kNoNet;
-  for (const int32_t n : found) {
-    const Node& node = b->nodes[n];
+  for (const Interval *n = firstEndingAtOrAfter(*b, local, cell_begin),
+                      *e = rowEnd(*b, local);
+       n != e && n->begin <= cell_end;
+       ++n) {
+    const Interval& node = *n;
     if (node.begin > next) {
       return false;  // a gap holds nothing
     }
@@ -552,36 +451,38 @@ bool ShapeGrid::applyRun(Layer& layer,
   }
   Block& b = block(layer, row_chunk, cell_chunk);
   const int local = row - b.row_first;
-  int32_t root = b.roots[local];
-  thread_local std::vector<int32_t> found;
   thread_local std::vector<Segment> segments;
   thread_local std::vector<Segment> changed;
-  found.clear();
+  thread_local std::vector<Segment> merged;
   segments.clear();
   changed.clear();
-  collectNodes(b, root, cell_begin - 1, cell_end + 1, found);
+  merged.clear();
+  // The intervals meeting [cell_begin - 1, cell_end + 1] are replaced.
+  const Interval* row_first = rowBegin(b, local);
+  const Interval* row_last = rowEnd(b, local);
+  const Interval* from = firstEndingAtOrAfter(b, local, cell_begin - 1);
+  const Interval* to = from;
+  while (to != row_last && to->begin <= cell_end + 1) {
+    ++to;
+  }
+  const auto first = static_cast<uint32_t>(from - row_first);
+  const auto last = static_cast<uint32_t>(to - row_first);
   int lo = cell_begin;
   int hi = cell_end;
-  for (const int32_t n : found) {
-    lo = std::min(lo, b.nodes[n].begin);
-    hi = std::max(hi, b.nodes[n].end);
+  for (const Interval* n = from; n != to; ++n) {
+    lo = std::min(lo, n->begin);
+    hi = std::max(hi, n->end);
   }
   int pos = lo;
-  for (const int32_t n : found) {
-    const Node& node = b.nodes[n];
-    if (node.begin > pos) {
-      segments.push_back({pos, node.begin - 1, 0, kNoNet});
+  for (const Interval* n = from; n != to; ++n) {
+    if (n->begin > pos) {
+      segments.push_back({pos, n->begin - 1, 0, kNoNet});
     }
-    segments.push_back({node.begin, node.end, node.value, node.owner});
-    pos = node.end + 1;
+    segments.push_back(*n);
+    pos = n->end + 1;
   }
   if (pos <= hi) {
     segments.push_back({pos, hi, 0, kNoNet});
-  }
-  for (const Segment& s : segments) {
-    if (s.value != 0 || s.owner != kNoNet) {
-      root = eraseNode(b, root, s.begin);
-    }
   }
   bool ok = true;
   for (const Segment& s : segments) {
@@ -605,7 +506,7 @@ bool ShapeGrid::applyRun(Layer& layer,
   Segment open{0, -2, 0, kNoNet};
   auto flush = [&]() {
     if (open.end >= open.begin && (open.value != 0 || open.owner != kNoNet)) {
-      root = insertNode(b, root, newNode(b, open));
+      merged.push_back(open);
     }
   };
   for (const Segment& s : changed) {
@@ -618,7 +519,7 @@ bool ShapeGrid::applyRun(Layer& layer,
     open = s;
   }
   flush();
-  b.roots[local] = root;
+  replaceRow(b, local, first, last, merged);
   return ok;
 }
 
@@ -960,7 +861,6 @@ void ShapeGrid::collect(const int layer_index,
       = std::max(c0 - kKnownHorizon, layer.chunk_first_cell[k0]);
   const int horizon_hi
       = std::min(c1 + kKnownHorizon, layer.chunk_first_cell[k1 + 1] - 1);
-  thread_local std::vector<int32_t> found;
   for (int r = r0; r <= r1; r++) {
     const int row_chunk = layer.row_chunk[r];
     int known_lo = horizon_lo;
@@ -970,13 +870,15 @@ void ShapeGrid::collect(const int layer_index,
       if (b == nullptr) {
         continue;
       }
-      const int32_t root = b->roots[r - b->row_first];
+      const int local = r - b->row_first;
       const int q_lo = std::max(c0, layer.chunk_first_cell[k]);
       const int q_hi = std::min(c1, layer.chunk_first_cell[k + 1] - 1);
-      found.clear();
-      collectNodes(*b, root, q_lo, q_hi, found);
-      for (const int32_t n : found) {
-        const Node& node = b->nodes[n];
+      // found = [from, to): the intervals meeting [q_lo, q_hi].
+      const Interval* from = firstEndingAtOrAfter(*b, local, q_lo);
+      const Interval* row_last = rowEnd(*b, local);
+      const Interval* to = from;
+      for (; to != row_last && to->begin <= q_hi; ++to) {
+        const Interval& node = *to;
         out.intervals++;
         if (node.owner == kSharedCell) {
           for (const SharedPart& p : b->shared[node.value]) {
@@ -1003,21 +905,17 @@ void ShapeGrid::collect(const int layer_index,
         }
       }
       if (k == k0) {
-        const int x = !found.empty() && b->nodes[found.front()].begin <= c0
-                          ? b->nodes[found.front()].begin
-                          : c0;
-        const int32_t pred = findLast(*b, root, x - 1);
-        if (pred >= 0) {
-          known_lo = std::max(known_lo, b->nodes[pred].end + 1);
+        const int x = from != to && from->begin <= c0 ? from->begin : c0;
+        const Interval* pred = findLast(*b, local, x - 1);
+        if (pred != nullptr) {
+          known_lo = std::max(known_lo, pred->end + 1);
         }
       }
       if (k == k1) {
-        const int y = !found.empty() && b->nodes[found.back()].end >= c1
-                          ? b->nodes[found.back()].end
-                          : c1;
-        const int32_t succ = findFirst(*b, root, y + 1);
-        if (succ >= 0) {
-          known_hi = std::min(known_hi, b->nodes[succ].begin - 1);
+        const int y = from != to && (to - 1)->end >= c1 ? (to - 1)->end : c1;
+        const Interval* succ = findFirst(*b, local, y + 1);
+        if (succ != nullptr) {
+          known_hi = std::min(known_hi, succ->begin - 1);
         }
       }
     }
@@ -1152,8 +1050,7 @@ void ShapeGrid::compact()
     }
     for (auto& b : layer.blocks) {
       if (b) {
-        b->nodes.shrink_to_fit();
-        b->free_nodes.shrink_to_fit();
+        b->pool.shrink_to_fit();
         b->shared.shrink_to_fit();
       }
     }
@@ -1194,23 +1091,20 @@ ShapeGrid::Statistics ShapeGrid::statistics() const
       if (!b) {
         continue;
       }
-      s.bytes += sizeof(Block) + b->roots.capacity() * sizeof(int32_t)
-                 + b->nodes.capacity() * sizeof(Node)
-                 + b->free_nodes.capacity() * sizeof(int32_t)
+      s.bytes += sizeof(Block) + b->row_offset.capacity() * sizeof(uint32_t)
+                 + b->pool.capacity() * sizeof(Interval)
                  + b->shared.capacity() * sizeof(b->shared[0]);
       for (const auto& parts : b->shared) {
         s.bytes += parts.capacity() * sizeof(SharedPart);
       }
       s.chunks++;
-      s.intervals
-          += static_cast<int64_t>(b->nodes.size() - b->free_nodes.size());
       s.shared_cells
           += static_cast<int64_t>(b->shared.size() - b->free_shared.size());
-      for (const int32_t root : b->roots) {
-        std::vector<int32_t> all;
-        collectNodes(*b, root, b->cell_first, b->cell_first + b->cells, all);
-        for (const int32_t n : all) {
-          s.interval_cells += b->nodes[n].end - b->nodes[n].begin + 1;
+      for (int local = 0; local < b->rows; local++) {
+        for (const Interval* n = rowBegin(*b, local); n != rowEnd(*b, local);
+             ++n) {
+          s.intervals++;
+          s.interval_cells += n->end - n->begin + 1;
         }
       }
     }
@@ -1230,11 +1124,9 @@ void ShapeGrid::forEachInterval(
         continue;
       }
       for (int local = 0; local < b->rows; local++) {
-        std::vector<int32_t> all;
-        collectNodes(
-            *b, b->roots[local], b->cell_first, b->cell_first + b->cells, all);
-        for (const int32_t n : all) {
-          const Node& node = b->nodes[n];
+        for (const Interval* n = rowBegin(*b, local); n != rowEnd(*b, local);
+             ++n) {
+          const Interval& node = *n;
           IntervalView v{b->row_first + local,
                          node.begin,
                          node.end,

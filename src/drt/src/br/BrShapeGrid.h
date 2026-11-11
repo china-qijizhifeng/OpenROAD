@@ -336,31 +336,33 @@ class ShapeGrid
     std::atomic<uint32_t> size{0};
     std::vector<WideShape> shapes;
   };
-  struct Node
+  // One stored interval of a row chunk: cells [begin, end] (absolute cell
+  // indices) with equal configuration and owner. `value` is the
+  // configuration, or the shared-cell index when owner == kSharedCell.
+  struct Interval
   {
     int32_t begin;
     int32_t end;
-    uint32_t value;  // configuration, or shared-cell index
-    int32_t owner;   // net, kNoNet or kSharedCell
-    int32_t left;
-    int32_t right;
-    int32_t height;
+    uint32_t value;
+    int32_t owner;
   };
   struct SharedPart
   {
     int32_t owner;
     uint32_t config;
   };
-  // Rows and cells of one layer anchored in one global routing tile.
+  // Rows and cells of one layer anchored in one global routing tile. The
+  // intervals of all its rows lie in one array in row order (compressed
+  // rows): row r holds pool[row_offset[r], row_offset[r + 1]), sorted by
+  // begin and disjoint. An update shifts the tail of the block's array.
   struct Block
   {
     int row_first = 0;
     int rows = 0;
     int cell_first = 0;
     int cells = 0;
-    std::vector<int32_t> roots;
-    std::vector<Node> nodes;
-    std::vector<int32_t> free_nodes;
+    std::vector<uint32_t> row_offset;  // rows + 1
+    std::vector<Interval> pool;
     std::vector<std::vector<SharedPart>> shared;
     std::vector<uint32_t> free_shared;
   };
@@ -377,14 +379,9 @@ class ShapeGrid
     // Wide shapes per tile chunk (row chunk * along_chunks + cell chunk).
     std::unique_ptr<WideList[]> wide;
   };
-  // State of a run of cells.
-  struct Segment
-  {
-    int begin;
-    int end;
-    uint32_t value;
-    int32_t owner;
-  };
+  // State of a run of cells (an interval, or a gap with value 0 and no
+  // owner).
+  using Segment = Interval;
 
   bool update(int layer,
               const Rect& rect,
@@ -456,24 +453,29 @@ class ShapeGrid
                   int clip_hi,
                   GridWindow& out) const;
 
-  // AVL tree operations on a block's node pool.
-  static int32_t height(const Block& b, int32_t n);
-  static void update(Block& b, int32_t n);
-  static int32_t rotateLeft(Block& b, int32_t n);
-  static int32_t rotateRight(Block& b, int32_t n);
-  static int32_t rebalance(Block& b, int32_t n);
-  static int32_t insertNode(Block& b, int32_t root, int32_t n);
-  static int32_t eraseNode(Block& b, int32_t root, int32_t begin);
-  static int32_t eraseMin(Block& b, int32_t root, int32_t& min);
-  static int32_t newNode(Block& b, const Segment& s);
-  // Largest begin <= cell / smallest begin >= cell; -1 if none.
-  static int32_t findLast(const Block& b, int32_t root, int32_t cell);
-  static int32_t findFirst(const Block& b, int32_t root, int32_t cell);
-  static void collectNodes(const Block& b,
-                           int32_t root,
-                           int32_t lo,
-                           int32_t hi,
-                           std::vector<int32_t>& out);
+  // Sorted interval arrays of the rows (Sec. 3.3 interval sets per row).
+  static const Interval* rowBegin(const Block& b, int local)
+  {
+    return b.pool.data() + b.row_offset[local];
+  }
+  static const Interval* rowEnd(const Block& b, int local)
+  {
+    return b.pool.data() + b.row_offset[local + 1];
+  }
+  // First interval of the row with end >= cell.
+  static const Interval* firstEndingAtOrAfter(const Block& b,
+                                              int local,
+                                              int32_t cell);
+  // Last interval with begin <= cell / first with begin >= cell; nullptr
+  // if none.
+  static const Interval* findLast(const Block& b, int local, int32_t cell);
+  static const Interval* findFirst(const Block& b, int local, int32_t cell);
+  // Replaces the row's intervals [first, last) by `with`.
+  static void replaceRow(Block& b,
+                         int local,
+                         uint32_t first,
+                         uint32_t last,
+                         const std::vector<Interval>& with);
 
   const ShapeClassTable* classes_ = nullptr;
   std::vector<Layer> layers_;

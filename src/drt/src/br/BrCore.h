@@ -196,20 +196,61 @@ struct SearchResult
   bool aborted = false;  // label budget exceeded
 };
 
+// pi_H of Sec. 4.1 over the target boxes of a search, in flat arrays: per
+// box its bounds, per (layer, box) the via bound plus terminal cost. The
+// value at (z, x, y) is min over boxes of l1 distance * rate + constant.
+class TargetBoxBound
+{
+ public:
+  // via_prefix[z] = cost of the vias 0 -> z; min_via_cost bounds a via
+  // when exact_future_cost is off.
+  void setup(const SearchRequest& request,
+             const std::vector<Cost>& via_prefix,
+             Cost min_via_cost);
+  bool empty() const { return xlo_.empty(); }
+  size_t size() const { return xlo_.size(); }
+  // Via bound plus terminal cost of box b from layer z.
+  Cost constant(const int z, const size_t b) const
+  {
+    return constant_[static_cast<size_t>(z) * xlo_.size() + b];
+  }
+  Cost at(const int z, const Coord x, const Coord y, const Cost rate) const
+  {
+    const size_t n = xlo_.size();
+    const Cost* constant = constant_.data() + static_cast<size_t>(z) * n;
+    Cost best = kInfCost;
+    for (size_t b = 0; b < n; b++) {
+      const Cost dx = std::max({0, xlo_[b] - x, x - xhi_[b]});
+      const Cost dy = std::max({0, ylo_[b] - y, y - yhi_[b]});
+      best = std::min(best, (dx + dy) * rate + constant[b]);
+    }
+    return best;
+  }
+
+ private:
+  std::vector<Coord> xlo_;
+  std::vector<Coord> xhi_;
+  std::vector<Coord> ylo_;
+  std::vector<Coord> yhi_;
+  std::vector<Cost> constant_;
+};
+
 // Per-vertex labels of a search window, stored in pages that a search
 // allocates when it touches them: memory follows the explored part of the
 // window, not its bounding box (a net spanning the die has a window of
-// most of the track graph). Pages are reused by later searches; stale
-// labels carry older epochs. A search may be limited to a number of pages;
-// beyond it, labels go to a scratch page and overflow() is set (the search
-// then stops). Between searches at most kKeptBytes of pages stay allocated.
-template <typename Label>
+// most of the track graph). Pages are reused by later searches. With
+// kClear, a page is reset to Label{} when a search first touches it, so
+// labels need no epoch of their own; otherwise stale labels carry older
+// epochs. A search may be limited to a number of pages; beyond it, labels
+// go to a scratch page and overflow() is set (the search then stops).
+// Between searches at most kKeptBytes of pages stay allocated.
+template <typename Label, bool kClear = false>
 class PagedLabels
 {
  public:
   static constexpr int kPageBits = 10;
   static constexpr size_t kPageSize = size_t{1} << kPageBits;
-  static constexpr size_t kKeptBytes = size_t{64} << 20;
+  static constexpr size_t kKeptBytes = size_t{16} << 20;
 
   // Starts a search over `size` window vertices with at most `limit`
   // labels (0: unlimited); returns its epoch.
@@ -222,13 +263,12 @@ class PagedLabels
     limit_pages_ = limit == 0 ? 0 : (limit + kPageSize - 1) / kPageSize;
     overflow_ = false;
     const size_t pages = (size >> kPageBits) + 1;
-    if (page_epoch_.size() < pages) {
-      page_epoch_.resize(pages, 0);
-      page_index_.resize(pages, 0);
+    if (slots_.size() < pages) {
+      slots_.resize(pages, Slot{});
     }
     used_ = 0;
     if (++epoch_ == 0) {
-      std::fill(page_epoch_.begin(), page_epoch_.end(), 0);
+      std::fill(slots_.begin(), slots_.end(), Slot{});
       for (auto& page : pool_) {
         std::fill(page.get(), page.get() + kPageSize, Label{});
       }
@@ -238,37 +278,53 @@ class PagedLabels
   }
   Label& operator[](const size_t index)
   {
-    const size_t p = index >> kPageBits;
-    if (page_epoch_[p] != epoch_) {
-      if (limit_pages_ != 0 && used_ >= limit_pages_) {
-        overflow_ = true;
-        if (!scratch_) {
-          scratch_ = std::make_unique<Label[]>(1);
-        }
-        scratch_[0] = Label{};
-        return scratch_[0];
-      }
-      page_epoch_[p] = epoch_;
-      if (used_ == pool_.size()) {
-        pool_.push_back(std::make_unique<Label[]>(kPageSize));
-      }
-      page_index_[p] = static_cast<uint32_t>(used_++);
-      peak_pages_ = std::max(peak_pages_, used_);
+    const Slot& slot = slots_[index >> kPageBits];
+    if (slot.epoch == epoch_) {
+      return slot.page[index & (kPageSize - 1)];
     }
-    return pool_[page_index_[p]][index & (kPageSize - 1)];
+    return touch(index);
   }
   bool overflow() const { return overflow_; }
   size_t bytes() const
   {
-    return page_epoch_.capacity() * 2 * sizeof(uint32_t)
+    return slots_.capacity() * sizeof(Slot)
            + pool_.size() * kPageSize * sizeof(Label);
   }
   // Largest page count a search has used.
   size_t peakPages() const { return peak_pages_; }
 
  private:
-  std::vector<uint32_t> page_epoch_;
-  std::vector<uint32_t> page_index_;
+  // A page of the window: its storage while `epoch` is the current one.
+  struct Slot
+  {
+    Label* page = nullptr;
+    uint32_t epoch = 0;
+  };
+  // First touch of a page in this search.
+  [[gnu::noinline]] Label& touch(const size_t index)
+  {
+    Slot& slot = slots_[index >> kPageBits];
+    if (limit_pages_ != 0 && used_ >= limit_pages_) {
+      overflow_ = true;
+      if (!scratch_) {
+        scratch_ = std::make_unique<Label[]>(1);
+      }
+      scratch_[0] = Label{};
+      return scratch_[0];
+    }
+    if (used_ == pool_.size()) {
+      pool_.push_back(std::make_unique<Label[]>(kPageSize));
+    }
+    slot.page = pool_[used_++].get();
+    slot.epoch = epoch_;
+    peak_pages_ = std::max(peak_pages_, used_);
+    if constexpr (kClear) {
+      std::fill(slot.page, slot.page + kPageSize, Label{});
+    }
+    return slot.page[index & (kPageSize - 1)];
+  }
+
+  std::vector<Slot> slots_;
   std::vector<std::unique_ptr<Label[]>> pool_;
   std::unique_ptr<Label[]> scratch_;
   size_t used_ = 0;
@@ -290,7 +346,7 @@ class PathSearch
   size_t scratchBytes() const { return labels_.bytes(); }
   size_t peakScratchBytes() const
   {
-    return labels_.peakPages() * PagedLabels<Label>::kPageSize * sizeof(Label);
+    return labels_.peakPages() * Labels::kPageSize * sizeof(Label);
   }
 
  private:
@@ -304,13 +360,17 @@ class PathSearch
     kFromLayerBelow = 5,  // via from z - 1
     kFromLayerAbove = 6,  // via from z + 1
   };
+  // A heap entry at vertex (z, i, j). Ties of key and g are broken by the
+  // vertex in (z, i, j) order, which is the order of the vertex ids.
   struct Item
   {
     Cost key;
     Cost g;
-    size_t v;
-    int8_t dir;  // 0 vertex label, +1 / -1 ray, 2 sink
+    int32_t i;
+    int32_t j;
     int32_t aux;
+    int8_t z;
+    int8_t dir;  // 0 vertex label, +1 / -1 ray, 2 sink
     bool operator>(const Item& o) const
     {
       if (key != o.key) {
@@ -319,24 +379,53 @@ class PathSearch
       if (g != o.g) {
         return g < o.g;  // deeper first on ties
       }
-      return v > o.v;
+      if (z != o.z) {
+        return z > o.z;
+      }
+      if (i != o.i) {
+        return i > o.i;
+      }
+      return j > o.j;
     }
   };
 
   Cost futureCost(int z, Coord x, Coord y) const;
+  // FastGridReader::level, inlined: the run cursors answer most queries
+  // without a call.
   RipupLevel level(const At a, Kind k) const
   {
-    return reader_.level(a.z, a.i, a.j, k, req_->wire_type, &counters_);
+    return detail::levelOf(
+        grid_,
+        a.z,
+        a.i,
+        a.j,
+        k,
+        req_->wire_type,
+        reader_.ignoredOwner(),
+        &counters_,
+        [this](int z, int i, int j) { return reader_.wiringWord(z, i, j); },
+        [this](int z, int i, int c) { return reader_.viaWord(z, i, c); });
   }
-  Cost vertexPenalty(At a, Kind k) const;
-  bool enter(At a, Kind k) const;
+  // A vertex or edge of level l may be entered: legal, or removable in
+  // rip-up mode.
+  bool usable(const RipupLevel l) const
+  {
+    return l == kLegal || (req_->ripup && l <= req_->max_ripup_level);
+  }
+  // Rip-up penalty of entering a of level l.
+  Cost penalty(At a, RipupLevel l) const;
+  bool enter(const At a, const Kind k) const { return usable(level(a, k)); }
+  // 4-ary min-heap on heap_. Item::operator> is a strict total order (no
+  // two queued items share key, g and vertex), so the pop sequence is that
+  // of any other heap.
   void push(const Item& item);
-  bool relax(size_t from_v, size_t to_v, Cost g, Parent parent, int8_t dir);
+  Item pop();
+  bool relax(int z, int i, int j, Cost g, Parent parent, int8_t dir);
   // Cost of the preferred-direction edge between positions j and j2,
   // including the wire spreading cost of entering j2.
   Cost wireCost(int z, int i, int j, int j2) const;
   Cost spreadCost(int z, int i, int j) const;
-  void settle(int z, int i, int j, size_t v, Cost g);
+  void settle(int z, int i, int j, Cost g);
 
   const TrackGraph& graph_;
   const FastGrid& grid_;
@@ -346,8 +435,8 @@ class PathSearch
   mutable FastGridReader reader_;
   Cost min_via_cost_ = 0;
   std::vector<Cost> via_prefix_;  // via_prefix_[z] = cost of vias 0 -> z
-  Cost viaBound(int z, const TargetBox& box) const;
   Cost min_wire_rate_ = 1;
+  TargetBoxBound boxes_;
 
   // Search window: per layer track range [i0, i0 + ni) and position range
   // [j0, j0 + nj) covering the region; local index = wbase + di * nj + dj.
@@ -370,17 +459,24 @@ class PathSearch
   void setupWindow(const SearchRequest& request);
   std::vector<Window> window_;
 
+  // Labels of one search (pages reset on first touch, see PagedLabels):
+  // dist = kInfCost until the vertex is labelled; marks tell sources,
+  // targets (target_index) and discounted edges (j, j + 1) at j.
+  enum Mark : uint8_t
+  {
+    kMarkSource = 1,
+    kMarkTarget = 2,
+    kMarkDiscount = 4,
+  };
   struct Label
   {
-    Cost dist = 0;
-    uint32_t stamp = 0;
-    uint32_t source_stamp = 0;
-    uint32_t target_stamp = 0;
-    uint32_t discount_stamp = 0;  // edge (j, j + 1) at j
+    Cost dist = kInfCost;
     int32_t target_index = 0;
     uint8_t parent = 0;
+    uint8_t marks = 0;
   };
-  mutable PagedLabels<Label> labels_;
+  using Labels = PagedLabels<Label, /*kClear=*/true>;
+  mutable Labels labels_;
   uint32_t epoch_ = 0;
   std::vector<Item> heap_;
 };
@@ -407,8 +503,7 @@ class IntervalSearch
   size_t scratchBytes() const { return labels_.bytes(); }
   size_t peakScratchBytes() const
   {
-    return labels_.peakPages() * PagedLabels<VertexLabel>::kPageSize
-           * sizeof(VertexLabel);
+    return labels_.peakPages() * Labels::kPageSize * sizeof(VertexLabel);
   }
   int64_t intervals() const { return num_intervals_; }
   int64_t labels() const { return num_labels_; }
@@ -550,7 +645,7 @@ class IntervalSearch
   mutable FastGridReader reader_;
   Cost min_via_cost_ = 0;
   std::vector<Cost> via_prefix_;  // via_prefix_[z] = cost of vias 0 -> z
-  Cost viaBound(int z, const TargetBox& box) const;
+  TargetBoxBound boxes_;
 
   struct Window
   {
@@ -558,21 +653,27 @@ class IntervalSearch
     size_t wbase = 0;
   };
   std::vector<Window> window_;
+  // Per-vertex state of one search (pages reset on first touch, see
+  // PagedLabels); marks tell which fields hold data of this search.
+  enum VertexMark : uint8_t
+  {
+    kMarkInterval = 1,  // interval_id: the vertex's interval
+    kMarkSource = 2,
+    kMarkTarget = 4,    // target_index
+    kMarkInfo = 8,      // info
+    kMarkPending = 16,  // pending_*: best deferred label
+  };
   struct VertexLabel
   {
-    uint32_t stamp = 0;
-    uint32_t source_stamp = 0;
-    uint32_t target_stamp = 0;
-    uint32_t info_stamp = 0;
-    int32_t interval_id = 0;
-    int32_t target_index = 0;
     // Best deferred label of a vertex outside every interval (see
     // relaxations in process): delta and predecessor.
-    uint32_t pending_stamp = 0;
+    Cost pending_delta = 0;
+    int32_t interval_id = 0;
+    int32_t target_index = 0;
     int32_t pending_pred_interval = 0;
     int32_t pending_pred_k = 0;
     uint16_t info = 0;
-    Cost pending_delta = 0;
+    uint8_t marks = 0;
   };
   bool nearest_first_ = false;
   Cost tieKey(const Cost pi) const { return nearest_first_ ? -pi : pi; }
@@ -599,7 +700,8 @@ class IntervalSearch
   // While direct_, pushEvent stores the event in direct_event_ instead.
   bool direct_ = false;
   Event direct_event_{0, 0, -1, 0};
-  mutable PagedLabels<VertexLabel> labels_;
+  using Labels = PagedLabels<VertexLabel, /*kClear=*/true>;
+  mutable Labels labels_;
   // labels_[li] through the last page used (most lookups stay on a track).
   VertexLabel& label(const size_t li) const
   {
@@ -613,9 +715,8 @@ class IntervalSearch
     }
     return l;
   }
-  static constexpr int kLabelPageBits = PagedLabels<VertexLabel>::kPageBits;
-  static constexpr size_t kLabelPageMask
-      = PagedLabels<VertexLabel>::kPageSize - 1;
+  static constexpr int kLabelPageBits = Labels::kPageBits;
+  static constexpr size_t kLabelPageMask = Labels::kPageSize - 1;
   mutable size_t label_page_ = ~size_t{0};
   mutable VertexLabel* label_base_ = nullptr;
   // Per target box of the track being built: cross cost, along range.
@@ -625,7 +726,7 @@ class IntervalSearch
   // their label storage for later searches (at most kKeptIntervals).
   std::vector<Interval> intervals_;
   int num_used_ = 0;
-  static constexpr size_t kKeptIntervals = size_t{1} << 18;
+  static constexpr size_t kKeptIntervals = size_t{1} << 16;
   std::vector<Event> heap_;
   int64_t num_intervals_ = 0;
   std::array<int64_t, kNumIntervalEnds> ends_{};
