@@ -4944,11 +4944,21 @@ void BonnRouteDR::main()
   for (const NetData& net : nets_) {
     pre_skip[net.id] = net.skip;
   }
-  for (NetData& net : nets_) {
+  // Guide tiles and access stubs of each net read only the design, the
+  // track graph and the routing space; buildAccess may mark its own net
+  // skipped.
+  std::vector<int> unskipped;
+  for (const NetData& net : nets_) {
     if (!net.skip) {
-      buildGuideTiles(net);
-      buildAccess(net);
+      unskipped.push_back(net.id);
     }
+  }
+  const int setup_threads = static_cast<int>(workers_.size());
+#pragma omp parallel for num_threads(setup_threads) schedule(dynamic, 64)
+  for (int k = 0; k < static_cast<int>(unskipped.size()); k++) {
+    NetData& net = nets_[unskipped[k]];
+    buildGuideTiles(net);
+    buildAccess(net);
   }
   phases.guide_tiles_and_stubs = lap();
   if (params_.offtrack_access) {
