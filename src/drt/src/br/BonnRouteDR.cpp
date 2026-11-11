@@ -1000,6 +1000,12 @@ void BonnRouteDR::ownShapes(
       add(s, br::ShapeType::kReservation);
     }
   }
+  // Incremental mode: kept input routing is a component of the net.
+  if (net.input_present) {
+    for (const RShape& s : net.input_shapes) {
+      add(s, routedType(s.role));
+    }
+  }
 }
 
 void BonnRouteDR::buildNets()

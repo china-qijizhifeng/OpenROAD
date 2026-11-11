@@ -127,8 +127,7 @@ uint64_t BonnRouteDR::termsFingerprint(const frNet* net)
   for (const frBTerm* bt : net->getBTerms()) {
     h += mix(reinterpret_cast<uintptr_t>(bt) ^ 0x5bd1e995ULL);
   }
-  return mix(h ^ (net->getInstTerms().size() << 20)
-             ^ net->getBTerms().size());
+  return mix(h ^ (net->getInstTerms().size() << 20) ^ net->getBTerms().size());
 }
 
 void BonnRouteDR::routingShapes(const frNet* net,
@@ -136,27 +135,26 @@ void BonnRouteDR::routingShapes(const frNet* net,
 {
   shapes.clear();
   const int num_fr = static_cast<int>(z_of_fr_.size());
-  auto wire_role = [&](const frLayerNum layer,
-                       const odb::Rect& r,
-                       const bool horizontal) {
-    const int z = layer >= 0 && layer < num_fr ? z_of_fr_[layer] : -1;
-    if (z < 0) {
-      return br::ShapeRole::kFixed;
-    }
-    return horizontal == layers_[z].horizontal
-               ? br::ShapeRole::kPreferredWire
-               : br::ShapeRole::kNonPreferredWire;
-  };
+  auto wire_role
+      = [&](const frLayerNum layer, const odb::Rect& r, const bool horizontal) {
+          const int z = layer >= 0 && layer < num_fr ? z_of_fr_[layer] : -1;
+          if (z < 0) {
+            return br::ShapeRole::kFixed;
+          }
+          return horizontal == layers_[z].horizontal
+                     ? br::ShapeRole::kPreferredWire
+                     : br::ShapeRole::kNonPreferredWire;
+        };
   for (const auto& shape : net->getShapes()) {
     const odb::Rect r = shape->getBBox();
     bool horizontal = r.dx() >= r.dy();
     if (shape->typeId() == frcPathSeg) {
-      const auto [b, e] = static_cast<const frPathSeg*>(shape.get())->getPoints();
+      const auto [b, e]
+          = static_cast<const frPathSeg*>(shape.get())->getPoints();
       if (b != e) {
         horizontal = b.y() == e.y();
       } else {
-        const int z = shape->getLayerNum() >= 0
-                              && shape->getLayerNum() < num_fr
+        const int z = shape->getLayerNum() >= 0 && shape->getLayerNum() < num_fr
                           ? z_of_fr_[shape->getLayerNum()]
                           : -1;
         horizontal = z >= 0 ? layers_[z].horizontal : horizontal;
@@ -168,14 +166,12 @@ void BonnRouteDR::routingShapes(const frNet* net,
   }
   for (const auto& via : net->getVias()) {
     const frViaDef* def = via->getViaDef();
-    shapes.push_back({def->getLayer1Num(),
-                      via->getLayer1BBox(),
-                      br::ShapeRole::kViaPad});
+    shapes.push_back(
+        {def->getLayer1Num(), via->getLayer1BBox(), br::ShapeRole::kViaPad});
     shapes.push_back(
         {def->getCutLayerNum(), via->getCutBBox(), br::ShapeRole::kCut});
-    shapes.push_back({def->getLayer2Num(),
-                      via->getLayer2BBox(),
-                      br::ShapeRole::kViaPad});
+    shapes.push_back(
+        {def->getLayer2Num(), via->getLayer2BBox(), br::ShapeRole::kViaPad});
   }
   for (const auto& patch : net->getPatchWires()) {
     const odb::Rect r = patch->getBBox();
@@ -341,7 +337,8 @@ void BonnRouteDR::syncInstances(SyncStats& stats)
       recordInstanceState(inst, record);
       const size_t before = record.shapes.size();
       readInstanceShapes(inst, record);
-      stats.shapes_inserted += static_cast<int64_t>(record.shapes.size() - before);
+      stats.shapes_inserted
+          += static_cast<int64_t>(record.shapes.size() - before);
       record.seen = true;
       stats.instances_changed++;
       stats.inst_regions.push_back(inst->getBBox());
@@ -424,7 +421,8 @@ void BonnRouteDR::syncNets(SyncStats& stats)
       setInputShapes(data, false, &pending);
     }
     for (const RShape& s : data.shapes) {
-      changeShape(s, routedShapeType(s.role), data.id, false, nullptr, &pending);
+      changeShape(
+          s, routedShapeType(s.role), data.id, false, nullptr, &pending);
       stats.shapes_removed++;
     }
     fast_builder_.flush(pending);
@@ -534,7 +532,8 @@ void BonnRouteDR::keepRoutingSpace()
       // Routed but dropped when written (contact guard): not in the design.
       br::FastGridBuilder::PendingRemovals pending;
       for (const RShape& s : data.shapes) {
-        changeShape(s, routedShapeType(s.role), data.id, false, nullptr, &pending);
+        changeShape(
+            s, routedShapeType(s.role), data.id, false, nullptr, &pending);
       }
       fast_builder_.flush(pending);
     }
@@ -610,7 +609,8 @@ bool BonnRouteDR::prepareNet(NetData& net,
         term = std::move(f->second);
         term.reservation_active = false;
         term.chosen = -1;
-        if (term.primary >= 0 && term.primary < static_cast<int>(term.options.size())) {
+        if (term.primary >= 0
+            && term.primary < static_cast<int>(term.options.size())) {
           accessShapes(term.options[term.primary], term.reservation);
           setReservation(term, net.id, true);
         }
@@ -642,7 +642,8 @@ bool BonnRouteDR::prepareNet(NetData& net,
           index.push_back(static_cast<int>(o));
         }
       }
-      const std::vector<int> choice = choosePrimaries({&legal}, {net.id}, stats);
+      const std::vector<int> choice
+          = choosePrimaries({&legal}, {net.id}, stats);
       keepStubs(term, catalogue);
       if (!choice.empty() && choice[0] >= 0) {
         term.primary = index[choice[0]];
@@ -658,13 +659,336 @@ bool BonnRouteDR::prepareNet(NetData& net,
   return !net.skip;
 }
 
+void BonnRouteDR::classifyInput(const NetData& net,
+                                InputClassification& out) const
+{
+  out = InputClassification{};
+  const frNet* fr = net.net;
+  // Pieces and their shapes (as routingShapes builds them).
+  std::vector<RShape> shapes;
+  for (const auto& shape : fr->getShapes()) {
+    InputPiece piece;
+    piece.obj = shape.get();
+    piece.kind = 0;
+    out.pieces.push_back(std::move(piece));
+  }
+  for (const auto& via : fr->getVias()) {
+    InputPiece piece;
+    piece.obj = via.get();
+    piece.kind = 1;
+    out.pieces.push_back(std::move(piece));
+  }
+  for (const auto& patch : fr->getPatchWires()) {
+    InputPiece piece;
+    piece.obj = patch.get();
+    piece.kind = 2;
+    out.pieces.push_back(std::move(piece));
+  }
+  routingShapes(fr, shapes);
+  {
+    // routingShapes lists wires, then three shapes per via, then patches.
+    size_t k = 0;
+    for (InputPiece& piece : out.pieces) {
+      const size_t n = piece.kind == 1 ? 3 : 1;
+      piece.shapes.assign(shapes.begin() + k, shapes.begin() + k + n);
+      k += n;
+    }
+  }
+  const int num_pieces = static_cast<int>(out.pieces.size());
+  // Pins in the order of net.terms (instance terms, then top-level terms).
+  std::vector<std::vector<frRect>> pins;
+  for (const frInstTerm* it : fr->getInstTerms()) {
+    pins.emplace_back();
+    it->getShapes(pins.back());
+  }
+  for (const frBTerm* bt : fr->getBTerms()) {
+    pins.emplace_back();
+    bt->getShapes(pins.back());
+  }
+  const int num_pins = static_cast<int>(pins.size());
+  br::PieceGraph g;
+  g.num_nodes = num_pieces + num_pins;
+  g.is_pin.assign(g.num_nodes, 0);
+  g.legal.assign(g.num_nodes, 1);
+  g.is_short.assign(g.num_nodes, 0);
+  for (int t = 0; t < num_pins; t++) {
+    g.is_pin[num_pieces + t] = 1;
+  }
+  const int num_fr = static_cast<int>(z_of_fr_.size());
+  for (int v = 0; v < num_pieces; v++) {
+    const InputPiece& piece = out.pieces[v];
+    for (const RShape& s : piece.shapes) {
+      if (shapeConflicts(s, net.id)) {
+        g.legal[v] = 0;
+        out.any_illegal = true;
+        break;
+      }
+    }
+    if (piece.kind != 1) {
+      const RShape& s = piece.shapes.front();
+      const frLayer* layer = design_->getTech()->getLayer(s.layer);
+      const int z = s.layer >= 0 && s.layer < num_fr ? z_of_fr_[s.layer] : -1;
+      const int64_t pitch
+          = z >= 0 ? layers_[z].pitch : static_cast<int64_t>(layer->getPitch());
+      const int64_t length = std::max(s.rect.dx(), s.rect.dy());
+      g.is_short[v] = length < params_.reserve_short_pitches * pitch;
+    }
+  }
+  // Touching metal on a layer joins two nodes (sweep over x per layer).
+  struct Item
+  {
+    odb::Rect rect;
+    int node;
+  };
+  std::unordered_map<frLayerNum, std::vector<Item>> by_layer;
+  for (int v = 0; v < num_pieces; v++) {
+    for (const RShape& s : out.pieces[v].shapes) {
+      by_layer[s.layer].push_back({s.rect, v});
+    }
+  }
+  for (int t = 0; t < num_pins; t++) {
+    for (const frRect& r : pins[t]) {
+      by_layer[r.getLayerNum()].push_back({r.getBBox(), num_pieces + t});
+    }
+  }
+  for (auto& [layer, items] : by_layer) {
+    std::ranges::sort(items, [](const Item& a, const Item& b) {
+      return a.rect.xMin() < b.rect.xMin();
+    });
+    for (size_t a = 0; a < items.size(); a++) {
+      for (size_t b = a + 1;
+           b < items.size() && items[b].rect.xMin() <= items[a].rect.xMax();
+           b++) {
+        if (items[a].node != items[b].node
+            && items[a].rect.intersects(items[b].rect)) {
+          g.edges.emplace_back(items[a].node, items[b].node);
+        }
+      }
+    }
+  }
+  out.kept = br::keptPieces(g);
+  out.reserved = br::reservedPieces(g, out.kept);
+  const std::vector<int> label = br::keptComponents(g, out.kept);
+  out.piece_label.assign(label.begin(), label.begin() + num_pieces);
+  out.term_label.assign(label.begin() + num_pieces, label.end());
+  out.complete
+      = num_pins > 0 && std::ranges::all_of(out.term_label, [&](const int l) {
+          return l == out.term_label.front();
+        });
+}
+
+void BonnRouteDR::applyClassification(NetData& net,
+                                      const InputClassification& c,
+                                      ClassifyStats& stats)
+{
+  stats.nets++;
+  // The net's input shapes are in the routing space; dropped and reserved
+  // pieces leave it, reserved ones come back as reservations.
+  br::FastGridBuilder::PendingRemovals pending;
+  setInputShapes(net, false, &pending);
+  fast_builder_.flush(pending);
+  net.input_shapes.clear();
+  net.input_reservation.clear();
+  net.discount_runs.clear();
+  const int num_fr = static_cast<int>(z_of_fr_.size());
+  for (size_t v = 0; v < c.pieces.size(); v++) {
+    const InputPiece& piece = c.pieces[v];
+    stats.pieces++;
+    if (c.kept[v]) {
+      net.input_shapes.insert(
+          net.input_shapes.end(), piece.shapes.begin(), piece.shapes.end());
+      stats.kept++;
+      continue;
+    }
+    if (!c.reserved[v]) {
+      stats.dropped++;
+      continue;
+    }
+    stats.reserved++;
+    net.input_reservation.insert(
+        net.input_reservation.end(), piece.shapes.begin(), piece.shapes.end());
+    if (piece.kind != 0) {
+      continue;
+    }
+    // Discount runs on the track the wire lies on (as reserveInputWires).
+    const auto* seg = static_cast<const frPathSeg*>(piece.obj);
+    if (seg->typeId() != frcPathSeg) {
+      continue;
+    }
+    const frLayerNum fr = seg->getLayerNum();
+    const int z = fr >= 0 && fr < num_fr ? z_of_fr_[fr] : -1;
+    if (z < params_.reserve_min_layer || z < 0) {
+      continue;
+    }
+    const auto [begin, end] = seg->getPoints();
+    const br::TrackLayer& l = graph_.layers[z];
+    const bool horizontal = begin.y() == end.y();
+    if (horizontal != l.horizontal || begin == end) {
+      continue;
+    }
+    const frCoord cross = horizontal ? begin.y() : begin.x();
+    auto track = std::ranges::lower_bound(l.tracks, cross);
+    if (track == l.tracks.end() || *track != cross) {
+      continue;
+    }
+    const frCoord lo = horizontal ? std::min(begin.x(), end.x())
+                                  : std::min(begin.y(), end.y());
+    const frCoord hi = horizontal ? std::max(begin.x(), end.x())
+                                  : std::max(begin.y(), end.y());
+    const int jlo = static_cast<int>(std::ranges::lower_bound(l.positions, lo)
+                                     - l.positions.begin());
+    const int jhi = static_cast<int>(std::ranges::upper_bound(l.positions, hi)
+                                     - l.positions.begin())
+                    - 1;
+    if (jhi > jlo) {
+      net.discount_runs.push_back(
+          {z, static_cast<int>(track - l.tracks.begin()), jlo, jhi});
+      stats.discount_runs++;
+    }
+  }
+  if (!net.input_shapes.empty()) {
+    setInputShapes(net, true);
+  }
+  net.input_reserved = false;
+  setInputReservation(net, true);
+  net.keeps_input = true;
+}
+
+void BonnRouteDR::mergeKeptComponents(NetData& net,
+                                      const InputClassification& c)
+{
+  // Kept pieces per component label.
+  std::unordered_map<int, std::vector<size_t>> pieces_of;
+  for (size_t v = 0; v < c.pieces.size(); v++) {
+    if (c.kept[v]) {
+      pieces_of[c.piece_label[v]].push_back(v);
+    }
+  }
+  const int num_terms = static_cast<int>(net.terms.size());
+  if (static_cast<int>(c.term_label.size()) != num_terms) {
+    return;
+  }
+  std::unordered_map<int, int> merged_of;  // label -> index in out
+  std::vector<Term> out;
+  std::vector<Term> lone;
+  for (int t = 0; t < num_terms; t++) {
+    Term& term = net.terms[t];
+    const int l = c.term_label[t];
+    if (!pieces_of.contains(l)) {
+      lone.push_back(std::move(term));
+      continue;
+    }
+    // Reservations are re-made for the merged terminal.
+    setReservation(term, net.id, false);
+    auto it = merged_of.find(l);
+    if (it == merged_of.end()) {
+      merged_of.emplace(l, static_cast<int>(out.size()));
+      out.push_back(std::move(term));
+      continue;
+    }
+    Term& m = out[it->second];
+    for (AccessOption& o : term.options) {
+      m.options.push_back(std::move(o));
+    }
+    m.reservation.insert(
+        m.reservation.end(), term.reservation.begin(), term.reservation.end());
+  }
+  // Track vertices on the kept pieces (cost 0): the kept routing is part of
+  // the terminal (Fig. 9: new wires attach to the kept wires).
+  const int num_fr = static_cast<int>(z_of_fr_.size());
+  for (auto& [l, idx] : merged_of) {
+    Term& m = out[idx];
+    std::unordered_set<size_t> have;
+    for (const AccessOption& o : m.options) {
+      have.insert(o.vertex);
+    }
+    auto add_vertex = [&](const int z, const int i, const int j) {
+      const size_t v = graph_.vertex(z, i, j);
+      if (!have.insert(v).second) {
+        return;
+      }
+      AccessOption opt;
+      opt.vertex = v;
+      opt.z = z;
+      opt.cost = 0;
+      m.options.push_back(std::move(opt));
+    };
+    for (const size_t p : pieces_of[l]) {
+      const InputPiece& piece = c.pieces[p];
+      if (piece.kind == 0 && piece.obj->typeId() == frcPathSeg) {
+        const auto* seg = static_cast<const frPathSeg*>(piece.obj);
+        const frLayerNum fr = seg->getLayerNum();
+        const int z = fr >= 0 && fr < num_fr ? z_of_fr_[fr] : -1;
+        if (z < 0) {
+          continue;
+        }
+        const auto [b, e] = seg->getPoints();
+        const br::TrackLayer& tl = graph_.layers[z];
+        const bool horizontal = b == e ? tl.horizontal : b.y() == e.y();
+        if (horizontal != tl.horizontal) {
+          continue;
+        }
+        const frCoord cross = horizontal ? b.y() : b.x();
+        auto track = std::ranges::lower_bound(tl.tracks, cross);
+        if (track == tl.tracks.end() || *track != cross) {
+          continue;
+        }
+        const int i = static_cast<int>(track - tl.tracks.begin());
+        const frCoord lo
+            = horizontal ? std::min(b.x(), e.x()) : std::min(b.y(), e.y());
+        const frCoord hi
+            = horizontal ? std::max(b.x(), e.x()) : std::max(b.y(), e.y());
+        for (auto j = std::ranges::lower_bound(tl.positions, lo);
+             j != tl.positions.end() && *j <= hi;
+             ++j) {
+          add_vertex(z, i, static_cast<int>(j - tl.positions.begin()));
+        }
+      } else if (piece.kind == 1) {
+        const auto* via = static_cast<const frVia*>(piece.obj);
+        const odb::Point o = via->getOrigin();
+        for (const frLayerNum fr : {via->getViaDef()->getLayer1Num(),
+                                    via->getViaDef()->getLayer2Num()}) {
+          const int z = fr >= 0 && fr < num_fr ? z_of_fr_[fr] : -1;
+          if (z < 0) {
+            continue;
+          }
+          const br::TrackLayer& tl = graph_.layers[z];
+          const frCoord cross = tl.horizontal ? o.y() : o.x();
+          const frCoord along = tl.horizontal ? o.x() : o.y();
+          auto track = std::ranges::lower_bound(tl.tracks, cross);
+          auto pos = std::ranges::lower_bound(tl.positions, along);
+          if (track != tl.tracks.end() && *track == cross
+              && pos != tl.positions.end() && *pos == along) {
+            add_vertex(z,
+                       static_cast<int>(track - tl.tracks.begin()),
+                       static_cast<int>(pos - tl.positions.begin()));
+          }
+        }
+      }
+    }
+    m.chosen = -1;
+    m.primary = -1;
+    setReservation(m, net.id, true);
+  }
+  // The largest kept component is the source (term 0).
+  std::ranges::stable_sort(out, [](const Term& a, const Term& b) {
+    return a.options.size() > b.options.size();
+  });
+  for (Term& t : lone) {
+    out.push_back(std::move(t));
+  }
+  net.terms = std::move(out);
+  net.skip = std::ranges::any_of(
+      net.terms, [](const Term& term) { return term.options.empty(); });
+}
+
 bool BonnRouteDR::prepareVictim(const int id)
 {
   if (!incremental_active_) {
     return true;
   }
   NetData& net = nets_[id];
-  if (net.dead || victim_changed_insts_ == nullptr) {
+  if (net.dead || net.keeps_input || victim_changed_insts_ == nullptr) {
     return false;
   }
   return prepareNet(net, *victim_changed_insts_);
@@ -681,9 +1005,13 @@ void BonnRouteDR::routeIncremental(std::vector<odb::Rect>& regions)
   const double sync_s = timer.elapsed();
   victim_changed_insts_ = &stats.changed_insts;
 
-  // Nets to route: without routing, or with routing whose pins changed (the
-  // input routing is ripped up and the net routed again).
+  // Nets to route (Sec. 5.2): nets without routing (repair_antennas
+  // destroyed it) are routed from their guides; nets with routing whose
+  // pins changed, or with illegal pieces near changed instances, keep their
+  // legal pin-to-pin paths and reserve their other legal pieces (Fig. 9).
   std::vector<int> work;
+  std::vector<int> candidates;
+  std::vector<char> terms_changed(nets_.size(), 0);
   int64_t unrouted = 0;
   int64_t pins_changed = 0;
   for (NetData& data : nets_) {
@@ -691,17 +1019,51 @@ void BonnRouteDR::routeIncremental(std::vector<odb::Rect>& regions)
       continue;
     }
     const uint64_t tfp = termsFingerprint(data.net);
-    const bool terms_changed = tfp != data.terms_fp;
+    terms_changed[data.id] = tfp != data.terms_fp;
     data.terms_fp = tfp;
     if (!data.input_present) {
       work.push_back(data.id);
       unrouted++;
-    } else if (terms_changed) {
-      setInputShapes(data, false);
-      data.input_removed = true;
-      work.push_back(data.id);
+    } else if (terms_changed[data.id]) {
+      candidates.push_back(data.id);
       pins_changed++;
     }
+  }
+  if (!stats.inst_regions.empty()) {
+    // Routed nets whose shapes meet a changed instance: checked for pieces
+    // that became illegal.
+    for (NetData& data : nets_) {
+      if (!data.input_present || terms_changed[data.id]
+          || !routableType(data)) {
+        continue;
+      }
+      const bool near
+          = std::ranges::any_of(data.input_shapes, [&](const RShape& sh) {
+              return std::ranges::any_of(
+                  stats.inst_regions,
+                  [&](const odb::Rect& r) { return r.intersects(sh.rect); });
+            });
+      if (near) {
+        candidates.push_back(data.id);
+      }
+    }
+  }
+  ClassifyStats cstats;
+  int64_t complete = 0;
+  std::vector<int> keep_work;
+  for (const int id : candidates) {
+    InputClassification c;
+    classifyInput(nets_[id], c);
+    if (c.complete && !(terms_changed[id] && c.any_illegal)) {
+      // All pins joined by legal paths; illegal leftovers go to FlexDR.
+      complete++;
+      continue;
+    }
+    if (!c.complete && !terms_changed[id] && !c.any_illegal) {
+      continue;
+    }
+    classified_.emplace(id, std::move(c));
+    keep_work.push_back(id);
   }
   std::vector<int> order;
   std::vector<int> not_prepared;
@@ -711,6 +1073,22 @@ void BonnRouteDR::routeIncremental(std::vector<odb::Rect>& regions)
     } else {
       not_prepared.push_back(id);
     }
+  }
+  for (const int id : keep_work) {
+    NetData& data = nets_[id];
+    if (!prepareNet(data, stats.changed_insts)) {
+      // BonnRoute cannot route it: the input routing goes and FlexDR routes
+      // the net from its guides.
+      classified_.erase(id);
+      setInputShapes(data, false);
+      data.input_removed = true;
+      not_prepared.push_back(id);
+      continue;
+    }
+    const InputClassification& c = classified_.at(id);
+    applyClassification(data, c, cstats);
+    mergeKeptComponents(data, c);
+    order.push_back(id);
   }
   const double access_s = timer.elapsed() - sync_s;
   std::ranges::stable_sort(
@@ -741,6 +1119,36 @@ void BonnRouteDR::routeIncremental(std::vector<odb::Rect>& regions)
     }
     write_mask_[id] = data.routed;
   }
+  // Fig. 9 nets: the pieces that were not kept leave the frNet; a net that
+  // could not be connected loses its input routing and goes to FlexDR.
+  for (auto& [id, c] : classified_) {
+    NetData& data = nets_[id];
+    frNet* fr = data.net;
+    if (data.routed) {
+      for (size_t v = 0; v < c.pieces.size(); v++) {
+        if (c.kept[v]) {
+          continue;
+        }
+        auto* obj = const_cast<frBlockObject*>(c.pieces[v].obj);
+        if (c.pieces[v].kind == 0) {
+          fr->removeShape(static_cast<frShape*>(obj));
+        } else if (c.pieces[v].kind == 1) {
+          fr->removeVia(static_cast<frVia*>(obj));
+        } else {
+          fr->removePatchWire(static_cast<frShape*>(obj));
+        }
+      }
+      fr->setModified(true);
+    } else {
+      setInputShapes(data, false);
+      fr->clearRoutes();
+      fr->setHasInitialRouting(false);
+      fr->setModified(true);
+      if (std::ranges::find(touched, id) == touched.end()) {
+        touched.push_back(id);
+      }
+    }
+  }
   writeNets();
   write_mask_.clear();
   frBlock* block = design_->getTopBlock();
@@ -760,7 +1168,13 @@ void BonnRouteDR::routeIncremental(std::vector<odb::Rect>& regions)
       for (const RShape& s : data.shapes) {
         regions.push_back(s.rect);
       }
-      data.input_shapes = std::move(data.shapes);
+      if (data.keeps_input && data.input_present) {
+        // Kept pieces stay; the new connections join them.
+        data.input_shapes.insert(
+            data.input_shapes.end(), data.shapes.begin(), data.shapes.end());
+      } else {
+        data.input_shapes = std::move(data.shapes);
+      }
       data.input_present = true;
       written++;
     } else {
@@ -768,7 +1182,8 @@ void BonnRouteDR::routeIncremental(std::vector<odb::Rect>& regions)
       // FlexDR routes it from its guides.
       br::FastGridBuilder::PendingRemovals pending;
       for (const RShape& s : data.shapes) {
-        changeShape(s, routedShapeType(s.role), data.id, false, nullptr, &pending);
+        changeShape(
+            s, routedShapeType(s.role), data.id, false, nullptr, &pending);
       }
       fast_builder_.flush(pending);
       add_guides(data);
@@ -803,10 +1218,14 @@ void BonnRouteDR::routeIncremental(std::vector<odb::Rect>& regions)
       setReservations(data, false);
       data.prepared = false;
       data.failed = false;
+      data.keeps_input = false;
+      data.discount_runs.clear();
+      data.input_reservation.clear();
     }
   }
   victim_changed_insts_ = nullptr;
   incremental_active_ = false;
+  classified_.clear();
   const double write_s = timer.elapsed() - sync_s - access_s - route_s;
   if (params_.verbose) {
     logger_->report(
@@ -815,7 +1234,8 @@ void BonnRouteDR::routeIncremental(std::vector<odb::Rect>& regions)
         "nets_added={} nets_removed={} shapes_removed={} shapes_inserted={} "
         "nets_to_route={} unrouted={} pins_changed={} not_prepared={} "
         "first_pass_failed={} ripups={} written={} left_to_flexdr={} "
-        "regions={}",
+        "regions={} classified_nets={} complete_nets={} pieces={} kept={} "
+        "reserved={} dropped={} discount_runs={}",
         sync_s,
         access_s,
         route_s,
@@ -827,7 +1247,7 @@ void BonnRouteDR::routeIncremental(std::vector<odb::Rect>& regions)
         stats.nets_removed,
         stats.shapes_removed,
         stats.shapes_inserted,
-        work.size(),
+        work.size() + keep_work.size(),
         unrouted,
         pins_changed,
         not_prepared.size(),
@@ -835,7 +1255,14 @@ void BonnRouteDR::routeIncremental(std::vector<odb::Rect>& regions)
         ripup_events_ - ripups_before,
         written,
         left,
-        regions.size());
+        regions.size(),
+        cstats.nets,
+        complete,
+        cstats.pieces,
+        cstats.kept,
+        cstats.reserved,
+        cstats.dropped,
+        cstats.discount_runs);
   }
 }
 

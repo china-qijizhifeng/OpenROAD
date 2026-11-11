@@ -1332,11 +1332,12 @@ int TritonRoute::main()
   } else {
     ta();
     if (bonnroute_ && !distributed_) {
-      auto bonnroute = std::make_unique<BonnRouteDR>(getDesign(),
-                                                     logger_,
-                                                     router_cfg_.get(),
-                                                     *bonnroute_params_,
-                                                     db_->getChip()->getBlock());
+      auto bonnroute
+          = std::make_unique<BonnRouteDR>(getDesign(),
+                                          logger_,
+                                          router_cfg_.get(),
+                                          *bonnroute_params_,
+                                          db_->getChip()->getBlock());
       bonnroute->main();
       if (bonnroute_params_->incremental
           && bonnroute_params_->incremental_resident) {

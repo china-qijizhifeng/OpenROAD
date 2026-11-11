@@ -336,6 +336,7 @@ repair_antennas
     [-ratio_margin margin]
     [-jumper_only]
     [-diode_only]
+    [-keep_detailed_wires]
 ```
 
 #### Options
@@ -347,6 +348,7 @@ repair_antennas
 | `-ratio_margin` | Add a margin to the antenna ratios. The default value is `0`, and the allowed values are integers `[0, 100]`. |
 | `-jumper_only` | Fix antenna violations using jumper insertion only, without inserting diodes. Mutually exclusive with `-diode_only`. |
 | `-diode_only` | Fix antenna violations using diode insertion only, without inserting jumpers. Mutually exclusive with `-jumper_only`. |
+| `-keep_detailed_wires` | On a detailed routing, keep the detailed wires of the nets that receive diodes; the next `detailed_route` connects the diodes. Off by default (the wires are removed and the nets routed again). Used with `detailed_route -bonnroute` incremental routing (`set_bonnroute_dr_param incremental 1`), which keeps legal pin-to-pin paths and routes the diode connections (Ahrens et al., arXiv:2111.06169, Section 5.2). |
 
 
 ### Draw Route Segments

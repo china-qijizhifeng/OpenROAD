@@ -815,6 +815,8 @@ int GlobalRouter::repairAntennas(odb::dbMTerm* diode_mterm,
     nets_to_repair.push_back(db_net);
   }
 
+  const bool keep_wires
+      = keep_detailed_wires_ && haveDetailedRoutes(nets_to_repair);
   if (haveDetailedRoutes(nets_to_repair) && iterations != 1) {
     logger_->warn(GRT,
                   121,
@@ -882,6 +884,7 @@ int GlobalRouter::repairAntennas(odb::dbMTerm* diode_mterm,
       updateDbCongestion();
     }
     if (violations && !jumper_only) {
+      keeping_detailed_wires_ = keep_wires;
       IncrementalGRoute incr_groute(this, block_);
       repair_antennas_->repairAntennas(diode_mterm);
       total_diodes_count_ += repair_antennas_->getDiodesCount();
@@ -902,6 +905,7 @@ int GlobalRouter::repairAntennas(odb::dbMTerm* diode_mterm,
         add_moved_nets(rerouted);
       }
     }
+    keeping_detailed_wires_ = false;
     repair_antennas_->clearViolations();
     itr++;
   }
@@ -1233,7 +1237,9 @@ void GlobalRouter::updateDirtyNets(std::vector<Net*>& dirty_nets)
   for (odb::dbNet* db_net : dirty_nets_) {
     Net* net = db_net_map_[db_net];
     updateNetPins(net);
-    destroyNetWire(net);
+    if (!keeping_detailed_wires_) {
+      destroyNetWire(net);
+    }
     std::string pins_not_covered;
     // compare new positions with last positions & add on vector
     if (net->isResAware()
@@ -7478,8 +7484,11 @@ std::vector<Net*> GlobalRouter::updateDirtyRoutesCugr(bool save_guides)
     updateNetPins(net);
     // Stale detailed wires (post-detailed-route repair) must go: the
     // reroute and its guides supersede them, and the antenna checker
-    // must not read them. No-op for nets without wires.
-    destroyNetWire(net);
+    // must not read them. No-op for nets without wires. With
+    // -keep_detailed_wires the wires of nets that got diodes stay.
+    if (!keeping_detailed_wires_) {
+      destroyNetWire(net);
+    }
     // Journal-restored nets get their pre-change routing back from the odb
     // guides instead of a reroute; a failed restore forces the reroute.
     const bool restore_requested

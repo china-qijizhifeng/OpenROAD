@@ -1586,7 +1586,7 @@ void FlexDR::optimizationFlow(const SearchRepairArgs& args,
 }
 
 bool FlexDR::isAffectedByChanges(const FlexDRWorker& worker,
-                                  const bool markers_only) const
+                                 const bool markers_only) const
 {
   // Guides are stored between gcell centers; keep one gcell of margin on top
   // of the region the worker reads.

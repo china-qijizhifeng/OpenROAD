@@ -371,6 +371,9 @@ class BonnRouteDR
     bool input_removed = false;
     // Terms built for this incremental call (access and guide tiles).
     bool prepared = false;
+    // Kept pin-to-pin paths of the input routing are a terminal of the
+    // net in this call (Fig. 9 of arXiv:2111.06169).
+    bool keeps_input = false;
     // The frNet was deleted from the design.
     bool dead = false;
     // Fingerprints of the frNet's routing and pins at the last update.
@@ -840,6 +843,47 @@ class BonnRouteDR
   // Rip-up hook: a victim of an incremental call is prepared before it is
   // removed; false keeps it in place.
   bool prepareVictim(int net);
+  // Sec. 5.2 / Fig. 9: pieces of a net's input routing (wires, vias,
+  // patches) classified into kept pin-to-pin paths, reservations and
+  // dropped pieces.
+  struct InputPiece
+  {
+    std::vector<RShape> shapes;
+    const frBlockObject* obj = nullptr;
+    int kind = 0;  // 0 wire, 1 via, 2 patch
+  };
+  struct InputClassification
+  {
+    std::vector<InputPiece> pieces;
+    std::vector<char> kept;
+    std::vector<char> reserved;
+    // Component label per term (net.terms order) and per piece.
+    std::vector<int> term_label;
+    std::vector<int> piece_label;
+    bool complete = false;
+    bool any_illegal = false;
+  };
+  struct ClassifyStats
+  {
+    int64_t nets = 0;
+    int64_t pieces = 0;
+    int64_t illegal = 0;
+    int64_t kept = 0;
+    int64_t reserved = 0;
+    int64_t dropped = 0;
+    int64_t discount_runs = 0;
+  };
+  void classifyInput(const NetData& net, InputClassification& out) const;
+  // Applies a classification: dropped pieces leave the routing space,
+  // reserved ones become reservations of the net (with discount runs on
+  // their tracks), kept ones stay.
+  void applyClassification(NetData& net,
+                           const InputClassification& c,
+                           ClassifyStats& stats);
+  // Terms of a component joined by kept pieces become one terminal whose
+  // options include the track vertices on the kept pieces.
+  void mergeKeptComponents(NetData& net, const InputClassification& c);
+  std::unordered_map<int, InputClassification> classified_;
   std::unordered_map<const frInst*, InstRecord> inst_records_;
   bool record_fixed_ = false;
   bool incremental_active_ = false;
