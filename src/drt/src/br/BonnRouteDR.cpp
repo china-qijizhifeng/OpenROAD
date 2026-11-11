@@ -55,10 +55,53 @@ namespace drt {
 using br::Cost;
 using br::Kind;
 
+void BonnRouteDRParams::applyProfile(const int which)
+{
+  profile = which == 1 ? 1 : 0;
+  if (profile == 1) {
+    // 2013-reimpl: Gester et al. 2013 as written. Interval search with
+    // property (ii) for vias and the Algorithm 4 tie order (Sec. 4.1),
+    // rip-up sequences (Sec. 4.4), the partition sequence to its end
+    // (Sec. 5.1), pi_H with the exact via bound (Sec. 4.1).
+    use_intervals = true;
+    interval_via_property = true;
+    interval_nearest_first = false;
+    ripup = true;
+    tail_batch = 0;
+    potential = 0;
+    spreading = false;
+  } else {
+    // 2013-improved: measured optimizations (vertex search, speculative
+    // tail batches, unresolved nets to FlexDR).
+    use_intervals = false;
+    interval_via_property = true;
+    interval_nearest_first = false;
+    ripup = false;
+    tail_batch = 32;
+    potential = 0;
+    spreading = false;
+  }
+  partitions = true;
+  critical_nets = true;
+  component_regions = true;
+  exact_future_cost = true;
+  offtrack_access = true;
+  postprocess = true;
+  access_classes = true;
+  reservations = false;
+}
+
+const char* BonnRouteDRParams::profileName() const
+{
+  return profile == 1 ? "2013-reimpl" : "2013-improved";
+}
+
 bool BonnRouteDRParams::set(const std::string& name, const double value)
 {
   const int v = static_cast<int>(value);
-  if (name == "via_cost") {
+  if (name == "profile") {
+    applyProfile(v);
+  } else if (name == "via_cost") {
     via_cost = v;
   } else if (name == "jog_factor") {
     jog_factor = std::max(1, v);
@@ -4119,7 +4162,7 @@ void BonnRouteDR::routePartitions(const std::vector<int>& order,
         routed += m.size();
       }
       logger_->info(utl::DRT,
-                    9103,
+                    9107,
                     "BonnRoute {} {}: {} regions, {} nets inside, {} "
                     "deferred; {:.2f}s, longest region {:.2f}s, thread "
                     "utilization {:.0f}%.",
@@ -4332,10 +4375,13 @@ void BonnRouteDR::writeNets()
 void BonnRouteDR::main()
 {
   utl::Timer timer;
+  if (params_.verbose) {
+    logger_->report("BonnRoute DR profile {}.", params_.profileName());
+  }
   if (modernSearch() && params_.use_intervals) {
     // The interval search assumes unit wire costs and the l1 future cost.
     logger_->warn(utl::DRT,
-                  9102,
+                  9106,
                   "BonnRoute: reservations and potentials use the vertex "
                   "search; use_intervals is ignored.");
     params_.use_intervals = false;

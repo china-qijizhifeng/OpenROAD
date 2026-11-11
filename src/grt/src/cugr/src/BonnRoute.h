@@ -93,7 +93,7 @@ struct BonnRouteParams
   // costs, and ALT bounds from `landmarks` landmarks [Goldberg and
   // Harrelson 2005] recomputed every `landmark_refresh` phases.
   int goal_orientation = 1;
-  int landmarks = 8;
+  int landmarks = 0;
   int landmark_refresh = 25;
   // Debug: rerun every oracle without goal orientation and compare the
   // connection costs (reported as "goal check").
@@ -111,9 +111,13 @@ struct BonnRouteParams
   // guides cover the coarse cells.
   int gcell_scale = 1;
   bool verbose = true;
+  // Algorithm profile: 0 = 2013-improved (default), 1 = 2013-reimpl.
+  int profile = 0;
 
   // Returns false if the name is unknown.
   bool set(const std::string& name, double value);
+  void applyProfile(int which);
+  const char* profileName() const;
 };
 
 class BonnRouteGlobal

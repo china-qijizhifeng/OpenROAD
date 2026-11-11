@@ -767,7 +767,9 @@ bool CUGR::setBonnRouteParam(const std::string& name, const double value)
 void CUGR::bonnRoute(std::vector<int>& net_indices)
 {
   if (verbose_) {
-    logger_->report("Stage 1: BonnRoute resource sharing.");
+    logger_->report(
+        "Stage 1: BonnRoute resource sharing (profile {}).",
+        bonnroute_params_ ? bonnroute_params_->profileName() : "2013-improved");
   }
   if (critical_nets_percentage_ != 0) {
     setInitialNetSlacks(net_indices);

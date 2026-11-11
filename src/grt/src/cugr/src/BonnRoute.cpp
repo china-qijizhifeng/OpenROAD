@@ -40,9 +40,41 @@ constexpr double kRenormalizeTo = 300.0;
 constexpr std::size_t kCacheLine = 64;
 }  // namespace
 
+void BonnRouteParams::applyProfile(const int which)
+{
+  profile = which == 1 ? 1 : 0;
+  // Both: Algorithm 2 with t = 125, epsilon = 1 (Sec. 2.3), pin vertex
+  // sets (Sec. 2.1) and the Sec. 2.5 capacity estimate, goal-oriented
+  // Dijkstra in the oracle (Sec. 2.2).
+  phases = 125;
+  epsilon = 1.0;
+  pin_sets = true;
+  capacity_model = 1;
+  goal_orientation = 1;
+  gcell_scale = 1;
+  if (profile == 1) {
+    // 2013-reimpl: goal orientation with landmarks (Sec. 2.2) and
+    // volatility-tolerant concurrent price updates (Sec. 2.3).
+    landmarks = 8;
+    concurrent_prices = true;
+  } else {
+    // 2013-improved: the l1 bound (faster than landmarks here) and
+    // deterministic frozen-price batches.
+    landmarks = 0;
+    concurrent_prices = false;
+  }
+}
+
+const char* BonnRouteParams::profileName() const
+{
+  return profile == 1 ? "2013-reimpl" : "2013-improved";
+}
+
 bool BonnRouteParams::set(const std::string& name, const double value)
 {
-  if (name == "phases") {
+  if (name == "profile") {
+    applyProfile(static_cast<int>(value));
+  } else if (name == "phases") {
     phases = std::max(1, static_cast<int>(value));
   } else if (name == "epsilon") {
     epsilon = value;

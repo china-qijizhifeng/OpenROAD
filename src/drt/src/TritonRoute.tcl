@@ -531,6 +531,24 @@ proc fix_max_spacing { args } {
 
 sta::define_cmd_args "set_bonnroute_dr_param" { name value }
 
+sta::define_cmd_args "set_bonnroute_profile" { name }
+
+proc set_bonnroute_profile { args } {
+  if { [llength $args] != 1 } {
+    utl::error DRT 9108 "set_bonnroute_profile requires a profile name."
+  }
+  set name [lindex $args 0]
+  if { $name == "2013-improved" } {
+    set value 0
+  } elseif { $name == "2013-reimpl" } {
+    set value 1
+  } else {
+    utl::error DRT 9109 "Unknown BonnRoute profile $name."
+  }
+  grt::set_bonnroute_param profile $value
+  drt::set_bonnroute_dr_param_cmd profile $value
+}
+
 proc set_bonnroute_dr_param { args } {
   if { [llength $args] != 2 } {
     utl::error DRT 9102 "set_bonnroute_dr_param requires a name and a value."

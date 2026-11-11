@@ -107,6 +107,22 @@ Some arguments that are helpful for developers are listed here.
 | `-or_seed` | Random seed for the order of nets to reroute. The default value is `-1`, and the allowed values are integers `[0, MAX_INT]`. | 
 | `-or_k` | Number of swaps is given by $k * sizeof(rerouteNets)$. The default value is `0`, and the allowed values are integers `[0, MAX_INT]`. |
 
+### BonnRoute Profile
+
+Select one of two BonnRoute algorithm profiles for global
+(`global_route -bonnroute`) and detailed (`detailed_route -bonnroute`)
+routing. Parameters set afterwards with `set_bonnroute_param` or
+`set_bonnroute_dr_param` override the profile.
+
+```tcl
+set_bonnroute_profile name
+```
+
+| Name | Meaning |
+| ----- | ----- |
+| `2013-improved` | Default. Gester et al. 2013 with measured optimizations: vertex search, speculative tail batches, unresolved nets to FlexDR; GR oracle with the l1 goal-oriented bound and deterministic frozen-price batches. |
+| `2013-reimpl` | Gester et al. 2013 as written: interval search with property (ii) for vias and the Algorithm 4 tie order, rip-up sequences, the partition sequence to its end; GR oracle with landmark goal orientation and concurrent price updates. Results vary between runs. See [the fidelity notes](BonnRouteFidelity.md) for what remains different. |
+
 ### BonnRoute Detailed Routing Parameters
 
 Set BonnRoute detailed routing parameters before `detailed_route -bonnroute`.

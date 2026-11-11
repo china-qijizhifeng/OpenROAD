@@ -87,6 +87,11 @@ VLSI Routing*, TODAES 18(2), 2013, Sections 2.1–2.5.
 | `repair_passes` | `8` | Candidate re-selection passes after rounding. |
 | `pin_sets` | `1` | Represent each pin by the cells of its access points (its shape cells if it has none), joined by zero-cost pin connections (Sections 2.1–2.2); `0` uses CUGR's pre-selected cell. |
 | `capacity_model` | `1` | Edge capacities: `1` estimates them as in Section 2.5; `0` keeps CUGR's capacity model. |
+| `profile` | `0` | Algorithm profile, also set by `set_bonnroute_profile`: `0` = `2013-improved`, `1` = `2013-reimpl` (see the drt documentation). |
+| `goal_orientation` | `1` | Goal-oriented Dijkstra in the oracle (Section 2.2); `0` plain Dijkstra. |
+| `landmarks` | `0` | Landmarks of the ALT bound combined with the l1 bound; `2013-reimpl` uses `8`, as Section 2.2 describes. |
+| `concurrent_prices` | `0` | Barrier-free concurrent price updates (Section 2.3, `2013-reimpl`); results then vary between runs. `0` uses deterministic frozen-price batches of `batch_size` nets. |
+| `gcell_scale` | `1` | Experimental: merge this many GCells per GR tile in each direction (the paper's tiles hold 50 to 100 wires). |
 | `capacity_single_tile` | `1` | Route nets whose pins share one gcell inside that gcell first and remove the track-graph vertices they use. |
 | `capacity_intra_tile` | `1` | Reduce capacities by the in-gcell Steiner length of the other nets. |
 | `capacity_stacked_vias` | `1` | Reduce intermediate-layer capacities by the statistical loss from stacked vias. |

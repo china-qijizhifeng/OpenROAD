@@ -174,8 +174,14 @@ struct BonnRouteDRParams
   // search that would exceed it stops without a path (counted).
   int search_label_mb = 512;
   bool verbose = true;
+  // Algorithm profile: 0 = 2013-improved (default), 1 = 2013-reimpl.
+  // Setting `profile` assigns the bundle in applyProfile(); parameters set
+  // afterwards override it.
+  int profile = 0;
 
   bool set(const std::string& name, double value);
+  void applyProfile(int which);
+  const char* profileName() const;
 };
 
 class BonnRouteDR
