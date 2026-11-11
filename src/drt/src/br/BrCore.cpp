@@ -14,6 +14,9 @@ namespace drt::br {
 
 Cost PathSearch::futureCost(const int z, const Coord x, const Coord y) const
 {
+  if (req_->future_cost != nullptr) {
+    return req_->future_cost->query(z, x, y);
+  }
   if (req_->target_boxes.empty()) {
     return 0;
   }
@@ -22,9 +25,25 @@ Cost PathSearch::futureCost(const int z, const Coord x, const Coord y) const
     const Cost dx = std::max({0, b.xlo - x, x - b.xhi});
     const Cost dy = std::max({0, b.ylo - y, y - b.yhi});
     const Cost dz = z < b.zlo ? b.zlo - z : (z > b.zhi ? z - b.zhi : 0);
-    best = std::min(best, dx + dy + dz * min_via_cost_);
+    best = std::min(best, (dx + dy) * min_wire_rate_ + dz * min_via_cost_);
   }
   return best;
+}
+
+Cost PathSearch::wireCost(const int z,
+                          const int i,
+                          const int j,
+                          const int j2) const
+{
+  const TrackLayer& layer = graph_.layers[z];
+  const Cost length = std::abs(layer.positions[j2] - layer.positions[j]);
+  if (req_->discounts.empty()) {
+    return length * graph_.wire_unit;
+  }
+  size_t li;
+  const bool discounted
+      = local(z, i, std::min(j, j2), li) && discount_stamp_[li] == epoch_;
+  return length * (discounted ? req_->discount_rate : graph_.wire_unit);
 }
 
 Cost PathSearch::vertexPenalty(const size_t v, const Kind k) const
@@ -201,12 +220,22 @@ void PathSearch::setupWindow(const SearchRequest& request)
     source_stamp_.resize(total, 0);
     target_stamp_.resize(total, 0);
     target_index_.resize(total);
+    discount_stamp_.resize(total, 0);
   }
   if (++epoch_ == 0) {
     std::fill(stamp_.begin(), stamp_.end(), 0);
     std::fill(source_stamp_.begin(), source_stamp_.end(), 0);
     std::fill(target_stamp_.begin(), target_stamp_.end(), 0);
+    std::fill(discount_stamp_.begin(), discount_stamp_.end(), 0);
     epoch_ = 1;
+  }
+  for (const DiscountRun& run : request.discounts) {
+    for (int j = run.jlo; j < run.jhi; j++) {
+      size_t li;
+      if (local(run.z, run.i, j, li)) {
+        discount_stamp_[li] = epoch_;
+      }
+    }
   }
 }
 
@@ -216,6 +245,9 @@ SearchResult PathSearch::run(const SearchRequest& request)
   req_ = &request;
   res_ = &result;
   min_via_cost_ = graph_.minViaCost();
+  min_wire_rate_ = request.discounts.empty()
+                       ? graph_.wire_unit
+                       : std::min(graph_.wire_unit, request.discount_rate);
   heap_.clear();
   setupWindow(request);
 
@@ -290,8 +322,7 @@ SearchResult PathSearch::run(const SearchRequest& request)
         if (!enter(w, kWire) || !enter(edge, kWireEdge)) {
           continue;
         }
-        const Cost c = std::abs(layer.positions[j2] - layer.positions[j])
-                       + vertexPenalty(w, kWire)
+        const Cost c = wireCost(z, i, j, j2) + vertexPenalty(w, kWire)
                        + vertexPenalty(edge, kWireEdge);
         relax(item.v,
               w,
@@ -317,8 +348,7 @@ SearchResult PathSearch::run(const SearchRequest& request)
       if (!enter(w, kWire) || !enter(edge, kWireEdge)) {
         break;
       }
-      const Cost ng = g + std::abs(layer.positions[j2] - layer.positions[cj])
-                      + vertexPenalty(w, kWire)
+      const Cost ng = g + wireCost(z, i, cj, j2) + vertexPenalty(w, kWire)
                       + vertexPenalty(edge, kWireEdge);
       size_t lw;
       if (!local(z, i, j2, lw)) {

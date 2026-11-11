@@ -8,10 +8,12 @@
 
 #pragma once
 
+#include <array>
 #include <cstdint>
 #include <memory>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 #include "br/BrCore.h"
@@ -50,6 +52,35 @@ struct BonnRouteDRParams
   int retry_dilation = 2;
   bool use_intervals = false;
   bool ripup = false;
+  // Sec. 4.4: search area of a connection = GR tiles of a shortest path
+  // along the guides from the source component to another component.
+  bool component_regions = true;
+  // Sec. 5.1 partition sequence; 0 selects batches of nets with disjoint
+  // bounding boxes. partition_regions = 0 uses twice the thread count.
+  bool partitions = true;
+  int partition_regions = 0;
+  // Interval property (ii) also for vias (Sec. 4.1); 0 relaxes vias per
+  // vertex and lets intervals ignore via availability.
+  bool interval_via_property = true;
+  // Sec. 4.4: bound on the depth of a rip-up sequence; a failed sequence
+  // restores the original routing.
+  int ripup_depth = 3;
+  // Later passes over unrouted nets use more rip-up effort and a larger
+  // routing area (Sec. 4.4, last sentence).
+  int ripup_passes = 2;
+  // Ahrens et al., arXiv:2111.06169, Sec. 5.2: legal track-assignment wires
+  // become reservations of their net, usable by it at cost factor
+  // discount_numerator / discount_denominator and blocked for other nets.
+  bool reservations = false;
+  int discount_numerator = 3;
+  int discount_denominator = 4;
+  // Lowest track-graph layer (0 = bottom routing layer) with reservations.
+  int reserve_min_layer = 0;
+  // Future cost: 0 = pi_H of the 2013 paper (Sec. 4.1); arXiv:2111.06169
+  // potentials 1 = l1 (Table 3), 2 = simple model (Theorem 3), 3 = general
+  // model (Section 4, guide area and discounts). Reservations or a
+  // potential select the vertex search.
+  int potential = 0;
   bool verbose = true;
 
   bool set(const std::string& name, double value);
@@ -115,6 +146,8 @@ class BonnRouteDR
   struct Term
   {
     std::vector<AccessOption> options;
+    std::vector<RShape> reservation;
+    bool reservation_active = false;
     int chosen = -1;
   };
   struct NetData
@@ -126,6 +159,13 @@ class BonnRouteDR
     std::vector<OutVia> vias;
     std::vector<RShape> shapes;  // committed shapes
     std::vector<std::pair<frLayerNum, odb::Point>> pin_points;
+    // Legal input wires reserved for this net (arXiv:2111.06169 Sec. 5.2)
+    // and the track-graph edges they cover.
+    std::vector<RShape> input_reservation;
+    bool input_reserved = false;
+    std::vector<br::DiscountRun> discount_runs;
+    // Guide tiles (z, tile x, tile y), deduplicated.
+    std::vector<std::array<int, 3>> guide_tiles;
     int ripups = 0;
     bool routed = false;
     bool failed = false;
@@ -140,9 +180,35 @@ class BonnRouteDR
     br::Region region;
     std::unique_ptr<br::PathSearch> search;
     std::unique_ptr<br::IntervalSearch> interval_search;
+    // Scratch of the guide-path search for connection regions.
+    std::vector<uint32_t> tile_guide;
+    std::vector<uint32_t> tile_seen;
+    std::vector<uint32_t> tile_target;
+    std::vector<int64_t> tile_parent;
+    uint32_t tile_epoch = 0;
+    // Sec. 5.1 partitions: a thread commits only inside its region. The
+    // shared shape index is updated after each partition; until then the
+    // worker sees its own commits and releases through these.
+    std::vector<RTree<int>> local_routed;
+    std::unordered_set<int> released;
+    std::vector<std::pair<RShape, int>> released_shapes;
+    std::vector<int> committed;
     int64_t searches = 0;
+    int64_t path_region_searches = 0;
     int64_t heap_pops = 0;
     int64_t settled = 0;
+  };
+  // Saved routing of a net, for restoring a failed rip-up sequence.
+  struct SavedRouting
+  {
+    int net;
+    bool was_routed;
+    std::vector<OutWire> wires;
+    std::vector<OutVia> vias;
+    std::vector<std::pair<frLayerNum, odb::Point>> pin_points;
+    std::vector<int> chosen;
+    std::vector<char> reserved;
+    bool input_reserved;
   };
 
   void buildTrackGraph();
@@ -150,13 +216,45 @@ class BonnRouteDR
   void buildNets();
   void buildAccess(NetData& net);
   void reserveAccess(NetData& net);
-  bool connect(NetData& net, bool ripup, Worker& worker);
+  // With `local`, shape-index updates are deferred (see Worker).
+  void setReservations(NetData& net, bool active, Worker* local = nullptr);
+  void reserveInputWires();
+  void setInputReservation(NetData& net, bool active, Worker* local = nullptr);
+  bool treeConflicts(const RTree<int>& tree,
+                     const RShape& shape,
+                     int net,
+                     const std::unordered_set<int>* skip = nullptr) const;
+  // Cost unit of the search: discount_denominator when discounts are used.
+  br::Cost unit() const { return graph_.wire_unit; }
+  bool modernSearch() const
+  {
+    return params_.reservations || params_.potential != 0;
+  }
+  void setReservation(Term& term,
+                      int net,
+                      bool active,
+                      Worker* local = nullptr);
+  void accessShapes(const AccessOption& option,
+                    std::vector<RShape>& shapes) const;
+  // extra_dilation enlarges the routing area of later rip-up passes.
+  bool connect(NetData& net,
+               bool ripup,
+               Worker& worker,
+               int extra_dilation = 0);
   bool connectInRegion(NetData& net,
                        int dilation,
                        bool ripup,
                        const std::vector<std::vector<char>>& valid,
                        Worker& worker);
   void buildRegion(const NetData& net, int dilation, br::Region& region);
+  void buildGuideTiles(NetData& net);
+  // Region of the guide path from the routed component to the nearest
+  // unconnected terminal; false if the guides do not connect them.
+  bool buildPathRegion(const NetData& net,
+                       const std::vector<char>& connected,
+                       const std::vector<size_t>& tree,
+                       const std::vector<std::vector<char>>& valid,
+                       Worker& worker);
   // Tile box of everything the net's searches may touch, with halo.
   void netTileBox(const NetData& net,
                   int& xlo,
@@ -165,16 +263,35 @@ class BonnRouteDR
                   int& yhi) const;
   void routeParallel(const std::vector<int>& order, std::vector<int>& failed);
   void routeRipupQueue(const std::vector<int>& failed);
+  bool ripupSequence(int net,
+                     int depth,
+                     int dilation,
+                     std::vector<SavedRouting>& journal);
+  SavedRouting saveRouting(const NetData& net) const;
+  int64_t input_wires_ = 0;
+  int64_t input_reserved_ = 0;
+  void restoreRouting(const SavedRouting& saved);
   void pathToGeometry(const std::vector<size_t>& path, NetData& net) const;
   void shapesOf(const NetData& net, std::vector<RShape>& shapes) const;
   void viaShapes(const OutVia& via, std::vector<RShape>& shapes) const;
   RShape wireShape(const OutWire& wire) const;
-  // Fast grid update for a shape; mode 0 fixed, 1 pin (owner), 2 routed.
+  // Fast grid update: 0 fixed, 1 pin, 2 routed, 3 owned reservation.
   void markShape(const RShape& shape, int mode, int owner, int delta);
-  void commitNet(NetData& net);
+  void commitNet(NetData& net, Worker* local = nullptr);
+  // Applies a worker's deferred shape-index updates (serial).
+  void mergeWorker(Worker& worker);
+  // Sec. 5.1: a sequence of balanced partitions into thread regions.
+  void routePartitions(const std::vector<int>& order, std::vector<int>& failed);
+  void partitionRegions(const std::vector<int>& nets,
+                        const std::vector<std::array<int, 4>>& boxes,
+                        int count,
+                        bool shifted,
+                        std::vector<std::array<int, 4>>& regions) const;
   void ripupNet(NetData& net);
   void collectVictims(const NetData& net, std::vector<int>& victims) const;
-  bool shapeConflicts(const RShape& shape, int net) const;
+  bool shapeConflicts(const RShape& shape,
+                      int net,
+                      const Worker* worker = nullptr) const;
   frCoord spacing(int z, frCoord width1, frCoord width2, frCoord prl) const;
   void writeNets();
 
@@ -201,14 +318,16 @@ class BonnRouteDR
 
   // Shape index (shape grid of Sec. 3.3, reduced to what the off-track
   // checks and rip-up need): fixed shapes and pins, and routed shapes.
-  std::vector<RTree<int>> fixed_tree_;   // owner net or -1
-  std::vector<RTree<int>> routed_tree_;  // owner net
+  std::vector<RTree<int>> fixed_tree_;        // owner net or -1
+  std::vector<RTree<int>> routed_tree_;       // owner net
+  std::vector<RTree<int>> reservation_tree_;  // primary access paths
   std::vector<frCoord> max_spacing_;
 
   std::vector<NetData> nets_;
   std::unordered_map<const frNet*, int> net_index_;
   // Statistics.
   int64_t ripup_events_ = 0;
+  int64_t rollbacks_ = 0;
 };
 
 }  // namespace drt

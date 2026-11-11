@@ -5,9 +5,12 @@
 #include <cstdio>
 #include <cstdlib>
 #include <functional>
+#include <map>
 #include <queue>
 #include <random>
 #include <set>
+#include <tuple>
+#include <vector>
 
 #include "br/BrCore.h"
 
@@ -42,7 +45,14 @@ struct Ref
           || !enter(e, kWireEdge)) {
         return kInfCost;
       }
-      return std::abs(l.positions[j2] - l.positions[j]) + pen(w, kWire)
+      Cost rate = g.wire_unit;
+      for (const DiscountRun& d : r.discounts) {
+        if (d.z == z && d.i == i && std::min(j, j2) >= d.jlo
+            && std::min(j, j2) < d.jhi) {
+          rate = r.discount_rate;
+        }
+      }
+      return std::abs(l.positions[j2] - l.positions[j]) * rate + pen(w, kWire)
              + pen(e, kWireEdge);
     }
     if (z == z2 && j == j2 && std::abs(i - i2) == 1) {
@@ -149,9 +159,7 @@ struct Ref
           if (!enter(w, kWire) || !enter(e, kWireEdge)) {
             continue;
           }
-          go(w,
-             std::abs(l.positions[j2] - l.positions[j]) + pen(w, kWire)
-                 + pen(e, kWireEdge));
+          go(w, edge(v, w, s));
         }
       }
       if (l.jogs && (s || enter(v, kJog))) {
@@ -216,7 +224,9 @@ static bool validPath(const SearchResult& r, const SearchRequest& q)
   return is_src && r.path.front() == r.target_vertex;
 }
 
-static int randomCases(const int cases, const bool sparse)
+// modern: wire unit 4 with discounted runs (arXiv:2111.06169 Sec. 5.2);
+// only the vertex search supports it.
+static int randomCases(const int cases, const bool sparse, const bool modern)
 {
   std::mt19937 rng(sparse ? 23456 : 12345);
   int64_t pops_i = 0, pops_v = 0, fails = 0, found = 0, labels = 0, ivs = 0,
@@ -252,8 +262,14 @@ static int randomCases(const int cases, const bool sparse)
       l.jogs = rng() % 3 != 0;
       l.jog_factor = 1 + rng() % 5;
     }
+    if (modern) {
+      g.wire_unit = 4;
+      for (TrackLayer& l : g.layers) {
+        l.jog_factor *= 4;
+      }
+    }
     for (int z = 0; z + 1 < Z; z++) {
-      g.via_cost.push_back(10 + rng() % 200);
+      g.via_cost.push_back((10 + rng() % 200) * g.wire_unit);
     }
     const int tile = 100 + rng() % 300;
     auto tf = [&](Coord c) { return c / tile; };
@@ -295,6 +311,19 @@ static int randomCases(const int cases, const bool sparse)
     q.region = &reg;
     q.ripup = rng() % 2;
     q.ripup_cost = 50 + rng() % 500;
+    if (modern) {
+      q.discount_rate = 3;
+      const int discounts = rng() % 6;
+      for (int d = 0; d < discounts; d++) {
+        const int z = rng() % Z;
+        const TrackLayer& l = g.layers[z];
+        const int i = rng() % l.numTracks();
+        const int jlo = rng() % l.numPositions();
+        const int jhi
+            = std::min(l.numPositions() - 1, jlo + 1 + (int) (rng() % 40));
+        q.discounts.push_back({z, i, jlo, jhi});
+      }
+    }
     int ns = 1 + rng() % 3, nt = 1 + rng() % 4;
     auto rv = [&]() { return (size_t) (rng() % g.numVertices()); };
     for (int s = 0; s < ns; s++) {
@@ -321,16 +350,20 @@ static int randomCases(const int cases, const bool sparse)
     }
     PathSearch ps(g, f);
     IntervalSearch is(g, f);
-    SearchResult ri = is.run(q);
+    SearchResult ri = modern ? SearchResult{} : is.run(q);
     SearchResult rvx = ps.run(q);
     Ref ref{g, f, q};
     Cost rc = ref.run();
     Cost ci = ri.found ? ri.cost : kInfCost,
          cv = rvx.found ? rvx.cost : kInfCost;
-    const Cost pi = ri.found ? ref.pathCost(ri) : kInfCost;
+    Cost pi = ri.found ? ref.pathCost(ri) : kInfCost;
     const Cost pv = rvx.found ? ref.pathCost(rvx) : kInfCost;
+    if (modern) {
+      ci = pi = rc;
+    }
     if (ci != rc || cv != rc || pi != ci || pv != cv
-        || (ri.found && !validPath(ri, q))) {
+        || (ri.found && !validPath(ri, q))
+        || (rvx.found && !validPath(rvx, q))) {
       fails++;
       if (fails < 10) {
         printf(
@@ -539,10 +572,60 @@ static int reusedSearch()
   return 0;
 }
 
+// Reservations (pin access paths, input wires) against a multiset model:
+// a (vertex, kind) is blocked for a net iff another owner covers it.
+static int reservationCases()
+{
+  std::mt19937 rng(7);
+  int fails = 0;
+  for (int c = 0; c < 500; c++) {
+    const int vertices = 1 + rng() % 6;
+    const int owners = 1 + rng() % 4;
+    FastGrid grid;
+    grid.init(vertices);
+    std::map<std::tuple<int, int, int>, int> model;
+    std::vector<std::tuple<int, int, int>> added;
+    for (int step = 0; step < 200; step++) {
+      if (added.empty() || rng() % 2) {
+        const int v = rng() % vertices;
+        const int k = rng() % kNumKinds;
+        const int o = rng() % owners;
+        grid.addReservation(v, (Kind) k, o, 1);
+        model[{v, k, o}]++;
+        added.emplace_back(v, k, o);
+      } else {
+        const size_t at = rng() % added.size();
+        const auto [v, k, o] = added[at];
+        added.erase(added.begin() + at);
+        grid.addReservation(v, (Kind) k, o, -1);
+        model[{v, k, o}]--;
+      }
+      for (int v = 0; v < vertices; v++) {
+        for (int k = 0; k < kNumKinds; k++) {
+          for (int net = -1; net <= owners; net++) {
+            bool expect = false;
+            for (int o = 0; o < owners; o++) {
+              expect |= o != net && model[{v, k, o}] > 0;
+            }
+            if (grid.hardBlocked(v, (Kind) k, net) != expect) {
+              if (fails++ < 5) {
+                printf("reservation mismatch: case %d step %d\n", c, step);
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+  return fails != 0;
+}
+
 int main()
 {
-  if (blockedGeometry() || obstacleDetour() || reusedSearch()) {
+  if (blockedGeometry() || obstacleDetour() || reusedSearch()
+      || reservationCases()) {
     return 1;
   }
-  return randomCases(400, false) || randomCases(400, true);
+  return randomCases(400, false, false) || randomCases(400, true, false)
+         || randomCases(400, false, true) || randomCases(400, true, true);
 }

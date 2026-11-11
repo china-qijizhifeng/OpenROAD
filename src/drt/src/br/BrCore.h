@@ -13,6 +13,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <limits>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -58,6 +59,10 @@ class TrackGraph
  public:
   std::vector<TrackLayer> layers;
   std::vector<Cost> via_cost;  // via between z and z + 1
+  // Cost of one DBU of preferred-direction wire. Values above 1 let a
+  // reservation discount (arXiv:2111.06169, Sec. 5.2) stay integral; jog
+  // factors, via costs and penalties are expressed in the same unit.
+  Cost wire_unit = 1;
   int tiles_x = 1;
   int tiles_y = 1;
 
@@ -231,6 +236,9 @@ class FastGrid
     pin_owner_.assign(num_vertices, kNoOwner);
     count_.assign(num_vertices, {});
     history_.assign(num_vertices, 0);
+    reserve_count_.assign(num_vertices, {});
+    reserve_owner_.assign(num_vertices, kNoOwner);
+    reserve_shared_.clear();
   }
   void addFixed(size_t v, Kind k) { fixed_[v] |= (1u << k); }
   // A pin shape blocks every net except its owner.
@@ -253,12 +261,86 @@ class FastGrid
     int c = count_[v][k] + delta;
     count_[v][k] = static_cast<uint8_t>(std::clamp(c, 0, 255));
   }
+  // Reservations (Sec. 4.3 primary pin access paths; arXiv:2111.06169
+  // Sec. 5.2 legal input wires) block every net except their owner until
+  // the owner releases them. Counts are exact per (vertex, kind). A vertex
+  // covered by footprints of several owners keeps per-owner counts in a
+  // sparse table; reservation changes are applied serially.
+  // Releases (delta < 0) never insert or erase table nodes, so threads may
+  // release reservations of disjoint vertex sets concurrently; additions
+  // must be serial.
+  void addReservation(size_t v, Kind k, int32_t owner, int delta)
+  {
+    auto bump = [](uint8_t& c, int d) {
+      c = static_cast<uint8_t>(std::clamp(c + d, 0, 255));
+    };
+    auto zero = [](const std::array<uint8_t, kNumKinds>& c) {
+      return std::ranges::all_of(c, [](uint8_t x) { return x == 0; });
+    };
+    int32_t& single = reserve_owner_[v];
+    if (single == kNoOwner || single == owner) {
+      if (delta < 0 && single == kNoOwner) {
+        return;
+      }
+      bump(reserve_count_[v][k], delta);
+      single = zero(reserve_count_[v]) ? kNoOwner : owner;
+      return;
+    }
+    if (single != kManyOwners) {
+      if (delta < 0) {
+        return;  // nothing of `owner` is recorded here
+      }
+      // A second owner: all current counts belong to `single`.
+      std::vector<OwnedCounts>& owners = reserve_shared_[v];
+      owners.clear();
+      owners.push_back({single, reserve_count_[v]});
+      single = kManyOwners;
+    }
+    auto found = reserve_shared_.find(v);
+    std::vector<OwnedCounts>& owners = found->second;
+    auto at = std::ranges::find(owners, owner, &OwnedCounts::owner);
+    if (at == owners.end()) {
+      if (delta < 0) {
+        return;
+      }
+      owners.push_back({owner, {}});
+      at = owners.end() - 1;
+    }
+    const int before = at->count[k];
+    bump(at->count[k], delta);
+    bump(reserve_count_[v][k], at->count[k] - before);
+    if (zero(at->count)) {
+      owners.erase(at);
+    }
+    if (owners.size() <= 1) {
+      single = owners.empty() ? kNoOwner : owners.front().owner;
+      owners.clear();
+    }
+  }
+  // True if reservations of nets other than `net` cover (v, k).
+  bool reservedForOther(size_t v, Kind k, int32_t net) const
+  {
+    if (reserve_count_[v][k] == 0) {
+      return false;
+    }
+    const int32_t single = reserve_owner_[v];
+    if (single != kManyOwners) {
+      return single != net;
+    }
+    const auto& owners = reserve_shared_.at(v);
+    return std::ranges::any_of(owners, [&](const OwnedCounts& o) {
+      return o.owner != net && o.count[k] > 0;
+    });
+  }
   bool hardBlocked(size_t v, Kind k, int32_t net) const
   {
     if ((fixed_[v] >> k) & 1u) {
       return true;
     }
-    return ((pin_mask_[v] >> k) & 1u) && pin_owner_[v] != net;
+    if (((pin_mask_[v] >> k) & 1u) && pin_owner_[v] != net) {
+      return true;
+    }
+    return reservedForOther(v, k, net);
   }
   bool usable(size_t v, Kind k, int32_t net) const
   {
@@ -284,6 +366,14 @@ class FastGrid
   std::vector<int32_t> pin_owner_;
   std::vector<std::array<uint8_t, kNumKinds>> count_;
   std::vector<uint16_t> history_;
+  struct OwnedCounts
+  {
+    int32_t owner;
+    std::array<uint8_t, kNumKinds> count;
+  };
+  std::vector<std::array<uint8_t, kNumKinds>> reserve_count_;
+  std::vector<int32_t> reserve_owner_;
+  std::unordered_map<size_t, std::vector<OwnedCounts>> reserve_shared_;
 };
 
 // Routing area R of one search: allowed global routing tiles per layer.
@@ -354,6 +444,24 @@ struct TargetBox
   int zlo, zhi;
 };
 
+// Lower bound on the cost from a location to the targets of a search
+// (future cost of Sec. 4.1; potentials of arXiv:2111.06169). It must be
+// feasible for the search graph: pi(v) <= c(v, w) + pi(w) on every edge.
+class FutureCostOracle
+{
+ public:
+  virtual ~FutureCostOracle() = default;
+  virtual Cost query(int z, Coord x, Coord y) const = 0;
+};
+
+// Preferred-direction edges (j, j + 1) for jlo <= j < jhi on track i of
+// layer z that the searching net may use at a discount (reservations of
+// its input wiring, arXiv:2111.06169 Sec. 5.2).
+struct DiscountRun
+{
+  int z, i, jlo, jhi;
+};
+
 struct SearchRequest
 {
   int32_t net = -1;
@@ -375,6 +483,14 @@ struct SearchRequest
   bool ripup = false;
   Cost ripup_cost = 0;
   bool use_intervals = true;
+  // Interval property (ii) of Sec. 4.1 for vias as well as jogs. Without
+  // it, intervals ignore via availability and relax vias per vertex.
+  bool interval_via_property = true;
+  // Optional future cost; nullptr selects the l1 bound pi_H on the target
+  // boxes. Only the vertex search supports an oracle and discounts.
+  const FutureCostOracle* future_cost = nullptr;
+  std::vector<DiscountRun> discounts;
+  Cost discount_rate = 0;  // cost per DBU of a discounted edge
 };
 
 struct SearchResult
@@ -435,6 +551,8 @@ class PathSearch
   bool enter(size_t v, Kind k) const;
   void push(const Item& item);
   bool relax(size_t from_v, size_t to_v, Cost g, Parent parent, int8_t dir);
+  // Cost of the preferred-direction edge between positions j and j2.
+  Cost wireCost(int z, int i, int j, int j2) const;
   void settle(int z, int i, int j, size_t v, Cost g);
 
   const TrackGraph& graph_;
@@ -442,6 +560,7 @@ class PathSearch
   const SearchRequest* req_ = nullptr;
   SearchResult* res_ = nullptr;
   Cost min_via_cost_ = 0;
+  Cost min_wire_rate_ = 1;
 
   // Search window: per layer track range [i0, i0 + ni) and position range
   // [j0, j0 + nj) covering the region; local index = wbase + di * nj + dj.
@@ -470,6 +589,7 @@ class PathSearch
   std::vector<uint32_t> source_stamp_;
   std::vector<uint32_t> target_stamp_;
   std::vector<int32_t> target_index_;
+  std::vector<uint32_t> discount_stamp_;  // edge (j, j + 1) at j
   uint32_t epoch_ = 0;
   std::vector<Item> heap_;
 };
@@ -503,6 +623,7 @@ class IntervalSearch
     Cost delta;  // reduced distance at k
     int32_t pred_interval;  // -1 for a source label
     int pred_k;
+    int64_t order;  // preserve the oldest label when envelope values tie
   };
   struct Interval
   {
@@ -510,7 +631,11 @@ class IntervalSearch
     int ja, jb;  // position range, inclusive
     int dir;     // +1: k = j - ja (target end at ja); -1: k = jb - j
     Cost future_at_ja;
-    std::vector<Label> labels;
+    std::vector<Label> labels;  // ordered by k
+    // Prefix minima of delta - 2*x and suffix minima of delta. They query
+    // the lower envelope in O(log labels) without scanning every label.
+    std::vector<int> prefix_best;
+    std::vector<int> suffix_best;
     int frontier = 0;  // vertices with k < frontier are settled
     int n() const { return jb - ja + 1; }
     int jOf(int k) const { return dir > 0 ? ja + k : jb - k; }
@@ -526,11 +651,20 @@ class IntervalSearch
   struct Event
   {
     Cost key;
+    Cost max_future;
     int32_t interval;  // -1: sink (target reached)
-    int32_t aux;       // target index for a sink
+    int32_t aux;       // frontier at enqueue time, or target index for a sink
     bool operator>(const Event& o) const
     {
-      return key != o.key ? key > o.key : interval > o.interval;
+      if (key != o.key) {
+        return key > o.key;
+      }
+      // Algorithm 4, line 12: among intervals at delta, choose the one
+      // whose settled run contains the largest future cost.
+      if (max_future != o.max_future) {
+        return max_future < o.max_future;
+      }
+      return interval > o.interval;
     }
   };
 
@@ -541,9 +675,11 @@ class IntervalSearch
   bool inWindow(int z, int i, int j, size_t& li) const;
   int intervalOf(int z, int i, int j);
   int buildInterval(int z, int i, int j);
-  int jogSignature(int z, int i, int j, size_t v) const;
+  int transitionSignature(int z, int i, int j, size_t v) const;
   Cost value(const Interval& iv, int k) const;
   const Label* argLabel(const Interval& iv, int k) const;
+  void rebuildEnvelope(Interval& iv);
+  int frontierEnd(const Interval& iv, Cost delta) const;
   void addLabel(int interval, int k, Cost delta, int pred_interval, int pred_k);
   void process(int interval, Cost delta);
   void pushEvent(int interval);

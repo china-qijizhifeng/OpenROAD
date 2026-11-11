@@ -64,27 +64,55 @@ bool IntervalSearch::inWindow(const int z,
   return true;
 }
 
-int IntervalSearch::jogSignature(const int z,
-                                 const int i,
-                                 const int j,
-                                 const size_t v) const
+int IntervalSearch::transitionSignature(const int z,
+                                        const int i,
+                                        const int j,
+                                        const size_t v) const
 {
   const TrackLayer& layer = graph_.layers[z];
-  if (!layer.jogs || !usableZero(v, kJog)) {
-    return 0;
-  }
   int sig = 0;
   for (const int di : {-1, 1}) {
     const int i2 = i + di;
     size_t li;
-    if (i2 < 0 || i2 >= layer.numTracks() || !inWindow(z, i2, j, li)
+    if (!layer.jogs || !enter(v, kJog) || i2 < 0 || i2 >= layer.numTracks()
+        || !inWindow(z, i2, j, li)
         || !req_->region->contains(layer, z, i2, j)) {
       continue;
     }
     const size_t w = graph_.vertex(z, i2, j);
     const size_t edge = di > 0 ? v : w;
-    if (usableZero(w, kJog) && usableZero(edge, kJogEdge)) {
+    if (enter(w, kJog) && enter(edge, kJogEdge)) {
       sig |= di > 0 ? 2 : 1;
+      if (!usableZero(v, kJog) || !usableZero(w, kJog)
+          || !usableZero(edge, kJogEdge)) {
+        sig |= 16;  // penalties cannot be compressed into this interval
+      }
+    }
+  }
+  for (const int dz : {-1, 1}) {
+    const int z2 = z + dz;
+    if (z2 < 0 || z2 >= graph_.numLayers()) {
+      continue;
+    }
+    const int i2 = dz > 0 ? layer.up_track[j] : layer.down_track[j];
+    const int j2 = dz > 0 ? layer.up_pos[i] : layer.down_pos[i];
+    size_t li;
+    if (i2 < 0 || j2 < 0 || !inWindow(z2, i2, j2, li)
+        || !req_->region->contains(graph_.layers[z2], z2, i2, j2)) {
+      continue;
+    }
+    const size_t w = graph_.vertex(z2, i2, j2);
+    const size_t lower = dz > 0 ? v : w;
+    const size_t upper = dz > 0 ? w : v;
+    if (enter(lower, kViaUpPad) && enter(lower, kCutUp)
+        && enter(upper, kViaDownPad)) {
+      if (req_->interval_via_property) {
+        sig |= dz > 0 ? 8 : 4;
+      }
+      if (!usableZero(lower, kViaUpPad) || !usableZero(lower, kCutUp)
+          || !usableZero(upper, kViaDownPad)) {
+        sig |= 16;
+      }
     }
   }
   return sig;
@@ -113,7 +141,11 @@ int IntervalSearch::buildInterval(const int z, const int i, const int j)
         || target_stamp_[li] == epoch_ || !region.contains(layer, z, i, jj)) {
       return false;
     }
-    return usableZero(graph_.vertex(z, i, jj), kWire);
+    const size_t v = graph_.vertex(z, i, jj);
+    return usableZero(v, kWire)
+           && !(source_stamp_[li] == epoch_ && layer.jogs
+                && !usableZero(v, kJog))
+           && !(transitionSignature(z, i, jj, v) & 16);
   };
   int ja = j;
   int jb = j;
@@ -124,7 +156,7 @@ int IntervalSearch::buildInterval(const int z, const int i, const int j)
   size_t li0;
   inWindow(z, i, j, li0);
   if (plain(j, li0)) {
-    const int sig = jogSignature(z, i, j, graph_.vertex(z, i, j));
+    const int sig = transitionSignature(z, i, j, graph_.vertex(z, i, j));
     auto joins = [&](int from, int to, Cost& pi_from) {
       size_t li;
       if (!plain(to, li)) {
@@ -134,7 +166,7 @@ int IntervalSearch::buildInterval(const int z, const int i, const int j)
       if (!usableZero(graph_.vertex(z, i, a), kWireEdge)) {
         return false;
       }
-      if (jogSignature(z, i, to, graph_.vertex(z, i, to)) != sig) {
+      if (transitionSignature(z, i, to, graph_.vertex(z, i, to)) != sig) {
         return false;
       }
       // Adjacent members must have the same slope, exactly +1 or -1.
@@ -180,36 +212,92 @@ int IntervalSearch::buildInterval(const int z, const int i, const int j)
 
 Cost IntervalSearch::value(const Interval& iv, const int k) const
 {
-  const TrackLayer& layer = graph_.layers[iv.z];
-  Cost best = kInfCost;
-  const Coord pk = layer.positions[iv.jOf(k)];
-  for (const Label& l : iv.labels) {
-    // Flat toward the target end, slope 2 away from it.
-    const Cost d
-        = k <= l.k ? l.delta
-                   : l.delta + 2 * std::abs(pk - layer.positions[iv.jOf(l.k)]);
-    best = std::min(best, d);
+  const Label* l = argLabel(iv, k);
+  if (l == nullptr) {
+    return kInfCost;
   }
-  return best;
+  const auto& positions = graph_.layers[iv.z].positions;
+  return l->delta
+         + (k <= l->k ? 0
+                      : 2
+                            * std::abs(static_cast<Cost>(positions[iv.jOf(k)])
+                                       - positions[iv.jOf(l->k)]));
 }
 
 const IntervalSearch::Label* IntervalSearch::argLabel(const Interval& iv,
                                                       const int k) const
 {
-  const TrackLayer& layer = graph_.layers[iv.z];
-  const Coord pk = layer.positions[iv.jOf(k)];
-  const Label* best = nullptr;
-  Cost best_d = kInfCost;
-  for (const Label& l : iv.labels) {
-    const Cost d
-        = k <= l.k ? l.delta
-                   : l.delta + 2 * std::abs(pk - layer.positions[iv.jOf(l.k)]);
-    if (d < best_d) {
-      best_d = d;
-      best = &l;
+  if (iv.labels.empty()) {
+    return nullptr;
+  }
+  const auto& positions = graph_.layers[iv.z].positions;
+  const int pos = static_cast<int>(
+      std::lower_bound(iv.labels.begin(),
+                       iv.labels.end(),
+                       k,
+                       [](const Label& l, int at) { return l.k < at; })
+      - iv.labels.begin());
+  const Label* best = pos < static_cast<int>(iv.labels.size())
+                          ? &iv.labels[iv.suffix_best[pos]]
+                          : nullptr;
+  if (pos > 0) {
+    const Label* left = &iv.labels[iv.prefix_best[pos - 1]];
+    const Cost d = left->delta
+                   + 2
+                         * std::abs(static_cast<Cost>(positions[iv.jOf(k)])
+                                    - positions[iv.jOf(left->k)]);
+    if (best == nullptr || d < best->delta
+        || (d == best->delta && left->order < best->order)) {
+      best = left;
     }
   }
   return best;
+}
+
+void IntervalSearch::rebuildEnvelope(Interval& iv)
+{
+  const int n = static_cast<int>(iv.labels.size());
+  iv.prefix_best.resize(n);
+  iv.suffix_best.resize(n);
+  const auto& positions = graph_.layers[iv.z].positions;
+  auto intercept = [&](int a) {
+    const Label& l = iv.labels[a];
+    return l.delta - 2 * iv.dir * static_cast<Cost>(positions[iv.jOf(l.k)]);
+  };
+  for (int a = 0; a < n; a++) {
+    const int prev = a > 0 ? iv.prefix_best[a - 1] : a;
+    iv.prefix_best[a]
+        = intercept(a) < intercept(prev)
+                  || (intercept(a) == intercept(prev)
+                      && iv.labels[a].order < iv.labels[prev].order)
+              ? a
+              : prev;
+  }
+  for (int a = n - 1; a >= 0; a--) {
+    const int next = a + 1 < n ? iv.suffix_best[a + 1] : a;
+    iv.suffix_best[a]
+        = iv.labels[a].delta < iv.labels[next].delta
+                  || (iv.labels[a].delta == iv.labels[next].delta
+                      && iv.labels[a].order < iv.labels[next].order)
+              ? a
+              : next;
+  }
+}
+
+int IntervalSearch::frontierEnd(const Interval& iv, const Cost delta) const
+{
+  // d is monotone on an interval; J_I(delta) is a contiguous flat run.
+  int lo = iv.frontier;
+  int hi = iv.n();
+  while (lo < hi) {
+    const int mid = lo + (hi - lo) / 2;
+    if (value(iv, mid) == delta) {
+      lo = mid + 1;
+    } else {
+      hi = mid;
+    }
+  }
+  return lo;
 }
 
 void IntervalSearch::pushEvent(const int interval)
@@ -222,7 +310,9 @@ void IntervalSearch::pushEvent(const int interval)
   if (key >= kInfCost) {
     return;
   }
-  heap_.push_back(Event{key, interval, 0});
+  const int end = frontierEnd(iv, key);
+  const Cost pi = iv.futureCost(graph_.layers[iv.z], iv.jOf(end - 1));
+  heap_.push_back(Event{key, pi, interval, iv.frontier});
   std::push_heap(heap_.begin(), heap_.end(), std::greater<>());
   res_->heap_pushes++;
 }
@@ -247,20 +337,20 @@ void IntervalSearch::addLabel(const int interval,
                    : delta + 2 * std::abs(layer.positions[iv.jOf(l.k)] - pk);
     return d < l.delta;
   });
-  iv.labels.push_back(Label{k, delta, pred_interval, pred_k});
+  auto at = std::lower_bound(
+      iv.labels.begin(), iv.labels.end(), k, [](const Label& l, int pos) {
+        return l.k < pos;
+      });
+  iv.labels.insert(at, Label{k, delta, pred_interval, pred_k, num_labels_});
+  rebuildEnvelope(iv);
   num_labels_++;
   pushEvent(interval);
 }
 
 void IntervalSearch::process(const int id, const Cost delta)
 {
-  // J_I(delta): the settled frontier moves over the flat run at delta.
   const int f = intervals_[id].frontier;
-  int g = f;
-  const int n = intervals_[id].n();
-  while (g < n && value(intervals_[id], g) == delta) {
-    g++;
-  }
+  const int g = frontierEnd(intervals_[id], delta);
   intervals_[id].frontier = g;
   const int z = intervals_[id].z;
   const int i = intervals_[id].i;
@@ -271,142 +361,140 @@ void IntervalSearch::process(const int id, const Cost delta)
   const TrackLayer& layer = graph_.layers[z];
   const Region& region = *req_->region;
   auto j_of = [&](int k) { return dir > 0 ? ja + k : jb - k; };
-
-  // Jog candidates kept per target interval (one label at max pi, line 14).
-  struct Pending
-  {
-    int interval;
-    int k;
-    Cost delta;
-    int from_k;
-    Cost pi;
+  auto k_of = [&](int j) { return dir > 0 ? j - ja : jb - j; };
+  res_->settled += g - f;
+  const int signature
+      = transitionSignature(z, i, j_of(f), graph_.vertex(z, i, j_of(f)));
+  auto relax_to = [&](int from_k, int z2, int i2, int j2, Cost cost) {
+    const Cost pi = intervals_[id].futureCost(layer, j_of(from_k));
+    const int next_id = intervalOf(z2, i2, j2);
+    if (next_id < 0) {
+      return;
+    }
+    const Interval& next = intervals_[next_id];
+    const Cost d2 = delta + cost - pi + next.futureCost(graph_.layers[z2], j2);
+    addLabel(next_id, next.kOf(j2), d2, id, from_k);
   };
-  std::vector<Pending> jog_best;
 
-  for (int k = f; k < g; k++) {
-    const int j = j_of(k);
-    const size_t v = graph_.vertex(z, i, j);
+  // Targets are single-vertex intervals, so terminal costs are exact.
+  if (single) {
     size_t li;
-    inWindow(z, i, j, li);
-    res_->settled++;
-    const bool is_source = source_stamp_[li] == epoch_;
-    const Cost pi_v = intervals_[id].futureCost(layer, j);
+    inWindow(z, i, ja, li);
     if (target_stamp_[li] == epoch_) {
       const auto& t = req_->targets[target_index_[li]];
-      heap_.push_back(Event{delta + t.cost, -1, target_index_[li]});
+      heap_.push_back(Event{delta + t.cost, 0, -1, target_index_[li]});
       std::push_heap(heap_.begin(), heap_.end(), std::greater<>());
       res_->heap_pushes++;
     }
-    auto relax_to = [&](int z2, int i2, int j2, Cost cost) {
-      const int iv2 = intervalOf(z2, i2, j2);
-      if (iv2 < 0) {
-        return;
-      }
-      const Interval& next = intervals_[iv2];
-      const Cost d2
-          = delta + cost - pi_v + next.futureCost(graph_.layers[z2], j2);
-      addLabel(iv2, next.kOf(j2), d2, id, k);
-    };
-    // Vias, per vertex.
-    if (z + 1 < graph_.numLayers()) {
-      const int i2 = layer.up_track[j];
-      const int j2 = layer.up_pos[i];
-      if (i2 >= 0 && j2 >= 0
-          && region.contains(graph_.layers[z + 1], z + 1, i2, j2)) {
-        const size_t w = graph_.vertex(z + 1, i2, j2);
-        if (enter(v, kViaUpPad) && enter(v, kCutUp) && enter(w, kViaDownPad)) {
-          relax_to(z + 1,
-                   i2,
-                   j2,
-                   graph_.via_cost[z] + penalty(v, kViaUpPad)
-                       + penalty(v, kCutUp) + penalty(w, kViaDownPad));
-        }
-      }
+  }
+
+  // On perpendicular layers each crossing reaches a different track and
+  // hence a different neighboring interval. Enumerate those adjacencies;
+  // skip the entire run when the interval has no vias in that direction.
+  for (const int dz : {-1, 1}) {
+    const int z2 = z + dz;
+    if (z2 < 0 || z2 >= graph_.numLayers()
+        || (!single && req_->interval_via_property
+            && !(signature & (dz > 0 ? 8 : 4)))) {
+      continue;
     }
-    if (z > 0) {
-      const int i2 = layer.down_track[j];
-      const int j2 = layer.down_pos[i];
-      if (i2 >= 0 && j2 >= 0
-          && region.contains(graph_.layers[z - 1], z - 1, i2, j2)) {
-        const size_t w = graph_.vertex(z - 1, i2, j2);
-        if (enter(w, kViaUpPad) && enter(w, kCutUp) && enter(v, kViaDownPad)) {
-          relax_to(z - 1,
-                   i2,
-                   j2,
-                   graph_.via_cost[z - 1] + penalty(w, kViaUpPad)
-                       + penalty(w, kCutUp) + penalty(v, kViaDownPad));
-        }
-      }
-    }
-    // Jogs.
-    if (layer.jogs && (is_source || enter(v, kJog))) {
-      for (const int di : {-1, 1}) {
-        const int i2 = i + di;
-        if (i2 < 0 || i2 >= layer.numTracks()
-            || !region.contains(layer, z, i2, j)) {
-          continue;
-        }
-        const size_t w = graph_.vertex(z, i2, j);
-        const size_t edge = di > 0 ? v : w;
-        if (!enter(w, kJog) || !enter(edge, kJogEdge)) {
-          continue;
-        }
-        const Cost pen = penalty(w, kJog) + penalty(edge, kJogEdge)
-                         + (is_source ? 0 : penalty(v, kJog));
-        const int iv2 = intervalOf(z, i2, j);
-        if (iv2 < 0) {
-          continue;
-        }
-        const Cost cost
-            = layer.jog_factor * std::abs(layer.tracks[i2] - layer.tracks[i])
-              + pen;
-        const Interval& next = intervals_[iv2];
-        const Cost d2 = delta + cost - pi_v + next.futureCost(layer, j);
-        const int k2 = next.kOf(j);
-        // Plain interval pairs with the same orientation: the landing of the
-        // vertex with maximum pi dominates the others (Algorithm 4, line 14).
-        const bool shortcut
-            = !single && pen == 0 && next.n() > 1 && next.dir == dir;
-        if (!shortcut) {
-          addLabel(iv2, k2, d2, id, k);
-          continue;
-        }
-        auto it = std::ranges::find_if(
-            jog_best, [&](const Pending& p) { return p.interval == iv2; });
-        if (it == jog_best.end()) {
-          jog_best.push_back(Pending{iv2, k2, d2, k, pi_v});
-        } else if (pi_v > it->pi) {
-          *it = Pending{iv2, k2, d2, k, pi_v};
-        }
-      }
-    }
-    // Preferred-direction edges leaving the interval at its ends.
-    for (const int dj : {-1, 1}) {
-      if ((dj < 0 && j != ja) || (dj > 0 && j != jb)) {
+    for (int k = f; k < g; k++) {
+      const int j = j_of(k);
+      const size_t v = graph_.vertex(z, i, j);
+      const int i2 = dz > 0 ? layer.up_track[j] : layer.down_track[j];
+      const int j2 = dz > 0 ? layer.up_pos[i] : layer.down_pos[i];
+      if (i2 < 0 || j2 < 0 || !region.contains(graph_.layers[z2], z2, i2, j2)) {
         continue;
       }
-      const int j2 = j + dj;
-      if (j2 < 0 || j2 >= layer.numPositions()
-          || !region.contains(layer, z, i, j2)) {
-        continue;
+      const size_t w = graph_.vertex(z2, i2, j2);
+      const size_t lower = dz > 0 ? v : w;
+      const size_t upper = dz > 0 ? w : v;
+      if (enter(lower, kViaUpPad) && enter(lower, kCutUp)
+          && enter(upper, kViaDownPad)) {
+        relax_to(k,
+                 z2,
+                 i2,
+                 j2,
+                 graph_.via_cost[std::min(z, z2)] + penalty(lower, kViaUpPad)
+                     + penalty(lower, kCutUp) + penalty(upper, kViaDownPad));
       }
-      if (!is_source && !enter(v, kWire)) {
-        continue;
-      }
-      const size_t w = graph_.vertex(z, i, j2);
-      const size_t edge = dj > 0 ? v : w;
-      if (!enter(w, kWire) || !enter(edge, kWireEdge)) {
-        continue;
-      }
-      relax_to(z,
-               i,
-               j2,
-               std::abs(layer.positions[j2] - layer.positions[j])
-                   + penalty(w, kWire) + penalty(edge, kWireEdge));
     }
   }
-  for (const Pending& p : jog_best) {
-    addLabel(p.interval, p.k, p.delta, id, p.from_k);
+
+  // Algorithm 4, lines 13-17: process a neighboring jog interval once,
+  // choosing the member of J_I(delta) with maximum pi. Interval membership
+  // includes all jog/via availability; transitions carrying penalties are
+  // singletons. No per-vertex jog labeling is needed on a clean run.
+  if (layer.jogs) {
+    for (const int di : {-1, 1}) {
+      const int i2 = i + di;
+      if (i2 < 0 || i2 >= layer.numTracks()
+          || (!single && !(signature & (di > 0 ? 2 : 1)))) {
+        continue;
+      }
+      for (int k = f; k < g;) {
+        const int j = j_of(k);
+        const size_t v = graph_.vertex(z, i, j);
+        const size_t w = graph_.vertex(z, i2, j);
+        const size_t edge = di > 0 ? v : w;
+        size_t li;
+        inWindow(z, i, j, li);
+        const bool source = source_stamp_[li] == epoch_;
+        if (!region.contains(layer, z, i2, j) || !(source || enter(v, kJog))
+            || !enter(w, kJog) || !enter(edge, kJogEdge)) {
+          k++;
+          continue;
+        }
+        const int next_id = intervalOf(z, i2, j);
+        if (next_id < 0) {
+          k++;
+          continue;
+        }
+        const Interval& next = intervals_[next_id];
+        const int last_j = dir > 0 ? std::min(j_of(g - 1), next.jb)
+                                   : std::max(j_of(g - 1), next.ja);
+        const int end = k_of(last_j) + 1;
+        const int representative = end - 1;
+        const int jr = j_of(representative);
+        const size_t vr = graph_.vertex(z, i, jr);
+        const size_t wr = graph_.vertex(z, i2, jr);
+        const size_t er = di > 0 ? vr : wr;
+        size_t lr;
+        inWindow(z, i, jr, lr);
+        const Cost cost
+            = layer.jog_factor * std::abs(layer.tracks[i2] - layer.tracks[i])
+              + penalty(wr, kJog) + penalty(er, kJogEdge)
+              + (source_stamp_[lr] == epoch_ ? 0 : penalty(vr, kJog));
+        relax_to(representative, z, i2, jr, cost);
+        k = end;
+      }
+    }
+  }
+
+  // Preferred-direction edges leave an interval only at its endpoints.
+  for (const int dj : {-1, 1}) {
+    const int j = dj < 0 ? ja : jb;
+    const int k = k_of(j);
+    const int j2 = j + dj;
+    if (k < f || k >= g || j2 < 0 || j2 >= layer.numPositions()
+        || !region.contains(layer, z, i, j2)) {
+      continue;
+    }
+    const size_t v = graph_.vertex(z, i, j);
+    const size_t w = graph_.vertex(z, i, j2);
+    const size_t edge = dj > 0 ? v : w;
+    size_t li;
+    inWindow(z, i, j, li);
+    if ((source_stamp_[li] != epoch_ && !enter(v, kWire)) || !enter(w, kWire)
+        || !enter(edge, kWireEdge)) {
+      continue;
+    }
+    relax_to(k,
+             z,
+             i,
+             j2,
+             std::abs(layer.positions[j2] - layer.positions[j])
+                 + penalty(w, kWire) + penalty(edge, kWireEdge));
   }
   pushEvent(id);
 }
@@ -528,7 +616,11 @@ SearchResult IntervalSearch::run(const SearchRequest& request)
       break;
     }
     const Interval& iv = intervals_[e.interval];
-    if (iv.frontier >= iv.n() || value(iv, iv.frontier) != e.key) {
+    if (iv.frontier >= iv.n() || iv.frontier != e.aux
+        || value(iv, iv.frontier) != e.key
+        || iv.futureCost(graph_.layers[iv.z],
+                         iv.jOf(frontierEnd(iv, e.key) - 1))
+               != e.max_future) {
       continue;
     }
     process(e.interval, e.key);
