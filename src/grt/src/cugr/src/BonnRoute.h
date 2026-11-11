@@ -104,6 +104,12 @@ struct BonnRouteParams
   // phase. Results then depend on thread timing. 0 = deterministic
   // frozen-price batches.
   bool concurrent_prices = false;
+  // Variant: CUGR gcells of gcell_scale x the default tile (Sec. 2.1 sizes
+  // tiles for 50-100 minimum-width wires per layer; OpenROAD's default
+  // tile holds about 10 tracks). The coarse grid is the gcell grid of the
+  // whole flow: it is written to the database for detailed routing, and
+  // guides cover the coarse cells.
+  int gcell_scale = 1;
   bool verbose = true;
 
   // Returns false if the name is unknown.

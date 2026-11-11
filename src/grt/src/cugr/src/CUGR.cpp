@@ -289,6 +289,8 @@ void CUGR::init(const int min_routing_layer,
 {
   clear();
   constants_.min_routing_layer = min_routing_layer - 1;
+  constants_.gcell_scale
+      = bonnroute_ && bonnroute_params_ ? bonnroute_params_->gcell_scale : 1;
   design_ = std::make_unique<Design>(db_,
                                      logger_,
                                      constants_,
@@ -2361,6 +2363,40 @@ void CUGR::reportCongestion() const
                "Sub-min-layer via demand (inert): {:.2f} tracks",
                submin_via);
   }
+}
+
+int CUGR::getGridlineSize() const
+{
+  return design_ ? design_->getGridlineSize() : 0;
+}
+
+odb::Rect CUGR::gcellUnion(const int x0,
+                           const int y0,
+                           const int x1,
+                           const int y1) const
+{
+  // Index of the gcell whose lower gridline is the last one <= v.
+  auto cell = [&](const int dimension, const int v) {
+    int lo = 0;
+    int hi = grid_graph_->getSize(dimension) - 1;
+    while (lo < hi) {
+      const int mid = (lo + hi + 1) / 2;
+      if (grid_graph_->getGridline(dimension, mid) <= v) {
+        lo = mid;
+      } else {
+        hi = mid - 1;
+      }
+    }
+    return lo;
+  };
+  const int cx0 = cell(0, std::min(x0, x1));
+  const int cx1 = cell(0, std::max(x0, x1));
+  const int cy0 = cell(1, std::min(y0, y1));
+  const int cy1 = cell(1, std::max(y0, y1));
+  return {grid_graph_->getGridline(0, cx0),
+          grid_graph_->getGridline(1, cy0),
+          grid_graph_->getGridline(0, cx1 + 1),
+          grid_graph_->getGridline(1, cy1 + 1)};
 }
 
 void CUGR::updateDbCongestion()

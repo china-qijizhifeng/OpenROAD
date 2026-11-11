@@ -98,6 +98,8 @@ bool BonnRouteParams::set(const std::string& name, const double value)
     goal_check = value != 0.0;
   } else if (name == "concurrent_prices") {
     concurrent_prices = value != 0.0;
+  } else if (name == "gcell_scale") {
+    gcell_scale = std::clamp(static_cast<int>(value), 1, 64);
   } else if (name == "verbose") {
     verbose = value != 0.0;
   } else {

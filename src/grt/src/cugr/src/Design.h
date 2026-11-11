@@ -92,6 +92,8 @@ class Design
                        bool skip_m1 = true) const;
 
   int getGridlineSize() const { return default_gridline_spacing_; }
+  // The block's default gcell tile (getGridlineSize() / gcell_scale).
+  int getFineGridlineSize() const { return fine_gridline_spacing_; }
 
   BoxT getDieRegion() const { return die_region_; }
 
@@ -153,6 +155,7 @@ class Design
 
   // For global routing
   int default_gridline_spacing_;
+  int fine_gridline_spacing_ = 0;
   std::vector<std::vector<int>> gridlines_;
 
   const Constants constants_;
