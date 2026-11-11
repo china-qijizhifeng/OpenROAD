@@ -212,9 +212,19 @@ segment, so constant point levels on an edge imply its level.
 ## A5 Integration (BonnRouteDR)
 
 * `buildRoutingSpace`: layer rules from the drt tech, classes, wire types,
-  shape-grid geometry, checker, fast grid. `buildFixed` inserts blockages and
-  pins (bulk), then the fast grid is built in parallel (vertex data, then jog
-  bits) and compacted.
+  shape-grid geometry, checker, fast grid. `buildFixed` queries the fixed
+  shapes per drt layer in parallel, interns their shape classes in the
+  order of a serial drt-layer loop (class ids as before), and inserts them
+  with `insertFixedShapes` (BrFixedShapes): per shape-grid layer, bands of
+  global routing tile rows, one thread per band inserting every shape
+  clipped to the band's rows in the serial order (the pieces of a row depend
+  only on the shape's extent in it; wide shapes go whole to the layer's
+  first band). Every tile chunk sees the changes of one serial pass
+  (`BonnRouteFixedShapesTest` compares intervals, configuration contents,
+  wide shapes and collect() pieces with serial insertion). Then the fast
+  grid is built in parallel (vertex data, then jog bits) and compacted.
+  Guide tiles and access stubs of the nets are built in parallel; the setup
+  log (`BonnRoute DR setup phases`) gives the wall seconds of every step.
 * Reservations (pin access primary paths, input wires) are shape-grid shapes
   of type reservation owned by their net: non-removable for other nets,
   released on connect, restored by rip-up rollback (`setReservation`,

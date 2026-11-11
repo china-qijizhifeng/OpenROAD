@@ -145,6 +145,23 @@ additionally requires the exact legality check of its three shapes.
 - `max_targets` (2 x `max_access_options`) stops the search once that many
   target vertices are settled: the catalogue consists of the nearest
   on-track points. Some of them may still fail the exact checks.
+- Implementation (exact): the result of a run, including the order of the
+  paths and every counter, is a function of the request. The heap holds
+  (f, state) pairs ordered by f only and sees the pushes and pops of a
+  `std::priority_queue` in the order of the formulation above; ties
+  therefore resolve as they always did. Per state one 16-byte label
+  (distance, 32-bit parent, stamp) and 16-byte heap items; a window of
+  2^32 / 5 or more grid vertices is not searched. Per grid line: the nearest
+  line at distance >= tau in both directions (turn arcs), the prefix
+  counts of unit segments meeting an obstacle (a segment between two lines
+  is free iff the counts at its ends are equal; built on first use of the
+  line), the l1 distance to the nearest target coordinate of each target
+  layer (future cost), and for on-track-only layers whether arcs may start
+  there (`OffTrackLayer::tracks`). `BonnRouteOffTrackTest` keeps the
+  previous search verbatim and compares results, order and counters on
+  6000 random requests (one to three layers, tau 0 to 5, points-only
+  layers, source costs, duplicate targets, target and cost limits, via
+  rules, arc filters, on-track-only layers).
 
 ## Diff-net legality adapter
 
@@ -212,6 +229,18 @@ their own.
   pitches) gave one class per instance, as on tinyRocket and aes.
 - Pins without any catalogue path keep the previous access stubs (counted as
   fallback); top-level pins get a catalogue each and their best legal path.
+- Selection conflicts: every candidate shape is classified once (role
+  fixed, no line-end ends, as the pairwise legality check classifies it);
+  shape pairs farther apart in x or y than the layer's rule reach are not
+  checked, since no rule applies beyond it (`BonnRouteOffTrackTest` checks
+  that no such pair violates a rule).
+- Setup log (verbose): `BonnRoute off-track access phases` gives the wall
+  seconds of pin map, signatures, classification, class catalogues (with
+  the thread seconds of targets, obstacle collection, blockage grid,
+  search, path checks and selection), members and top-level pins;
+  `BonnRoute DR access digest` and `routing digest` fingerprint the
+  catalogues, primaries and reservations after setup and the routing
+  before writeNets, for comparing runs.
 
 ## Conflict-free solution by destructive bounding
 
