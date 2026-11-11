@@ -270,6 +270,9 @@ int BonnRouteDR::addNetData(frNet* net)
 
 bool BonnRouteDR::routableType(const NetData& data) const
 {
+  // Nets with input routing need no guides: repair_antennas
+  // -keep_detailed_wires leaves them without guides, and their routing
+  // area comes from the kept routing (prepareNet).
   if (data.dead || data.net == nullptr) {
     return false;
   }
@@ -278,7 +281,7 @@ bool BonnRouteDR::routableType(const NetData& data) const
   const size_t num_terms = net->getInstTerms().size() + net->getBTerms().size();
   return !(net->isSpecial() || net->isFake() || net->isFixed() || net->hasNDR()
            || type == odb::dbSigType::POWER || type == odb::dbSigType::GROUND
-           || num_terms < 2 || !net->hasGuides());
+           || num_terms < 2 || (!net->hasGuides() && !data.input_present));
 }
 
 void BonnRouteDR::recordFixedShape(const frBlockObject* obj,
@@ -634,6 +637,33 @@ bool BonnRouteDR::prepareNet(NetData& net,
   net.discount_runs.clear();
   net.skip = false;
   buildGuideTiles(net);
+  if (net.guide_tiles.empty()) {
+    // No guides: the tiles of the net's routing and pins.
+    frBlock* block = design_->getTopBlock();
+    auto add = [&](const frLayerNum fr, const odb::Rect& r) {
+      int z = fr >= 0 && fr < static_cast<int>(z_of_fr_.size()) ? z_of_fr_[fr]
+                                                                : -1;
+      if (z < 0) {
+        z = fr < layers_.front().fr ? 0 : graph_.numLayers() - 1;
+      }
+      const odb::Point a = block->getGCellIdx(r.ll());
+      const odb::Point b = block->getGCellIdx(r.ur());
+      for (int x = a.x(); x <= b.x(); x++) {
+        for (int y = a.y(); y <= b.y(); y++) {
+          net.guide_tiles.push_back({z, x, y});
+        }
+      }
+    };
+    for (const RShape& sh : net.input_shapes) {
+      add(sh.layer, sh.rect);
+    }
+    for (const RShape& sh : net.pins) {
+      add(sh.layer, sh.rect);
+    }
+    std::ranges::sort(net.guide_tiles);
+    net.guide_tiles.erase(std::ranges::unique(net.guide_tiles).begin(),
+                          net.guide_tiles.end());
+  }
   buildAccess(net);
   size_t t = 0;
   for (frInstTerm* it : net.net->getInstTerms()) {
@@ -1185,8 +1215,11 @@ void BonnRouteDR::routeIncremental(std::vector<odb::Rect>& regions)
     }
     write_mask_[id] = data.routed;
   }
-  // Fig. 9 nets: the pieces that were not kept leave the frNet; a net that
-  // could not be connected loses its input routing and goes to FlexDR.
+  // Fig. 9 nets: the pieces that were not kept leave the frNet. A net that
+  // could not be connected loses its input routing and goes to FlexDR when
+  // it has guides; without guides (repair_antennas -keep_detailed_wires)
+  // FlexDR cannot route it, so its input routing is restored unchanged.
+  int64_t restored = 0;
   for (auto& [id, c] : classified_) {
     NetData& data = nets_[id];
     frNet* fr = data.net;
@@ -1205,6 +1238,13 @@ void BonnRouteDR::routeIncremental(std::vector<odb::Rect>& regions)
         }
       }
       fr->setModified(true);
+    } else if (!fr->hasGuides()) {
+      setReservations(data, false);
+      setInputShapes(data, false);
+      routingShapes(fr, data.input_shapes);
+      setInputShapes(data, true);
+      data.keeps_input = false;
+      restored++;
     } else {
       setInputShapes(data, false);
       fr->clearRoutes();
@@ -1301,7 +1341,7 @@ void BonnRouteDR::routeIncremental(std::vector<odb::Rect>& regions)
         "nets_to_route={} unrouted={} pins_changed={} not_prepared={} "
         "first_pass_failed={} ripups={} written={} left_to_flexdr={} "
         "regions={} classified_nets={} complete_nets={} pieces={} kept={} "
-        "reserved={} dropped={} discount_runs={}",
+        "reserved={} dropped={} discount_runs={} restored_unconnected={}",
         sync_s,
         access_s,
         route_s,
@@ -1328,7 +1368,8 @@ void BonnRouteDR::routeIncremental(std::vector<odb::Rect>& regions)
         cstats.kept,
         cstats.reserved,
         cstats.dropped,
-        cstats.discount_runs);
+        cstats.discount_runs,
+        restored);
   }
 }
 
