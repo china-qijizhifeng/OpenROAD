@@ -906,7 +906,7 @@ void BonnRouteDR::changeShape(const RShape& shape,
     }
     // Sec. 3.6: the fast grid follows every change of the shape grid of
     // the track layers and their cuts, incrementally.
-    if (!bulk_insert_ && layer < track_grid_layers_) {
+    if (layer < track_grid_layers_) {
       const br::PlacedShape placed{r, cls, 3};
       const br::RipupLevel level = shape_grid_.level(type, owner);
       if (insert) {
@@ -1007,13 +1007,25 @@ void BonnRouteDR::buildFixed()
   frRegionQuery* rq = design_->getRegionQuery();
   const odb::Rect die = design_->getTopBlock()->getDieBox();
   const int num_fr = static_cast<int>(z_of_fr_.size());
-  bulk_insert_ = true;
+  const int threads = std::max(1, router_cfg_->MAX_THREADS);
+  // The fixed shapes of each drt layer in region-query order, with their
+  // owner net (-1: blockage).
+  struct FixedShape
+  {
+    odb::Rect rect;
+    int owner;
+    br::ClassId cls = 0;
+    br::ClassId projection_cls = 0;
+  };
+  std::vector<std::vector<FixedShape>> fixed(num_fr);
+#pragma omp parallel for num_threads(threads) schedule(dynamic, 1)
   for (int fr = 0; fr < num_fr; fr++) {
     if (gridLayer(fr) < 0) {
       continue;
     }
     frRegionQuery::Objects<frBlockObject> result;
     rq->query(die, fr, result);
+    fixed[fr].reserve(result.size());
     for (const auto& [rect, obj] : result) {
       frNet* owner_net = nullptr;
       if (obj->typeId() == frcInstTerm) {
@@ -1028,18 +1040,74 @@ void BonnRouteDR::buildFixed()
           owner = it->second;
         }
       }
-      const RShape shape{static_cast<frLayerNum>(fr), rect};
-      changeShape(shape,
-                  owner >= 0 ? br::ShapeType::kPin : br::ShapeType::kBlockage,
-                  owner,
-                  true,
-                  nullptr);
-      if (owner >= 0) {
-        nets_[owner].pins.push_back(shape);
+      fixed[fr].push_back({rect, owner});
+    }
+  }
+  setup_phases_.fixed_query = timer.elapsed();
+  // Shape classes in the order of the serial drt-layer loop (a shape, then
+  // its cut projection), so that class ids are those of that loop.
+  for (int fr = 0; fr < num_fr; fr++) {
+    const int g = gridLayer(fr);
+    if (g < 0) {
+      continue;
+    }
+    const int above = projectionLayer(g);
+    for (FixedShape& f : fixed[fr]) {
+      RShape shape{static_cast<frLayerNum>(fr), f.rect};
+      f.cls = shapeClass(shape, g);
+      if (above >= 0) {
+        shape.role = br::ShapeRole::kCutProjection;
+        f.projection_cls = shapeClass(shape, above);
       }
     }
   }
-  bulk_insert_ = false;
+  // Shape-grid layers are independent; each receives the shapes of its
+  // drt layer and the projections of the cut layer below (changeShape),
+  // in the order of the drt-layer loop: the cut below comes first. One
+  // thread per grid layer inserts them in that order.
+  struct Source
+  {
+    frLayerNum fr;
+    bool projection;
+  };
+  setup_phases_.fixed_classes = timer.elapsed() - setup_phases_.fixed_query;
+  std::vector<std::vector<Source>> sources(shape_classes_.numLayers());
+  for (int fr = 0; fr < num_fr; fr++) {
+    const int g = gridLayer(fr);
+    if (g < 0) {
+      continue;
+    }
+    sources[g].push_back({static_cast<frLayerNum>(fr), false});
+    const int above = projectionLayer(g);
+    if (above >= 0) {
+      sources[above].push_back({static_cast<frLayerNum>(fr), true});
+    }
+  }
+#pragma omp parallel for num_threads(threads) schedule(dynamic, 1)
+  for (int g = 0; g < static_cast<int>(sources.size()); g++) {
+    br::ShapeGridWriteCache cache;
+    for (const Source& source : sources[g]) {
+      for (const FixedShape& f : fixed[source.fr]) {
+        const br::ShapeType type
+            = f.owner >= 0 ? br::ShapeType::kPin : br::ShapeType::kBlockage;
+        if (!shape_grid_.insert(g,
+                                brRect(f.rect),
+                                source.projection ? f.projection_cls : f.cls,
+                                type,
+                                f.owner,
+                                cache)) {
+          inconsistent_updates_++;
+        }
+      }
+    }
+  }
+  for (int fr = 0; fr < num_fr; fr++) {
+    for (const FixedShape& f : fixed[fr]) {
+      if (f.owner >= 0) {
+        nets_[f.owner].pins.push_back({static_cast<frLayerNum>(fr), f.rect});
+      }
+    }
+  }
   setup_phases_.fixed_insert = timer.elapsed();
   rebuildFastGrid();
   setup_phases_.fast_grid_rebuild
@@ -4981,7 +5049,8 @@ void BonnRouteDR::main()
     logger_->report(
         "BonnRoute DR setup phases: track graph {:.2f}s, routing space "
         "{:.2f}s, spreading tiles {:.2f}s, workers {:.2f}s, nets {:.2f}s, "
-        "fixed shapes {:.2f}s, fast grid rebuild {:.2f}s, compaction "
+        "fixed shapes {:.2f}s (region query {:.2f}s, classes {:.2f}s), fast "
+        "grid rebuild {:.2f}s, compaction "
         "{:.2f}s, same-net rules {:.2f}s, guide tiles and access stubs "
         "{:.2f}s, off-track access {:.2f}s, stub reservations {:.2f}s, input "
         "wire reservations {:.2f}s; setup {:.2f}s.",
@@ -4991,6 +5060,8 @@ void BonnRouteDR::main()
         phases.workers,
         phases.nets,
         phases.fixed_insert,
+        phases.fixed_query,
+        phases.fixed_classes,
         phases.fast_grid_rebuild,
         phases.compaction,
         phases.same_net_rules,

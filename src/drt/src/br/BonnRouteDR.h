@@ -440,7 +440,9 @@ class BonnRouteDR
     double spreading = 0;
     double workers = 0;
     double nets = 0;
-    double fixed_insert = 0;
+    double fixed_insert = 0;  // total: query, classes, shape-grid insert
+    double fixed_query = 0;
+    double fixed_classes = 0;
     double fast_grid_rebuild = 0;
     double compaction = 0;
     double same_net_rules = 0;
@@ -701,8 +703,6 @@ class BonnRouteDR
   // grid layers (2 z + 1 for z track layers); the low layers follow.
   std::vector<int> grid_of_fr_;
   int track_grid_layers_ = 0;
-  // During buildFixed the fast grid is rebuilt once at the end.
-  bool bulk_insert_ = false;
   // Tiles between a net's routing area and its partition box border, so
   // that its routing-space updates and queries stay inside (Sec. 5.1).
   int halo_tiles_ = 1;
