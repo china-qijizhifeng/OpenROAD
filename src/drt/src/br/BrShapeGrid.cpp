@@ -170,7 +170,7 @@ ShapeGrid::Block& ShapeGrid::block(Layer& layer,
     b->rows = layer.chunk_first_row[row_chunk + 1] - b->row_first;
     b->cell_first = layer.chunk_first_cell[cell_chunk];
     b->cells = layer.chunk_first_cell[cell_chunk + 1] - b->cell_first;
-    b->spans.assign(b->rows, RowSpan{});
+    b->row_offset.assign(b->rows + 1, 0);
   }
   return *b;
 }
@@ -186,9 +186,10 @@ const ShapeGrid::Block* ShapeGrid::block(const Layer& layer,
 
 // Interval sets of the rows (Sec. 3.3: "intervals which are stored in an
 // AVL-tree in each row"): per row chunk a sorted array of disjoint
-// intervals in the block's pool. Rows of a tile chunk hold few intervals,
-// so binary search and moving the tail of one row replace the tree's
-// rotations; the enumeration order (increasing first cell) is the same.
+// intervals, the rows of a block concatenated (compressed rows). Row
+// chunks hold few intervals, so binary search and shifting the block's
+// tail replace the tree's rotations; the enumeration order (increasing
+// first cell) is the same.
 
 const ShapeGrid::Interval* ShapeGrid::firstEndingAtOrAfter(const Block& b,
                                                            const int local,
@@ -224,64 +225,33 @@ const ShapeGrid::Interval* ShapeGrid::findFirst(const Block& b,
   return it == last ? nullptr : it;
 }
 
-void ShapeGrid::compactPool(Block& b)
-{
-  size_t live = 0;
-  for (const RowSpan& span : b.spans) {
-    live += span.count;
-  }
-  std::vector<Interval> pool;
-  pool.reserve(live);
-  for (RowSpan& span : b.spans) {
-    const uint32_t offset = static_cast<uint32_t>(pool.size());
-    pool.insert(pool.end(),
-                b.pool.begin() + span.offset,
-                b.pool.begin() + span.offset + span.count);
-    span.offset = offset;
-    span.capacity = span.count;
-  }
-  b.pool = std::move(pool);
-  b.dead = 0;
-}
-
 void ShapeGrid::replaceRow(Block& b,
                            const int local,
                            const uint32_t first,
                            const uint32_t last,
                            const std::vector<Interval>& with)
 {
-  RowSpan span = b.spans[local];
-  const uint32_t n = static_cast<uint32_t>(with.size());
-  const uint32_t count = span.count - (last - first) + n;
-  if (count <= span.capacity) {
-    Interval* row = b.pool.data() + span.offset;
-    std::move(row + last, row + span.count, row + first + n);
-    std::ranges::copy(with, row + first);
-    b.spans[local].count = count;
-    return;
-  }
-  // Move the row to the end of the pool with room to grow; compact the
-  // pool once a quarter of it is left behind by moved rows.
-  const uint32_t capacity = count + count / 4 + 2;
-  if (b.pool.size() + capacity > b.pool.capacity()) {
-    if (b.dead * 4 >= b.pool.size()) {
-      compactPool(b);
-      span = b.spans[local];
+  const uint32_t base = b.row_offset[local];
+  const auto n = static_cast<int64_t>(with.size());
+  const auto m = static_cast<int64_t>(last - first);
+  const int64_t delta = n - m;
+  if (delta > 0) {
+    // Grow by an eighth: blocks keep little spare room.
+    const size_t need = b.pool.size() + delta;
+    if (need > b.pool.capacity()) {
+      b.pool.reserve(need + need / 8 + 4);
     }
-    if (b.pool.size() + capacity > b.pool.capacity()) {
-      b.pool.reserve(std::max(b.pool.size() + capacity,
-                              b.pool.size() + b.pool.size() / 4 + 64));
+    b.pool.insert(b.pool.begin() + base + last, delta, Interval{});
+  } else if (delta < 0) {
+    b.pool.erase(b.pool.begin() + base + first + n,
+                 b.pool.begin() + base + last);
+  }
+  std::ranges::copy(with, b.pool.begin() + base + first);
+  if (delta != 0) {
+    for (int r = local + 1; r <= b.rows; r++) {
+      b.row_offset[r] = static_cast<uint32_t>(b.row_offset[r] + delta);
     }
   }
-  const uint32_t offset = static_cast<uint32_t>(b.pool.size());
-  b.pool.resize(b.pool.size() + capacity);
-  Interval* from = b.pool.data() + span.offset;
-  Interval* to = b.pool.data() + offset;
-  std::copy(from, from + first, to);
-  std::ranges::copy(with, to + first);
-  std::copy(from + last, from + span.count, to + first + n);
-  b.dead += span.capacity;
-  b.spans[local] = RowSpan{offset, count, capacity};
 }
 
 uint32_t ShapeGrid::transition(const uint32_t config,
@@ -1080,7 +1050,7 @@ void ShapeGrid::compact()
     }
     for (auto& b : layer.blocks) {
       if (b) {
-        compactPool(*b);
+        b->pool.shrink_to_fit();
         b->shared.shrink_to_fit();
       }
     }
@@ -1121,7 +1091,7 @@ ShapeGrid::Statistics ShapeGrid::statistics() const
       if (!b) {
         continue;
       }
-      s.bytes += sizeof(Block) + b->spans.capacity() * sizeof(RowSpan)
+      s.bytes += sizeof(Block) + b->row_offset.capacity() * sizeof(uint32_t)
                  + b->pool.capacity() * sizeof(Interval)
                  + b->shared.capacity() * sizeof(b->shared[0]);
       for (const auto& parts : b->shared) {

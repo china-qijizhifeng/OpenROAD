@@ -351,27 +351,18 @@ class ShapeGrid
     int32_t owner;
     uint32_t config;
   };
-  // The intervals of one row chunk: pool[offset, offset + count) of its
-  // block, sorted by begin and disjoint; `capacity` slots are reserved.
-  struct RowSpan
-  {
-    uint32_t offset = 0;
-    uint32_t count = 0;
-    uint32_t capacity = 0;
-  };
   // Rows and cells of one layer anchored in one global routing tile. The
-  // rows' interval arrays share one contiguous pool; a row that outgrows
-  // its slots moves to the end of the pool, and the pool is compacted once
-  // the slots left behind reach a quarter of it.
+  // intervals of all its rows lie in one array in row order (compressed
+  // rows): row r holds pool[row_offset[r], row_offset[r + 1]), sorted by
+  // begin and disjoint. An update shifts the tail of the block's array.
   struct Block
   {
     int row_first = 0;
     int rows = 0;
     int cell_first = 0;
     int cells = 0;
-    std::vector<RowSpan> spans;
+    std::vector<uint32_t> row_offset;  // rows + 1
     std::vector<Interval> pool;
-    size_t dead = 0;  // pool slots of moved rows
     std::vector<std::vector<SharedPart>> shared;
     std::vector<uint32_t> free_shared;
   };
@@ -465,11 +456,11 @@ class ShapeGrid
   // Sorted interval arrays of the rows (Sec. 3.3 interval sets per row).
   static const Interval* rowBegin(const Block& b, int local)
   {
-    return b.pool.data() + b.spans[local].offset;
+    return b.pool.data() + b.row_offset[local];
   }
   static const Interval* rowEnd(const Block& b, int local)
   {
-    return rowBegin(b, local) + b.spans[local].count;
+    return b.pool.data() + b.row_offset[local + 1];
   }
   // First interval of the row with end >= cell.
   static const Interval* firstEndingAtOrAfter(const Block& b,
@@ -485,7 +476,6 @@ class ShapeGrid
                          uint32_t first,
                          uint32_t last,
                          const std::vector<Interval>& with);
-  static void compactPool(Block& b);
 
   const ShapeClassTable* classes_ = nullptr;
   std::vector<Layer> layers_;

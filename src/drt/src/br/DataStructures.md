@@ -108,12 +108,11 @@ segment, so constant point levels on an edge imply its level.
   so its set is a sorted array of 16-byte records (first cell, last cell,
   configuration, owner) instead of a tree: lookups are binary searches,
   enumeration is a linear scan in the same order, and an update moves the
-  tail of one short array. The arrays of a tile chunk's rows share one
-  contiguous pool; a row that outgrows its slots moves to the end of the
-  pool with a quarter of headroom, and the pool is compacted when a
-  quarter of it is left behind (and after the bulk build). Insert / remove
-  of a shape is O(log n + k + n) per row chunk, k = intervals it meets,
-  n = intervals of the row chunk.
+  tail of a short array. The rows of a tile chunk are concatenated in
+  one array (compressed rows: one 32-bit offset per row), which grows by
+  an eighth when full and is shrunk after the bulk build. Insert / remove
+  of a shape is O(log n + k + N) per row chunk, k = intervals it meets,
+  N = intervals of the tile chunk (a few hundred on the measured designs).
 * Owner: "for each nonempty interval we store the net that the shapes of this
   interval belong to". Blockage pieces have no owner; pins, reservations,
   wires and vias are owned. A cell that would hold owned shapes of two nets
