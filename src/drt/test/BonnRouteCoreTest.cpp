@@ -377,7 +377,7 @@ static int randomCases(const int cases, const bool sparse, const bool modern)
             (long long) rc);
       }
     }
-    found += ri.found;
+    found += modern ? rvx.found : ri.found;
     pops_i += ri.heap_pops;
     labels += is.labels();
     ivs += is.intervals();
