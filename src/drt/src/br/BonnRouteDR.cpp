@@ -621,6 +621,7 @@ void BonnRouteDR::buildRoutingSpace()
   // routing area, so threads of disjoint regions (Sec. 5.1) never touch
   // the same tile chunk.
   const int64_t tile = std::max<int64_t>(1, std::min(tile_dx_, tile_dy_));
+  interaction_reach_ = need + max_pitch;
   halo_tiles_ = static_cast<int>(
       std::max<int64_t>(1, (2 * need + max_pitch + tile - 1) / tile));
   // Search label budget (labels of the vertex search: 32 bytes).
@@ -3733,6 +3734,9 @@ void BonnRouteDR::routeSpeculative(const std::vector<int>& order,
   int64_t batches = 0;
   int64_t conflicts = 0;
   int64_t nets = 0;
+  int64_t checked = 0;
+  double commit_seconds = 0;
+  double check_seconds = 0;
   double wall_total = 0;
   double busy_total = 0;
   while (!queue.empty()) {
@@ -3763,8 +3767,12 @@ void BonnRouteDR::routeSpeculative(const std::vector<int>& order,
     // start of the batch, so only commits earlier in the batch can conflict
     // with it. The first committed net of a batch is never checked, which
     // guarantees progress.
+    // Only shapes within the interaction distance of a shape committed
+    // earlier in the batch can conflict: nets whose bounding boxes stay
+    // farther apart skip the exact check.
+    const double commit_start = omp_get_wtime();
     std::vector<int> retry;
-    bool committed = false;
+    std::vector<odb::Rect> committed_boxes;
     for (size_t k = 0; k < batch.size(); k++) {
       NetData& net = nets_[batch[k]];
       if (!ok[k]) {
@@ -3774,11 +3782,26 @@ void BonnRouteDR::routeSpeculative(const std::vector<int>& order,
         continue;
       }
       bool clash = false;
-      if (committed) {
+      if (!committed_boxes.empty()) {
         shapesOf(net, shapes);
-        clash = std::ranges::any_of(shapes, [&](const RShape& shape) {
-          return shapeConflicts(shape, net.id);
-        });
+        odb::Rect box;
+        box.mergeInit();
+        for (const RShape& shape : shapes) {
+          box.merge(shape.rect);
+        }
+        const bool near = !box.isInverted()
+                          && std::ranges::any_of(committed_boxes,
+                                                 [&](const odb::Rect& other) {
+                                                   return other.intersects(box);
+                                                 });
+        if (near) {
+          const double check_start = omp_get_wtime();
+          clash = std::ranges::any_of(shapes, [&](const RShape& shape) {
+            return shapeConflicts(shape, net.id);
+          });
+          check_seconds += omp_get_wtime() - check_start;
+          checked++;
+        }
       }
       if (clash) {
         net.wires.clear();
@@ -3790,9 +3813,18 @@ void BonnRouteDR::routeSpeculative(const std::vector<int>& order,
       }
       commitNet(net, nullptr);
       setReservations(net, false, nullptr);
-      committed = true;
+      odb::Rect box;
+      box.mergeInit();
+      for (const RShape& shape : net.shapes) {
+        box.merge(shape.rect);
+      }
+      if (!box.isInverted()) {
+        box.bloat(static_cast<int>(interaction_reach_), box);
+        committed_boxes.push_back(box);
+      }
       nets++;
     }
+    commit_seconds += omp_get_wtime() - commit_start;
     for (auto it = retry.rbegin(); it != retry.rend(); ++it) {
       queue.push_front(*it);
     }
@@ -3807,14 +3839,18 @@ void BonnRouteDR::routeSpeculative(const std::vector<int>& order,
         9105,
         "BonnRoute {} speculative batches: {} batches of up to {} "
         "nets, {} nets committed, {} searched again after a "
-        "conflict; {:.2f}s, thread utilization {:.0f}%.",
+        "conflict; parallel search {:.2f}s, thread utilization {:.0f}%; "
+        "serial commit {:.2f}s ({} nets checked exactly, {:.2f}s).",
         stage,
         batches,
         batch_size,
         nets,
         conflicts,
         wall_total,
-        wall_total > 0 ? 100.0 * busy_total / (wall_total * threads) : 0.0);
+        wall_total > 0 ? 100.0 * busy_total / (wall_total * threads) : 0.0,
+        commit_seconds,
+        checked,
+        check_seconds);
   }
 }
 

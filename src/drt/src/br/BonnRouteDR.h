@@ -584,6 +584,9 @@ class BonnRouteDR
   // Tiles between a net's routing area and its partition box border, so
   // that its routing-space updates and queries stay inside (Sec. 5.1).
   int halo_tiles_ = 1;
+  // Largest distance at which two shapes of the routing space interact
+  // (any layer, incl. via-layer rules), plus one pitch.
+  int64_t interaction_reach_ = 0;
   size_t label_limit_ = 0;
   std::atomic<int64_t> inconsistent_updates_{0};
   std::vector<Worker> workers_;
