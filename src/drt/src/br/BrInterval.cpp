@@ -17,36 +17,14 @@ namespace drt::br {
 
 Cost IntervalSearch::futureCost(const int z, const int i, const int j) const
 {
+  const auto [x, y] = graph_.layers[z].point(i, j);
   if (req_->future_cost != nullptr) {
-    const auto [x, y] = graph_.layers[z].point(i, j);
     return req_->future_cost->query(z, x, y);
   }
-  if (req_->target_boxes.empty()) {
+  if (boxes_.empty()) {
     return 0;
   }
-  const auto [x, y] = graph_.layers[z].point(i, j);
-  Cost best = kInfCost;
-  for (const TargetBox& b : req_->target_boxes) {
-    const Cost dx = std::max({0, b.xlo - x, x - b.xhi});
-    const Cost dy = std::max({0, b.ylo - y, y - b.yhi});
-    best = std::min(
-        best,
-        dx + dy + viaBound(z, b) + (req_->exact_future_cost ? b.cost : 0));
-  }
-  return best;
-}
-
-Cost IntervalSearch::viaBound(const int z, const TargetBox& box) const
-{
-  if (z < box.zlo) {
-    return req_->exact_future_cost ? via_prefix_[box.zlo] - via_prefix_[z]
-                                   : (box.zlo - z) * min_via_cost_;
-  }
-  if (z > box.zhi) {
-    return req_->exact_future_cost ? via_prefix_[z] - via_prefix_[box.zhi]
-                                   : (z - box.zhi) * min_via_cost_;
-  }
-  return 0;
+  return boxes_.at(z, x, y, 1);
 }
 
 Cost IntervalSearch::spreadCost(const int z, const int i, const int j) const
@@ -345,16 +323,17 @@ int IntervalSearch::buildInterval(const int z, const int i, const int j)
   // pi_H along track i: per target box, the cost across the track
   // (cross distance, via bound, terminal cost) and its range along it.
   track_future_.clear();
-  for (const TargetBox& b : req_->target_boxes) {
+  for (size_t bi = 0; bi < req_->target_boxes.size(); bi++) {
     if (req_->future_cost != nullptr) {
       break;
     }
+    const TargetBox& b = req_->target_boxes[bi];
     const Coord c = layer.tracks[i];
     const Coord clo = layer.horizontal ? b.ylo : b.xlo;
     const Coord chi = layer.horizontal ? b.yhi : b.xhi;
     track_future_.push_back(
-        {std::max({Cost{0}, Cost{clo} - c, Cost{c} - chi}) + viaBound(z, b)
-             + (req_->exact_future_cost ? b.cost : 0),
+        {std::max({Cost{0}, Cost{clo} - c, Cost{c} - chi})
+             + boxes_.constant(z, bi),
          layer.horizontal ? b.xlo : b.ylo,
          layer.horizontal ? b.xhi : b.yhi});
   }
@@ -882,6 +861,7 @@ SearchResult IntervalSearch::run(const SearchRequest& request)
   for (int z = 1; z < graph_.numLayers(); z++) {
     via_prefix_[z] = via_prefix_[z - 1] + graph_.via_cost[z - 1];
   }
+  boxes_.setup(request, via_prefix_, min_via_cost_);
   heap_.clear();
   pending_.clear();
   jog_runs_.clear();

@@ -12,36 +12,52 @@
 
 namespace drt::br {
 
+void TargetBoxBound::setup(const SearchRequest& request,
+                           const std::vector<Cost>& via_prefix,
+                           const Cost min_via_cost)
+{
+  const size_t n = request.target_boxes.size();
+  const size_t layers = via_prefix.size();
+  xlo_.resize(n);
+  xhi_.resize(n);
+  ylo_.resize(n);
+  yhi_.resize(n);
+  constant_.resize(n * layers);
+  for (size_t b = 0; b < n; b++) {
+    const TargetBox& box = request.target_boxes[b];
+    xlo_[b] = box.xlo;
+    xhi_[b] = box.xhi;
+    ylo_[b] = box.ylo;
+    yhi_[b] = box.yhi;
+    for (size_t z = 0; z < layers; z++) {
+      // Via bound from z to the box's layer range (exact: the cheapest via
+      // stack; otherwise layers * cheapest via).
+      Cost via = 0;
+      const int iz = static_cast<int>(z);
+      if (iz < box.zlo) {
+        via = request.exact_future_cost
+                  ? via_prefix[box.zlo] - via_prefix[iz]
+                  : (box.zlo - iz) * min_via_cost;
+      } else if (iz > box.zhi) {
+        via = request.exact_future_cost
+                  ? via_prefix[iz] - via_prefix[box.zhi]
+                  : (iz - box.zhi) * min_via_cost;
+      }
+      constant_[z * n + b]
+          = via + (request.exact_future_cost ? box.cost : 0);
+    }
+  }
+}
+
 Cost PathSearch::futureCost(const int z, const Coord x, const Coord y) const
 {
   if (req_->future_cost != nullptr) {
     return req_->future_cost->query(z, x, y);
   }
-  if (req_->target_boxes.empty()) {
+  if (boxes_.empty()) {
     return 0;
   }
-  Cost best = kInfCost;
-  for (const TargetBox& b : req_->target_boxes) {
-    const Cost dx = std::max({0, b.xlo - x, x - b.xhi});
-    const Cost dy = std::max({0, b.ylo - y, y - b.yhi});
-    best = std::min(best,
-                    (dx + dy) * min_wire_rate_ + viaBound(z, b)
-                        + (req_->exact_future_cost ? b.cost : 0));
-  }
-  return best;
-}
-
-Cost PathSearch::viaBound(const int z, const TargetBox& box) const
-{
-  if (z < box.zlo) {
-    return req_->exact_future_cost ? via_prefix_[box.zlo] - via_prefix_[z]
-                                   : (box.zlo - z) * min_via_cost_;
-  }
-  if (z > box.zhi) {
-    return req_->exact_future_cost ? via_prefix_[z] - via_prefix_[box.zhi]
-                                   : (z - box.zhi) * min_via_cost_;
-  }
-  return 0;
+  return boxes_.at(z, x, y, min_wire_rate_);
 }
 
 Cost PathSearch::spreadCost(const int z, const int i, const int j) const
@@ -100,8 +116,49 @@ Cost PathSearch::penalty(const At a, const RipupLevel l) const
 void PathSearch::push(const Item& item)
 {
   heap_.push_back(item);
-  std::push_heap(heap_.begin(), heap_.end(), std::greater<>());
+  size_t k = heap_.size() - 1;
+  while (k > 0) {
+    const size_t parent = (k - 1) / 4;
+    if (!(heap_[parent] > item)) {
+      break;
+    }
+    heap_[k] = heap_[parent];
+    k = parent;
+  }
+  heap_[k] = item;
   res_->heap_pushes++;
+}
+
+PathSearch::Item PathSearch::pop()
+{
+  const Item top = heap_.front();
+  const Item last = heap_.back();
+  heap_.pop_back();
+  const size_t n = heap_.size();
+  if (n == 0) {
+    return top;
+  }
+  size_t k = 0;
+  while (true) {
+    const size_t first = 4 * k + 1;
+    if (first >= n) {
+      break;
+    }
+    size_t best = first;
+    const size_t end = std::min(first + 4, n);
+    for (size_t c = first + 1; c < end; c++) {
+      if (heap_[best] > heap_[c]) {
+        best = c;
+      }
+    }
+    if (!(last > heap_[best])) {
+      break;
+    }
+    heap_[k] = heap_[best];
+    k = best;
+  }
+  heap_[k] = last;
+  return top;
 }
 
 bool PathSearch::relax(const int z,
@@ -297,6 +354,7 @@ SearchResult PathSearch::run(const SearchRequest& request)
                        ? graph_.wire_unit
                        : std::min(graph_.wire_unit, request.discount_rate);
   heap_.clear();
+  boxes_.setup(request, via_prefix_, min_via_cost_);
   setupWindow(request);
 
   for (size_t t = 0; t < request.targets.size(); t++) {
@@ -337,9 +395,7 @@ SearchResult PathSearch::run(const SearchRequest& request)
       result.aborted = true;
       break;
     }
-    std::pop_heap(heap_.begin(), heap_.end(), std::greater<>());
-    const Item item = heap_.back();
-    heap_.pop_back();
+    const Item item = pop();
     result.heap_pops++;
     const int z = item.z;
     const int i = item.i;

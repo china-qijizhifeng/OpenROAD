@@ -196,6 +196,45 @@ struct SearchResult
   bool aborted = false;  // label budget exceeded
 };
 
+// pi_H of Sec. 4.1 over the target boxes of a search, in flat arrays: per
+// box its bounds, per (layer, box) the via bound plus terminal cost. The
+// value at (z, x, y) is min over boxes of l1 distance * rate + constant.
+class TargetBoxBound
+{
+ public:
+  // via_prefix[z] = cost of the vias 0 -> z; min_via_cost bounds a via
+  // when exact_future_cost is off.
+  void setup(const SearchRequest& request,
+             const std::vector<Cost>& via_prefix,
+             Cost min_via_cost);
+  bool empty() const { return xlo_.empty(); }
+  size_t size() const { return xlo_.size(); }
+  // Via bound plus terminal cost of box b from layer z.
+  Cost constant(const int z, const size_t b) const
+  {
+    return constant_[static_cast<size_t>(z) * xlo_.size() + b];
+  }
+  Cost at(const int z, const Coord x, const Coord y, const Cost rate) const
+  {
+    const size_t n = xlo_.size();
+    const Cost* constant = constant_.data() + static_cast<size_t>(z) * n;
+    Cost best = kInfCost;
+    for (size_t b = 0; b < n; b++) {
+      const Cost dx = std::max({0, xlo_[b] - x, x - xhi_[b]});
+      const Cost dy = std::max({0, ylo_[b] - y, y - yhi_[b]});
+      best = std::min(best, (dx + dy) * rate + constant[b]);
+    }
+    return best;
+  }
+
+ private:
+  std::vector<Coord> xlo_;
+  std::vector<Coord> xhi_;
+  std::vector<Coord> ylo_;
+  std::vector<Coord> yhi_;
+  std::vector<Cost> constant_;
+};
+
 // Per-vertex labels of a search window, stored in pages that a search
 // allocates when it touches them: memory follows the explored part of the
 // window, not its bounding box (a net spanning the die has a window of
@@ -376,7 +415,11 @@ class PathSearch
   // Rip-up penalty of entering a of level l.
   Cost penalty(At a, RipupLevel l) const;
   bool enter(const At a, const Kind k) const { return usable(level(a, k)); }
+  // 4-ary min-heap on heap_. Item::operator> is a strict total order (no
+  // two queued items share key, g and vertex), so the pop sequence is that
+  // of any other heap.
   void push(const Item& item);
+  Item pop();
   bool relax(int z, int i, int j, Cost g, Parent parent, int8_t dir);
   // Cost of the preferred-direction edge between positions j and j2,
   // including the wire spreading cost of entering j2.
@@ -392,8 +435,8 @@ class PathSearch
   mutable FastGridReader reader_;
   Cost min_via_cost_ = 0;
   std::vector<Cost> via_prefix_;  // via_prefix_[z] = cost of vias 0 -> z
-  Cost viaBound(int z, const TargetBox& box) const;
   Cost min_wire_rate_ = 1;
+  TargetBoxBound boxes_;
 
   // Search window: per layer track range [i0, i0 + ni) and position range
   // [j0, j0 + nj) covering the region; local index = wbase + di * nj + dj.
@@ -602,7 +645,7 @@ class IntervalSearch
   mutable FastGridReader reader_;
   Cost min_via_cost_ = 0;
   std::vector<Cost> via_prefix_;  // via_prefix_[z] = cost of vias 0 -> z
-  Cost viaBound(int z, const TargetBox& box) const;
+  TargetBoxBound boxes_;
 
   struct Window
   {
