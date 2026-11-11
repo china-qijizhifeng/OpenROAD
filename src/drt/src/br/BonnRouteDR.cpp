@@ -4466,10 +4466,15 @@ void BonnRouteDR::writeNets()
         }
       }
       seg->setStyle(style);
+      // Access paths of an NDR net keep the default rule: tapered, as
+      // FlexDR marks them, so that its checks apply no NDR spacing.
+      seg->setTapered(data.wire_type != 0 && w.wire_type == 0);
       net->addShape(std::move(seg));
     }
     for (const OutVia& v : data.vias) {
-      net->addVia(std::make_unique<frVia>(v.def, v.point));
+      auto via = std::make_unique<frVia>(v.def, v.point);
+      via->setTapered(data.wire_type != 0 && v.wire_type == 0);
+      net->addVia(std::move(via));
     }
     net->setHasInitialRouting(true);
     net->setModified(true);
