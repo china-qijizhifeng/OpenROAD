@@ -203,6 +203,19 @@ struct BonnRouteDRParams
   // Sec. 4.1 searches: per-worker label budget in MB (0: unlimited); a
   // search that would exceed it stops without a path (counted).
   int search_label_mb = 512;
+  // FlexDR clean-up after BonnRoute. FlexDR's iterations 0-2 run in
+  // incremental mode, which reroutes only nets without initial routing
+  // (the nets BonnRoute left) and keeps every BonnRoute net fixed; iteration
+  // 3 is the first that rips up nets at violations. After iteration 0 (which
+  // routes the left nets and checks every tile), the clean-up runs the first
+  // cleanup_incremental_iterations of the incremental iterations 1 and 2 and
+  // continues with iteration 3; 2 is FlexDR's own sequence.
+  int cleanup_incremental_iterations = 2;
+  // In the incremental iterations, a FlexDR worker whose nets all carry
+  // initial routing has nothing to reroute; it runs the design-rule check
+  // (with FlexGC's patches) and writes back the same result without
+  // building the maze grid graph.
+  bool cleanup_check_only_workers = false;
   bool verbose = true;
   // Algorithm profile: 0 = 2013-improved (default), 1 = 2013-reimpl,
   // 2 = 2021 (2013-reimpl plus Ahrens et al., arXiv:2111.06169).

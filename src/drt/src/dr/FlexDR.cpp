@@ -610,6 +610,12 @@ std::unique_ptr<FlexDRWorker> FlexDR::createWorker(const int x_offset,
     worker->setDRIter(0, bp);
   }
   worker->setRipupMode(args.ripupMode);
+  // Only iterations 0-2 (incremental because of initial routing): later
+  // incremental iterations of designs with fixed nets also gauge worker
+  // congestion on the grid graph.
+  worker->setCheckOnlyWithoutReroutableNets(
+      initial_routing_cleanup_.check_only_workers
+      && args.ripupMode == RipUpMode::INCR && iter_ <= 2 && !dist_on_);
   worker->setFollowGuide(args.followGuide);
   // TODO: only pass to relevant workers
   worker->setGraphics(graphics_.get());
@@ -811,6 +817,9 @@ void FlexDR::endWorkersBatch(
   for (auto& worker : workers_batch) {
     if (worker->end(getDesign())) {
       numWorkUnits_ += 1;
+    }
+    if (worker->isCheckOnly()) {
+      num_check_only_workers_++;
     }
     if (changed_regions != nullptr && worker->hasChangedDesign()) {
       changed_regions->push_back(worker->getExtBox());
@@ -1509,6 +1518,7 @@ void FlexDR::optimizationFlow(const SearchRepairArgs& args,
   int version = 0;
   increaseClipsize_ = false;
   numWorkUnits_ = 0;
+  num_check_only_workers_ = 0;
   // parallel execution
   for (auto& workerBatch : workers) {
     ProfileTask profile("DR:checkerboard");
@@ -1553,6 +1563,15 @@ void FlexDR::optimizationFlow(const SearchRepairArgs& args,
                     num_unaffected_workers,
                     num_workers);
     }
+  }
+
+  if (num_check_only_workers_ > 0 && router_cfg_->VERBOSE > 0) {
+    logger_->info(DRT,
+                  9121,
+                  "{} of {} workers had only nets with initial routing and "
+                  "ran the design-rule check only.",
+                  num_check_only_workers_,
+                  num_workers);
   }
 
   if (!iter_) {
@@ -2281,6 +2300,20 @@ int FlexDR::main()
     }
     if (reporter->incrementProgress()) {
       break;
+    }
+    // Iterations 1 and 2 keep every net with initial routing fixed
+    // (incremental mode); after the configured number of them, the repair
+    // that rips up such nets at violations (iteration 3) follows.
+    if (incremental && iter_ < 2
+        && iter_ == initial_routing_cleanup_.incremental_iterations) {
+      if (router_cfg_->VERBOSE > 0) {
+        logger_->info(DRT,
+                      9120,
+                      "Initial routing clean-up continues with iteration 3 "
+                      "after iteration {}.",
+                      iter_);
+      }
+      iter_ = 2;
     }
     ++iter_;
   }

@@ -227,6 +227,10 @@ bool BonnRouteDRParams::set(const std::string& name, const double value)
     offtrack_preferred_access_points = v != 0;
   } else if (name == "search_label_mb") {
     search_label_mb = std::max(0, v);
+  } else if (name == "cleanup_incremental_iterations") {
+    cleanup_incremental_iterations = std::clamp(v, 0, 2);
+  } else if (name == "cleanup_check_only_workers") {
+    cleanup_check_only_workers = v != 0;
   } else if (name == "verbose") {
     verbose = v != 0;
   } else {
