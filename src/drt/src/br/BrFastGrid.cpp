@@ -7,6 +7,8 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <functional>
+#include <iterator>
 #include <map>
 #include <span>
 #include <tuple>
@@ -1532,7 +1534,7 @@ void FastGridBuilder::insertWiring(const int z,
   thread_local std::vector<LineSpan> spans;
   // Point levels: max(old, the new shape's level where it violates).
   for (int i = r.i0; i <= r.i1; i++) {
-    const Point a = location(z, i, std::max(r.j0, 0));
+    const Point a = location(z, i, std::clamp(r.j0, 0, np - 1));
     for (const LocatedModel& m : models) {
       spans.clear();
       appendViolationSpans(
@@ -1608,7 +1610,7 @@ void FastGridBuilder::insertWiring(const int z,
   }
   if (layer.jogs) {
     for (int p = r.p0; p <= r.p1; p++) {
-      const Point a = location(z, p, std::max(r.j0, 0));
+      const Point a = location(z, p, std::clamp(r.j0, 0, np - 1));
       thread_local std::vector<std::vector<LineSpan>> hits;
       hits.assign(fast_, {});
       for (int t = 0; t < fast_; t++) {
@@ -1753,6 +1755,12 @@ void FastGridBuilder::wiringCandidates(const int z,
                                        Candidates& out) const
 {
   const TrackLayer& layer = graph_->layers[z];
+  const int np = layer.numPositions();
+  if (np == 0) {
+    return;
+  }
+  // The range's first position can lie beyond the track's last one; the
+  // spans are absolute, so any position of the track is a reference.
   const Range r = wiringRange(z, s.rect, shapeReach(g, s.cls));
   const ShapeClassTable& classes = checker_->grid().classes();
   thread_local std::vector<LocatedModel> models;
@@ -1761,7 +1769,7 @@ void FastGridBuilder::wiringCandidates(const int z,
   thread_local std::vector<LineSpan> spans;
   // Point levels equal to the shape's level where it violates.
   for (int i = r.i0; i <= r.i1; i++) {
-    const Point a = location(z, i, std::max(r.j0, 0));
+    const Point a = location(z, i, std::clamp(r.j0, 0, np - 1));
     for (const LocatedModel& m : models) {
       spans.clear();
       appendViolationSpans(
@@ -1797,7 +1805,7 @@ void FastGridBuilder::wiringCandidates(const int z,
     return;
   }
   for (int p = r.p0; p <= r.p1; p++) {
-    const Point a = location(z, p, std::max(r.j0, 0));
+    const Point a = location(z, p, std::clamp(r.j0, 0, np - 1));
     for (int t = 0; t < fast_; t++) {
       if (!(*types_)[t].non_preferred[z].valid) {
         continue;
@@ -1871,6 +1879,33 @@ void FastGridBuilder::viaCandidates(const int z,
   }
 }
 
+namespace {
+
+// A run of candidates on one track (gaps of at most kSegmentGap positions)
+// with one position of margin on each side: the edges and jog pairs at a
+// changed position.
+constexpr int kSegmentGap = 16;
+
+struct Segment
+{
+  int i = 0;
+  int lo = 0;
+  int hi = 0;
+  size_t first = 0;  // candidates [first, last] of FastGridBuilder::Candidates
+  size_t last = 0;
+  std::vector<uint64_t> words;  // level fields and wire edge bit, lo .. hi
+};
+
+// Swept jog hull levels of pair (p, p + 1) at position j, per wire type.
+struct JogSwept
+{
+  int p = 0;
+  int j = 0;
+  std::array<RipupLevel, FastGrid::kMaxWireTypes> swept{};
+};
+
+}  // namespace
+
 void FastGridBuilder::recomputeCandidates(
     const int z,
     Candidates& cand,
@@ -1882,226 +1917,344 @@ void FastGridBuilder::recomputeCandidates(
   const int nt = layer.numTracks();
   std::ranges::sort(cand.at);
   cand.at.erase(std::ranges::unique(cand.at).begin(), cand.at.end());
-  struct Track
-  {
-    int i;
-    int lo;
-    int hi;
-    std::vector<uint64_t> words;       // level fields, positions lo .. hi
-    std::vector<RipupLevel> interior;  // [t * (n - 1) + (j - lo)]
-    std::vector<uint32_t> near;        // pieces that can meet the track
-  };
-  thread_local std::vector<Track> tracks;
-  tracks.clear();
+  // Scratch of the calling thread; group bodies on other threads write only
+  // their own segments and jog lists.
+  thread_local std::vector<Segment> segments;
+  size_t num_segments = 0;
   for (size_t k = 0; k < cand.at.size();) {
     size_t e = k;
-    while (e + 1 < cand.at.size() && cand.at[e + 1].first == cand.at[k].first) {
+    while (e + 1 < cand.at.size() && cand.at[e + 1].first == cand.at[k].first
+           && cand.at[e + 1].second - cand.at[e].second <= kSegmentGap) {
       e++;
     }
-    tracks.push_back({cand.at[k].first,
-                      std::max(0, cand.at[k].second - 1),
-                      std::min(np - 1, cand.at[e].second + 1),
-                      {},
-                      {},
-                      {}});
+    if (num_segments == segments.size()) {
+      segments.emplace_back();
+    }
+    Segment& seg = segments[num_segments++];
+    seg.i = cand.at[k].first;
+    seg.lo = std::max(0, cand.at[k].second - 1);
+    seg.hi = std::min(np - 1, cand.at[e].second + 1);
+    seg.first = k;
+    seg.last = e;
     k = e + 1;
   }
+  const std::span<Segment> segs(segments.data(), num_segments);
+  // Groups of segments per global routing tile (of the segment's first
+  // position). Each group is recomputed from its own shape-grid window;
+  // the groups only read, so they run in parallel, and the results are
+  // combined in a fixed order.
+  // Thread-local scratch is bound to references: lambda bodies on other
+  // threads must see the calling thread's objects.
+  thread_local std::vector<std::pair<int64_t, int>> keyed_scratch;
+  std::vector<std::pair<int64_t, int>>& keyed = keyed_scratch;
+  keyed.clear();
+  for (size_t k = 0; k < segs.size(); k++) {
+    const Segment& seg = segs[k];
+    const int64_t key = int64_t{layer.track_tile[seg.i]} * (int64_t{1} << 32)
+                        + layer.pos_tile[seg.lo];
+    keyed.emplace_back(key, static_cast<int>(k));
+  }
+  std::ranges::sort(keyed);
+  thread_local std::vector<std::pair<size_t, size_t>> groups_scratch;
+  std::vector<std::pair<size_t, size_t>>& groups = groups_scratch;  // of keyed
+  groups.clear();
+  for (size_t k = 0; k < keyed.size();) {
+    size_t e = k;
+    while (e + 1 < keyed.size() && keyed[e + 1].first == keyed[k].first) {
+      e++;
+    }
+    groups.emplace_back(k, e + 1);
+    k = e + 1;
+  }
+  thread_local std::vector<std::vector<JogSwept>> group_jogs_scratch;
+  std::vector<std::vector<JogSwept>>& group_jogs = group_jogs_scratch;
+  if (group_jogs.size() < groups.size()) {
+    group_jogs.resize(groups.size());
+  }
+  for (size_t k = 0; k < groups.size(); k++) {
+    group_jogs[k].clear();
+  }
+  thread_local std::vector<LocatedModel> models_scratch;
+  std::vector<LocatedModel>& models = models_scratch;
+  models.clear();
+  pointModels(z, models);
   const ShapeGrid& sg = checker_->grid();
   const ShapeClassTable& classes = sg.classes();
   const int g = wiringGridLayer(z);
   const Coord reach = modelReach(g);
-  // One window for all tracks, including the neighbouring tracks of the
-  // jog pairs; collect() adds the wide pieces beyond it.
-  Rect window;
-  bool first = true;
-  for (const Track& t : tracks) {
-    for (const int i : {t.i - 1, t.i, t.i + 1}) {
-      if (i < 0 || i >= nt) {
-        continue;
-      }
-      const Rect r = windowOf(location(z, i, t.lo),
-                              location(z, i, t.hi),
-                              wiring_model_box_[z],
-                              reach);
-      window = first ? r : window.hull(r);
-      first = false;
-    }
-  }
-  thread_local GridWindow pieces;
-  sg.collect(g, window, pieces);
-  thread_local std::vector<LocatedModel> models;
-  models.clear();
-  pointModels(z, models);
   const bool h = layer.horizontal;
   const Rect& box = wiring_model_box_[z];
-  // Interaction distance of the models with a piece.
-  auto piece_reach = [&](const GridPiece& p) {
-    return std::max(reach, classes.reachOf(p.cls));
-  };
-  auto cross_meets = [&](const GridPiece& p, Coord lo, Coord hi) {
-    const Coord p_lo = h ? p.rect.ylo : p.rect.xlo;
-    const Coord p_hi = h ? p.rect.yhi : p.rect.xhi;
-    const Coord d = piece_reach(p);
-    return p_hi > lo - d && p_lo < hi + d;
-  };
-  auto skip = [&](const GridPiece& p) {
-    return p.owner == ignored && p.owner != kNoNet && isOwned(p.type);
-  };
-  thread_local std::vector<LineSpan> spans;
-  thread_local std::vector<uint32_t> near;
-  for (Track& t : tracks) {
-    const int n = t.hi - t.lo + 1;
-    t.words.assign(n, 0);
-    t.interior.assign(static_cast<size_t>(fast_) * std::max(0, n - 1), 0);
-    const Coord c = layer.tracks[t.i];
-    const Coord c_lo = c + (h ? box.ylo : box.xlo);
-    const Coord c_hi = c + (h ? box.yhi : box.xhi);
-    const Point a = location(z, t.i, t.lo);
-    const Coord along_lo = layer.positions[t.lo];
-    const Coord along_hi = layer.positions[t.hi];
-    near.clear();
-    for (const GridPiece& p : pieces.pieces) {
-      const Coord pa_lo = h ? p.rect.xlo : p.rect.ylo;
-      const Coord pa_hi = h ? p.rect.xhi : p.rect.yhi;
-      if (skip(p) || !cross_meets(p, c_lo, c_hi)
-          || pa_lo >= along_hi + (h ? box.xhi : box.yhi) + piece_reach(p)
-          || pa_hi <= along_lo + (h ? box.xlo : box.ylo) - piece_reach(p)) {
-        continue;
-      }
-      near.push_back(static_cast<uint32_t>(&p - pieces.pieces.data()));
-    }
-    t.near = near;
-    for (const uint32_t pi : near) {
-      const GridPiece& p = pieces.pieces[pi];
-      const RipupLevel lv = sg.level(p.type, p.owner);
-      const PlacedShape ps{p.rect, p.cls, p.line_end_ends};
-      for (const LocatedModel& m : models) {
-        if (farApart(classes,
-                     m,
-                     p,
-                     h,
-                     c + (h ? m.rect.ylo : m.rect.xlo),
-                     c + (h ? m.rect.yhi : m.rect.xhi),
-                     along_lo + (h ? m.rect.xlo : m.rect.ylo),
-                     along_hi + (h ? m.rect.xhi : m.rect.yhi))) {
+  constexpr uint64_t kWireBit = uint64_t{1} << FastGrid::kWireEdgeBit;
+  auto recompute_group = [&](const int gi) {
+    const auto [g0, g1] = groups[gi];
+    // One window for the group's tracks, including the neighbouring tracks
+    // of the jog pairs; collect() adds the wide pieces beyond it.
+    Rect window;
+    bool first = true;
+    for (size_t k = g0; k < g1; k++) {
+      const Segment& seg = segs[keyed[k].second];
+      for (const int i : {seg.i - 1, seg.i, seg.i + 1}) {
+        if (i < 0 || i >= nt) {
           continue;
         }
-        spans.clear();
-        appendViolationSpans(classes, m.rect, m.cls, 3, a, h, ps, spans);
-        const int shift = FastGrid::wiringShift(m.group / 4, m.group % 4);
-        for (const LineSpan& sp : spans) {
-          const auto [ja, jb] = indexRange(layer.positions, sp.lo, sp.hi);
-          for (int k = std::max(ja, t.lo); k <= std::min(jb, t.hi); k++) {
-            raise(t.words[k - t.lo], shift, lv);
+        const Rect r = windowOf(
+            location(z, i, seg.lo), location(z, i, seg.hi), box, reach);
+        window = first ? r : window.hull(r);
+        first = false;
+      }
+    }
+    thread_local GridWindow pieces;
+    sg.collect(g, window, pieces);
+    // Interaction distance of the models with a piece.
+    auto piece_reach = [&](const GridPiece& p) {
+      return std::max(reach, classes.reachOf(p.cls));
+    };
+    auto cross_meets = [&](const GridPiece& p, Coord lo, Coord hi) {
+      const Coord p_lo = h ? p.rect.ylo : p.rect.xlo;
+      const Coord p_hi = h ? p.rect.yhi : p.rect.xhi;
+      const Coord d = piece_reach(p);
+      return p_hi > lo - d && p_lo < hi + d;
+    };
+    auto skip = [&](const GridPiece& p) {
+      return p.owner == ignored && p.owner != kNoNet && isOwned(p.type);
+    };
+    thread_local std::vector<LineSpan> spans;
+    thread_local std::vector<uint32_t> near;
+    thread_local std::vector<RipupLevel> interior;
+    for (size_t k = g0; k < g1; k++) {
+      Segment& seg = segs[keyed[k].second];
+      const int n = seg.hi - seg.lo + 1;
+      seg.words.assign(n, 0);
+      interior.assign(static_cast<size_t>(fast_) * std::max(0, n - 1), 0);
+      const Coord c = layer.tracks[seg.i];
+      const Coord c_lo = c + (h ? box.ylo : box.xlo);
+      const Coord c_hi = c + (h ? box.yhi : box.xhi);
+      const Point a = location(z, seg.i, seg.lo);
+      const Coord along_lo = layer.positions[seg.lo];
+      const Coord along_hi = layer.positions[seg.hi];
+      near.clear();
+      for (const GridPiece& p : pieces.pieces) {
+        const Coord pa_lo = h ? p.rect.xlo : p.rect.ylo;
+        const Coord pa_hi = h ? p.rect.xhi : p.rect.yhi;
+        if (skip(p) || !cross_meets(p, c_lo, c_hi)
+            || pa_lo >= along_hi + (h ? box.xhi : box.yhi) + piece_reach(p)
+            || pa_hi <= along_lo + (h ? box.xlo : box.ylo) - piece_reach(p)) {
+          continue;
+        }
+        near.push_back(static_cast<uint32_t>(&p - pieces.pieces.data()));
+      }
+      for (const uint32_t pi : near) {
+        const GridPiece& p = pieces.pieces[pi];
+        const RipupLevel lv = sg.level(p.type, p.owner);
+        const PlacedShape ps{p.rect, p.cls, p.line_end_ends};
+        for (const LocatedModel& m : models) {
+          if (farApart(classes,
+                       m,
+                       p,
+                       h,
+                       c + (h ? m.rect.ylo : m.rect.xlo),
+                       c + (h ? m.rect.yhi : m.rect.xhi),
+                       along_lo + (h ? m.rect.xlo : m.rect.ylo),
+                       along_hi + (h ? m.rect.xhi : m.rect.yhi))) {
+            continue;
           }
-          if (m.group % 4 == 0 && n > 1) {
-            RipupLevel* in
-                = &t.interior[static_cast<size_t>(m.group / 4) * (n - 1)];
-            for (int e = std::max(t.lo, ja - 1); e <= std::min(t.hi - 1, jb);
-                 e++) {
-              in[e - t.lo] = std::max(in[e - t.lo], lv);
+          spans.clear();
+          appendViolationSpans(classes, m.rect, m.cls, 3, a, h, ps, spans);
+          const int shift = FastGrid::wiringShift(m.group / 4, m.group % 4);
+          for (const LineSpan& sp : spans) {
+            const auto [ja, jb] = indexRange(layer.positions, sp.lo, sp.hi);
+            for (int q = std::max(ja, seg.lo); q <= std::min(jb, seg.hi); q++) {
+              raise(seg.words[q - seg.lo], shift, lv);
+            }
+            if (m.group % 4 == 0 && n > 1) {
+              RipupLevel* in
+                  = &interior[static_cast<size_t>(m.group / 4) * (n - 1)];
+              for (int e = std::max(seg.lo, ja - 1);
+                   e <= std::min(seg.hi - 1, jb);
+                   e++) {
+                in[e - seg.lo] = std::max(in[e - seg.lo], lv);
+              }
             }
           }
         }
       }
-    }
-  }
-  auto find_track = [&](int i) -> const Track* {
-    const auto it = std::ranges::lower_bound(tracks, i, {}, &Track::i);
-    return it != tracks.end() && it->i == i ? &*it : nullptr;
-  };
-  constexpr uint64_t kWireBit = uint64_t{1} << FastGrid::kWireEdgeBit;
-  constexpr uint64_t kJogBit = uint64_t{1} << FastGrid::kJogEdgeBit;
-  auto levels_at = [&](int i, int j) -> uint64_t {
-    const Track* t = find_track(i);
-    if (t != nullptr && j >= t->lo && j <= t->hi) {
-      return t->words[j - t->lo];
-    }
-    return grid_->wiringWord(z, i, j) & ~FastGrid::kEdgeBits;
-  };
-  // Jog bits to recompute: pairs below and above every candidate.
-  thread_local std::vector<std::pair<int, int>> jog;
-  jog.clear();
-  if (layer.jogs) {
-    for (const auto& [i, j] : cand.at) {
-      if (i + 1 < nt) {
-        jog.emplace_back(i, j);
+      // Preferred bits of the edges with a changed endpoint; the edge
+      // beyond the segment keeps its stored bit.
+      for (int j = seg.lo; j <= seg.hi; j++) {
+        bool wire_bit;
+        if (j < seg.hi) {
+          wire_bit = false;
+          for (int ty = 0; ty < fast_ && !wire_bit; ty++) {
+            const int shift = FastGrid::wiringShift(ty, 0);
+            const RipupLevel ends
+                = std::max(FastGrid::field(seg.words[j - seg.lo], shift),
+                           FastGrid::field(seg.words[j + 1 - seg.lo], shift));
+            if (interior[static_cast<size_t>(ty) * (n - 1) + (j - seg.lo)]
+                <= ends) {
+              continue;
+            }
+            const PlacedShape hull{
+                prefHull(z, seg.i, j, ty), (*types_)[ty].preferred[z].cls, 3};
+            for (const uint32_t pi : near) {
+              const GridPiece& p = pieces.pieces[pi];
+              if (sg.level(p.type, p.owner) > ends
+                  && shapesViolate(
+                      classes,
+                      hull,
+                      PlacedShape{p.rect, p.cls, p.line_end_ends})) {
+                wire_bit = true;
+                break;
+              }
+            }
+          }
+        } else {
+          wire_bit = (grid_->wiringWord(z, seg.i, j) & kWireBit) != 0;
+        }
+        if (wire_bit) {
+          seg.words[j - seg.lo] |= kWireBit;
+        }
       }
-      if (i >= 1) {
-        jog.emplace_back(i - 1, j);
+    }
+    // Swept jog hulls of the pairs below and above the group's candidates.
+    if (!layer.jogs) {
+      return;
+    }
+    thread_local std::vector<std::pair<int, int>> jog;
+    jog.clear();
+    for (size_t k = g0; k < g1; k++) {
+      const Segment& seg = segs[keyed[k].second];
+      for (size_t q = seg.first; q <= seg.last; q++) {
+        const auto [i, j] = cand.at[q];
+        if (i + 1 < nt) {
+          jog.emplace_back(i, j);
+        }
+        if (i >= 1) {
+          jog.emplace_back(i - 1, j);
+        }
       }
     }
     std::ranges::sort(jog);
     jog.erase(std::ranges::unique(jog).begin(), jog.end());
-  }
-  thread_local std::vector<std::pair<std::pair<int, int>, bool>> jog_bits;
-  jog_bits.clear();
-  thread_local std::vector<RipupLevel> swept;
-  for (size_t k = 0; k < jog.size();) {
-    const int p = jog[k].first;
-    size_t e = k;
-    while (e + 1 < jog.size() && jog[e + 1].first == p) {
-      e++;
-    }
-    const int m = static_cast<int>(e - k + 1);
-    swept.assign(static_cast<size_t>(fast_) * m, 0);
-    const Coord c = layer.tracks[p];
-    const Coord c2 = layer.tracks[p + 1];
-    const Point a = location(z, p, jog[k].second);
-    thread_local std::vector<std::pair<int, LocatedModel>> hulls;
-    hulls.clear();
-    for (int t = 0; t < fast_; t++) {
-      if ((*types_)[t].non_preferred[z].valid) {
-        hulls.emplace_back(t, jogHull(z, p, t));
+    std::vector<JogSwept>& result = group_jogs[gi];
+    for (size_t k = 0; k < jog.size();) {
+      const int p = jog[k].first;
+      size_t e = k;
+      while (e + 1 < jog.size() && jog[e + 1].first == p) {
+        e++;
       }
-    }
-    for (const GridPiece& piece : pieces.pieces) {
-      if (skip(piece)
-          || !cross_meets(piece,
-                          c + (h ? box.ylo : box.xlo),
-                          c2 + (h ? box.yhi : box.xhi))) {
-        continue;
+      const size_t base = result.size();
+      for (size_t q = k; q <= e; q++) {
+        result.push_back({p, jog[q].second, {}});
       }
-      const RipupLevel lv = sg.level(piece.type, piece.owner);
-      const PlacedShape ps{piece.rect, piece.cls, piece.line_end_ends};
-      for (const auto& [t, hull] : hulls) {
-        if (farApart(classes,
-                     hull,
-                     piece,
-                     h,
-                     c + (h ? hull.rect.ylo : hull.rect.xlo),
-                     c + (h ? hull.rect.yhi : hull.rect.xhi),
-                     layer.positions[jog[k].second]
-                         + (h ? hull.rect.xlo : hull.rect.ylo),
-                     layer.positions[jog[e].second]
-                         + (h ? hull.rect.xhi : hull.rect.yhi))) {
+      const int m = static_cast<int>(e - k + 1);
+      const Coord c = layer.tracks[p];
+      const Coord c2 = layer.tracks[p + 1];
+      const Point a = location(z, p, jog[k].second);
+      thread_local std::vector<std::pair<int, LocatedModel>> hulls;
+      hulls.clear();
+      for (int t = 0; t < fast_; t++) {
+        if ((*types_)[t].non_preferred[z].valid) {
+          hulls.emplace_back(t, jogHull(z, p, t));
+        }
+      }
+      for (const GridPiece& piece : pieces.pieces) {
+        if (skip(piece)
+            || !cross_meets(piece,
+                            c + (h ? box.ylo : box.xlo),
+                            c2 + (h ? box.yhi : box.xhi))) {
           continue;
         }
-        spans.clear();
-        appendViolationSpans(classes, hull.rect, hull.cls, 3, a, h, ps, spans);
-        for (const LineSpan& sp : spans) {
-          for (int q = 0; q < m; q++) {
-            const Coord x = layer.positions[jog[k + q].second];
-            if (sp.lo <= x && x <= sp.hi) {
-              RipupLevel& s = swept[static_cast<size_t>(t) * m + q];
-              s = std::max(s, lv);
+        const RipupLevel lv = sg.level(piece.type, piece.owner);
+        const PlacedShape ps{piece.rect, piece.cls, piece.line_end_ends};
+        for (const auto& [t, hull] : hulls) {
+          if (farApart(classes,
+                       hull,
+                       piece,
+                       h,
+                       c + (h ? hull.rect.ylo : hull.rect.xlo),
+                       c + (h ? hull.rect.yhi : hull.rect.xhi),
+                       layer.positions[jog[k].second]
+                           + (h ? hull.rect.xlo : hull.rect.ylo),
+                       layer.positions[jog[e].second]
+                           + (h ? hull.rect.xhi : hull.rect.yhi))) {
+            continue;
+          }
+          spans.clear();
+          appendViolationSpans(
+              classes, hull.rect, hull.cls, 3, a, h, ps, spans);
+          for (const LineSpan& sp : spans) {
+            for (int q = 0; q < m; q++) {
+              const Coord x = layer.positions[jog[k + q].second];
+              if (sp.lo <= x && x <= sp.hi) {
+                RipupLevel& s = result[base + q].swept[t];
+                s = std::max(s, lv);
+              }
             }
           }
         }
       }
+      k = e + 1;
     }
-    for (int q = 0; q < m; q++) {
-      const int j = jog[k + q].second;
-      const uint64_t wa = levels_at(p, j);
-      const uint64_t wb = levels_at(p + 1, j);
-      bool bit = false;
-      for (int t = 0; t < fast_ && !bit; t++) {
-        const int shift = FastGrid::wiringShift(t, 1);
-        bit = swept[static_cast<size_t>(t) * m + q] > std::max(
-                  FastGrid::field(wa, shift), FastGrid::field(wb, shift));
+  };
+  const int num_groups = static_cast<int>(groups.size());
+  if (parallel_for_ && num_groups >= 2
+      && cand.at.size() >= parallel_min_candidates_) {
+    parallel_for_(num_groups, recompute_group);
+  } else {
+    for (int gi = 0; gi < num_groups; gi++) {
+      recompute_group(gi);
+    }
+  }
+  // Combine in a fixed order: segments are sorted by (track, position).
+  auto find_segment = [&](int i, int j) -> const Segment* {
+    const auto it = std::ranges::upper_bound(
+        segs, std::make_pair(i, j), {}, [](const Segment& s) {
+          return std::make_pair(s.i, s.lo);
+        });
+    if (it == segs.begin()) {
+      return nullptr;
+    }
+    const Segment& s = *std::prev(it);
+    return s.i == i && j >= s.lo && j <= s.hi ? &s : nullptr;
+  };
+  auto levels_at = [&](int i, int j) -> uint64_t {
+    const Segment* s = find_segment(i, j);
+    if (s != nullptr) {
+      return s->words[j - s->lo] & ~FastGrid::kEdgeBits;
+    }
+    return grid_->wiringWord(z, i, j) & ~FastGrid::kEdgeBits;
+  };
+  constexpr uint64_t kJogBit = uint64_t{1} << FastGrid::kJogEdgeBit;
+  thread_local std::vector<JogSwept> jogs;
+  jogs.clear();
+  for (size_t k = 0; k < groups.size(); k++) {
+    jogs.insert(jogs.end(), group_jogs[k].begin(), group_jogs[k].end());
+  }
+  std::ranges::sort(
+      jogs, {}, [](const JogSwept& x) { return std::make_pair(x.p, x.j); });
+  thread_local std::vector<std::pair<std::pair<int, int>, bool>> jog_bits;
+  jog_bits.clear();
+  for (size_t k = 0; k < jogs.size();) {
+    // A pair near two groups was swept by both, from windows that each
+    // hold every piece the hull can violate: equal levels.
+    JogSwept merged = jogs[k];
+    size_t e = k;
+    while (e + 1 < jogs.size() && jogs[e + 1].p == merged.p
+           && jogs[e + 1].j == merged.j) {
+      e++;
+      for (int t = 0; t < fast_; t++) {
+        merged.swept[t] = std::max(merged.swept[t], jogs[e].swept[t]);
       }
-      jog_bits.push_back({{p, j}, bit});
     }
+    const uint64_t wa = levels_at(merged.p, merged.j);
+    const uint64_t wb = levels_at(merged.p + 1, merged.j);
+    bool bit = false;
+    for (int t = 0; t < fast_ && !bit; t++) {
+      const int shift = FastGrid::wiringShift(t, 1);
+      bit = merged.swept[t]
+            > std::max(FastGrid::field(wa, shift), FastGrid::field(wb, shift));
+    }
+    jog_bits.push_back({{merged.p, merged.j}, bit});
     k = e + 1;
   }
   auto jog_bit = [&](int p, int j, bool stored) {
@@ -2113,53 +2266,21 @@ void FastGridBuilder::recomputeCandidates(
                ? it->second
                : stored;
   };
-  // Words of the candidate tracks: levels, preferred bits of the edges
-  // with a changed endpoint, jog bits.
-  for (const Track& t : tracks) {
-    const int n = t.hi - t.lo + 1;
-    for (int j = t.lo; j <= t.hi; j++) {
-      const uint64_t stored = grid_->wiringWord(z, t.i, j);
-      uint64_t w = t.words[j - t.lo];
-      bool wire_bit = (stored & kWireBit) != 0;
-      if (j < t.hi) {
-        wire_bit = false;
-        for (int ty = 0; ty < fast_ && !wire_bit; ty++) {
-          const int shift = FastGrid::wiringShift(ty, 0);
-          const RipupLevel ends
-              = std::max(FastGrid::field(t.words[j - t.lo], shift),
-                         FastGrid::field(t.words[j + 1 - t.lo], shift));
-          if (t.interior[static_cast<size_t>(ty) * (n - 1) + (j - t.lo)]
-              <= ends) {
-            continue;
-          }
-          const PlacedShape hull{
-              prefHull(z, t.i, j, ty), (*types_)[ty].preferred[z].cls, 3};
-          for (const uint32_t pi : t.near) {
-            const GridPiece& p = pieces.pieces[pi];
-            if (sg.level(p.type, p.owner) > ends
-                && shapesViolate(classes,
-                                 hull,
-                                 PlacedShape{p.rect, p.cls, p.line_end_ends})) {
-              wire_bit = true;
-              break;
-            }
-          }
-        }
-      }
-      if (wire_bit) {
-        w |= kWireBit;
-      }
-      if (jog_bit(t.i, j, (stored & kJogBit) != 0)) {
+  // Words of the segments: levels, preferred bits, jog bits.
+  for (const Segment& seg : segs) {
+    for (int j = seg.lo; j <= seg.hi; j++) {
+      uint64_t w = seg.words[j - seg.lo];
+      const uint64_t stored = grid_->wiringWord(z, seg.i, j);
+      if (jog_bit(seg.i, j, (stored & kJogBit) != 0)) {
         w |= kJogBit;
       }
-      out.emplace_back(t.i, j, w);
+      out.emplace_back(seg.i, j, w);
     }
   }
-  // Jog bits of tracks without own candidates.
+  // Jog bits of positions outside the segments.
   for (const auto& [pj, bit] : jog_bits) {
     const auto [p, j] = pj;
-    const Track* t = find_track(p);
-    if (t != nullptr && j >= t->lo && j <= t->hi) {
+    if (find_segment(p, j) != nullptr) {
       continue;
     }
     const uint64_t stored = grid_->wiringWord(z, p, j);

@@ -183,10 +183,18 @@ segment, so constant point levels on an edge imply its level.
     where it violates, and marked edges whose swept wire it hits, can change.
     Only these candidates (with the edge bits at both sides and the jog bits
     of the pairs below and above) are recomputed exactly
-    (`recomputeCandidates`): one shape-grid window for all of them, pieces
-    prefiltered exactly by their interaction distance, unchanged neighbours
-    read from the stored words. A group of removals (a net's rip-up, its
-    released reservations) is recomputed once (`PendingRemovals`, `flush`).
+    (`recomputeCandidates`). Candidates on a track form segments (gaps of
+    at most 16 positions, one position of margin for the edges); segments
+    are grouped per global routing tile, and each group reads one
+    shape-grid window, pieces prefiltered exactly by their interaction
+    distance. Groups only read (levels, edge bits, swept jog hulls); jog
+    bits, whose pairs can straddle two groups, are decided afterwards from
+    the new levels of both tracks, and all words are written in a fixed
+    order, so the result does not depend on the order or the threads that
+    computed the groups (`setParallelFor`; BonnRouteDR runs them on the
+    router's threads outside parallel regions). A group of removals (a
+    net's rip-up, its released reservations, a speculative batch) is
+    recomputed once (`PendingRemovals`, `flush`).
   * The initial build computes whole tracks the same way (one window per
     track block, no per-interval queries).
   Wire types outside the fast grid and marked edges are answered exactly

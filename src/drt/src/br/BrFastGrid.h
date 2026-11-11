@@ -39,7 +39,9 @@
 
 #include <algorithm>
 #include <array>
+#include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <tuple>
 #include <unordered_map>
@@ -77,6 +79,8 @@ class LegalityOracle
 };
 
 #define BR_FAST_GRID_READER 1
+// FastGridBuilder::setParallelFor (tile groups of a removal recomputation).
+#define BR_FAST_GRID_PARALLEL_FLUSH 1
 
 // Who answered the path search's legality queries.
 struct LegalityCounters
@@ -511,6 +515,17 @@ class FastGridBuilder final : public LegalityOracle
                     RipupLevel level,
                     PendingRemovals& pending);
   void flush(PendingRemovals& pending);
+  // Runs body(0) .. body(count - 1), possibly concurrently; the bodies only
+  // read the routing space. Removal recomputations over several global
+  // routing tiles (flush() of a batch) use it; results do not depend on it.
+  using ParallelFor
+      = std::function<void(int count, const std::function<void(int)>& body)>;
+  void setParallelFor(ParallelFor parallel_for,
+                      const size_t min_candidates = 64)
+  {
+    parallel_for_ = std::move(parallel_for);
+    parallel_min_candidates_ = min_candidates;
+  }
   // Exact recomputation of everything a shape meeting `rect` can change.
   void shapeChanged(int grid_layer, const Rect& rect);
 
@@ -716,6 +731,8 @@ class FastGridBuilder final : public LegalityOracle
   std::vector<bool> has_projection_;
   // Shape-grid layers with a wide model class (windows use classReach()).
   std::vector<bool> wide_models_;
+  ParallelFor parallel_for_;
+  size_t parallel_min_candidates_ = 64;
 };
 
 }  // namespace drt::br

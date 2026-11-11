@@ -12,6 +12,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <deque>
+#include <functional>
 #include <limits>
 #include <memory>
 #include <string>
@@ -615,6 +616,22 @@ void BonnRouteDR::buildRoutingSpace()
   // Sec. 3.6: the fast grid holds the most frequent wire type.
   grid_.init(&graph_, 1);
   fast_builder_.init(&graph_, &wire_types_, 1, &checker_, &grid_);
+  // Removal recomputations of a batch (flush) run their tile groups on the
+  // router's threads; inside a parallel region (partition workers) serially.
+  const int flush_threads = std::max(1, router_cfg_->MAX_THREADS);
+  fast_builder_.setParallelFor(
+      [flush_threads](const int count, const std::function<void(int)>& body) {
+        if (omp_in_parallel()) {
+          for (int k = 0; k < count; k++) {
+            body(k);
+          }
+          return;
+        }
+#pragma omp parallel for num_threads(flush_threads) schedule(dynamic, 1)
+        for (int k = 0; k < count; k++) {
+          body(k);
+        }
+      });
   // A shape change writes up to need + one pitch beyond the shape and
   // reads up to 2 * need + one pitch (fast-grid recomputation); a query
   // reads up to need. netTileBox adds this many tiles beyond the largest

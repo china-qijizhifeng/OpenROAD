@@ -15,14 +15,17 @@
 // the metal2 blockages (macro-like wide shapes).
 
 #include <algorithm>
+#include <atomic>
 #include <boost/geometry.hpp>
 #include <boost/geometry/index/rtree.hpp>
 #include <chrono>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <functional>
 #include <random>
 #include <string_view>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -997,6 +1000,100 @@ int main(int argc, char** argv)
       double(overlay_positions) / std::max<size_t>(1, pin_ids.size()));
 #endif
   std::printf("\n");
+  // 7. Batched removals (the reservation releases of a speculative batch):
+  // wires spread over the die removed together, one exact recomputation.
+  {
+    std::vector<std::pair<int, Rect>> wires;
+    for (size_t k = 0; k < probes.size() && wires.size() < 5000; k++) {
+      if (probes[k].first % 2 == 0) {
+        wires.push_back(probes[k]);
+      }
+    }
+    auto checksum = [&] {
+      uint64_t sum = 0;
+      for (int z = 0; z < graph.numLayers(); z++) {
+        const TrackLayer& l = graph.layers[z];
+        for (int i = 0; i < l.numTracks(); i++) {
+          for (int j = 0; j < l.numPositions(); j++) {
+            sum = sum * 1000003 + fast.wiringWord(z, i, j);
+          }
+        }
+      }
+      return sum;
+    };
+    const uint64_t base = checksum();
+    const int batch = 250;
+    auto run = [&](double& t_candidates, double& t_flush) {
+      t_candidates = 0;
+      t_flush = 0;
+      for (const auto& [g, r] : wires) {
+        const ClassId cls = wt.preferred[g / 2].cls;
+        grid.insert(g, r, cls, ShapeType::kWire, 7, cache);
+        builder.shapeInserted(
+            g, PlacedShape{r, cls, 3}, grid.level(ShapeType::kWire, 7));
+      }
+      for (size_t b = 0; b < wires.size(); b += batch) {
+        FastGridBuilder::PendingRemovals pending;
+        for (size_t k = b; k < std::min(wires.size(), b + batch); k++) {
+          const auto& [g, r] = wires[k];
+          const ClassId cls = wt.preferred[g / 2].cls;
+          grid.remove(g, r, cls, ShapeType::kWire, 7, cache);
+          auto t1 = std::chrono::steady_clock::now();
+          builder.shapeRemoved(g,
+                               PlacedShape{r, cls, 3},
+                               grid.level(ShapeType::kWire, 7),
+                               pending);
+          t_candidates += seconds(t1);
+        }
+        auto t1 = std::chrono::steady_clock::now();
+        builder.flush(pending);
+        t_flush += seconds(t1);
+      }
+      t_candidates /= wires.size();
+      t_flush /= wires.size();
+      return checksum() == base;
+    };
+    double cand_1 = 0;
+    double flush_1 = 0;
+    const bool same_1 = run(cand_1, flush_1);
+    std::printf(
+        "| batched removal (%zu wires, %d per flush) | time per wire "
+        "|\n|---|---|\n",
+        wires.size(),
+        batch);
+    std::printf("| candidates (shapeRemoved into the batch) | %.1f us |\n",
+                1e6 * cand_1);
+    std::printf("| flush, 1 thread | %.1f us |\n", 1e6 * flush_1);
+#ifdef BR_FAST_GRID_PARALLEL_FLUSH
+    builder.setParallelFor([](int count, const std::function<void(int)>& body) {
+      std::atomic<int> next{0};
+      std::vector<std::thread> threads;
+      for (int k = 0; k < 8; k++) {
+        threads.emplace_back([&] {
+          for (int q = next++; q < count; q = next++) {
+            body(q);
+          }
+        });
+      }
+      for (std::thread& th : threads) {
+        th.join();
+      }
+    });
+    double cand_8 = 0;
+    double flush_8 = 0;
+    const bool same_8 = run(cand_8, flush_8);
+    builder.setParallelFor(nullptr);
+    std::printf("| flush, 8 threads | %.1f us |\n", 1e6 * flush_8);
+    std::printf(
+        "| fast grid after the removals equals the one before | %s / %s |\n",
+        same_1 ? "yes" : "NO",
+        same_8 ? "yes" : "NO");
+#else
+    std::printf("| fast grid after the removals equals the one before | %s |\n",
+                same_1 ? "yes" : "NO");
+#endif
+    std::printf("\n");
+  }
   std::printf("| total routing-space memory per on-track vertex | %.2f B |\n",
               double(sg.bytes + fs.bytes) / fs.vertices);
   std::printf("(checksums %lld %lld %lld %lld)\n",

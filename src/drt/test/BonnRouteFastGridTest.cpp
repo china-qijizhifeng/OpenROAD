@@ -8,9 +8,12 @@
 // to a rebuild from scratch, and the checker path for other wire types.
 
 #include <algorithm>
+#include <atomic>
 #include <cstdint>
 #include <cstdio>
+#include <functional>
 #include <random>
+#include <thread>
 #include <vector>
 
 #include "BonnRouteRoutingSpaceTestUtil.h"
@@ -38,6 +41,7 @@ struct Totals
   int64_t via_intervals = 0;
   int64_t vertices = 0;
   int64_t overlays = 0;
+  int64_t parallel_runs = 0;
 };
 
 void fail(Totals& t, const char* what, int c)
@@ -142,6 +146,26 @@ void runCase(std::mt19937& rng, const int c, Totals& t)
   fg.init(&graph, fast);
   FastGridBuilder builder;
   builder.init(&graph, &types, fast, &checker, &fg);
+  // Half of the cases recompute removal groups on several threads.
+  if (rng() % 2 == 0) {
+    builder.setParallelFor(
+        [&t](int count, const std::function<void(int)>& body) {
+          t.parallel_runs++;
+          std::atomic<int> next{0};
+          std::vector<std::thread> threads;
+          for (int k = 0; k < 4; k++) {
+            threads.emplace_back([&] {
+              for (int q = next++; q < count; q = next++) {
+                body(q);
+              }
+            });
+          }
+          for (std::thread& th : threads) {
+            th.join();
+          }
+        },
+        1);
+  }
   ShapeGridWriteCache cache;
   std::vector<StoredShape> live;
   // Some shapes before the initial build, the rest incrementally.
@@ -214,7 +238,9 @@ void runCase(std::mt19937& rng, const int c, Totals& t)
     } else if (rng() % 3 == 0) {
       // A group of removals, recomputed once (a net's rip-up).
       FastGridBuilder::PendingRemovals pending;
-      for (int r = randomInt(rng, 1, 4); r > 0 && !live.empty(); r--) {
+      for (int r = randomInt(rng, 1, rng() % 2 ? 4 : 12);
+           r > 0 && !live.empty();
+           r--) {
         const size_t at = rng() % live.size();
         const StoredShape s = live[at];
         live.erase(live.begin() + at);
@@ -460,7 +486,8 @@ int main()
   std::printf(
       "fast grid: %lld cases, %lld vertex checks (%lld blocked), %lld edge "
       "checks, %lld marked edges, %lld failures | %lld vertices in %lld "
-      "wiring intervals, %lld via intervals, %lld overlays checked\n",
+      "wiring intervals, %lld via intervals, %lld overlays checked, %lld "
+      "parallel recomputations\n",
       static_cast<long long>(t.cases),
       static_cast<long long>(t.vertex_checks),
       static_cast<long long>(t.blocked),
@@ -470,6 +497,7 @@ int main()
       static_cast<long long>(t.vertices),
       static_cast<long long>(t.intervals),
       static_cast<long long>(t.via_intervals),
-      static_cast<long long>(t.overlays));
+      static_cast<long long>(t.overlays),
+      static_cast<long long>(t.parallel_runs));
   return t.fails != 0;
 }
