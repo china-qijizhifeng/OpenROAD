@@ -432,7 +432,12 @@ class BonnRouteDR
                              Worker& worker,
                              std::vector<OutWire>& patches) const;
   // `local`: the worker whose region contains the net (Sec. 5.1).
-  void setReservations(NetData& net, bool active, Worker* local = nullptr);
+  // Releasing with `pending` collects the fast-grid recomputation there for
+  // one later flush; without it the release flushes at once.
+  void setReservations(NetData& net,
+                       bool active,
+                       Worker* local = nullptr,
+                       br::FastGridBuilder::PendingRemovals* pending = nullptr);
   void reserveInputWires();
   void setInputReservation(NetData& net, bool active, Worker* local = nullptr);
   // Diff-net conflict with the shapes of an R-tree (input wires only).
