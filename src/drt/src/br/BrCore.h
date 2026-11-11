@@ -164,14 +164,17 @@ struct SearchRequest
   // to a target layer (exact); false keeps dz * (cheapest via).
   bool exact_future_cost = true;
   // Optional future cost; nullptr selects the l1 bound pi_H on the target
-  // boxes. Only the vertex search supports an oracle and discounts.
+  // boxes. The interval search uses an oracle as pi with property (i)
+  // checked between neighbours (it needs wire_unit 1); only the vertex
+  // search supports discounts.
   const FutureCostOracle* future_cost = nullptr;
   std::vector<DiscountRun> discounts;
   Cost discount_rate = 0;  // cost per DBU of a discounted edge
   // Wire spreading (Gester et al. 2013, Sec. 4.2): in tiles where global
   // routing left room ([z][tx * tiles_y + ty] != 0), entering a wire vertex
   // next to an occupied track costs spread_cost, which keeps the tracks
-  // beside routed wires free where space allows. Vertex search only.
+  // beside routed wires free where space allows. In the interval search
+  // such vertices are singletons and the cost enters the wire relaxations.
   const std::vector<std::vector<uint8_t>>* spread_tiles = nullptr;
   Cost spread_cost = 0;
 };
@@ -478,6 +481,9 @@ class IntervalSearch
   };
 
   Cost futureCost(int z, int i, int j) const;
+  // Wire spreading cost of entering wire vertex (z, i, j) along its track
+  // (as PathSearch::spreadCost).
+  Cost spreadCost(int z, int i, int j) const;
   // FastGridReader::level, inlined: the run cursors answer most queries
   // of a track scan without a call.
   RipupLevel level(const At a, Kind k) const
@@ -514,6 +520,7 @@ class IntervalSearch
     kInfoJogLegal = 64,   // kJog
     kInfoEdgeLegal = 128,  // kWireEdge to position j + 1
     kInfoVias = 256,       // the via bits are computed
+    kInfoSpread = 512,     // entering the vertex costs the spreading cost
   };
   struct VertexLabel;
   uint16_t info(int z, int i, int j, VertexLabel& label) const;

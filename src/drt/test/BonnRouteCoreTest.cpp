@@ -279,10 +279,12 @@ static bool validPath(const SearchResult& r, const SearchRequest& q)
 // modern: wire unit 4 with discounted runs (arXiv:2111.06169 Sec. 5.2);
 // only the vertex search supports it. potential: 0 = l1 target boxes,
 // 1..3 = PotentialOracle l1 / simple / general on the request's Region.
+// spread: wire spreading with unit wire costs (both searches).
 static int randomCases(const int cases,
                        const bool sparse,
                        const bool modern,
-                       const int potential = 0)
+                       const int potential = 0,
+                       const bool spread = false)
 {
   std::mt19937 rng(sparse ? 23456 : 12345);
   int64_t pops_i = 0, pops_v = 0, fails = 0, found = 0, labels = 0, ivs = 0,
@@ -387,7 +389,7 @@ static int randomCases(const int cases,
     // Wire type 2 is outside the fast grid: the checker answers.
     q.wire_type = rng() % 3;
     std::vector<std::vector<uint8_t>> spread_tiles;
-    if (modern && rng() % 2) {
+    if ((modern || spread) && rng() % 2) {
       spread_tiles.assign(Z, std::vector<uint8_t>(size_t(T) * T, 0));
       for (auto& layer_tiles : spread_tiles) {
         for (auto& tile_flag : layer_tiles) {
@@ -395,7 +397,7 @@ static int randomCases(const int cases,
         }
       }
       q.spread_tiles = &spread_tiles;
-      q.spread_cost = 4 * (1 + rng() % 60);
+      q.spread_cost = (modern ? 4 : 1) * (1 + rng() % 60);
     }
     if (modern) {
       q.discount_rate = 3;
@@ -541,9 +543,10 @@ static int randomCases(const int cases,
 // exist at alternating positions, while the positions of M2 and M5
 // coincide on both sides. Blockages and routed shapes are runs along the
 // tracks, so intervals get long, as on real designs.
-static int pitchCases(const int cases)
+// extras: also wire spreading and oracle potentials (simple, general).
+static int pitchCases(const int cases, const bool extras = false)
 {
-  std::mt19937 rng(9876);
+  std::mt19937 rng(extras ? 4321 : 9876);
   int64_t fails = 0, found = 0, pops[5] = {}, settled[5] = {};
   for (int c = 0; c < cases; c++) {
     TrackGraph g;
@@ -686,6 +689,41 @@ static int pitchCases(const int cases)
     if (rng() % 6 == 0) {
       q.target_boxes.clear();
     }
+    std::vector<std::vector<uint8_t>> spread_tiles;
+    PotentialOracle oracle;
+    if (extras && c % 3 != 1) {
+      spread_tiles.assign(Z, std::vector<uint8_t>(size_t(T) * T, 0));
+      for (auto& layer_tiles : spread_tiles) {
+        for (auto& tile_flag : layer_tiles) {
+          tile_flag = rng() % 3 != 0;
+        }
+      }
+      q.spread_tiles = &spread_tiles;
+      q.spread_cost = 1 + rng() % 80;
+    }
+    if (extras && c % 3 != 0) {
+      const bool general = c % 3 == 1;
+      if (general) {
+        // The general model's contract: sources in the routing area.
+        for (const auto& [v, cost] : q.sources) {
+          int z, i, j;
+          g.decode(v, z, i, j);
+          const TrackLayer& l = g.layers[z];
+          const int t = l.track_tile[i];
+          const int p = l.pos_tile[j];
+          reg.allow(z, l.horizontal ? p : t, l.horizontal ? t : p);
+        }
+      }
+      const GCellGrid gcells{0, 0, tile, tile, 0, 0, span, span};
+      oracle.prepare(general ? PotentialOracle::Model::kGeneral
+                             : PotentialOracle::Model::kSimple,
+                     g,
+                     q,
+                     gcells,
+                     3,
+                     4);
+      q.future_cost = &oracle;
+    }
     PathSearch ps(g, f);
     IntervalSearch is(g, f);
     SearchResult r[5];
@@ -723,9 +761,10 @@ static int pitchCases(const int cases)
     }
   }
   printf(
-      "pitch cases %d found %lld fails %lld | heap pops interval %lld / "
+      "pitch cases%s %d found %lld fails %lld | heap pops interval %lld / "
       "without via property %lld / nearest first %lld / %lld / vertex %lld | "
       "settled %lld / %lld / %lld / %lld / %lld\n",
+      extras ? " (spreading, potentials)" : "",
       cases,
       (long long) found,
       (long long) fails,
@@ -1064,5 +1103,10 @@ int main()
          || randomCases(400, false, true) || randomCases(400, true, true)
          || randomCases(300, false, true, 1) || randomCases(300, true, true, 2)
          || randomCases(300, false, true, 3) || randomCases(300, true, true, 3)
-         || randomCases(300, false, false, 3) || pitchCases(300);
+         || randomCases(300, false, false, 3) || randomCases(300, true, false, 1)
+         || randomCases(300, false, false, 2)
+         || randomCases(400, false, false, 0, true)
+         || randomCases(400, true, false, 0, true)
+         || randomCases(300, false, false, 3, true) || pitchCases(300)
+         || pitchCases(300, true);
 }

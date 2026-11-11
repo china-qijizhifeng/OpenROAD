@@ -17,6 +17,10 @@ namespace drt::br {
 
 Cost IntervalSearch::futureCost(const int z, const int i, const int j) const
 {
+  if (req_->future_cost != nullptr) {
+    const auto [x, y] = graph_.layers[z].point(i, j);
+    return req_->future_cost->query(z, x, y);
+  }
   if (req_->target_boxes.empty()) {
     return 0;
   }
@@ -41,6 +45,32 @@ Cost IntervalSearch::viaBound(const int z, const TargetBox& box) const
   if (z > box.zhi) {
     return req_->exact_future_cost ? via_prefix_[z] - via_prefix_[box.zhi]
                                    : (z - box.zhi) * min_via_cost_;
+  }
+  return 0;
+}
+
+Cost IntervalSearch::spreadCost(const int z, const int i, const int j) const
+{
+  if (req_->spread_cost == 0 || req_->spread_tiles == nullptr) {
+    return 0;
+  }
+  const TrackLayer& layer = graph_.layers[z];
+  const int t = layer.track_tile[i];
+  const int p = layer.pos_tile[j];
+  const int tx = layer.horizontal ? p : t;
+  const int ty = layer.horizontal ? t : p;
+  if ((*req_->spread_tiles)[z][static_cast<size_t>(tx) * graph_.tiles_y + ty]
+      == 0) {
+    return 0;
+  }
+  // A neighbouring track is occupied where its wire vertex is not legal
+  // (not counted as a legality query of the path).
+  for (const int di : {-1, 1}) {
+    const int i2 = i + di;
+    if (i2 >= 0 && i2 < layer.numTracks()
+        && reader_.level(z, i2, j, kWire, req_->wire_type) != kLegal) {
+      return req_->spread_cost;
+    }
   }
   return 0;
 }
@@ -118,6 +148,9 @@ uint16_t IntervalSearch::computeInfo(const int z,
         }
       }
     }
+    if (spreadCost(z, i, j) != 0) {
+      bits |= kInfoSpread;
+    }
     return vias ? bits | computeVias(z, i, j, 0) : bits;
   }
   // Fast wire type: decode the words (detail::levelOf, one word per track).
@@ -170,6 +203,9 @@ uint16_t IntervalSearch::computeInfo(const int z,
     }
   }
   counters_.fast_grid += queries;
+  if (spreadCost(z, i, j) != 0) {
+    bits |= kInfoSpread;  // entering it costs extra: a singleton
+  }
   return vias ? bits | computeVias(z, i, j, own) : bits;
 }
 
@@ -301,7 +337,7 @@ int IntervalSearch::buildInterval(const int z, const int i, const int j)
     return (bits & kInfoWireLegal) != 0
            && !(lab.source_stamp == epoch_ && layer.jogs
                 && !(bits & kInfoJogLegal))
-           && (bits & kTransPenalty) == 0;
+           && (bits & (kTransPenalty | kInfoSpread)) == 0;
   };
   int ja = j;
   int jb = j;
@@ -310,6 +346,9 @@ int IntervalSearch::buildInterval(const int z, const int i, const int j)
   // (cross distance, via bound, terminal cost) and its range along it.
   track_future_.clear();
   for (const TargetBox& b : req_->target_boxes) {
+    if (req_->future_cost != nullptr) {
+      break;
+    }
     const Coord c = layer.tracks[i];
     const Coord clo = layer.horizontal ? b.ylo : b.xlo;
     const Coord chi = layer.horizontal ? b.yhi : b.xhi;
@@ -320,6 +359,9 @@ int IntervalSearch::buildInterval(const int z, const int i, const int j)
          layer.horizontal ? b.xhi : b.yhi});
   }
   auto future = [&](int jj) {
+    if (req_->future_cost != nullptr) {
+      return futureCost(z, i, jj);
+    }
     if (track_future_.empty()) {
       return Cost{0};
     }
@@ -758,12 +800,16 @@ void IntervalSearch::process(const int id, const Cost delta, int g)
       if (!single) {
         // Every member has the jog (property (ii)). The jogs are relaxed
         // (relaxJogs) when their cheapest possible label is the cheapest
-        // event: pi is 1-Lipschitz, so every jog label of the run is at
-        // least delta + (beta_z - 1) * |track distance|.
+        // event: pi_H is 1-Lipschitz, so every jog label of the run is at
+        // least delta + (beta_z - 1) * |track distance|; a feasible oracle
+        // only bounds them by delta.
         const Cost distance = std::abs(layer.tracks[i2] - layer.tracks[i]);
         jog_runs_.push_back({id, f, g, di, delta});
         heap_.push_back(Event{
-            delta + (layer.jog_factor - 1) * distance,
+            delta
+                + (req_->future_cost != nullptr
+                       ? 0
+                       : (layer.jog_factor - 1) * distance),
             tieKey(intervals_[id].futureCost(layer, j_of(g - 1)) - distance),
             kJogEvent,
             static_cast<int32_t>(jog_runs_.size() - 1)});
@@ -817,7 +863,9 @@ void IntervalSearch::process(const int id, const Cost delta, int g)
         || !enter(w, kWire) || !enter(edge, kWireEdge)) {
       continue;
     }
-    commit(k, p, penalty(w, kWire) + penalty(edge, kWireEdge));
+    commit(k,
+           p,
+           penalty(w, kWire) + penalty(edge, kWireEdge) + spreadCost(z, i, j2));
   }
   pushEvent(id);
 }

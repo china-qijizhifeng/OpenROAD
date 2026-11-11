@@ -4392,6 +4392,7 @@ void BonnRouteDR::main()
   if (params_.verbose) {
     logger_->report("BonnRoute DR profile {}.", params_.profileName());
   }
+  // TODO(2021): discount rates in the interval search.
   if (modernSearch() && params_.use_intervals) {
     // The interval search assumes unit wire costs (no discounted runs).
     logger_->warn(utl::DRT,
