@@ -58,6 +58,13 @@ struct OffTrackLayer
   // Cost per DBU in x and y (1, 1 = length, as in Theorem 3.2).
   int64_t cost_x = 1;
   int64_t cost_y = 1;
+  // On-track-only layer (Sec. 3.8 "removing edges that induce a
+  // violation"): with `tracks` set, planar arcs run only in the preferred
+  // direction (`horizontal`) and start on one of the sorted track lines
+  // (y = track if horizontal, else x = track). The search evaluates this
+  // per grid line once; it equals an arc_filter with the same rule.
+  const std::vector<GeoCoord>* tracks = nullptr;
+  bool horizontal = true;
 };
 
 struct OffTrackSource
@@ -141,6 +148,13 @@ struct OffTrackResult
 // settles the targets; the paths are the shortest
 // tau-feasible paths among those with grid vertices as segment ends, which
 // by Theorem 3.2 are shortest tau-feasible paths.
+//
+// The result (paths, their order and every counter) is a function of the
+// request: the heap holds (f, state) pairs ordered by f only, and every
+// push and pop happens in the order of the reference formulation above
+// (BonnRouteOffTrackTest keeps that formulation and compares results on
+// random requests). A window with 2^32 / 5 or more grid vertices is not
+// searched (no paths; grid_vertices reports its size).
 class OffTrackSearch
 {
  public:
@@ -151,38 +165,66 @@ class OffTrackSearch
   {
     std::vector<GeoCoord> xs;
     std::vector<GeoCoord> ys;
-    size_t base = 0;
+    uint32_t base = 0;
+    int nx = 0;
+    int ny = 0;
     const std::vector<Box>* obstacles = nullptr;
-    // Per row (y) / column (x), built on first use: the sorted open
-    // intervals (lo, hi) of obstacle interiors crossing the line.
-    std::vector<std::vector<std::pair<GeoCoord, GeoCoord>>> rows;
-    std::vector<std::vector<std::pair<GeoCoord, GeoCoord>>> cols;
-    std::vector<char> row_built;
-    std::vector<char> col_built;
+    // Obstacles in increasing ylo / xlo order: the candidates of a row y
+    // (column x) are the prefix with ylo < y (xlo < x).
+    std::vector<Box> by_ylo;
+    std::vector<Box> by_xlo;
+    // Per row (y) / column (x), built on first use: the sorted, merged
+    // open intervals (lo, hi) of obstacle interiors crossing the line, as
+    // [begin, end) of `intervals`; begin = -1 until built.
+    std::vector<std::pair<int, int>> row_span;
+    std::vector<std::pair<int, int>> col_span;
+    std::vector<std::pair<GeoCoord, GeoCoord>> intervals;
     // Index of each line in the layer above / below, or -1.
     std::vector<int> up_x;
     std::vector<int> up_y;
     std::vector<int> down_x;
     std::vector<int> down_y;
-    int nx() const { return static_cast<int>(xs.size()); }
-    int ny() const { return static_cast<int>(ys.size()); }
+    // Turn arcs: the nearest line at distance >= tau above (`_plus`, nx /
+    // ny if none) and below (`_minus`, -1 if none).
+    std::vector<int> turn_x_plus;
+    std::vector<int> turn_x_minus;
+    std::vector<int> turn_y_plus;
+    std::vector<int> turn_y_minus;
+    // On-track-only layers: lines on which planar arcs may start.
+    std::vector<char> row_on_track;
+    std::vector<char> col_on_track;
+    // Future cost terms per target layer t: l1 distance of each line to
+    // the nearest target coordinate of layer t (index t * nx + ix).
+    std::vector<int64_t> near_x;
+    std::vector<int64_t> near_y;
   };
   // True if the segment between grid lines ix0 < ix1 on row iy (resp.
   // iy0 < iy1 on column ix) avoids all open obstacle interiors.
   bool freeH(LayerIndex& l, int iy, int ix0, int ix1);
   bool freeV(LayerIndex& l, int ix, int iy0, int iy1);
 
+  // Label of a state, valid where stamp == epoch_ (buffers are reused
+  // across runs without clearing).
+  struct Label
+  {
+    int64_t dist;
+    uint32_t parent;  // kNoParent for sources
+    uint32_t stamp;
+  };
+  struct HeapItem
+  {
+    int64_t f;
+    uint32_t state;
+  };
   std::vector<LayerIndex> index_;
-  // State labels, valid where stamp_ == epoch_ (buffers are reused across
-  // runs without clearing).
-  std::vector<int64_t> dist_;
-  std::vector<int64_t> parent_;
-  std::vector<uint32_t> stamp_;
-  std::vector<int8_t> via_memo_;
+  std::vector<Label> labels_;
+  std::vector<HeapItem> heap_;
+  // Per grid vertex: via memo (stamp, allowed) and the first index of the
+  // vertex in the sorted target list (valid where target_stamp_ == epoch_).
   std::vector<uint32_t> via_stamp_;
-  // Future cost per grid vertex, valid where future_stamp_ == epoch_.
-  std::vector<int64_t> future_memo_;
-  std::vector<uint32_t> future_stamp_;
+  std::vector<int8_t> via_memo_;
+  std::vector<uint32_t> target_stamp_;
+  std::vector<int32_t> target_first_;
   uint32_t epoch_ = 0;
 };
 

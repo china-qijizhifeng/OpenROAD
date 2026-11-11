@@ -25,7 +25,10 @@ cc_test(
 cc_test(
     name = "bonnroute_offtrack_test",
     size = "medium",
-    srcs = ["BonnRouteOffTrackTest.cpp"],
+    srcs = [
+        "BonnRouteOffTrackTest.cpp",
+        "BonnRouteRoutingSpaceTestUtil.h",
+    ],
     deps = ["//src/drt:bonnroute_core"],
 )
 

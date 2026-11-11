@@ -2222,27 +2222,12 @@ void BonnRouteDR::offTrackCatalogue(const int net,
   // On layers whose wires must stay on tracks in the preferred direction
   // (Sec. 3.8: "removing edges that induce a violation"), only planar arcs
   // along a track remain.
-  std::vector<char> on_tracks(frs.size(), 0);
   for (size_t s = 0; s < frs.size(); s++) {
-    on_tracks[s] = onTracksOnly(frs[s]) && z_of_fr_[frs[s]] >= 0;
-  }
-  if (std::ranges::any_of(on_tracks, [](char c) { return c != 0; })) {
-    req.arc_filter = [&](const int s,
-                         const br::GridPoint& from,
-                         const br::GridPoint&,
-                         int,
-                         const int dir) {
-      if (!on_tracks[s]) {
-        return true;
-      }
+    if (onTracksOnly(frs[s]) && z_of_fr_[frs[s]] >= 0) {
       const br::TrackLayer& l = graph_.layers[z_of_fr_[frs[s]]];
-      const bool along_x = dir == 0 || dir == 1;
-      if (along_x != l.horizontal) {
-        return false;
-      }
-      return std::ranges::binary_search(l.tracks,
-                                        l.horizontal ? from.y : from.x);
-    };
+      req.layers[s].tracks = &l.tracks;
+      req.layers[s].horizontal = l.horizontal;
+    }
   }
   req.via_allowed = [&](int lower, const br::GridPoint& p) {
     if (lower == 0) {
@@ -2474,12 +2459,51 @@ std::vector<int> BonnRouteDR::choosePrimaries(
       accessShapes(opt, shapes[p].back());
     }
   }
-  const Legality legality(*this, nullptr);
+  // Candidate shapes classified once, as Legality::conflict classifies
+  // them (role kFixed, no line-end ends), with their grid layer and the
+  // layer's rule reach: shapes farther apart than the reach in x or y
+  // never violate a rule of the layer (ShapeClassTable::ruleReach).
+  struct ConflictShape
+  {
+    frLayerNum layer;
+    int grid_layer;
+    br::Coord reach;
+    br::PlacedShape placed;
+  };
+  std::vector<std::vector<std::vector<ConflictShape>>> classified(n);
+  for (int p = 0; p < n; p++) {
+    classified[p].resize(shapes[p].size());
+    for (size_t c = 0; c < shapes[p].size(); c++) {
+      for (const RShape& s : shapes[p][c]) {
+        const int g = gridLayer(s.layer);
+        if (g < 0) {
+          continue;
+        }
+        const RShape fixed{s.layer, s.rect};
+        classified[p][c].push_back(
+            {s.layer,
+             g,
+             shape_classes_.reach(g),
+             br::PlacedShape{brRect(s.rect), shapeClass(fixed, g), 0}});
+      }
+    }
+  }
   in.conflict = [&](int pa, int ca, int pb, int cb) {
-    for (const RShape& a : shapes[pa][ca]) {
-      for (const RShape& b : shapes[pb][cb]) {
-        if (a.layer == b.layer
-            && legality.conflict(a.layer, toBox(a.rect), toBox(b.rect))) {
+    for (const ConflictShape& a : classified[pa][ca]) {
+      for (const ConflictShape& b : classified[pb][cb]) {
+        if (a.layer != b.layer) {
+          continue;
+        }
+        const br::Rect& ra = a.placed.rect;
+        const br::Rect& rb = b.placed.rect;
+        const int64_t gx = std::max<int64_t>(
+            {0, int64_t{rb.xlo} - ra.xhi, int64_t{ra.xlo} - rb.xhi});
+        const int64_t gy = std::max<int64_t>(
+            {0, int64_t{rb.ylo} - ra.yhi, int64_t{ra.ylo} - rb.yhi});
+        if (gx > a.reach || gy > a.reach) {
+          continue;
+        }
+        if (br::shapesViolate(shape_classes_, a.placed, b.placed)) {
           return true;
         }
       }
