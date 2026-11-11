@@ -141,6 +141,8 @@ set_bonnroute_dr_param name value
 | `reserve_min_layer` | `0` | Lowest track-graph layer whose input wires become reservations. |
 | `potential` | `0` | Future cost: `0` l1 bound of the 2013 paper; arXiv:2111.06169 potentials `1` l1 (Table 3), `2` simple model (Theorem 3), `3` general model on the search area with discounts (Section 4); `4` uses the general model only for connections whose guide path detours (Gester et al. 2013, Section 4.1), the l1 bound otherwise. |
 | `potential_detour_tiles` | `2` | Detour, in GCells beyond the tile distance of its ends, from which `potential 4` uses the general model. |
+| `spreading` | `0` | Wire spreading (Section 4.2): in GCells whose global routing utilization is at most `spread_utilization` percent, a wire vertex beside an occupied track costs `spread_cost` pitches more. Reads the congestion that `global_route` stores in the database. Selects the vertex search. |
+| `spread_cost` / `spread_utilization` | `1` / `70` | Spreading cost in pitches of the bottom layer; utilization threshold in percent. |
 | `verbose` | `1` | Print coverage and search statistics. |
 
 The interval search maintains reduced-distance label envelopes on tracks,

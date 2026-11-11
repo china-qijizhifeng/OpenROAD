@@ -53,8 +53,23 @@ struct Ref
           rate = r.discount_rate;
         }
       }
+      Cost spread = 0;
+      if (r.spread_cost != 0 && r.spread_tiles != nullptr) {
+        const int t = l.track_tile[i];
+        const int p = l.pos_tile[j2];
+        const int tx = l.horizontal ? p : t;
+        const int ty = l.horizontal ? t : p;
+        if ((*r.spread_tiles)[z][static_cast<size_t>(tx) * g.tiles_y + ty]) {
+          for (const int di : {-1, 1}) {
+            if (i + di >= 0 && i + di < l.numTracks()
+                && !f.usable(g.vertex(z, i + di, j2), kWire, r.net)) {
+              spread = r.spread_cost;
+            }
+          }
+        }
+      }
       return std::abs(l.positions[j2] - l.positions[j]) * rate + pen(w, kWire)
-             + pen(e, kWireEdge);
+             + pen(e, kWireEdge) + spread;
     }
     if (z == z2 && j == j2 && std::abs(i - i2) == 1) {
       size_t e = i2 > i ? u : w;
@@ -280,6 +295,7 @@ static int randomCases(const int cases,
     auto tf = [&](Coord c) { return c / tile; };
     g.finalize(tf, tf);
     const int T = span / tile + 1;
+    g.tiles_x = g.tiles_y = T;
     FastGrid f;
     f.init(g.numVertices());
     double pfix = sparse ? 0.005 : (rng() % 30) / 100.0;
@@ -316,6 +332,17 @@ static int randomCases(const int cases,
     q.region = &reg;
     q.ripup = rng() % 2;
     q.ripup_cost = 50 + rng() % 500;
+    std::vector<std::vector<uint8_t>> spread_tiles;
+    if (modern && rng() % 2) {
+      spread_tiles.assign(Z, std::vector<uint8_t>(size_t(T) * T, 0));
+      for (auto& layer_tiles : spread_tiles) {
+        for (auto& tile_flag : layer_tiles) {
+          tile_flag = rng() % 2;
+        }
+      }
+      q.spread_tiles = &spread_tiles;
+      q.spread_cost = 4 * (1 + rng() % 60);
+    }
     if (modern) {
       q.discount_rate = 3;
       const int discounts = rng() % 6;

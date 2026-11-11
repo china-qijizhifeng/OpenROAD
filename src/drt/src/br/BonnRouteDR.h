@@ -22,6 +22,10 @@
 #include "frRTree.h"
 #include "odb/geom.h"
 
+namespace odb {
+class dbBlock;
+}
+
 namespace utl {
 class Logger;
 }
@@ -88,6 +92,13 @@ struct BonnRouteDRParams
   // otherwise. Reservations or a potential select the vertex search.
   int potential = 0;
   int potential_detour_tiles = 2;
+  // Sec. 4.2 wire spreading: extra cost (pitches of the layer) of a wire
+  // vertex beside an occupied track, in GCells whose global routing
+  // utilization (dbGCellGrid usage / capacity) is at most
+  // spread_utilization percent. Selects the vertex search.
+  bool spreading = false;
+  int spread_cost = 1;
+  int spread_utilization = 70;
   bool verbose = true;
 
   bool set(const std::string& name, double value);
@@ -96,10 +107,13 @@ struct BonnRouteDRParams
 class BonnRouteDR
 {
  public:
+  // block: source of the global routing congestion (dbGCellGrid) used by
+  // wire spreading; may be nullptr.
   BonnRouteDR(frDesign* design,
               utl::Logger* logger,
               RouterConfiguration* router_cfg,
-              const BonnRouteDRParams& params);
+              const BonnRouteDRParams& params,
+              odb::dbBlock* block = nullptr);
   ~BonnRouteDR();
 
   void main();
@@ -240,8 +254,10 @@ class BonnRouteDR
   br::Cost unit() const { return graph_.wire_unit; }
   bool modernSearch() const
   {
-    return params_.reservations || params_.potential != 0;
+    return params_.reservations || params_.potential != 0 || params_.spreading;
   }
+  // Tiles where global routing left room for spreading (Sec. 4.2).
+  void buildSpreadTiles();
   void setReservation(Term& term,
                       int net,
                       bool active,
@@ -330,6 +346,9 @@ class BonnRouteDR
   frCoord tile_dy_ = 1;
   int tiles_x_ = 1;
   odb::Rect die_;
+  odb::dbBlock* block_ = nullptr;
+  std::vector<std::vector<uint8_t>> spread_tiles_;
+  int64_t spread_tile_count_ = 0;
   int tiles_y_ = 1;
 
   // Shape index (shape grid of Sec. 3.3, reduced to what the off-track

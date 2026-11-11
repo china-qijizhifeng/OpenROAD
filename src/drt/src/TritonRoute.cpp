@@ -1293,8 +1293,11 @@ int TritonRoute::main()
     if (!bonnroute_params_) {
       bonnroute_params_ = std::make_unique<BonnRouteDRParams>();
     }
-    BonnRouteDR bonnroute(
-        getDesign(), logger_, router_cfg_.get(), *bonnroute_params_);
+    BonnRouteDR bonnroute(getDesign(),
+                          logger_,
+                          router_cfg_.get(),
+                          *bonnroute_params_,
+                          db_->getChip()->getBlock());
     bonnroute.main();
   }
   if (distributed_) {

@@ -33,6 +33,7 @@
 #include "drt-global.h"
 #include "frDesign.h"
 #include "frRegionQuery.h"
+#include "odb/db.h"
 #include "odb/dbTypes.h"
 #include "odb/geom.h"
 #include "utl/Logger.h"
@@ -88,6 +89,12 @@ bool BonnRouteDRParams::set(const std::string& name, const double value)
     partitions = v != 0;
   } else if (name == "partition_regions") {
     partition_regions = std::max(0, v);
+  } else if (name == "spreading") {
+    spreading = v != 0;
+  } else if (name == "spread_cost") {
+    spread_cost = std::max(0, v);
+  } else if (name == "spread_utilization") {
+    spread_utilization = std::clamp(v, 0, 1000);
   } else if (name == "component_regions") {
     component_regions = v != 0;
   } else if (name == "ripup_depth") {
@@ -105,9 +112,50 @@ bool BonnRouteDRParams::set(const std::string& name, const double value)
 BonnRouteDR::BonnRouteDR(frDesign* design,
                          utl::Logger* logger,
                          RouterConfiguration* router_cfg,
-                         const BonnRouteDRParams& params)
-    : design_(design), logger_(logger), router_cfg_(router_cfg), params_(params)
+                         const BonnRouteDRParams& params,
+                         odb::dbBlock* block)
+    : design_(design),
+      logger_(logger),
+      router_cfg_(router_cfg),
+      params_(params),
+      block_(block)
 {
+}
+
+void BonnRouteDR::buildSpreadTiles()
+{
+  spread_tiles_.clear();
+  spread_tile_count_ = 0;
+  odb::dbGCellGrid* gcells
+      = block_ != nullptr ? block_->getGCellGrid() : nullptr;
+  if (gcells == nullptr) {
+    logger_->warn(utl::DRT,
+                  9104,
+                  "BonnRoute: no global routing congestion in the database; "
+                  "wire spreading is disabled.");
+    return;
+  }
+  spread_tiles_.assign(
+      graph_.numLayers(),
+      std::vector<uint8_t>(static_cast<size_t>(tiles_x_) * tiles_y_, 0));
+  for (int z = 0; z < graph_.numLayers(); z++) {
+    odb::dbTechLayer* layer = layers_[z].layer->getDbLayer();
+    for (int tx = 0; tx < tiles_x_; tx++) {
+      for (int ty = 0; ty < tiles_y_; ty++) {
+        const int cx = tile_x0_ + tx * tile_dx_ + tile_dx_ / 2;
+        const int cy = tile_y0_ + ty * tile_dy_ + tile_dy_ / 2;
+        const uint32_t gx = gcells->getXIdx(cx);
+        const uint32_t gy = gcells->getYIdx(cy);
+        const float capacity = gcells->getCapacity(layer, gx, gy);
+        const float usage = gcells->getUsage(layer, gx, gy);
+        if (capacity > 0
+            && usage * 100 <= capacity * params_.spread_utilization) {
+          spread_tiles_[z][static_cast<size_t>(tx) * tiles_y_ + ty] = 1;
+          spread_tile_count_++;
+        }
+      }
+    }
+  }
 }
 
 BonnRouteDR::~BonnRouteDR() = default;
@@ -1200,6 +1248,11 @@ bool BonnRouteDR::connectInRegion(NetData& net,
   req.ripup_cost
       = static_cast<Cost>(params_.ripup_cost) * layers_[0].pitch * unit();
   req.discounts = net.discount_runs;
+  if (params_.spreading && !spread_tiles_.empty()) {
+    req.spread_tiles = &spread_tiles_;
+    req.spread_cost
+        = static_cast<Cost>(params_.spread_cost) * layers_[0].pitch * unit();
+  }
   req.discount_rate = static_cast<Cost>(params_.discount_numerator) * unit()
                       / params_.discount_denominator;
   req.use_intervals = params_.use_intervals;
@@ -1968,6 +2021,9 @@ void BonnRouteDR::main()
     return;
   }
   grid_.init(graph_.numVertices());
+  if (params_.spreading) {
+    buildSpreadTiles();
+  }
   workers_.resize(std::max(1, router_cfg_->MAX_THREADS));
   for (Worker& w : workers_) {
     w.region.init(graph_.numLayers(), tiles_x_, tiles_y_);
@@ -2082,6 +2138,14 @@ void BonnRouteDR::main()
           prepares[1],
           prepares[2],
           fallbacks);
+    }
+    if (params_.spreading) {
+      logger_->report(
+          "BonnRoute DR: wire spreading in {} of {} layer tiles (GR "
+          "utilization <= {}%).",
+          spread_tile_count_,
+          static_cast<int64_t>(graph_.numLayers()) * tiles_x_ * tiles_y_,
+          params_.spread_utilization);
     }
     if (params_.reservations) {
       logger_->report(

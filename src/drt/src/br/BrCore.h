@@ -491,6 +491,12 @@ struct SearchRequest
   const FutureCostOracle* future_cost = nullptr;
   std::vector<DiscountRun> discounts;
   Cost discount_rate = 0;  // cost per DBU of a discounted edge
+  // Wire spreading (Gester et al. 2013, Sec. 4.2): in tiles where global
+  // routing left room ([z][tx * tiles_y + ty] != 0), entering a wire vertex
+  // next to an occupied track costs spread_cost, which keeps the tracks
+  // beside routed wires free where space allows. Vertex search only.
+  const std::vector<std::vector<uint8_t>>* spread_tiles = nullptr;
+  Cost spread_cost = 0;
 };
 
 struct SearchResult
@@ -551,8 +557,10 @@ class PathSearch
   bool enter(size_t v, Kind k) const;
   void push(const Item& item);
   bool relax(size_t from_v, size_t to_v, Cost g, Parent parent, int8_t dir);
-  // Cost of the preferred-direction edge between positions j and j2.
+  // Cost of the preferred-direction edge between positions j and j2,
+  // including the wire spreading cost of entering j2.
   Cost wireCost(int z, int i, int j, int j2) const;
+  Cost spreadCost(int z, int i, int j) const;
   void settle(int z, int i, int j, size_t v, Cost g);
 
   const TrackGraph& graph_;
