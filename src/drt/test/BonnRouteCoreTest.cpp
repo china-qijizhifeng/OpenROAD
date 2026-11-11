@@ -1,7 +1,10 @@
 // SPDX-License-Identifier: BSD-3-Clause
 // Copyright (c) 2026, The OpenROAD Authors
 
-// Differential test: interval search == vertex search == plain Dijkstra.
+// Differential test: interval search == vertex search == plain Dijkstra, all
+// reading legality through the fast grid API (Sec. 3.6) including edges
+// marked for the distance rule checker and wire types outside the fast
+// grid.
 #include <cstdio>
 #include <cstdlib>
 #include <functional>
@@ -13,8 +16,31 @@
 #include <vector>
 
 #include "br/BrCore.h"
+#include "br/BrDistanceRules.h"
+#include "br/BrShapeGrid.h"
+#include "br/BrWireModel.h"
 
 using namespace drt::br;
+
+// Stands in for the distance rule checker: exact levels of marked edges,
+// and wire type t >= fast answered like fast wire type t - 1.
+struct TestOracle : LegalityOracle
+{
+  const FastGrid* grid = nullptr;
+  std::map<std::pair<size_t, int>, RipupLevel> edges;
+  RipupLevel vertexLevel(int z, int i, int j, int t, Kind k) const override
+  {
+    return grid->level(z, i, j, k, t - 1);
+  }
+  RipupLevel edgeLevel(int z, int i, int j, int t, Kind k) const override
+  {
+    if (t >= grid->numWireTypes()) {
+      return grid->level(z, i, j, k, t - 1);
+    }
+    const auto it = edges.find({grid->graph().vertex(z, i, j), k});
+    return it == edges.end() ? kNotRemovable : it->second;
+  }
+};
 
 struct Ref
 {
@@ -23,11 +49,14 @@ struct Ref
   const SearchRequest& r;
   bool enter(size_t v, Kind k) const
   {
-    return f.usable(v, k, r.net) || (r.ripup && f.ripupable(v, k, r.net));
+    const RipupLevel l = f.level(v, k, r.wire_type);
+    return l == kLegal || (r.ripup && l <= r.max_ripup_level);
   }
   Cost pen(size_t v, Kind k) const
   {
-    return f.usable(v, k, r.net) ? 0 : r.ripup_cost * (1 + f.history(v));
+    return f.level(v, k, r.wire_type) == kLegal
+               ? 0
+               : r.ripup_cost * (1 + f.history(v));
   }
   // Cost of one edge u->w as the searches price it; kInfCost if absent.
   Cost edge(size_t u, size_t w, bool u_source) const
@@ -230,7 +259,7 @@ static int randomCases(const int cases, const bool sparse, const bool modern)
 {
   std::mt19937 rng(sparse ? 23456 : 12345);
   int64_t pops_i = 0, pops_v = 0, fails = 0, found = 0, labels = 0, ivs = 0,
-          settled_i = 0, settled_v = 0;
+          settled_i = 0, settled_v = 0, fast_queries = 0, checker_queries = 0;
   for (int c = 0; c < cases; c++) {
     TrackGraph g;
     int Z = 2 + rng() % 3;
@@ -276,22 +305,37 @@ static int randomCases(const int cases, const bool sparse, const bool modern)
     g.finalize(tf, tf);
     const int T = span / tile + 1;
     FastGrid f;
-    f.init(g.numVertices());
+    f.init(&g, 2);
+    TestOracle oracle;
+    oracle.grid = &f;
+    f.setOracle(&oracle);
     double pfix = sparse ? 0.005 : (rng() % 30) / 100.0;
     double prout = sparse ? 0.005 : (rng() % 20) / 100.0;
     std::uniform_real_distribution<double> u(0, 1);
     for (size_t v = 0; v < g.numVertices(); v++) {
-      for (int k = 0; k < kNumKinds; k++) {
-        if (u(rng) < pfix) {
-          f.addFixed(v, (Kind) k);
-        } else if (u(rng) < prout) {
-          f.addRouted(v, (Kind) k, 1);
-        } else if (u(rng) < (sparse ? 0.001 : 0.03)) {
-          f.addPin(v, (Kind) k, rng() % 3);
+      for (int t = 0; t < 2; t++) {
+        for (int k = 0; k <= kViaDownPad; k++) {
+          // Non-removable shapes (blockages, pins, other nets'
+          // reservations), routed shapes of ripup level 1..6.
+          if (u(rng) < pfix) {
+            f.setLevel(v, (Kind) k, t, kNotRemovable);
+          } else if (u(rng) < prout) {
+            f.setLevel(v, (Kind) k, t, 1 + rng() % kMaxRemovableLevel);
+          } else if (u(rng) < (sparse ? 0.001 : 0.03)) {
+            f.setLevel(v, (Kind) k, t, kNotRemovable);
+          }
         }
-        if (u(rng) < (sparse ? 0.0 : 0.05)) {
-          f.bumpHistory(v);
+      }
+      // Edges whose swept wire meets shapes between the endpoints.
+      for (const Kind e : {kWireEdge, kJogEdge}) {
+        if (u(rng) < (sparse ? 0.002 : 0.05)) {
+          f.setEdgeQuery(v, e, true);
+          oracle.edges[{v, e}]
+              = u(rng) < 0.5 ? kNotRemovable : 1 + rng() % kMaxRemovableLevel;
         }
+      }
+      if (u(rng) < (sparse ? 0.0 : 0.05)) {
+        f.bumpHistory(v);
       }
     }
     Region reg;
@@ -311,6 +355,9 @@ static int randomCases(const int cases, const bool sparse, const bool modern)
     q.region = &reg;
     q.ripup = rng() % 2;
     q.ripup_cost = 50 + rng() % 500;
+    q.max_ripup_level = 1 + rng() % kMaxRemovableLevel;
+    // Wire type 2 is outside the fast grid: the checker answers.
+    q.wire_type = rng() % 3;
     if (modern) {
       q.discount_rate = 3;
       const int discounts = rng() % 6;
@@ -378,6 +425,8 @@ static int randomCases(const int cases, const bool sparse, const bool modern)
       }
     }
     found += modern ? rvx.found : ri.found;
+    fast_queries += rvx.fast_grid_queries + ri.fast_grid_queries;
+    checker_queries += rvx.checker_queries + ri.checker_queries;
     pops_i += ri.heap_pops;
     labels += is.labels();
     ivs += is.intervals();
@@ -388,7 +437,7 @@ static int randomCases(const int cases, const bool sparse, const bool modern)
   printf(
       "cases %d found %lld fails %lld | heap pops interval %lld vertex %lld "
       "(%.2fx) | intervals %lld labels %lld | settled interval %lld vertex "
-      "%lld\n",
+      "%lld | legality queries fast grid %lld checker %lld\n",
       cases,
       (long long) found,
       (long long) fails,
@@ -398,7 +447,9 @@ static int randomCases(const int cases, const bool sparse, const bool modern)
       (long long) ivs,
       (long long) labels,
       (long long) settled_i,
-      (long long) settled_v);
+      (long long) settled_v,
+      (long long) fast_queries,
+      (long long) checker_queries);
   return fails != 0;
 }
 
@@ -466,10 +517,15 @@ static int obstacleDetour()
     layer.positions = {0, 100, 200, 300};
     graph.finalize([](int) { return 0; }, [](int) { return 0; });
     FastGrid grid;
-    grid.init(graph.numVertices());
+    grid.init(&graph, 1);
+    TestOracle oracle;
+    oracle.grid = &grid;
+    grid.setOracle(&oracle);
     // The obstacle hits the middle of edge (100, 200), while its endpoints
-    // remain legal. The shortest path must jog to the other track and back.
-    grid.addFixed(graph.vertex(0, 0, 1), kWireEdge);
+    // remain legal (Fig. 4 zigzag edge): the edge is marked for the
+    // checker. The shortest path must jog to the other track and back.
+    grid.setEdgeQuery(graph.vertex(0, 0, 1), kWireEdge, true);
+    oracle.edges[{graph.vertex(0, 0, 1), kWireEdge}] = kNotRemovable;
     Region region;
     region.init(1, 1, 1);
     region.allow(0, 0, 0);
@@ -514,7 +570,10 @@ static int reusedSearch()
     auto tile = [](Coord c) { return c / 100; };
     graph.finalize(tile, tile);
     FastGrid grid;
-    grid.init(graph.numVertices());
+    grid.init(&graph, 1);
+    TestOracle oracle;
+    oracle.grid = &grid;
+    grid.setOracle(&oracle);
     Region region;
     region.init(2, 5, 5);
     PathSearch vertex(graph, grid);
@@ -533,7 +592,8 @@ static int reusedSearch()
       }
       const size_t obstacle = graph.vertex(0, 2, 20);
       const int occupied = query % 2;
-      grid.addRouted(obstacle, kWireEdge, occupied);
+      grid.setEdgeQuery(obstacle, kWireEdge, occupied != 0);
+      oracle.edges[{obstacle, kWireEdge}] = 1;
       SearchRequest request;
       request.net = 0;
       request.region = &region;
@@ -566,51 +626,88 @@ static int reusedSearch()
           return 1;
         }
       }
-      grid.addRouted(obstacle, kWireEdge, -occupied);
+      grid.setEdgeQuery(obstacle, kWireEdge, false);
     }
   }
   return 0;
 }
 
-// Reservations (pin access paths, input wires) against a multiset model:
-// a (vertex, kind) is blocked for a net iff another owner covers it.
+// Reservations (pin access paths, input wires) are shape-grid shapes owned
+// by their net (Sec. 4.3, 4.4): against a multiset model, a model placed on
+// a reservation is blocked for a net iff a live reservation of another
+// owner violates it (the querying net's own shapes count as removed).
 static int reservationCases()
 {
   std::mt19937 rng(7);
   int fails = 0;
-  for (int c = 0; c < 500; c++) {
-    const int vertices = 1 + rng() % 6;
+  for (int c = 0; c < 300; c++) {
+    ShapeClassTable classes;
+    LayerRules rules;
+    rules.spacing = SpacingTable::constant(4 + rng() % 4);
+    classes.setLayers({rules});
+    ShapeGrid grid;
+    ShapeGridLayerGeometry g;
+    g.along_cell = g.cross_cell
+        = std::max<Coord>(1, maximalCellSize(classes, 0));
+    g.along_cells = g.cross_cells = 120 / g.along_cell + 1;
+    grid.init(&classes, {g}, ChunkAxis{}, ChunkAxis{});
+    DistanceRuleChecker checker(&grid);
+    ShapeGridWriteCache cache;
     const int owners = 1 + rng() % 4;
-    FastGrid grid;
-    grid.init(vertices);
-    std::map<std::tuple<int, int, int>, int> model;
-    std::vector<std::tuple<int, int, int>> added;
-    for (int step = 0; step < 200; step++) {
-      if (added.empty() || rng() % 2) {
-        const int v = rng() % vertices;
-        const int k = rng() % kNumKinds;
-        const int o = rng() % owners;
-        grid.addReservation(v, (Kind) k, o, 1);
-        model[{v, k, o}]++;
-        added.emplace_back(v, k, o);
+    // A few reservation footprints, shared by several owners.
+    std::vector<Rect> spots;
+    for (int k = 0; k < 4; k++) {
+      const Coord x = 10 + rng() % 80;
+      const Coord y = 10 + rng() % 80;
+      spots.push_back({x, y, x + 3 + (Coord) (rng() % 20), y + 6});
+    }
+    struct Live
+    {
+      Rect rect;
+      ClassId cls;
+      int owner;
+    };
+    std::vector<Live> live;
+    for (int step = 0; step < 120; step++) {
+      if (live.empty() || rng() % 2) {
+        const Rect r = spots[rng() % spots.size()];
+        const Live l{r,
+                     classes.classify(0, r, ShapeRole::kFixed),
+                     (int) (rng() % owners)};
+        grid.insert(0, l.rect, l.cls, ShapeType::kReservation, l.owner, cache);
+        live.push_back(l);
       } else {
-        const size_t at = rng() % added.size();
-        const auto [v, k, o] = added[at];
-        added.erase(added.begin() + at);
-        grid.addReservation(v, (Kind) k, o, -1);
-        model[{v, k, o}]--;
+        const size_t at = rng() % live.size();
+        const Live l = live[at];
+        live.erase(live.begin() + at);
+        if (!grid.remove(
+                0, l.rect, l.cls, ShapeType::kReservation, l.owner, cache)) {
+          fails++;
+        }
       }
-      for (int v = 0; v < vertices; v++) {
-        for (int k = 0; k < kNumKinds; k++) {
-          for (int net = -1; net <= owners; net++) {
-            bool expect = false;
-            for (int o = 0; o < owners; o++) {
-              expect |= o != net && model[{v, k, o}] > 0;
-            }
-            if (grid.hardBlocked(v, (Kind) k, net) != expect) {
-              if (fails++ < 5) {
-                printf("reservation mismatch: case %d step %d\n", c, step);
-              }
+      const Rect model{-2, -2, 2, 2};
+      const LocatedModel m{
+          0, model, classes.classify(0, model, ShapeRole::kFixed), 3, 0};
+      for (int q = 0; q < 4; q++) {
+        const Point at{(Coord) (rng() % 110), (Coord) (rng() % 110)};
+        for (int net = -1; net <= owners; net++) {
+          bool expect = false;
+          for (const Live& l : live) {
+            expect
+                |= l.owner != net
+                   && shapesViolate(classes,
+                                    PlacedShape{model.translated(at), m.cls, 3},
+                                    PlacedShape{l.rect, l.cls, 3});
+          }
+          CheckOptions opts;
+          opts.ignored_owner = net;
+          opts.intervals = false;
+          CheckResult res;
+          checker.check(at, std::span(&m, 1), opts, res);
+          if ((res.levels[0] == kNotRemovable) != expect
+              || (res.levels[0] != kLegal && res.levels[0] != kNotRemovable)) {
+            if (fails++ < 5) {
+              printf("reservation mismatch: case %d step %d\n", c, step);
             }
           }
         }

@@ -14,10 +14,11 @@ source.
 | ----- | ----- | ----- |
 | GR pin connectivity | Branches may reach different cells of the same pin and use the pin's existing conductivity to connect. | Multiple access cells are candidates, but the output chooses one cell per pin. It cannot represent arbitrary same-pin cell forests; this can require extra routing. |
 | GR capacity estimation (Section 2.5) | Count usable track-graph vertices, account for prerouted single-tile nets and estimated intra-tile connections of longer nets, and statistically estimate intermediate-layer capacity loss from stacked vias. | Import CUGR edge capacity minus existing demand. Via-pad demand is accounted for, but this is not the paper's capacity estimator. The difference can affect congestion prediction and detours. |
-| DR geometry (Sections 3.4 and 3.8) | Query permitted wire/via models and maximal usable intervals, handle rule exceptions, and use a blockage graph for off-track paths. | Check wire/jog edges and endpoints, via geometry and spacing; use OpenROAD access points and short local access stubs. The full shape-grid exception checker and off-track blockage-grid search are absent. Some feasible connections or rule interactions can fall outside this model. |
+| DR geometry (Sections 3.1–3.6) | Shape grid of cell configurations in interval trees, distance rule checker with maximal intervals and blocking-net report, fast grid with edge query bits. | Implemented as described in [`src/br/DataStructures.md`](src/br/DataStructures.md), including the per-rule modelling (some drt rules are modelled conservatively, optimistically or not at all and are left to FlexDR). |
+| DR off-track geometry (Section 3.8) | Blockage grid and path-preserving digraph for off-track paths. | Absent; OpenROAD access points and short local access stubs, checked by the distance rule checker. |
 
 Source entry points are [`BonnRouteGlobal::oracle` and `run`](../grt/src/cugr/src/BonnRoute.cpp),
-and [`BonnRouteDR::markShape`, `shapeConflicts` and `buildAccess`](src/br/BonnRouteDR.cpp).
+and [`BonnRouteDR::changeShape`, `shapeConflicts` and `buildAccess`](src/br/BonnRouteDR.cpp).
 Multiple pin access candidates and swept-edge legality checks are implemented;
 their limitations should not be described as their complete absence.
 

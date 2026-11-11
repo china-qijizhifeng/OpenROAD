@@ -11,6 +11,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <deque>
+#include <functional>
 #include <limits>
 #include <memory>
 #include <string>
@@ -19,6 +20,11 @@
 #include <vector>
 
 #include "br/BrCore.h"
+#include "br/BrDistanceRules.h"
+#include "br/BrFastGrid.h"
+#include "br/BrGeometry.h"
+#include "br/BrShapeGrid.h"
+#include "br/BrWireModel.h"
 #include "db/obj/frAccess.h"
 #include "db/obj/frBTerm.h"
 #include "db/obj/frBlock.h"
@@ -118,13 +124,14 @@ int BonnRouteDR::tileY(const frCoord y) const
   return std::clamp((y - tile_y0_) / tile_dy_, 0, tiles_y_ - 1);
 }
 
-frCoord BonnRouteDR::spacing(const int z,
-                             const frCoord width1,
-                             const frCoord width2,
-                             const frCoord prl) const
+namespace {
+
+br::Rect toRect(const odb::Rect& r)
 {
-  return layers_[z].layer->getMinSpacingValue(width1, width2, prl, false);
+  return {r.xMin(), r.yMin(), r.xMax(), r.yMax()};
 }
+
+}  // namespace
 
 void BonnRouteDR::buildTrackGraph()
 {
@@ -248,115 +255,360 @@ void BonnRouteDR::buildTrackGraph()
   graph_.tiles_y = tiles_y_;
   graph_.finalize([this](br::Coord x) { return tileX(x); },
                   [this](br::Coord y) { return tileY(y); });
-  fixed_tree_.clear();
-  routed_tree_.clear();
-  reservation_tree_.clear();
-  fixed_tree_.resize(num_fr);
-  routed_tree_.resize(num_fr);
-  reservation_tree_.resize(num_fr);
-  max_spacing_.assign(num_fr, 0);
-  for (const LayerInfo& info : layers_) {
-    max_spacing_[info.fr] = 4 * info.pitch;
-    if (info.fr + 1 < num_fr) {
-      max_spacing_[info.fr + 1] = 4 * info.pitch;
+}
+
+br::SpacingTable BonnRouteDR::spacingTable(frLayer* layer) const
+{
+  // Sec. 3.1: distances are nondecreasing functions of the widths and the
+  // common run-length. Sample drt's spacing lookup at every threshold t and
+  // t + 1 of its PRL table, two-widths table and range rules, so buckets
+  // agree with the lookup for strict and non-strict thresholds.
+  std::vector<br::Coord> widths;
+  std::vector<br::Coord> prls;
+  auto add = [](std::vector<br::Coord>& v, const frCoord t) {
+    if (t >= 0) {
+      v.push_back(t);
+      v.push_back(t + 1);
     }
+  };
+  frConstraint* con = layer->getMinSpacing();
+  if (con != nullptr
+      && con->typeId() == frConstraintTypeEnum::frcSpacingTablePrlConstraint) {
+    auto table = static_cast<frSpacingTablePrlConstraint*>(con)->getLookupTbl();
+    for (const frCoord w : table.getRows()) {
+      add(widths, w);
+    }
+    for (const frCoord p : table.getCols()) {
+      add(prls, p);
+    }
+  }
+  odb::dbTechLayer* db_layer = layer->getDbLayer();
+  if (db_layer != nullptr && db_layer->hasTwoWidthsSpacingRules()) {
+    const uint32_t rows = db_layer->getTwoWidthsSpacingTableNumWidths();
+    for (uint32_t row = 0; row < rows; row++) {
+      add(widths,
+          static_cast<frCoord>(db_layer->getTwoWidthsSpacingTableWidth(row)));
+      if (db_layer->getTwoWidthsSpacingTableHasPRL(row)) {
+        add(prls,
+            static_cast<frCoord>(db_layer->getTwoWidthsSpacingTablePRL(row)));
+      }
+    }
+  }
+  if (layer->hasSpacingRangeConstraints()) {
+    for (const auto* range : layer->getSpacingRangeConstraints()) {
+      add(widths, range->getMinWidth());
+      add(widths, range->getMaxWidth());
+    }
+  }
+  return br::SpacingTable::sample(
+      widths, prls, [layer](br::Coord a, br::Coord b, br::Coord prl) {
+        return layer->getMinSpacingValue(a, b, prl, false);
+      });
+}
+
+void BonnRouteDR::buildRoutingSpace()
+{
+  frTechObject* tech = design_->getTech();
+  const int num_z = graph_.numLayers();
+  // Shape-grid layers: wiring layer z is 2z, the via layer above it 2z + 1.
+  std::vector<br::LayerRules> rules;
+  for (int z = 0; z < num_z; z++) {
+    const LayerInfo& info = layers_[z];
+    br::LayerRules wiring;
+    wiring.horizontal = info.horizontal;
+    wiring.spacing = spacingTable(info.layer);
+    // Line-end rule (Sec. 3.1), from drt's summary of the EOL rules.
+    const drEolSpacingConstraint& eol = info.layer->getDrEolSpacingConstraint();
+    wiring.line_end = {eol.eolWidth, eol.eolSpace, eol.eolWithin};
+    rules.push_back(wiring);
+    if (z + 1 == num_z) {
+      continue;
+    }
+    br::LayerRules via;
+    via.via_layer = true;
+    via.horizontal = info.horizontal;
+    via.spacing = br::SpacingTable::constant(info.cut_spacing);
+    if (z > 0) {
+      // Inter-layer via rule with the cut layer below (Sec. 3.1, 3.2).
+      frLayer* cut = tech->getLayer(info.fr + 1);
+      frLayer* below = tech->getLayer(layers_[z - 1].fr + 1);
+      auto inter = [](frLayer* a, frLayer* b) -> frCoord {
+        const auto& cons = a->getInterLayerCutSpacingConstraint(false);
+        const frLayerNum n = b->getLayerNum();
+        if (n < 0 || n >= static_cast<int>(cons.size()) || cons[n] == nullptr) {
+          return 0;
+        }
+        return cons[n]->getCutSpacing();
+      };
+      via.projection_spacing = std::max(inter(cut, below), inter(below, cut));
+    }
+    rules.push_back(via);
+  }
+  shape_classes_.setLayers(rules);
+  // Wire types (Sec. 3.2): default widths and vias, then the NDRs.
+  auto geometry = [&](const std::string& name, frNonDefaultRule* ndr) {
+    br::WireTypeGeometry g;
+    g.name = name;
+    for (int z = 0; z < num_z; z++) {
+      frCoord w = layers_[z].width;
+      if (ndr != nullptr) {
+        w = std::max(w, ndr->getWidth(layers_[z].fr / 2 - 1));
+      }
+      g.width.push_back(w);
+    }
+    for (int z = 0; z + 1 < num_z; z++) {
+      const frViaDef* def = layers_[z].up_via;
+      if (ndr != nullptr && ndr->getPrefVia(layers_[z].fr / 2 - 1) != nullptr) {
+        def = ndr->getPrefVia(layers_[z].fr / 2 - 1);
+      }
+      const frVia via(def);
+      g.via.push_back({true,
+                       toRect(via.getLayer1BBox()),
+                       toRect(via.getCutBBox()),
+                       toRect(via.getLayer2BBox())});
+    }
+    return g;
+  };
+  wire_types_.clear();
+  wire_types_.push_back(
+      br::makeWireType(geometry("default", nullptr), shape_classes_));
+  for (const auto& ndr : tech->getNondefaultRules()) {
+    wire_types_.push_back(
+        br::makeWireType(geometry(ndr->getName(), ndr.get()), shape_classes_));
+  }
+  // Shape grid cells (Sec. 3.3): the largest edge whose diagonal stays
+  // below the smallest diff-net spacing, reduced to a divisor of the track
+  // pitch when one is at least half as large, and anchored so that tracks
+  // lie at cell centres; equal geometry on different tracks then has equal
+  // configurations.
+  const odb::Rect die = design_->getTopBlock()->getDieBox();
+  std::vector<br::ShapeGridLayerGeometry> geometries;
+  frCoord max_pitch = 0;
+  for (const LayerInfo& info : layers_) {
+    max_pitch = std::max(max_pitch, info.pitch);
+  }
+  int64_t need = 0;
+  for (int g = 0; g < shape_classes_.numLayers(); g++) {
+    const int z = g / 2;
+    const bool via_layer = (g % 2) == 1;
+    const br::TrackLayer& tl = graph_.layers[z];
+    const frCoord bound = br::maximalCellSize(shape_classes_, g);
+    auto cell = [&](frCoord pitch) -> frCoord {
+      if (bound <= 0) {
+        return std::max<frCoord>(1, pitch / 4);
+      }
+      for (int k = 1; k <= 64 && pitch > 0; k++) {
+        if (pitch % k == 0 && pitch / k <= bound) {
+          return pitch / k >= bound / 2 ? pitch / k : bound;
+        }
+      }
+      return bound;
+    };
+    const frCoord cross_pitch = layers_[z].pitch;
+    const frCoord along_pitch
+        = z + 1 < num_z ? layers_[z + 1].pitch
+                        : (z > 0 ? layers_[z - 1].pitch : cross_pitch);
+    br::ShapeGridLayerGeometry geom;
+    geom.horizontal = shape_classes_.layer(g).horizontal;
+    geom.cross_cell = cell(cross_pitch);
+    geom.along_cell = cell(along_pitch);
+    const frCoord margin = shape_classes_.reach(g) + 4 * max_pitch;
+    const bool h = geom.horizontal;
+    const frCoord cross_lo = (h ? die.yMin() : die.xMin()) - margin;
+    const frCoord cross_hi = (h ? die.yMax() : die.xMax()) + margin;
+    const frCoord along_lo = (h ? die.xMin() : die.yMin()) - margin;
+    const frCoord along_hi = (h ? die.xMax() : die.yMax()) + margin;
+    auto origin = [](frCoord anchor, frCoord lo, frCoord size) {
+      const frCoord start = anchor - size / 2;
+      return static_cast<frCoord>(
+          start - br::floorDiv(start - lo + size - 1, size) * size);
+    };
+    geom.cross_origin = origin(tl.tracks.empty() ? cross_lo : tl.tracks.front(),
+                               cross_lo,
+                               geom.cross_cell);
+    geom.along_origin
+        = origin(tl.positions.empty() ? along_lo : tl.positions.front(),
+                 along_lo,
+                 geom.along_cell);
+    geom.cross_cells = static_cast<int>(
+        (int64_t{cross_hi} - geom.cross_origin) / geom.cross_cell + 1);
+    geom.along_cells = static_cast<int>(
+        (int64_t{along_hi} - geom.along_origin) / geom.along_cell + 1);
+    geometries.push_back(geom);
+    // Largest distance from a location at which an update or query of this
+    // layer can read or write (model, interaction distance, one cell).
+    br::Coord model = 0;
+    const br::WireType& w = wire_types_.front();
+    auto extent = [&](const br::WireModel& m) {
+      if (m.valid) {
+        model = std::max({model,
+                          std::abs(m.rect.xlo),
+                          std::abs(m.rect.ylo),
+                          std::abs(m.rect.xhi),
+                          std::abs(m.rect.yhi)});
+      }
+    };
+    if (!via_layer) {
+      extent(w.preferred[z]);
+      if (z + 1 < num_z) {
+        extent(w.via[z].bottom);
+      }
+      if (z > 0) {
+        extent(w.via[z - 1].top);
+      }
+    } else {
+      extent(w.via[z].cut);
+    }
+    need = std::max<int64_t>(need,
+                             shape_classes_.reach(g) + model
+                                 + std::max(geom.cross_cell, geom.along_cell));
+  }
+  shape_grid_.init(&shape_classes_,
+                   geometries,
+                   br::ChunkAxis{tile_x0_, tile_dx_, tiles_x_},
+                   br::ChunkAxis{tile_y0_, tile_dy_, tiles_y_});
+  checker_.init(&shape_grid_);
+  // Sec. 3.6: the fast grid holds the most frequent wire type.
+  grid_.init(&graph_, 1);
+  fast_builder_.init(&graph_, &wire_types_, 1, &checker_, &grid_);
+  // A shape change writes up to need + one pitch beyond the shape and
+  // reads up to 2 * need + one pitch (fast-grid recomputation); a query
+  // reads up to need. netTileBox adds this many tiles beyond the largest
+  // routing area, so threads of disjoint regions (Sec. 5.1) never touch
+  // the same tile chunk.
+  const int64_t tile = std::max<int64_t>(1, std::min(tile_dx_, tile_dy_));
+  halo_tiles_ = static_cast<int>(
+      std::max<int64_t>(1, (2 * need + max_pitch + tile - 1) / tile));
+}
+
+void BonnRouteDR::rebuildFastGrid()
+{
+  // Whole tile rows per job: a tile's run lists are written by one thread.
+  const std::vector<std::array<int, 3>> jobs = fast_builder_.rebuildJobs();
+  const int threads = std::max(1, router_cfg_->MAX_THREADS);
+  // Vertex data first; jog bits read both tracks of a pair.
+#pragma omp parallel for num_threads(threads) schedule(dynamic, 1)
+  for (int k = 0; k < static_cast<int>(jobs.size()); k++) {
+    fast_builder_.rebuildVertices(jobs[k][0], jobs[k][1], jobs[k][2]);
+  }
+  // Jog bits read the next tile row: compute all, then write.
+  std::vector<std::vector<br::FastGridBuilder::JogBits>> bits(jobs.size());
+#pragma omp parallel for num_threads(threads) schedule(dynamic, 1)
+  for (int k = 0; k < static_cast<int>(jobs.size()); k++) {
+    fast_builder_.computeJogBits(jobs[k][0], jobs[k][1], jobs[k][2], bits[k]);
+  }
+#pragma omp parallel for num_threads(threads) schedule(dynamic, 1)
+  for (int k = 0; k < static_cast<int>(jobs.size()); k++) {
+    fast_builder_.writeJogBits(bits[k]);
   }
 }
 
-void BonnRouteDR::markShape(const RShape& shape,
-                            const int mode,
-                            const int owner,
-                            const int delta)
+int BonnRouteDR::gridLayer(const frLayerNum layer) const
 {
-  const odb::Rect& r = shape.rect;
-  auto apply = [&](const int z,
-                   const Kind kind,
-                   const frCoord xlo,
-                   const frCoord ylo,
-                   const frCoord xhi,
-                   const frCoord yhi) {
-    br::forEachBlocked(
-        graph_.layers[z], kind, xlo, ylo, xhi, yhi, [&](int i, int j) {
-          const size_t v = graph_.vertex(z, i, j);
-          if (mode == 0) {
-            grid_.addFixed(v, kind);
-          } else if (mode == 1) {
-            grid_.addPin(v, kind, owner);
-          } else if (mode == 2) {
-            grid_.addRouted(v, kind, delta);
-          } else {
-            grid_.addReservation(v, kind, owner, delta);
-          }
-        });
-    // The swept edges of wires and jogs (Sec. 3.6 edge exceptions).
-    if (kind == br::kWire || kind == br::kJog) {
-      const Kind edge = kind == br::kWire ? br::kWireEdge : br::kJogEdge;
-      br::forEachBlocked(
-          graph_.layers[z], edge, xlo, ylo, xhi, yhi, [&](int i, int j) {
-            const size_t v = graph_.vertex(z, i, j);
-            if (mode == 0) {
-              grid_.addFixed(v, edge);
-            } else if (mode == 1) {
-              grid_.addPin(v, edge, owner);
-            } else if (mode == 2) {
-              grid_.addRouted(v, edge, delta);
-            } else {
-              grid_.addReservation(v, edge, owner, delta);
-            }
-          });
-    }
-  };
-  // Origins p at which `model + p` is closer than (sx, sy) to r.
-  auto block_model = [&](const int z,
-                         const Kind kind,
-                         const odb::Rect& model,
-                         const frCoord sx,
-                         const frCoord sy) {
-    apply(z,
-          kind,
-          r.xMin() - sx - model.xMax() + 1,
-          r.yMin() - sy - model.yMax() + 1,
-          r.xMax() + sx - model.xMin() - 1,
-          r.yMax() + sy - model.yMin() - 1);
-  };
-  const int num_fr = static_cast<int>(z_of_fr_.size());
-  if (shape.layer < 0 || shape.layer >= num_fr) {
+  if (layer < 0 || layer >= static_cast<int>(z_of_fr_.size())) {
+    return -1;
+  }
+  if (z_of_fr_[layer] >= 0) {
+    return br::wiringGridLayer(z_of_fr_[layer]);
+  }
+  if (cut_z_of_fr_[layer] >= 0) {
+    return br::viaGridLayer(cut_z_of_fr_[layer]);
+  }
+  return -1;
+}
+
+int BonnRouteDR::projectionLayer(const int grid_layer) const
+{
+  const int above = grid_layer + 2;
+  if (grid_layer % 2 == 1 && above < shape_classes_.numLayers()
+      && shape_classes_.layer(above).projection_spacing > 0) {
+    return above;
+  }
+  return -1;
+}
+
+br::ClassId BonnRouteDR::shapeClass(const RShape& shape,
+                                    const int grid_layer,
+                                    Worker* local)
+{
+  br::ShapeRole role = shape.role;
+  if (grid_layer % 2 == 1 && role != br::ShapeRole::kCutProjection) {
+    role = br::ShapeRole::kCut;
+  }
+  const br::ShapeClass c
+      = shape_classes_.describe(grid_layer, toRect(shape.rect), role);
+  auto& cache = local != nullptr ? local->class_cache : serial_class_cache_;
+  const auto it = cache.find(c);
+  if (it != cache.end()) {
+    return it->second;
+  }
+  const br::ClassId id = shape_classes_.intern(c);
+  cache.emplace(c, id);
+  return id;
+}
+
+namespace {
+
+br::ShapeType routedType(const br::ShapeRole role)
+{
+  return role == br::ShapeRole::kPreferredWire
+                 || role == br::ShapeRole::kNonPreferredWire
+             ? br::ShapeType::kWire
+             : br::ShapeType::kVia;
+}
+
+}  // namespace
+
+void BonnRouteDR::changeShape(const RShape& shape,
+                              const br::ShapeType type,
+                              const int owner,
+                              const bool insert,
+                              Worker* local)
+{
+  const int g = gridLayer(shape.layer);
+  if (g < 0) {
     return;
   }
-  const int z = z_of_fr_[shape.layer];
-  if (z >= 0) {
-    const LayerInfo& info = layers_[z];
-    const frCoord ws = r.minDXDY();
-    const frCoord prl = r.maxDXDY();
-    const frCoord w = info.width;
-    const frCoord half = w / 2;
-    const odb::Rect wire_model(-half, -half, w - half, w - half);
-    const frCoord s_wire = spacing(z, ws, w, prl);
-    // Wires are assumed to end in preferred direction (Sec. 3.1).
-    const frCoord s_along = (info.eol_width > 0 && w < info.eol_width)
-                                ? std::max(s_wire, info.eol_space)
-                                : s_wire;
-    block_model(z,
-                br::kWire,
-                wire_model,
-                info.horizontal ? s_along : s_wire,
-                info.horizontal ? s_wire : s_along);
-    block_model(z, br::kJog, wire_model, s_wire, s_wire);
-    if (z + 1 < static_cast<int>(layers_.size())) {
-      const frCoord s = spacing(z, ws, info.up_pad.minDXDY(), prl);
-      block_model(z, br::kViaUpPad, info.up_pad, s, s);
+  br::ShapeGridWriteCache& cache
+      = local != nullptr ? local->cache : serial_cache_;
+  const br::Rect r = toRect(shape.rect);
+  auto apply = [&](const int layer, const br::ClassId cls) {
+    const bool ok = insert
+                        ? shape_grid_.insert(layer, r, cls, type, owner, cache)
+                        : shape_grid_.remove(layer, r, cls, type, owner, cache);
+    if (!ok) {
+      inconsistent_updates_++;
     }
-    if (z > 0) {
-      const frCoord s = spacing(z, ws, info.down_pad.minDXDY(), prl);
-      block_model(z, br::kViaDownPad, info.down_pad, s, s);
+    // Sec. 3.6: the fast grid follows every change of the shape grid.
+    if (!bulk_insert_) {
+      fast_builder_.shapeChanged(layer, r);
     }
-    return;
+  };
+  apply(g, shapeClass(shape, g, local));
+  const int above = projectionLayer(g);
+  if (above >= 0) {
+    RShape projection = shape;
+    projection.role = br::ShapeRole::kCutProjection;
+    apply(above, shapeClass(projection, above, local));
   }
-  const int cz = cut_z_of_fr_[shape.layer];
-  if (cz >= 0) {
-    const LayerInfo& info = layers_[cz];
-    block_model(
-        cz, br::kCutUp, info.up_cut, info.cut_spacing, info.cut_spacing);
+}
+
+void BonnRouteDR::setOwnShapes(NetData& net, const bool present, Worker* local)
+{
+  for (const RShape& pin : net.pins) {
+    changeShape(pin, br::ShapeType::kPin, net.id, present, local);
+  }
+  for (const Term& term : net.terms) {
+    if (term.reservation_active) {
+      for (const RShape& s : term.reservation) {
+        changeShape(s, br::ShapeType::kReservation, net.id, present, local);
+      }
+    }
+  }
+  if (net.input_reserved) {
+    for (const RShape& s : net.input_reservation) {
+      changeShape(s, br::ShapeType::kReservation, net.id, present, local);
+    }
   }
 }
 
@@ -393,17 +645,18 @@ void BonnRouteDR::buildNets()
 
 void BonnRouteDR::buildFixed()
 {
+  // Blockages and pins (Sec. 3.3 shape types); pins are owned by their net
+  // and removed temporarily while it is connected (Sec. 4.4).
   frRegionQuery* rq = design_->getRegionQuery();
   const odb::Rect die = design_->getTopBlock()->getDieBox();
   const int num_fr = static_cast<int>(z_of_fr_.size());
+  bulk_insert_ = true;
   for (int fr = 0; fr < num_fr; fr++) {
     if (z_of_fr_[fr] < 0 && cut_z_of_fr_[fr] < 0) {
       continue;
     }
     frRegionQuery::Objects<frBlockObject> result;
     rq->query(die, fr, result);
-    std::vector<std::pair<odb::Rect, int>> entries;
-    entries.reserve(result.size());
     for (const auto& [rect, obj] : result) {
       frNet* owner_net = nullptr;
       if (obj->typeId() == frcInstTerm) {
@@ -418,50 +671,49 @@ void BonnRouteDR::buildFixed()
           owner = it->second;
         }
       }
-      markShape(
-          {static_cast<frLayerNum>(fr), rect}, owner >= 0 ? 1 : 0, owner, 0);
-      entries.emplace_back(rect, owner);
+      const RShape shape{static_cast<frLayerNum>(fr), rect};
+      changeShape(shape,
+                  owner >= 0 ? br::ShapeType::kPin : br::ShapeType::kBlockage,
+                  owner,
+                  true,
+                  nullptr);
+      if (owner >= 0) {
+        nets_[owner].pins.push_back(shape);
+      }
     }
-    fixed_tree_[fr] = RTree<int>(entries.begin(), entries.end());
   }
+  bulk_insert_ = false;
+  rebuildFastGrid();
+  shape_grid_.compact();
+  grid_.compact();
 }
 
 bool BonnRouteDR::treeConflicts(const RTree<int>& tree,
                                 const RShape& shape,
-                                const int net,
-                                const std::unordered_set<int>* skip) const
+                                const int net)
 {
-  const int num_fr = static_cast<int>(z_of_fr_.size());
-  if (shape.layer < 0 || shape.layer >= num_fr) {
+  const int g = gridLayer(shape.layer);
+  if (g < 0) {
     return false;
   }
-  const int z = z_of_fr_[shape.layer];
-  const int cz = cut_z_of_fr_[shape.layer];
-  if (z < 0 && cz < 0) {
-    return false;
-  }
+  // The pairwise rule of the shape grid on preferred-direction wires.
+  const br::Rect r = toRect(shape.rect);
+  const br::ClassId cls = shapeClass(shape, g, nullptr);
+  const br::Coord reach = shape_classes_.reach(g);
   odb::Rect query = shape.rect;
-  query.bloat(max_spacing_[shape.layer], query);
+  query.bloat(reach, query);
   for (auto it = tree.qbegin(bgi::intersects(query)); it != tree.qend(); ++it) {
-    if ((it->second == net && net >= 0)
-        || (skip != nullptr && skip->contains(it->second))) {
+    if (it->second == net && net >= 0) {
       continue;
     }
-    const odb::Rect& other = it->first;
-    frCoord s;
-    if (z >= 0) {
-      const frCoord prl = std::min(other.maxDXDY(), shape.rect.maxDXDY());
-      s = spacing(z, other.minDXDY(), shape.rect.minDXDY(), prl);
-    } else {
-      s = layers_[cz].cut_spacing;
-    }
-    const int64_t dx = std::max({0,
-                                 other.xMin() - shape.rect.xMax(),
-                                 shape.rect.xMin() - other.xMax()});
-    const int64_t dy = std::max({0,
-                                 other.yMin() - shape.rect.yMax(),
-                                 shape.rect.yMin() - other.yMax()});
-    if (dx * dx + dy * dy < static_cast<int64_t>(s) * s) {
+    const br::Rect o = toRect(it->first);
+    const br::ClassId other = shapeClass(
+        RShape{shape.layer, it->first, br::ShapeRole::kPreferredWire},
+        g,
+        nullptr);
+    if (br::shapesViolate(shape_classes_,
+                          br::PlacedShape{r, cls, 3},
+                          br::PlacedShape{o, other, 3})) {
       return true;
     }
   }
@@ -470,40 +722,60 @@ bool BonnRouteDR::treeConflicts(const RTree<int>& tree,
 
 bool BonnRouteDR::shapeConflicts(const RShape& shape,
                                  const int net,
-                                 const Worker* worker) const
+                                 const Worker* worker)
 {
-  if (shape.layer < 0 || shape.layer >= static_cast<int>(z_of_fr_.size())) {
+  const int g = gridLayer(shape.layer);
+  if (g < 0) {
     return false;
   }
-  const bool local = worker != nullptr && !worker->local_routed.empty();
-  return treeConflicts(fixed_tree_[shape.layer], shape, net)
-         || treeConflicts(routed_tree_[shape.layer], shape, net)
-         || (local
-             && treeConflicts(worker->local_routed[shape.layer], shape, net))
-         || treeConflicts(reservation_tree_[shape.layer],
-                          shape,
-                          net,
-                          worker != nullptr ? &worker->released : nullptr);
+  // Sec. 3.4 / 4.4: everything but the net's own shapes.
+  Worker* local = const_cast<Worker*>(worker);
+  const br::Rect r = toRect(shape.rect);
+  if (checker_.shapeLevel(g, r, shapeClass(shape, g, local), 3, net)
+      != br::kLegal) {
+    return true;
+  }
+  const int above = projectionLayer(g);
+  if (above >= 0) {
+    RShape projection = shape;
+    projection.role = br::ShapeRole::kCutProjection;
+    return checker_.shapeLevel(
+               above, r, shapeClass(projection, above, local), 3, net)
+           != br::kLegal;
+  }
+  return false;
 }
 
 BonnRouteDR::RShape BonnRouteDR::wireShape(const OutWire& wire) const
 {
+  // Sec. 3.2: the stick figure plus the wire model of wire type 0.
   const int z = z_of_fr_[wire.layer];
-  const frCoord half = layers_[z].width / 2;
-  odb::Rect r(std::min(wire.begin.x(), wire.end.x()) - half,
-              std::min(wire.begin.y(), wire.end.y()) - half,
-              std::max(wire.begin.x(), wire.end.x()) + half,
-              std::max(wire.begin.y(), wire.end.y()) + half);
-  return {wire.layer, r};
+  const bool horizontal = wire.begin.y() == wire.end.y();
+  const bool preferred
+      = wire.begin == wire.end || horizontal == layers_[z].horizontal;
+  const br::WireType& type = wire_types_.front();
+  const br::Rect& m
+      = (preferred ? type.preferred[z] : type.non_preferred[z]).rect;
+  odb::Rect r(std::min(wire.begin.x(), wire.end.x()) + m.xlo,
+              std::min(wire.begin.y(), wire.end.y()) + m.ylo,
+              std::max(wire.begin.x(), wire.end.x()) + m.xhi,
+              std::max(wire.begin.y(), wire.end.y()) + m.yhi);
+  return {wire.layer,
+          r,
+          preferred ? br::ShapeRole::kPreferredWire
+                    : br::ShapeRole::kNonPreferredWire};
 }
 
 void BonnRouteDR::viaShapes(const OutVia& via,
                             std::vector<RShape>& shapes) const
 {
   frVia v(via.def, via.point);
-  shapes.push_back({via.def->getLayer1Num(), v.getLayer1BBox()});
-  shapes.push_back({via.def->getCutLayerNum(), v.getCutBBox()});
-  shapes.push_back({via.def->getLayer2Num(), v.getLayer2BBox()});
+  shapes.push_back(
+      {via.def->getLayer1Num(), v.getLayer1BBox(), br::ShapeRole::kViaPad});
+  shapes.push_back(
+      {via.def->getCutLayerNum(), v.getCutBBox(), br::ShapeRole::kCut});
+  shapes.push_back(
+      {via.def->getLayer2Num(), v.getLayer2BBox(), br::ShapeRole::kViaPad});
 }
 
 void BonnRouteDR::shapesOf(const NetData& net,
@@ -722,20 +994,10 @@ void BonnRouteDR::setReservation(Term& term,
   if (term.reservation_active == active) {
     return;
   }
+  // Reservations are shape-grid shapes owned by the net, non-removable for
+  // the others (Sec. 4.3).
   for (const RShape& shape : term.reservation) {
-    if (shape.layer < 0
-        || shape.layer >= static_cast<int>(reservation_tree_.size())) {
-      continue;
-    }
-    markShape(shape, 3, net, active ? 1 : -1);
-    auto& tree = reservation_tree_[shape.layer];
-    if (local != nullptr) {
-      local->released_shapes.emplace_back(shape, net);
-    } else if (active) {
-      tree.insert({shape.rect, net});
-    } else {
-      tree.remove(std::make_pair(shape.rect, net));
-    }
+    changeShape(shape, br::ShapeType::kReservation, net, active, local);
   }
   term.reservation_active = active;
 }
@@ -750,9 +1012,6 @@ void BonnRouteDR::setReservations(NetData& net,
   if (!active) {
     setInputReservation(net, false, local);
   }
-  if (local != nullptr) {
-    local->released.insert(net.id);
-  }
 }
 
 void BonnRouteDR::setInputReservation(NetData& net,
@@ -763,15 +1022,7 @@ void BonnRouteDR::setInputReservation(NetData& net,
     return;
   }
   for (const RShape& shape : net.input_reservation) {
-    markShape(shape, 3, net.id, active ? 1 : -1);
-    auto& tree = reservation_tree_[shape.layer];
-    if (local != nullptr) {
-      local->released_shapes.emplace_back(shape, net.id);
-    } else if (active) {
-      tree.insert({shape.rect, net.id});
-    } else {
-      tree.remove(std::make_pair(shape.rect, net.id));
-    }
+    changeShape(shape, br::ShapeType::kReservation, net.id, active, local);
   }
   net.input_reserved = active;
 }
@@ -1115,6 +1366,21 @@ bool BonnRouteDR::connect(NetData& net,
                           Worker& worker,
                           const int extra_dilation)
 {
+  // Sec. 4.4: "The shapes of the components that contributed to S and T,
+  // including reserved pin access paths, are removed temporarily from
+  // routing space in order not to block access to these vertices." All
+  // components of the net are sources or targets of its searches.
+  setOwnShapes(net, false, &worker);
+  const bool ok = connectWithoutOwnShapes(net, ripup, worker, extra_dilation);
+  setOwnShapes(net, true, &worker);
+  return ok;
+}
+
+bool BonnRouteDR::connectWithoutOwnShapes(NetData& net,
+                                          const bool ripup,
+                                          Worker& worker,
+                                          const int extra_dilation)
+{
   const int num_terms = static_cast<int>(net.terms.size());
   // Stub and attachment legality depend on the committed shapes, not on
   // the guide dilation. Check them once for both clean windows.
@@ -1124,8 +1390,9 @@ bool BonnRouteDR::connect(NetData& net,
     valid[t].assign(term.options.size(), 0);
     for (size_t o = 0; o < term.options.size(); o++) {
       const AccessOption& opt = term.options[o];
-      bool ok = grid_.usable(opt.vertex, br::kWire, net.id)
-                || (ripup && grid_.ripupable(opt.vertex, br::kWire, net.id));
+      const br::RipupLevel level = grid_.level(opt.vertex, br::kWire);
+      bool ok
+          = level == br::kLegal || (ripup && level <= br::kMaxRemovableLevel);
       if (ok && !ripup) {
         for (const OutWire& w : opt.wires) {
           if (shapeConflicts(wireShape(w), net.id, &worker)) {
@@ -1139,8 +1406,11 @@ bool BonnRouteDR::connect(NetData& net,
             break;
           }
           const frVia via(v.def, v.point);
-          ok = !shapeConflicts(
-              {v.def->getLayer2Num(), via.getLayer2BBox()}, net.id, &worker);
+          ok = !shapeConflicts({v.def->getLayer2Num(),
+                                via.getLayer2BBox(),
+                                br::ShapeRole::kViaPad},
+                               net.id,
+                               &worker);
         }
       }
       valid[t][o] = ok;
@@ -1182,6 +1452,7 @@ bool BonnRouteDR::connectInRegion(NetData& net,
                       / params_.discount_denominator;
   req.use_intervals = params_.use_intervals;
   req.interval_via_property = params_.interval_via_property;
+  req.wire_type = 0;
   std::unordered_set<size_t> in_tree;
   std::vector<size_t> tree;
   std::vector<std::pair<size_t, Cost>> sources;
@@ -1249,6 +1520,8 @@ bool BonnRouteDR::connectInRegion(NetData& net,
     worker.searches++;
     worker.heap_pops += res.heap_pops;
     worker.settled += res.settled;
+    worker.fast_grid_queries += res.fast_grid_queries;
+    worker.checker_queries += res.checker_queries;
     return res;
   };
   bool full_region = false;
@@ -1324,7 +1597,7 @@ bool BonnRouteDR::connectInRegion(NetData& net,
   // History for rip-up (Sec. 4.2): vertices whose use forces a rip-up.
   if (ripup) {
     for (const size_t v : in_tree) {
-      if (!grid_.usable(v, br::kWire, net.id)) {
+      if (grid_.level(v, br::kWire) != br::kLegal) {
         grid_.bumpHistory(v);
       }
     }
@@ -1336,48 +1609,15 @@ void BonnRouteDR::commitNet(NetData& net, Worker* local)
 {
   shapesOf(net, net.shapes);
   for (const RShape& s : net.shapes) {
-    markShape(s, 2, net.id, 1);
-    if (s.layer >= 0 && s.layer < static_cast<int>(routed_tree_.size())) {
-      if (local != nullptr) {
-        local->local_routed[s.layer].insert({s.rect, net.id});
-      } else {
-        routed_tree_[s.layer].insert({s.rect, net.id});
-      }
-    }
-  }
-  if (local != nullptr) {
-    local->committed.push_back(net.id);
+    changeShape(s, routedType(s.role), net.id, true, local);
   }
   net.routed = true;
-}
-
-void BonnRouteDR::mergeWorker(Worker& worker)
-{
-  for (const int id : worker.committed) {
-    for (const RShape& s : nets_[id].shapes) {
-      if (s.layer >= 0 && s.layer < static_cast<int>(routed_tree_.size())) {
-        routed_tree_[s.layer].insert({s.rect, id});
-      }
-    }
-  }
-  for (const auto& [shape, net] : worker.released_shapes) {
-    reservation_tree_[shape.layer].remove(std::make_pair(shape.rect, net));
-  }
-  for (RTree<int>& tree : worker.local_routed) {
-    tree.clear();
-  }
-  worker.released.clear();
-  worker.released_shapes.clear();
-  worker.committed.clear();
 }
 
 void BonnRouteDR::ripupNet(NetData& net)
 {
   for (const RShape& s : net.shapes) {
-    markShape(s, 2, net.id, -1);
-    if (s.layer >= 0 && s.layer < static_cast<int>(routed_tree_.size())) {
-      routed_tree_[s.layer].remove(std::make_pair(s.rect, net.id));
-    }
+    changeShape(s, routedType(s.role), net.id, false, nullptr);
   }
   net.shapes.clear();
   net.wires.clear();
@@ -1385,48 +1625,35 @@ void BonnRouteDR::ripupNet(NetData& net)
   net.routed = false;
 }
 
-void BonnRouteDR::collectVictims(const NetData& net,
-                                 std::vector<int>& victims) const
+void BonnRouteDR::collectVictims(const NetData& net, std::vector<int>& victims)
 {
+  // Sec. 3.4: "the distance rule checking module can report nets whose
+  // (partial) removal increases the set of allowed wire or via models";
+  // Sec. 4.2 / 4.4: those nets are ripped up.
   std::vector<RShape> shapes;
   shapesOf(net, shapes);
   std::unordered_set<int> found;
+  std::vector<br::BlockingNet> nets;
+  auto report = [&](const RShape& shape, const int g) {
+    checker_.shapeLevel(
+        g, toRect(shape.rect), shapeClass(shape, g, nullptr), 3, net.id, &nets);
+    for (const br::BlockingNet& b : nets) {
+      if (b.net != net.id && b.net >= 0) {
+        found.insert(b.net);
+      }
+    }
+  };
   for (const RShape& shape : shapes) {
-    if (shape.layer < 0 || shape.layer >= static_cast<int>(z_of_fr_.size())) {
+    const int g = gridLayer(shape.layer);
+    if (g < 0) {
       continue;
     }
-    const int z = z_of_fr_[shape.layer];
-    const int cz = cut_z_of_fr_[shape.layer];
-    if (z < 0 && cz < 0) {
-      continue;
-    }
-    odb::Rect query = shape.rect;
-    query.bloat(max_spacing_[shape.layer], query);
-    const auto& tree = routed_tree_[shape.layer];
-    for (auto it = tree.qbegin(bgi::intersects(query)); it != tree.qend();
-         ++it) {
-      if (it->second == net.id || found.contains(it->second)) {
-        continue;
-      }
-      const odb::Rect& other = it->first;
-      frCoord s;
-      if (z >= 0) {
-        s = spacing(z,
-                    other.minDXDY(),
-                    shape.rect.minDXDY(),
-                    std::min(other.maxDXDY(), shape.rect.maxDXDY()));
-      } else {
-        s = layers_[cz].cut_spacing;
-      }
-      const int64_t dx = std::max({0,
-                                   other.xMin() - shape.rect.xMax(),
-                                   shape.rect.xMin() - other.xMax()});
-      const int64_t dy = std::max({0,
-                                   other.yMin() - shape.rect.yMax(),
-                                   shape.rect.yMin() - other.yMax()});
-      if (dx * dx + dy * dy < static_cast<int64_t>(s) * s) {
-        found.insert(it->second);
-      }
+    report(shape, g);
+    const int above = projectionLayer(g);
+    if (above >= 0) {
+      RShape projection = shape;
+      projection.role = br::ShapeRole::kCutProjection;
+      report(projection, above);
     }
   }
   victims.assign(found.begin(), found.end());
@@ -1460,8 +1687,13 @@ void BonnRouteDR::netTileBox(const NetData& net,
       add(tileX(x), tileY(y));
     }
   }
-  // Retry dilation plus one tile for the spacing halo of committed shapes.
-  const int halo = params_.retry_dilation + 1;
+  // Pins are removed and reinserted while the net is connected (Sec. 4.4).
+  for (const RShape& pin : net.pins) {
+    add(tileX(pin.rect.xMin()), tileY(pin.rect.yMin()));
+    add(tileX(pin.rect.xMax()), tileY(pin.rect.yMax()));
+  }
+  // Retry dilation plus the routing-space interaction halo (Sec. 5.1).
+  const int halo = params_.retry_dilation + halo_tiles_;
   xlo -= halo;
   ylo -= halo;
   xhi += halo;
@@ -1667,9 +1899,6 @@ void BonnRouteDR::routePartitions(const std::vector<int>& order,
           region_failed[r].push_back(id);
         }
       }
-    }
-    for (Worker& w : workers_) {
-      mergeWorker(w);
     }
     for (const auto& f : region_failed) {
       failed.insert(failed.end(), f.begin(), f.end());
@@ -1889,7 +2118,7 @@ void BonnRouteDR::main()
   if (layers_.empty()) {
     return;
   }
-  grid_.init(graph_.numVertices());
+  buildRoutingSpace();
   workers_.resize(std::max(1, router_cfg_->MAX_THREADS));
   for (Worker& w : workers_) {
     w.region.init(graph_.numLayers(), tiles_x_, tiles_y_);
@@ -1925,9 +2154,6 @@ void BonnRouteDR::main()
   std::ranges::stable_sort(
       order, [&](int a, int b) { return nets_[a].hpwl < nets_[b].hpwl; });
   std::vector<int> failed_first;
-  for (Worker& w : workers_) {
-    w.local_routed.assign(z_of_fr_.size(), RTree<int>());
-  }
   if (params_.partitions) {
     routePartitions(order, failed_first);
   } else {
@@ -1953,7 +2179,11 @@ void BonnRouteDR::main()
   int64_t intervals = 0;
   int64_t labels = 0;
   int64_t path_region_searches = 0;
+  int64_t fast_grid_queries = 0;
+  int64_t checker_queries = 0;
   for (const Worker& w : workers_) {
+    fast_grid_queries += w.fast_grid_queries;
+    checker_queries += w.checker_queries;
     searches += w.searches;
     path_region_searches += w.path_region_searches;
     heap_pops += w.heap_pops;
@@ -1964,6 +2194,33 @@ void BonnRouteDR::main()
     }
   }
   if (params_.verbose) {
+    const br::ShapeGrid::Statistics sg = shape_grid_.statistics();
+    const br::FastGrid::Statistics fg = grid_.statistics();
+    logger_->report(
+        "BonnRoute DR routing space: {} shape-grid intervals ({} cells, {} "
+        "shared cells), {} cell configurations, {} shape classes, {} wire "
+        "types, {:.1f} MB; fast grid {} intervals for {} vertices, {} via "
+        "intervals, {} marked edges, {:.1f} MB; partition halo {} tiles; {} "
+        "legality queries, {:.2f}% answered by the fast grid; {} "
+        "inconsistent updates.",
+        sg.intervals,
+        sg.interval_cells,
+        sg.shared_cells,
+        sg.configurations,
+        shape_classes_.size(),
+        wire_types_.size(),
+        sg.bytes / 1e6,
+        fg.wiring_intervals,
+        fg.vertices,
+        fg.via_intervals,
+        fg.marked_edges,
+        fg.bytes / 1e6,
+        halo_tiles_,
+        fast_grid_queries + checker_queries,
+        fast_grid_queries + checker_queries > 0
+            ? 100.0 * fast_grid_queries / (fast_grid_queries + checker_queries)
+            : 100.0,
+        inconsistent_updates_.load());
     logger_->report(
         "BonnRoute DR: {} threads, parallel phase until {:.2f}s, {} nets "
         "to {}.",

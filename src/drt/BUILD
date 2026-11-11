@@ -42,9 +42,21 @@ cc_library(
     name = "bonnroute_core",
     srcs = [
         "src/br/BrCore.cpp",
+        "src/br/BrDistanceRules.cpp",
+        "src/br/BrFastGrid.cpp",
         "src/br/BrInterval.cpp",
+        "src/br/BrShapeGrid.cpp",
+        "src/br/BrWireModel.cpp",
     ],
-    hdrs = ["src/br/BrCore.h"],
+    hdrs = [
+        "src/br/BrCore.h",
+        "src/br/BrDistanceRules.h",
+        "src/br/BrFastGrid.h",
+        "src/br/BrGeometry.h",
+        "src/br/BrShapeGrid.h",
+        "src/br/BrTrackGraph.h",
+        "src/br/BrWireModel.h",
+    ],
     includes = ["src"],
 )
 

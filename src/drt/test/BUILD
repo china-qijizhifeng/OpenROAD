@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: BSD-3-Clause
 # Copyright (c) 2022-2025, The OpenROAD Authors
 
+load("@rules_cc//cc:cc_binary.bzl", "cc_binary")
 load("@rules_cc//cc:cc_test.bzl", "cc_test")
 load("@rules_python//python:defs.bzl", "py_library", "py_test")
 load("//test:regression.bzl", "doc_check_test", "regression_test")
@@ -12,6 +13,69 @@ cc_test(
     size = "small",
     srcs = ["BonnRouteCoreTest.cpp"],
     deps = ["//src/drt:bonnroute_core"],
+)
+
+cc_test(
+    name = "bonnroute_wire_model_test",
+    size = "small",
+    srcs = [
+        "BonnRouteRoutingSpaceTestUtil.h",
+        "BonnRouteWireModelTest.cpp",
+    ],
+    deps = ["//src/drt:bonnroute_core"],
+)
+
+cc_test(
+    name = "bonnroute_shape_grid_test",
+    size = "small",
+    srcs = [
+        "BonnRouteRoutingSpaceTestUtil.h",
+        "BonnRouteShapeGridTest.cpp",
+    ],
+    deps = ["//src/drt:bonnroute_core"],
+)
+
+cc_test(
+    name = "bonnroute_distance_rules_test",
+    size = "small",
+    srcs = [
+        "BonnRouteDistanceRulesTest.cpp",
+        "BonnRouteRoutingSpaceTestUtil.h",
+    ],
+    deps = ["//src/drt:bonnroute_core"],
+)
+
+cc_test(
+    name = "bonnroute_fast_grid_test",
+    size = "small",
+    srcs = [
+        "BonnRouteFastGridTest.cpp",
+        "BonnRouteRoutingSpaceTestUtil.h",
+    ],
+    deps = ["//src/drt:bonnroute_core"],
+)
+
+cc_test(
+    name = "bonnroute_partition_test",
+    size = "small",
+    srcs = [
+        "BonnRoutePartitionTest.cpp",
+        "BonnRouteRoutingSpaceTestUtil.h",
+    ],
+    deps = ["//src/drt:bonnroute_core"],
+)
+
+# Measurements of the routing-space data structures on random instances.
+cc_binary(
+    name = "bonnroute_routing_space_bench",
+    srcs = [
+        "BonnRouteRoutingSpaceBench.cpp",
+        "BonnRouteRoutingSpaceTestUtil.h",
+    ],
+    deps = [
+        "//src/drt:bonnroute_core",
+        "@boost.geometry",
+    ],
 )
 
 exports_files(

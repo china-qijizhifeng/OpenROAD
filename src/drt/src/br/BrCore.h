@@ -2,9 +2,11 @@
 // Copyright (c) 2026, The OpenROAD Authors
 
 // BonnRoute detailed routing core (Gester et al., TODAES 18(2), 2013,
-// Sec. 3.5, 3.6, 4.1, 4.2): track graph, fast grid and the on-track
-// interval path search with future cost. Independent of the drt database so
-// it can be tested in isolation; BonnRouteDR adapts it to frDesign.
+// Sec. 4.1, 4.2): the on-track vertex and interval path searches with
+// future cost. They read legality from the fast grid (Sec. 3.6, see
+// BrFastGrid.h), which forwards marked edges and other wire types to the
+// distance rule checker. Independent of the drt database so it can be
+// tested in isolation; BonnRouteDR adapts it to frDesign.
 
 #pragma once
 
@@ -13,368 +15,14 @@
 #include <cstddef>
 #include <cstdint>
 #include <limits>
-#include <unordered_map>
+#include <memory>
 #include <utility>
 #include <vector>
 
+#include "br/BrFastGrid.h"
+#include "br/BrTrackGraph.h"
+
 namespace drt::br {
-
-using Coord = int;
-using Cost = int64_t;
-constexpr Cost kInfCost = std::numeric_limits<Cost>::max() / 4;
-
-// One wiring layer of the track graph (Sec. 3.5). Vertices are the
-// intersections of the layer's tracks with the tracks of the adjacent
-// layers, which have the perpendicular preferred direction.
-struct TrackLayer
-{
-  bool horizontal = true;
-  std::vector<Coord> tracks;     // cross coordinates, sorted and unique
-  std::vector<Coord> positions;  // along coordinates, sorted and unique
-  // Per position: track index of layer z +/- 1 at this coordinate, or -1.
-  std::vector<int> up_track;
-  std::vector<int> down_track;
-  // Per track: position index of this track's coordinate in layer z +/- 1.
-  std::vector<int> up_pos;
-  std::vector<int> down_pos;
-  // Per track / position: global routing tile row / column (Region lookup).
-  std::vector<int> track_tile;
-  std::vector<int> pos_tile;
-  bool jogs = true;
-  Cost jog_factor = 4;  // beta_z of Sec. 4.1
-  size_t base = 0;
-
-  int numTracks() const { return static_cast<int>(tracks.size()); }
-  int numPositions() const { return static_cast<int>(positions.size()); }
-  // (x, y) of vertex (i, j).
-  std::pair<Coord, Coord> point(int i, int j) const
-  {
-    return horizontal ? std::make_pair(positions[j], tracks[i])
-                      : std::make_pair(tracks[i], positions[j]);
-  }
-};
-
-class TrackGraph
-{
- public:
-  std::vector<TrackLayer> layers;
-  std::vector<Cost> via_cost;  // via between z and z + 1
-  // Cost of one DBU of preferred-direction wire. Values above 1 let a
-  // reservation discount (arXiv:2111.06169, Sec. 5.2) stay integral; jog
-  // factors, via costs and penalties are expressed in the same unit.
-  Cost wire_unit = 1;
-  int tiles_x = 1;
-  int tiles_y = 1;
-
-  // Fills the up/down maps and vertex bases; tile_x / tile_y map a
-  // coordinate to its tile index.
-  template <typename TileX, typename TileY>
-  void finalize(TileX tile_x, TileY tile_y);
-
-  int numLayers() const { return static_cast<int>(layers.size()); }
-  size_t numVertices() const { return num_vertices_; }
-  size_t vertex(int z, int i, int j) const
-  {
-    const TrackLayer& l = layers[z];
-    return l.base + static_cast<size_t>(i) * l.positions.size() + j;
-  }
-  // Inverse of vertex().
-  void decode(size_t v, int& z, int& i, int& j) const
-  {
-    z = static_cast<int>(
-            std::upper_bound(layer_bases_.begin(), layer_bases_.end(), v)
-            - layer_bases_.begin())
-        - 1;
-    const TrackLayer& l = layers[z];
-    const size_t rem = v - l.base;
-    i = static_cast<int>(rem / l.positions.size());
-    j = static_cast<int>(rem % l.positions.size());
-  }
-  std::pair<Coord, Coord> point(size_t v) const
-  {
-    int z, i, j;
-    decode(v, z, i, j);
-    return layers[z].point(i, j);
-  }
-  Cost minViaCost() const
-  {
-    Cost c = kInfCost;
-    for (const Cost v : via_cost) {
-      c = std::min(c, v);
-    }
-    return c == kInfCost ? 0 : c;
-  }
-
- private:
-  size_t num_vertices_ = 0;
-  std::vector<size_t> layer_bases_;
-};
-
-template <typename TileX, typename TileY>
-void TrackGraph::finalize(TileX tile_x, TileY tile_y)
-{
-  auto index_of = [](const std::vector<Coord>& v, Coord c) {
-    auto it = std::lower_bound(v.begin(), v.end(), c);
-    return (it != v.end() && *it == c) ? static_cast<int>(it - v.begin()) : -1;
-  };
-  num_vertices_ = 0;
-  layer_bases_.clear();
-  for (int z = 0; z < numLayers(); z++) {
-    TrackLayer& l = layers[z];
-    l.base = num_vertices_;
-    layer_bases_.push_back(num_vertices_);
-    num_vertices_ += l.tracks.size() * l.positions.size();
-    l.up_track.assign(l.positions.size(), -1);
-    l.down_track.assign(l.positions.size(), -1);
-    l.up_pos.assign(l.tracks.size(), -1);
-    l.down_pos.assign(l.tracks.size(), -1);
-    for (int dz : {-1, 1}) {
-      const int nz = z + dz;
-      if (nz < 0 || nz >= numLayers()) {
-        continue;
-      }
-      const TrackLayer& n = layers[nz];
-      for (int j = 0; j < l.numPositions(); j++) {
-        (dz > 0 ? l.up_track : l.down_track)[j]
-            = index_of(n.tracks, l.positions[j]);
-      }
-      for (int i = 0; i < l.numTracks(); i++) {
-        (dz > 0 ? l.up_pos : l.down_pos)[i]
-            = index_of(n.positions, l.tracks[i]);
-      }
-    }
-    l.track_tile.resize(l.tracks.size());
-    l.pos_tile.resize(l.positions.size());
-    for (int i = 0; i < l.numTracks(); i++) {
-      l.track_tile[i]
-          = l.horizontal ? tile_y(l.tracks[i]) : tile_x(l.tracks[i]);
-    }
-    for (int j = 0; j < l.numPositions(); j++) {
-      l.pos_tile[j]
-          = l.horizontal ? tile_x(l.positions[j]) : tile_y(l.positions[j]);
-    }
-  }
-}
-
-// Shape kinds whose legality the fast grid stores per vertex (Sec. 3.6):
-// preferred-direction wire, jog, bottom pad and cut of the via going up,
-// top pad of the via coming from below.
-enum Kind : uint8_t
-{
-  kWire = 0,
-  kJog = 1,
-  kViaUpPad = 2,
-  kCutUp = 3,
-  kViaDownPad = 4,
-  // Edge legality (Sec. 3.6, Fig. 4): stored at the lower endpoint, for the
-  // preferred-direction edge to j + 1 and the jog to track i + 1. An edge
-  // can be blocked although both endpoints are legal (a shape between them).
-  kWireEdge = 5,
-  kJogEdge = 6,
-  kNumKinds = 7
-};
-
-// Calls fn(i, j) for every vertex of layer `l` whose origin lies in the
-// blocked-origin box [xlo, xhi] x [ylo, yhi] (vertex kinds), or for every
-// edge whose swept segment meets it: kWireEdge (j, j + 1) on track i,
-// kJogEdge (i, i + 1) at position j. The box is the Minkowski difference of
-// a shape (bloated by spacing) and the shape model of the kind, so an edge
-// is blocked exactly when a model placed anywhere on it violates spacing.
-template <typename F>
-void forEachBlocked(const TrackLayer& l,
-                    const Kind kind,
-                    const Coord xlo,
-                    const Coord ylo,
-                    const Coord xhi,
-                    const Coord yhi,
-                    F&& fn)
-{
-  if (xlo > xhi || ylo > yhi) {
-    return;
-  }
-  const Coord clo = l.horizontal ? ylo : xlo;
-  const Coord chi = l.horizontal ? yhi : xhi;
-  const Coord alo = l.horizontal ? xlo : ylo;
-  const Coord ahi = l.horizontal ? xhi : yhi;
-  auto first_ge = [](const std::vector<Coord>& v, Coord c) {
-    return static_cast<int>(std::lower_bound(v.begin(), v.end(), c)
-                            - v.begin());
-  };
-  auto last_le = [](const std::vector<Coord>& v, Coord c) {
-    return static_cast<int>(std::upper_bound(v.begin(), v.end(), c) - v.begin())
-           - 1;
-  };
-  int i0 = first_ge(l.tracks, clo);
-  int i1 = last_le(l.tracks, chi);
-  int j0 = first_ge(l.positions, alo);
-  int j1 = last_le(l.positions, ahi);
-  if (kind == kWireEdge) {
-    // Edges (j, j + 1) with positions[j] <= ahi and positions[j + 1] >= alo.
-    j0 = std::max(0, j0 - 1);
-    j1 = std::min(j1, l.numPositions() - 2);
-  } else if (kind == kJogEdge) {
-    i0 = std::max(0, i0 - 1);
-    i1 = std::min(i1, l.numTracks() - 2);
-  }
-  for (int i = i0; i <= i1; i++) {
-    for (int j = j0; j <= j1; j++) {
-      fn(i, j);
-    }
-  }
-}
-
-class FastGrid
-{
- public:
-  static constexpr int32_t kNoOwner = -1;
-  static constexpr int32_t kManyOwners = -2;
-
-  void init(size_t num_vertices)
-  {
-    fixed_.assign(num_vertices, 0);
-    pin_mask_.assign(num_vertices, 0);
-    pin_owner_.assign(num_vertices, kNoOwner);
-    count_.assign(num_vertices, {});
-    history_.assign(num_vertices, 0);
-    reserve_count_.assign(num_vertices, {});
-    reserve_owner_.assign(num_vertices, kNoOwner);
-    reserve_shared_.clear();
-  }
-  void addFixed(size_t v, Kind k) { fixed_[v] |= (1u << k); }
-  // A pin shape blocks every net except its owner.
-  void addPin(size_t v, Kind k, int32_t owner)
-  {
-    if (owner < 0) {
-      addFixed(v, k);
-      return;
-    }
-    pin_mask_[v] |= (1u << k);
-    if (pin_owner_[v] == kNoOwner) {
-      pin_owner_[v] = owner;
-    } else if (pin_owner_[v] != owner) {
-      pin_owner_[v] = kManyOwners;
-    }
-  }
-  // Routed (removable) shapes; saturating counter.
-  void addRouted(size_t v, Kind k, int delta)
-  {
-    int c = count_[v][k] + delta;
-    count_[v][k] = static_cast<uint8_t>(std::clamp(c, 0, 255));
-  }
-  // Reservations (Sec. 4.3 primary pin access paths; arXiv:2111.06169
-  // Sec. 5.2 legal input wires) block every net except their owner until
-  // the owner releases them. Counts are exact per (vertex, kind). A vertex
-  // covered by footprints of several owners keeps per-owner counts in a
-  // sparse table; reservation changes are applied serially.
-  // Releases (delta < 0) never insert or erase table nodes, so threads may
-  // release reservations of disjoint vertex sets concurrently; additions
-  // must be serial.
-  void addReservation(size_t v, Kind k, int32_t owner, int delta)
-  {
-    auto bump = [](uint8_t& c, int d) {
-      c = static_cast<uint8_t>(std::clamp(c + d, 0, 255));
-    };
-    auto zero = [](const std::array<uint8_t, kNumKinds>& c) {
-      return std::ranges::all_of(c, [](uint8_t x) { return x == 0; });
-    };
-    int32_t& single = reserve_owner_[v];
-    if (single == kNoOwner || single == owner) {
-      if (delta < 0 && single == kNoOwner) {
-        return;
-      }
-      bump(reserve_count_[v][k], delta);
-      single = zero(reserve_count_[v]) ? kNoOwner : owner;
-      return;
-    }
-    if (single != kManyOwners) {
-      if (delta < 0) {
-        return;  // nothing of `owner` is recorded here
-      }
-      // A second owner: all current counts belong to `single`.
-      std::vector<OwnedCounts>& owners = reserve_shared_[v];
-      owners.clear();
-      owners.push_back({single, reserve_count_[v]});
-      single = kManyOwners;
-    }
-    auto found = reserve_shared_.find(v);
-    std::vector<OwnedCounts>& owners = found->second;
-    auto at = std::ranges::find(owners, owner, &OwnedCounts::owner);
-    if (at == owners.end()) {
-      if (delta < 0) {
-        return;
-      }
-      owners.push_back({owner, {}});
-      at = owners.end() - 1;
-    }
-    const int before = at->count[k];
-    bump(at->count[k], delta);
-    bump(reserve_count_[v][k], at->count[k] - before);
-    if (zero(at->count)) {
-      owners.erase(at);
-    }
-    if (owners.size() <= 1) {
-      single = owners.empty() ? kNoOwner : owners.front().owner;
-      owners.clear();
-    }
-  }
-  // True if reservations of nets other than `net` cover (v, k).
-  bool reservedForOther(size_t v, Kind k, int32_t net) const
-  {
-    if (reserve_count_[v][k] == 0) {
-      return false;
-    }
-    const int32_t single = reserve_owner_[v];
-    if (single != kManyOwners) {
-      return single != net;
-    }
-    const auto& owners = reserve_shared_.at(v);
-    return std::ranges::any_of(owners, [&](const OwnedCounts& o) {
-      return o.owner != net && o.count[k] > 0;
-    });
-  }
-  bool hardBlocked(size_t v, Kind k, int32_t net) const
-  {
-    if ((fixed_[v] >> k) & 1u) {
-      return true;
-    }
-    if (((pin_mask_[v] >> k) & 1u) && pin_owner_[v] != net) {
-      return true;
-    }
-    return reservedForOther(v, k, net);
-  }
-  bool usable(size_t v, Kind k, int32_t net) const
-  {
-    return !hardBlocked(v, k, net) && count_[v][k] == 0;
-  }
-  // Blocked only by routed shapes, which a rip-up can remove (Sec. 4.2).
-  bool ripupable(size_t v, Kind k, int32_t net) const
-  {
-    return !hardBlocked(v, k, net) && count_[v][k] > 0;
-  }
-  uint8_t routedCount(size_t v, Kind k) const { return count_[v][k]; }
-  uint16_t history(size_t v) const { return history_[v]; }
-  void bumpHistory(size_t v)
-  {
-    if (history_[v] < 0xffff) {
-      history_[v]++;
-    }
-  }
-
- private:
-  std::vector<uint8_t> fixed_;
-  std::vector<uint8_t> pin_mask_;
-  std::vector<int32_t> pin_owner_;
-  std::vector<std::array<uint8_t, kNumKinds>> count_;
-  std::vector<uint16_t> history_;
-  struct OwnedCounts
-  {
-    int32_t owner;
-    std::array<uint8_t, kNumKinds> count;
-  };
-  std::vector<std::array<uint8_t, kNumKinds>> reserve_count_;
-  std::vector<int32_t> reserve_owner_;
-  std::unordered_map<size_t, std::vector<OwnedCounts>> reserve_shared_;
-};
 
 // Routing area R of one search: allowed global routing tiles per layer.
 struct Region
@@ -478,10 +126,15 @@ struct SearchRequest
   };
   std::vector<Target> targets;
   std::vector<TargetBox> target_boxes;
-  // Rip-up mode: vertices blocked only by routed shapes are usable at
+  // Wire type of the connection (Sec. 4.1: "a wiretype w"); wire types
+  // outside the fast grid are answered by the distance rule checker.
+  int wire_type = 0;
+  // Rip-up mode (Sec. 4.2): vertices and edges whose shapes become legal
+  // after ripping up shapes of ripup level <= max_ripup_level are usable at
   // ripup_cost * (1 + history).
   bool ripup = false;
   Cost ripup_cost = 0;
+  RipupLevel max_ripup_level = kMaxRemovableLevel;
   bool use_intervals = true;
   // Interval property (ii) of Sec. 4.1 for vias as well as jogs. Without
   // it, intervals ignore via availability and relax vias per vertex.
@@ -504,6 +157,65 @@ struct SearchResult
   int64_t heap_pops = 0;
   int64_t heap_pushes = 0;
   int64_t settled = 0;
+  // Legality queries answered by the fast grid / the distance rule checker.
+  int64_t fast_grid_queries = 0;
+  int64_t checker_queries = 0;
+};
+
+// Per-vertex labels of a search window, stored in pages that a search
+// allocates when it touches them: memory follows the explored part of the
+// window, not its bounding box (a net spanning the die has a window of
+// most of the track graph). Pages are reused by later searches; stale
+// labels carry older epochs.
+template <typename Label>
+class PagedLabels
+{
+ public:
+  static constexpr int kPageBits = 10;
+  static constexpr size_t kPageSize = size_t{1} << kPageBits;
+
+  // Starts a search over `size` window vertices; returns its epoch.
+  uint32_t reset(const size_t size)
+  {
+    const size_t pages = (size >> kPageBits) + 1;
+    if (page_epoch_.size() < pages) {
+      page_epoch_.resize(pages, 0);
+      page_index_.resize(pages, 0);
+    }
+    used_ = 0;
+    if (++epoch_ == 0) {
+      std::fill(page_epoch_.begin(), page_epoch_.end(), 0);
+      for (auto& page : pool_) {
+        std::fill(page.get(), page.get() + kPageSize, Label{});
+      }
+      epoch_ = 1;
+    }
+    return epoch_;
+  }
+  Label& operator[](const size_t index)
+  {
+    const size_t p = index >> kPageBits;
+    if (page_epoch_[p] != epoch_) {
+      page_epoch_[p] = epoch_;
+      if (used_ == pool_.size()) {
+        pool_.push_back(std::make_unique<Label[]>(kPageSize));
+      }
+      page_index_[p] = static_cast<uint32_t>(used_++);
+    }
+    return pool_[page_index_[p]][index & (kPageSize - 1)];
+  }
+  size_t bytes() const
+  {
+    return page_epoch_.capacity() * 2 * sizeof(uint32_t)
+           + pool_.size() * kPageSize * sizeof(Label);
+  }
+
+ private:
+  std::vector<uint32_t> page_epoch_;
+  std::vector<uint32_t> page_index_;
+  std::vector<std::unique_ptr<Label[]>> pool_;
+  size_t used_ = 0;
+  uint32_t epoch_ = 0;
 };
 
 // Vertex search with future cost on the track graph (use_intervals = 0).
@@ -515,6 +227,7 @@ class PathSearch
   {
   }
   SearchResult run(const SearchRequest& request);
+  size_t scratchBytes() const { return labels_.bytes(); }
 
  private:
   enum Parent : uint8_t
@@ -547,6 +260,10 @@ class PathSearch
   };
 
   Cost futureCost(int z, Coord x, Coord y) const;
+  RipupLevel level(size_t v, Kind k) const
+  {
+    return grid_.level(v, k, req_->wire_type, &counters_);
+  }
   Cost vertexPenalty(size_t v, Kind k) const;
   bool enter(size_t v, Kind k) const;
   void push(const Item& item);
@@ -559,6 +276,7 @@ class PathSearch
   const FastGrid& grid_;
   const SearchRequest* req_ = nullptr;
   SearchResult* res_ = nullptr;
+  mutable LegalityCounters counters_;
   Cost min_via_cost_ = 0;
   Cost min_wire_rate_ = 1;
 
@@ -583,13 +301,17 @@ class PathSearch
   void setupWindow(const SearchRequest& request);
   std::vector<Window> window_;
 
-  std::vector<Cost> dist_;
-  std::vector<uint8_t> parent_;
-  std::vector<uint32_t> stamp_;
-  std::vector<uint32_t> source_stamp_;
-  std::vector<uint32_t> target_stamp_;
-  std::vector<int32_t> target_index_;
-  std::vector<uint32_t> discount_stamp_;  // edge (j, j + 1) at j
+  struct Label
+  {
+    Cost dist = 0;
+    uint32_t stamp = 0;
+    uint32_t source_stamp = 0;
+    uint32_t target_stamp = 0;
+    uint32_t discount_stamp = 0;  // edge (j, j + 1) at j
+    int32_t target_index = 0;
+    uint8_t parent = 0;
+  };
+  mutable PagedLabels<Label> labels_;
   uint32_t epoch_ = 0;
   std::vector<Item> heap_;
 };
@@ -613,6 +335,7 @@ class IntervalSearch
   {
   }
   SearchResult run(const SearchRequest& request);
+  size_t scratchBytes() const { return labels_.bytes(); }
   int64_t intervals() const { return num_intervals_; }
   int64_t labels() const { return num_labels_; }
 
@@ -669,6 +392,10 @@ class IntervalSearch
   };
 
   Cost futureCost(int z, int i, int j) const;
+  RipupLevel level(size_t v, Kind k) const
+  {
+    return grid_.level(v, k, req_->wire_type, &counters_);
+  }
   bool usableZero(size_t v, Kind k) const;
   bool enter(size_t v, Kind k) const;
   Cost penalty(size_t v, Kind k) const;
@@ -688,6 +415,7 @@ class IntervalSearch
   const FastGrid& grid_;
   const SearchRequest* req_ = nullptr;
   SearchResult* res_ = nullptr;
+  mutable LegalityCounters counters_;
   Cost min_via_cost_ = 0;
 
   struct Window
@@ -696,11 +424,15 @@ class IntervalSearch
     size_t wbase = 0;
   };
   std::vector<Window> window_;
-  std::vector<int32_t> interval_id_;
-  std::vector<uint32_t> stamp_;
-  std::vector<uint32_t> source_stamp_;
-  std::vector<uint32_t> target_stamp_;
-  std::vector<int32_t> target_index_;
+  struct VertexLabel
+  {
+    uint32_t stamp = 0;
+    uint32_t source_stamp = 0;
+    uint32_t target_stamp = 0;
+    int32_t interval_id = 0;
+    int32_t target_index = 0;
+  };
+  mutable PagedLabels<VertexLabel> labels_;
   uint32_t epoch_ = 0;
   std::vector<Interval> intervals_;
   std::vector<Event> heap_;

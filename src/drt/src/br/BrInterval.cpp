@@ -32,18 +32,18 @@ Cost IntervalSearch::futureCost(const int z, const int i, const int j) const
 
 bool IntervalSearch::usableZero(const size_t v, const Kind k) const
 {
-  return grid_.usable(v, k, req_->net);
+  return level(v, k) == kLegal;
 }
 
 bool IntervalSearch::enter(const size_t v, const Kind k) const
 {
-  return grid_.usable(v, k, req_->net)
-         || (req_->ripup && grid_.ripupable(v, k, req_->net));
+  const RipupLevel l = level(v, k);
+  return l == kLegal || (req_->ripup && l <= req_->max_ripup_level);
 }
 
 Cost IntervalSearch::penalty(const size_t v, const Kind k) const
 {
-  if (grid_.usable(v, k, req_->net)) {
+  if (level(v, k) == kLegal) {
     return 0;
   }
   return req_->ripup_cost * (1 + static_cast<Cost>(grid_.history(v)));
@@ -73,7 +73,7 @@ int IntervalSearch::transitionSignature(const int z,
   int sig = 0;
   for (const int di : {-1, 1}) {
     const int i2 = i + di;
-    size_t li;
+    size_t li = 0;
     if (!layer.jogs || !enter(v, kJog) || i2 < 0 || i2 >= layer.numTracks()
         || !inWindow(z, i2, j, li)
         || !req_->region->contains(layer, z, i2, j)) {
@@ -96,7 +96,7 @@ int IntervalSearch::transitionSignature(const int z,
     }
     const int i2 = dz > 0 ? layer.up_track[j] : layer.down_track[j];
     const int j2 = dz > 0 ? layer.up_pos[i] : layer.down_pos[i];
-    size_t li;
+    size_t li = 0;
     if (i2 < 0 || j2 < 0 || !inWindow(z2, i2, j2, li)
         || !req_->region->contains(graph_.layers[z2], z2, i2, j2)) {
       continue;
@@ -120,12 +120,12 @@ int IntervalSearch::transitionSignature(const int z,
 
 int IntervalSearch::intervalOf(const int z, const int i, const int j)
 {
-  size_t li;
+  size_t li = 0;
   if (!inWindow(z, i, j, li)) {
     return -1;
   }
-  if (stamp_[li] == epoch_) {
-    return interval_id_[li];
+  if (labels_[li].stamp == epoch_) {
+    return labels_[li].interval_id;
   }
   return buildInterval(z, i, j);
 }
@@ -137,13 +137,14 @@ int IntervalSearch::buildInterval(const int z, const int i, const int j)
   // A vertex may join an interval if it is a plain wire vertex: in the
   // region, unassigned, wire-usable without penalty and not a target.
   auto plain = [&](int jj, size_t& li) {
-    if (!inWindow(z, i, jj, li) || stamp_[li] == epoch_
-        || target_stamp_[li] == epoch_ || !region.contains(layer, z, i, jj)) {
+    if (!inWindow(z, i, jj, li) || labels_[li].stamp == epoch_
+        || labels_[li].target_stamp == epoch_
+        || !region.contains(layer, z, i, jj)) {
       return false;
     }
     const size_t v = graph_.vertex(z, i, jj);
     return usableZero(v, kWire)
-           && !(source_stamp_[li] == epoch_ && layer.jogs
+           && !(labels_[li].source_stamp == epoch_ && layer.jogs
                 && !usableZero(v, kJog))
            && !(transitionSignature(z, i, jj, v) & 16);
   };
@@ -153,12 +154,12 @@ int IntervalSearch::buildInterval(const int z, const int i, const int j)
   const Cost pi0 = futureCost(z, i, j);
   Cost pi_a = pi0;
   Cost pi_b = pi0;
-  size_t li0;
+  size_t li0 = 0;
   inWindow(z, i, j, li0);
   if (plain(j, li0)) {
     const int sig = transitionSignature(z, i, j, graph_.vertex(z, i, j));
     auto joins = [&](int from, int to, Cost& pi_from) {
-      size_t li;
+      size_t li = 0;
       if (!plain(to, li)) {
         return false;
       }
@@ -201,10 +202,10 @@ int IntervalSearch::buildInterval(const int z, const int i, const int j)
   const int id = static_cast<int>(intervals_.size());
   intervals_.push_back(std::move(iv));
   for (int jj = ja; jj <= jb; jj++) {
-    size_t li;
+    size_t li = 0;
     inWindow(z, i, jj, li);
-    stamp_[li] = epoch_;
-    interval_id_[li] = id;
+    labels_[li].stamp = epoch_;
+    labels_[li].interval_id = id;
   }
   num_intervals_++;
   return id;
@@ -378,11 +379,11 @@ void IntervalSearch::process(const int id, const Cost delta)
 
   // Targets are single-vertex intervals, so terminal costs are exact.
   if (single) {
-    size_t li;
+    size_t li = 0;
     inWindow(z, i, ja, li);
-    if (target_stamp_[li] == epoch_) {
-      const auto& t = req_->targets[target_index_[li]];
-      heap_.push_back(Event{delta + t.cost, 0, -1, target_index_[li]});
+    if (labels_[li].target_stamp == epoch_) {
+      const auto& t = req_->targets[labels_[li].target_index];
+      heap_.push_back(Event{delta + t.cost, 0, -1, labels_[li].target_index});
       std::push_heap(heap_.begin(), heap_.end(), std::greater<>());
       res_->heap_pushes++;
     }
@@ -437,9 +438,9 @@ void IntervalSearch::process(const int id, const Cost delta)
         const size_t v = graph_.vertex(z, i, j);
         const size_t w = graph_.vertex(z, i2, j);
         const size_t edge = di > 0 ? v : w;
-        size_t li;
+        size_t li = 0;
         inWindow(z, i, j, li);
-        const bool source = source_stamp_[li] == epoch_;
+        const bool source = labels_[li].source_stamp == epoch_;
         if (!region.contains(layer, z, i2, j) || !(source || enter(v, kJog))
             || !enter(w, kJog) || !enter(edge, kJogEdge)) {
           k++;
@@ -459,12 +460,12 @@ void IntervalSearch::process(const int id, const Cost delta)
         const size_t vr = graph_.vertex(z, i, jr);
         const size_t wr = graph_.vertex(z, i2, jr);
         const size_t er = di > 0 ? vr : wr;
-        size_t lr;
+        size_t lr = 0;
         inWindow(z, i, jr, lr);
         const Cost cost
             = layer.jog_factor * std::abs(layer.tracks[i2] - layer.tracks[i])
               + penalty(wr, kJog) + penalty(er, kJogEdge)
-              + (source_stamp_[lr] == epoch_ ? 0 : penalty(vr, kJog));
+              + (labels_[lr].source_stamp == epoch_ ? 0 : penalty(vr, kJog));
         relax_to(representative, z, i2, jr, cost);
         k = end;
       }
@@ -483,10 +484,10 @@ void IntervalSearch::process(const int id, const Cost delta)
     const size_t v = graph_.vertex(z, i, j);
     const size_t w = graph_.vertex(z, i, j2);
     const size_t edge = dj > 0 ? v : w;
-    size_t li;
+    size_t li = 0;
     inWindow(z, i, j, li);
-    if ((source_stamp_[li] != epoch_ && !enter(v, kWire)) || !enter(w, kWire)
-        || !enter(edge, kWireEdge)) {
+    if ((labels_[li].source_stamp != epoch_ && !enter(v, kWire))
+        || !enter(w, kWire) || !enter(edge, kWireEdge)) {
       continue;
     }
     relax_to(k,
@@ -504,6 +505,7 @@ SearchResult IntervalSearch::run(const SearchRequest& request)
   SearchResult result;
   req_ = &request;
   res_ = &result;
+  counters_ = {};
   min_via_cost_ = graph_.minViaCost();
   heap_.clear();
   intervals_.clear();
@@ -558,39 +560,28 @@ SearchResult IntervalSearch::run(const SearchRequest& request)
     w.wbase = total;
     total += static_cast<size_t>(w.ni) * w.nj;
   }
-  if (stamp_.size() < total) {
-    interval_id_.resize(total);
-    stamp_.resize(total, 0);
-    source_stamp_.resize(total, 0);
-    target_stamp_.resize(total, 0);
-    target_index_.resize(total);
-  }
-  if (++epoch_ == 0) {
-    std::ranges::fill(stamp_, 0);
-    std::ranges::fill(source_stamp_, 0);
-    std::ranges::fill(target_stamp_, 0);
-    epoch_ = 1;
-  }
+  epoch_ = labels_.reset(total);
   for (size_t t = 0; t < request.targets.size(); t++) {
     int z, i, j;
     graph_.decode(request.targets[t].vertex, z, i, j);
-    size_t li;
+    size_t li = 0;
     if (!inWindow(z, i, j, li)) {
       continue;
     }
-    if (target_stamp_[li] == epoch_
-        && request.targets[target_index_[li]].cost <= request.targets[t].cost) {
+    if (labels_[li].target_stamp == epoch_
+        && request.targets[labels_[li].target_index].cost
+               <= request.targets[t].cost) {
       continue;
     }
-    target_stamp_[li] = epoch_;
-    target_index_[li] = static_cast<int32_t>(t);
+    labels_[li].target_stamp = epoch_;
+    labels_[li].target_index = static_cast<int32_t>(t);
   }
   for (const auto& [v, c] : request.sources) {
     int z, i, j;
     graph_.decode(v, z, i, j);
-    size_t li;
+    size_t li = 0;
     if (inWindow(z, i, j, li)) {
-      source_stamp_[li] = epoch_;
+      labels_[li].source_stamp = epoch_;
     }
   }
   // Algorithm 4, lines 1-4 (with source costs).
@@ -625,15 +616,17 @@ SearchResult IntervalSearch::run(const SearchRequest& request)
     }
     process(e.interval, e.key);
   }
+  result.fast_grid_queries = counters_.fast_grid;
+  result.checker_queries = counters_.checker;
   if (!result.found) {
     return result;
   }
   // Backtrack through the labels.
   int z, i, j;
   graph_.decode(result.target_vertex, z, i, j);
-  size_t li;
+  size_t li = 0;
   inWindow(z, i, j, li);
-  int id = interval_id_[li];
+  int id = labels_[li].interval_id;
   int k = intervals_[id].kOf(j);
   while (true) {
     const Interval& iv = intervals_[id];

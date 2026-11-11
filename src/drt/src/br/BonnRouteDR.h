@@ -9,14 +9,18 @@
 #pragma once
 
 #include <array>
+#include <atomic>
 #include <cstdint>
 #include <memory>
 #include <string>
 #include <unordered_map>
-#include <unordered_set>
 #include <vector>
 
 #include "br/BrCore.h"
+#include "br/BrDistanceRules.h"
+#include "br/BrFastGrid.h"
+#include "br/BrShapeGrid.h"
+#include "br/BrWireModel.h"
 #include "frBaseTypes.h"
 #include "frRTree.h"
 #include "odb/geom.h"
@@ -126,10 +130,12 @@ class BonnRouteDR
     const frViaDef* def;
     odb::Point point;
   };
+  // A shape on a drt layer; role selects its shape class (Sec. 3.1).
   struct RShape
   {
     frLayerNum layer;
     odb::Rect rect;
+    br::ShapeRole role = br::ShapeRole::kFixed;
   };
   struct AccessOption
   {
@@ -158,6 +164,7 @@ class BonnRouteDR
     std::vector<OutWire> wires;
     std::vector<OutVia> vias;
     std::vector<RShape> shapes;  // committed shapes
+    std::vector<RShape> pins;    // pin shapes in the shape grid
     std::vector<std::pair<frLayerNum, odb::Point>> pin_points;
     // Legal input wires reserved for this net (arXiv:2111.06169 Sec. 5.2)
     // and the track-graph edges they cover.
@@ -186,14 +193,16 @@ class BonnRouteDR
     std::vector<uint32_t> tile_target;
     std::vector<int64_t> tile_parent;
     uint32_t tile_epoch = 0;
-    // Sec. 5.1 partitions: a thread commits only inside its region. The
-    // shared shape index is updated after each partition; until then the
-    // worker sees its own commits and releases through these.
-    std::vector<RTree<int>> local_routed;
-    std::unordered_set<int> released;
-    std::vector<std::pair<RShape, int>> released_shapes;
-    std::vector<int> committed;
+    // Sec. 5.1: a thread changes the routing space only inside its region;
+    // shape grid and fast grid are chunked by global routing tile, so the
+    // worker updates them in place. Its configuration transitions are
+    // memoised here.
+    br::ShapeGridWriteCache cache;
+    mutable std::unordered_map<br::ShapeClass, br::ClassId, br::ShapeClassHash>
+        class_cache;
     int64_t searches = 0;
+    int64_t fast_grid_queries = 0;
+    int64_t checker_queries = 0;
     int64_t path_region_searches = 0;
     int64_t heap_pops = 0;
     int64_t settled = 0;
@@ -212,18 +221,21 @@ class BonnRouteDR
   };
 
   void buildTrackGraph();
+  // Distance rules, shape classes and wire types from the drt tech (Sec.
+  // 3.1, 3.2), the shape grid (Sec. 3.3), checker (3.4) and fast grid (3.6).
+  void buildRoutingSpace();
+  br::SpacingTable spacingTable(frLayer* layer) const;
+  void rebuildFastGrid();
   void buildFixed();
   void buildNets();
   void buildAccess(NetData& net);
   void reserveAccess(NetData& net);
-  // With `local`, shape-index updates are deferred (see Worker).
+  // `local`: the worker whose region contains the net (Sec. 5.1).
   void setReservations(NetData& net, bool active, Worker* local = nullptr);
   void reserveInputWires();
   void setInputReservation(NetData& net, bool active, Worker* local = nullptr);
-  bool treeConflicts(const RTree<int>& tree,
-                     const RShape& shape,
-                     int net,
-                     const std::unordered_set<int>* skip = nullptr) const;
+  // Diff-net conflict with the shapes of an R-tree (input wires only).
+  bool treeConflicts(const RTree<int>& tree, const RShape& shape, int net);
   // Cost unit of the search: discount_denominator when discounts are used.
   br::Cost unit() const { return graph_.wire_unit; }
   bool modernSearch() const
@@ -241,6 +253,10 @@ class BonnRouteDR
                bool ripup,
                Worker& worker,
                int extra_dilation = 0);
+  bool connectWithoutOwnShapes(NetData& net,
+                               bool ripup,
+                               Worker& worker,
+                               int extra_dilation);
   bool connectInRegion(NetData& net,
                        int dilation,
                        bool ripup,
@@ -275,11 +291,23 @@ class BonnRouteDR
   void shapesOf(const NetData& net, std::vector<RShape>& shapes) const;
   void viaShapes(const OutVia& via, std::vector<RShape>& shapes) const;
   RShape wireShape(const OutWire& wire) const;
-  // Fast grid update: 0 fixed, 1 pin, 2 routed, 3 owned reservation.
-  void markShape(const RShape& shape, int mode, int owner, int delta);
+  // Shape-grid layer of a drt layer, or -1.
+  int gridLayer(frLayerNum layer) const;
+  br::ClassId shapeClass(const RShape& shape, int grid_layer, Worker* local);
+  // Grid layer above a cut layer that holds its inter-layer projection, or
+  // -1 (Sec. 3.2).
+  int projectionLayer(int grid_layer) const;
+  // Inserts / removes a shape in the shape grid (with the inter-layer
+  // projection of a cut, Sec. 3.2) and updates the fast grid (Sec. 3.6).
+  void changeShape(const RShape& shape,
+                   br::ShapeType type,
+                   int owner,
+                   bool insert,
+                   Worker* local);
+  // Sec. 4.4: the shapes of the components being connected (pins,
+  // reservations) are removed temporarily from routing space.
+  void setOwnShapes(NetData& net, bool present, Worker* local);
   void commitNet(NetData& net, Worker* local = nullptr);
-  // Applies a worker's deferred shape-index updates (serial).
-  void mergeWorker(Worker& worker);
   // Sec. 5.1: a sequence of balanced partitions into thread regions.
   void routePartitions(const std::vector<int>& order, std::vector<int>& failed);
   void partitionRegions(const std::vector<int>& nets,
@@ -288,11 +316,14 @@ class BonnRouteDR
                         bool shifted,
                         std::vector<std::array<int, 4>>& regions) const;
   void ripupNet(NetData& net);
-  void collectVictims(const NetData& net, std::vector<int>& victims) const;
+  // Rip-up victims: nets reported by the distance rule checker as blocking
+  // the net's new shapes (Sec. 3.4, 4.2).
+  void collectVictims(const NetData& net, std::vector<int>& victims);
+  // Distance rule check of an off-track shape against everything but
+  // `net`'s own shapes (the adapter for off-track paths and pin access).
   bool shapeConflicts(const RShape& shape,
                       int net,
-                      const Worker* worker = nullptr) const;
-  frCoord spacing(int z, frCoord width1, frCoord width2, frCoord prl) const;
+                      const Worker* worker = nullptr);
   void writeNets();
 
   int tileX(frCoord x) const;
@@ -304,7 +335,23 @@ class BonnRouteDR
   BonnRouteDRParams params_;
 
   br::TrackGraph graph_;
+  br::ShapeClassTable shape_classes_;
+  // Wire type 0: default widths and vias (the fast-grid wire type); then
+  // one wire type per non-default rule (Sec. 3.2).
+  std::vector<br::WireType> wire_types_;
+  br::ShapeGrid shape_grid_;
+  br::DistanceRuleChecker checker_;
   br::FastGrid grid_;
+  br::FastGridBuilder fast_builder_;
+  br::ShapeGridWriteCache serial_cache_;
+  std::unordered_map<br::ShapeClass, br::ClassId, br::ShapeClassHash>
+      serial_class_cache_;
+  // During buildFixed the fast grid is rebuilt once at the end.
+  bool bulk_insert_ = false;
+  // Tiles between a net's routing area and its partition box border, so
+  // that its routing-space updates and queries stay inside (Sec. 5.1).
+  int halo_tiles_ = 1;
+  std::atomic<int64_t> inconsistent_updates_{0};
   std::vector<Worker> workers_;
   std::vector<LayerInfo> layers_;  // per z
   std::vector<int> z_of_fr_;       // routing layer -> z, -1
@@ -315,13 +362,6 @@ class BonnRouteDR
   frCoord tile_dy_ = 1;
   int tiles_x_ = 1;
   int tiles_y_ = 1;
-
-  // Shape index (shape grid of Sec. 3.3, reduced to what the off-track
-  // checks and rip-up need): fixed shapes and pins, and routed shapes.
-  std::vector<RTree<int>> fixed_tree_;        // owner net or -1
-  std::vector<RTree<int>> routed_tree_;       // owner net
-  std::vector<RTree<int>> reservation_tree_;  // primary access paths
-  std::vector<frCoord> max_spacing_;
 
   std::vector<NetData> nets_;
   std::unordered_map<const frNet*, int> net_index_;
