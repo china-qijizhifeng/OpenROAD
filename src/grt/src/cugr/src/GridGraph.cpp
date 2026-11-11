@@ -596,6 +596,9 @@ double GridGraph::getNetResistance(const std::shared_ptr<GRTreeNode>& tree,
   double total_resistance = 0.0;
   GRTreeNode::preorder(tree, [&](const std::shared_ptr<GRTreeNode>& node) {
     for (const auto& child : node->getChildren()) {
+      if (child->isPinLink()) {
+        continue;  // existing pin metal, no routing demand
+      }
       if (node->getLayerIdx() == child->getLayerIdx()) {
         // Wire segment on a single layer.
         const int layer = node->getLayerIdx();
@@ -640,6 +643,9 @@ int GridGraph::getTreeLength(const std::shared_ptr<GRTreeNode>& tree) const
   int length = 0;
   GRTreeNode::preorder(tree, [&](const std::shared_ptr<GRTreeNode>& node) {
     for (const auto& child : node->getChildren()) {
+      if (child->isPinLink()) {
+        continue;  // existing pin metal, no routing demand
+      }
       // Planar wirelength in gcells (vias contribute 0).
       length += std::abs(node->x() - child->x())
                 + std::abs(node->y() - child->y());
@@ -683,11 +689,15 @@ std::vector<AccessPoint> GridGraph::translateAccessPointsToGrid(
   return aps_on_grid;
 }
 
-std::vector<GRPoint> GridGraph::pinAccessCells(const GRNet* net,
-                                               const int pin_idx) const
+namespace {
+// All ODB access points of one pin of `net`, with the location of the
+// instance their points are relative to.
+std::vector<odb::dbAccessPoint*> pinAccessPointsOf(const GRNet* net,
+                                                   const int pin_idx,
+                                                   odb::Point& location)
 {
   std::vector<odb::dbAccessPoint*> aps;
-  odb::Point location(0, 0);
+  location = odb::Point(0, 0);
   const auto& bterms = net->getBTermsByPinIndex();
   const auto& iterms = net->getITermsByPinIndex();
   if (auto it = bterms.find(pin_idx); it != bterms.end()) {
@@ -703,11 +713,52 @@ std::vector<GRPoint> GridGraph::pinAccessCells(const GRNet* net,
     it->second->getInst()->getLocation(x, y);
     location = odb::Point(x, y);
   }
+  return aps;
+}
+}  // namespace
+
+std::vector<GRPoint> GridGraph::pinAccessCells(const GRNet* net,
+                                               const int pin_idx) const
+{
+  odb::Point location;
+  const std::vector<odb::dbAccessPoint*> aps
+      = pinAccessPointsOf(net, pin_idx, location);
   std::vector<GRPoint> cells;
   for (const AccessPoint& ap : translateAccessPointsToGrid(aps, location)) {
     cells.emplace_back(ap.layers.low(), ap.point.x(), ap.point.y());
   }
   return cells;
+}
+
+std::vector<std::pair<odb::Point, int>> GridGraph::pinAccessLocations(
+    const GRNet* net,
+    const int pin_idx) const
+{
+  odb::Point location;
+  const std::vector<odb::dbAccessPoint*> aps
+      = pinAccessPointsOf(net, pin_idx, location);
+  std::vector<std::pair<odb::Point, int>> result;
+  result.reserve(aps.size());
+  for (odb::dbAccessPoint* ap : aps) {
+    // Same transform as translateAccessPointsToGrid.
+    odb::Point point = ap->getPoint();
+    point.addX(location.getX());
+    point.addY(location.getY());
+    const int layer = std::clamp(
+        ap->getLayer()->getRoutingLevel() - 1, 0, getNumLayers() - 1);
+    result.emplace_back(point, layer);
+  }
+  return result;
+}
+
+void GridGraph::setEdgeCapacity(const int layer_index,
+                                const int x,
+                                const int y,
+                                const CapacityT capacity)
+{
+  graph_edges_[layer_index][x][y].capacity = capacity;
+  congestion_info_dirty_ = true;
+  markCongestionTile(layer_index, x, y);
 }
 
 AccessPoint GridGraph::selectAccessPoint(
@@ -1012,6 +1063,9 @@ void GridGraph::forEachViaColumnImpl(const std::shared_ptr<GRTreeNode>& tree,
   std::vector<std::array<int, 4>> spans;  // x, y, low, high
   GRTreeNode::preorder(tree, [&](const std::shared_ptr<GRTreeNode>& node) {
     for (const auto& child : node->getChildren()) {
+      if (child->isPinLink()) {
+        continue;  // existing pin metal, no routing demand
+      }
       if (node->getLayerIdx() != child->getLayerIdx()) {
         const auto [low, high]
             = std::minmax({node->getLayerIdx(), child->getLayerIdx()});
@@ -1116,6 +1170,9 @@ void GridGraph::forEachTreeWireEdgeImpl(const std::shared_ptr<GRTreeNode>& tree,
   std::vector<std::array<int, 3>> wrong_way;  // layer, crossed cell x, y
   GRTreeNode::preorder(tree, [&](const std::shared_ptr<GRTreeNode>& node) {
     for (const auto& child : node->getChildren()) {
+      if (child->isPinLink()) {
+        continue;  // existing pin metal, no routing demand
+      }
       if (node->getLayerIdx() == child->getLayerIdx()) {
         const int layer = node->getLayerIdx();
         // Detailed routes may dip below min_routing_layer for pin access;
@@ -1334,6 +1391,9 @@ std::string GridGraph::getPythonString(
   GRTreeNode::preorder(
       routing_tree, [&](const std::shared_ptr<GRTreeNode>& node) {
         for (const auto& child : node->getChildren()) {
+          if (child->isPinLink()) {
+            continue;
+          }
           if (node->getLayerIdx() == child->getLayerIdx()) {
             const int direction = getLayerDirection(node->getLayerIdx());
             const int r = (*node)[1 - direction];

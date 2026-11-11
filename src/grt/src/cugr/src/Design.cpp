@@ -416,6 +416,10 @@ void Design::computeViaDemandLengths()
   // Fallback proxy (min-area stub x via_multiplier) for pairs with no via.
   via_demand_length_lower_.assign(num_layers, 0.0);
   via_demand_length_upper_.assign(num_layers, 0.0);
+  via_pad_along_lower_.assign(num_layers, 0.0);
+  via_pad_along_upper_.assign(num_layers, 0.0);
+  via_pad_tracks_lower_.assign(num_layers, 1.0);
+  via_pad_tracks_upper_.assign(num_layers, 1.0);
 
   // A wrong-way wire crosses a layer's tracks like a via pad: its width
   // runs along the tracks and it spans one gcell across them. Demand per
@@ -446,6 +450,8 @@ void Design::computeViaDemandLengths()
 
     double num_lower = lower.getMinLength() * constants_.via_multiplier;
     double num_upper = upper.getMinLength() * constants_.via_multiplier;
+    via_pad_along_lower_[i] = num_lower;
+    via_pad_along_upper_[i] = num_upper;
     // Union the boxes on each layer; a via may have several rects per layer.
     odb::Rect lo_box, up_box;
     lo_box.mergeInit();
@@ -460,9 +466,13 @@ void Design::computeViaDemandLengths()
       }
       if (!lo_box.isInverted() && lo_box.dx() > 0 && lo_box.dy() > 0) {
         num_lower = viaDemandLength(lower, lo_box.dx(), lo_box.dy());
+        std::tie(via_pad_along_lower_[i], via_pad_tracks_lower_[i])
+            = viaPadExtent(lower, lo_box.dx(), lo_box.dy());
       }
       if (!up_box.isInverted() && up_box.dx() > 0 && up_box.dy() > 0) {
         num_upper = viaDemandLength(upper, up_box.dx(), up_box.dy());
+        std::tie(via_pad_along_upper_[i], via_pad_tracks_upper_[i])
+            = viaPadExtent(upper, up_box.dx(), up_box.dy());
       }
     }
     via_demand_length_lower_[i] = num_lower;
@@ -506,6 +516,14 @@ double Design::viaDemandLength(const MetalLayer& layer,
                                const int dx,
                                const int dy) const
 {
+  const auto [along, tracks_blocked] = viaPadExtent(layer, dx, dy);
+  return along * tracks_blocked;
+}
+
+std::pair<double, double> Design::viaPadExtent(const MetalLayer& layer,
+                                               const int dx,
+                                               const int dy) const
+{
   const int pitch = layer.getPitch();
   // getSpacing() is 0 on parallel-table-only techs; use default spacing then.
   const int spacing
@@ -517,7 +535,7 @@ double Design::viaDemandLength(const MetalLayer& layer,
   const double tracks_blocked
       = pitch > 0 ? std::ceil(static_cast<double>(perp + 2 * spacing) / pitch)
                   : 1.0;
-  return along * tracks_blocked;
+  return {static_cast<double>(along), tracks_blocked};
 }
 
 void Design::getAllObstacles(std::vector<std::vector<BoxT>>& all_obstacles,

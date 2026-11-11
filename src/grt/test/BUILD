@@ -269,6 +269,31 @@ regression_test(
 )
 
 cc_test(
+    name = "TestBonnRouteCapacity",
+    size = "small",
+    srcs = ["cpp/TestBonnRouteCapacity.cpp"],
+    deps = [
+        "//src/grt:cugr",
+        "//src/odb/src/db",
+        "@googletest//:gtest",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
+    name = "TestBonnRouteModels",
+    size = "small",
+    srcs = ["cpp/TestBonnRouteModels.cpp"],
+    deps = [
+        "//src/grt:cugr",
+        "//src/odb/src/db",
+        "//src/utl",
+        "@googletest//:gtest",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
     name = "TestOverflow",
     size = "small",
     srcs = ["cpp/TestOverflow.cpp"],

@@ -2,6 +2,7 @@
 
 #include <set>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 #include "CUGR.h"
@@ -67,6 +68,13 @@ class Design
   {
     return via_demand_length_upper_[i];
   }
+  // Via pad geometry behind the demand lengths above (BonnRoute stacked-via
+  // statistics, Sec. 2.5): pad extent along the routing direction of the
+  // pad's layer and the number of tracks it blocks across.
+  double getViaPadAlongLower(int i) const { return via_pad_along_lower_[i]; }
+  double getViaPadAlongUpper(int i) const { return via_pad_along_upper_[i]; }
+  double getViaPadTracksLower(int i) const { return via_pad_tracks_lower_[i]; }
+  double getViaPadTracksUpper(int i) const { return via_pad_tracks_upper_[i]; }
   double getWrongWayDemandLength(int i) const
   {
     return wrong_way_demand_length_[i];
@@ -110,6 +118,10 @@ class Design
                                    odb::dbTechLayer* upper_tl) const;
   // Via pad demand length: extent along routing dir x tracks blocked across.
   double viaDemandLength(const MetalLayer& layer, int dx, int dy) const;
+  // The two factors of viaDemandLength: {along, tracks blocked}.
+  std::pair<double, double> viaPadExtent(const MetalLayer& layer,
+                                         int dx,
+                                         int dy) const;
 
   // debug functions
   void printNets() const;
@@ -121,6 +133,10 @@ class Design
   // Effective via demand length per lower layer i (lower_ = i, upper_ = i+1).
   std::vector<double> via_demand_length_lower_;
   std::vector<double> via_demand_length_upper_;
+  std::vector<double> via_pad_along_lower_;
+  std::vector<double> via_pad_along_upper_;
+  std::vector<double> via_pad_tracks_lower_;
+  std::vector<double> via_pad_tracks_upper_;
   std::vector<double> wrong_way_demand_length_;
   std::vector<CUGRNet> nets_;
   std::unordered_map<odb::dbNet*, int> db_net_to_id_;

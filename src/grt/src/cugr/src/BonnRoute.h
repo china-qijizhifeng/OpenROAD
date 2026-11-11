@@ -7,11 +7,15 @@
 // path-composition Steiner oracle (Algorithm 1), followed by randomized
 // rounding and re-choosing among the generated candidates (Sec. 2.4).
 //
-// Resources are the CUGR wire edges (capacity in tracks, demand as committed
-// by GridGraph::addTreeUsage, including via-pad flank demand) plus one
-// objective resource (wire length + vias, CUGR cost weights). The routing
-// trees left on the nets are committed to the grid graph so that every CUGR
-// downstream step (maze clean-up, guides, congestion report) applies as is.
+// Resources are the CUGR wire edges (demand as committed by
+// GridGraph::addTreeUsage, including via-pad flank demand) plus one objective
+// resource (wire length + vias, CUGR cost weights). Edge capacities follow
+// Sec. 2.5 (BonnRouteCapacity.h) or, with capacity_model 0, CUGR's model.
+// Pins are vertex sets V_p joined by zero-cost cliques (Sec. 2.1-2.2); the
+// trees keep the used clique edges as pin links (GRTreeNode::isPinLink).
+// The routing trees left on the nets are committed to the grid graph so that
+// every CUGR downstream step (maze clean-up, guides, congestion report)
+// applies as is.
 
 #pragma once
 
@@ -22,6 +26,7 @@
 #include <utility>
 #include <vector>
 
+#include "BonnRouteCapacity.h"
 #include "GRTree.h"
 #include "geo.h"
 
@@ -33,6 +38,11 @@ namespace grt {
 
 class GridGraph;
 class GRNet;
+
+// The estimator input of Sec. 2.5 (BonnRouteCapacity.h) for CUGR's grid,
+// layers and blockages; capacities come back in GridGraph::edgeFlatIndex
+// order.
+bonnroute::CapacityGrid capacityGridFromCugr(const GridGraph& grid_graph);
 
 struct BonnRouteParams
 {
@@ -60,8 +70,19 @@ struct BonnRouteParams
   // Randomized rounding seed and re-choose passes.
   unsigned seed = 1;
   int repair_passes = 8;
-  // Pins as vertex sets V_p (Sec. 2.1); false = one pre-selected cell.
+  // Pins as vertex sets V_p (Sec. 2.1): the cells of the pin's access
+  // points (shape cells for a pin without any); false = one pre-selected
+  // cell per pin.
   bool pin_sets = true;
+  // Edge capacities: 1 = Sec. 2.5 estimate, 0 = CUGR's capacity model.
+  int capacity_model = 1;
+  // Sec. 2.5 refinements of capacity_model 1.
+  bool capacity_single_tile = true;
+  bool capacity_intra_tile = true;
+  bool capacity_stacked_vias = true;
+  double capacity_blockage_extension = 1.0;
+  int capacity_single_tile_layers = 2;
+  double capacity_single_tile_margin = 0.25;
   // Oracle on the whole grid graph instead of the expanded net bbox.
   bool full_graph = false;
   // Run CUGR maze rip-up and reroute on nets still on overflowed edges.
@@ -84,6 +105,9 @@ class BonnRouteGlobal
   // Routes every net; on return each net has a routing tree whose usage is
   // committed to the grid graph.
   void run();
+  // CUGR's capacities (GridGraph::edgeFlatIndex order) before capacity
+  // model 1 replaced them; empty for capacity model 0.
+  const std::vector<double>& cugrCapacity() const { return cugr_capacity_; }
 
  private:
   // A pin is the set V_p of grid vertices of its shapes (Sec. 2.1); the
@@ -99,6 +123,8 @@ class BonnRouteGlobal
     int16_t x;
     int16_t y;
     int32_t parent;  // index into the node list, -1 for the root
+    // GRNet pin index if the edge from the parent is a pin link, else -1.
+    int32_t pin = -1;
   };
   struct Candidate
   {
@@ -107,7 +133,9 @@ class BonnRouteGlobal
     double objective = 0.0;
     uint64_t hash = 0;
     int count = 0;
-    // Cell chosen for each terminal (same order as NetState::terminals).
+    // Representative cell of each terminal (same order as
+    // NetState::terminals): a cell of the pin in the tree, preferring one
+    // with a wire or via.
     std::vector<std::array<int16_t, 3>> pin_cells;
   };
   struct NetState
@@ -148,10 +176,18 @@ class BonnRouteGlobal
                       Scratch& scratch,
                       bool objective_only,
                       bool whole_grid) const;
+  // tree_edges holds vertex pairs; edge_pins[i] is the GRNet pin index of
+  // pair i if it is a pin-clique edge, else -1.
   bool buildCandidate(const NetState& state,
                       const std::vector<std::array<int, 3>>& tree_edges,
-                      const std::vector<std::array<int, 3>>& pin_cells,
+                      const std::vector<int>& edge_pins,
                       Candidate& candidate) const;
+  // Congestion-free oracle pass: objective bound and reuse certificate;
+  // with stack_counts, the via stacks through each (layer, x, y).
+  void pilot(std::vector<double>* stack_counts);
+  void estimateCapacities();
+  void applyCapacities(const std::vector<double>& capacities);
+  void reportCapacities() const;
   double padCost(int layer, int x, int y, double pad, const GRNet* net) const;
   std::shared_ptr<GRTreeNode> buildTree(const Candidate& candidate) const;
   double logCost(const Candidate& candidate) const;
@@ -199,6 +235,10 @@ class BonnRouteGlobal
   int min_layer_ = 0;
 
   std::vector<NetState> states_;
+  std::unique_ptr<bonnroute::CapacityEstimator> estimator_;
+  std::vector<double> cugr_capacity_;
+  double estimate_time_ = 0.0;
+  double base_objective_ = 0.0;
   std::vector<int> order_;  // nets taking part in resource sharing
 
   // Statistics.
