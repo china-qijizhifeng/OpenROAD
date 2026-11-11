@@ -98,12 +98,17 @@ OffTrackResult OffTrackSearch::run(const OffTrackRequest& req)
 {
   OffTrackResult res;
   const int num_layers = static_cast<int>(req.layers.size());
-  index_.assign(num_layers, LayerIndex());
   size_t total = 0;
   const Box& win = req.window;
+  // Per-layer indexes: buffers of earlier runs are reused.
+  if (index_.size() < static_cast<size_t>(num_layers)) {
+    index_.resize(num_layers);
+  }
   for (int z = 0; z < num_layers; z++) {
     const OffTrackLayer& in = req.layers[z];
     LayerIndex& l = index_[z];
+    l.xs.clear();
+    l.ys.clear();
     for (const GeoCoord x : in.grid.xs) {
       if (x >= win.xlo && x <= win.xhi) {
         l.xs.push_back(x);
@@ -117,28 +122,57 @@ OffTrackResult OffTrackSearch::run(const OffTrackRequest& req)
     l.base = total;
     total += static_cast<size_t>(l.nx()) * l.ny();
     l.obstacles = &in.obstacles;
-    l.rows.assign(l.ny(), {});
-    l.cols.assign(l.nx(), {});
+    if (l.rows.size() < static_cast<size_t>(l.ny())) {
+      l.rows.resize(l.ny());
+    }
+    if (l.cols.size() < static_cast<size_t>(l.nx())) {
+      l.cols.resize(l.nx());
+    }
     l.row_built.assign(l.ny(), 0);
     l.col_built.assign(l.nx(), 0);
+    // Turn arcs (lines at distance >= tau), two pointers per axis.
+    const GeoCoord tau = in.grid.tau;
+    auto turns = [tau](const std::vector<GeoCoord>& v,
+                       std::vector<int>& plus,
+                       std::vector<int>& minus) {
+      const int n = static_cast<int>(v.size());
+      plus.resize(n);
+      minus.resize(n);
+      int k = 0;
+      for (int i = 0; i < n; i++) {
+        // lower_bound(v, v[i] + tau)
+        while (k < n && v[k] < v[i] + tau) {
+          k++;
+        }
+        plus[i] = k;
+      }
+      k = -1;
+      for (int i = 0; i < n; i++) {
+        // upper_bound(v, v[i] - tau) - 1
+        while (k + 1 < n && v[k + 1] <= v[i] - tau) {
+          k++;
+        }
+        minus[i] = k;
+      }
+    };
+    turns(l.xs, l.turn_x_plus, l.turn_x_minus);
+    turns(l.ys, l.turn_y_plus, l.turn_y_minus);
   }
   res.grid_vertices = static_cast<int64_t>(total);
   res.states = static_cast<int64_t>(total) * kStates;
-  if (dist_.size() < total * kStates) {
-    dist_.resize(total * kStates);
-    parent_.resize(total * kStates);
-    stamp_.resize(total * kStates, 0);
+  if (states_.size() < total * kStates) {
+    states_.resize(total * kStates, StateLabel{0, kNoParent, 0});
   }
-  if (via_memo_.size() < total) {
-    via_memo_.resize(total);
-    via_stamp_.resize(total, 0);
-    future_memo_.resize(total);
-    future_stamp_.resize(total, 0);
+  if (vertices_.size() < total) {
+    vertices_.resize(total, VertexMemo{0, 0, 0, 0, 0});
   }
   if (++epoch_ == 0) {
-    std::fill(stamp_.begin(), stamp_.end(), 0);
-    std::fill(via_stamp_.begin(), via_stamp_.end(), 0);
-    std::fill(future_stamp_.begin(), future_stamp_.end(), 0);
+    for (StateLabel& label : states_) {
+      label.stamp = 0;
+    }
+    for (VertexMemo& memo : vertices_) {
+      memo.future_stamp = memo.via_stamp = memo.target_stamp = 0;
+    }
     epoch_ = 1;
   }
   for (int z = 0; z < num_layers; z++) {
@@ -167,12 +201,12 @@ OffTrackResult OffTrackSearch::run(const OffTrackRequest& req)
     }
   }
   auto dist = [&](const int64_t st) {
-    return stamp_[st] == epoch_ ? dist_[st] : kInf;
+    const StateLabel& label = states_[st];
+    return label.stamp == epoch_ ? label.dist : kInf;
   };
   auto set = [&](const int64_t st, const int64_t d, const int64_t parent) {
-    stamp_[st] = epoch_;
-    dist_[st] = d;
-    parent_[st] = parent;
+    states_[st] = StateLabel{
+        d, parent < 0 ? kNoParent : static_cast<uint32_t>(parent), epoch_};
   };
 
   auto layer_of = [&](const size_t v) {
@@ -282,6 +316,9 @@ OffTrackResult OffTrackSearch::run(const OffTrackRequest& req)
     targets.emplace_back(l.base + static_cast<size_t>(ix) * l.ny() + iy, t.id);
   }
   std::sort(targets.begin(), targets.end());
+  for (const auto& [v, id] : targets) {
+    vertices_[v].target_stamp = epoch_;
+  }
   std::vector<int64_t> reached(targets.size(), -1);
   size_t distinct = 0;
   for (size_t k = 0; k < targets.size(); k++) {
@@ -297,22 +334,22 @@ OffTrackResult OffTrackSearch::run(const OffTrackRequest& req)
     res.arcs++;
     if (cost < dist(to)) {
       set(to, cost, from);
-      const size_t v = static_cast<size_t>(to / kStates);
-      if (future_stamp_[v] != epoch_) {
-        future_stamp_[v] = epoch_;
-        future_memo_[v] = future(to_layer, to_point);
+      VertexMemo& memo = vertices_[static_cast<size_t>(to / kStates)];
+      if (memo.future_stamp != epoch_) {
+        memo.future_stamp = epoch_;
+        memo.future = future(to_layer, to_point);
       }
-      heap.push({cost + future_memo_[v], cost, to});
+      heap.push({cost + memo.future, cost, to});
     }
   };
   auto via_ok
       = [&](const int lower_z, const size_t lower_v, const GridPoint p) {
-          if (via_stamp_[lower_v] != epoch_) {
-            via_stamp_[lower_v] = epoch_;
-            via_memo_[lower_v]
-                = (req.via_allowed && req.via_allowed(lower_z, p)) ? 1 : 0;
+          VertexMemo& memo = vertices_[lower_v];
+          if (memo.via_stamp != epoch_) {
+            memo.via_stamp = epoch_;
+            memo.via = (req.via_allowed && req.via_allowed(lower_z, p)) ? 1 : 0;
           }
-          return via_memo_[lower_v] == 1;
+          return memo.via == 1;
         };
 
   while (!heap.empty() && remaining > 0) {
@@ -335,7 +372,7 @@ OffTrackResult OffTrackSearch::run(const OffTrackRequest& req)
     const int ix = static_cast<int>((v - l.base) / l.ny());
     const int iy = static_cast<int>((v - l.base) % l.ny());
     const GridPoint p{l.xs[ix], l.ys[iy]};
-    {
+    if (vertices_[v].target_stamp == epoch_) {
       auto it = std::lower_bound(
           targets.begin(), targets.end(), std::make_pair(v, -1));
       if (it != targets.end() && it->first == v) {
@@ -379,35 +416,24 @@ OffTrackResult OffTrackSearch::run(const OffTrackRequest& req)
         planar(ix, iy - 1, 3);
       }
       // Turn arcs to the nearest vertices at distance >= tau.
-      const GeoCoord tau = in.grid.tau;
       const bool turn_x = d == kFresh || d == 2 || d == 3;
       const bool turn_y = d == kFresh || d == 0 || d == 1;
       if (turn_x) {
-        const int kp = static_cast<int>(
-            std::lower_bound(l.xs.begin(), l.xs.end(), p.x + tau)
-            - l.xs.begin());
+        const int kp = l.turn_x_plus[ix];
         if (kp < l.nx() && freeH(l, iy, ix, kp)) {
           planar(kp, iy, 0);
         }
-        const int km = static_cast<int>(
-                           std::upper_bound(l.xs.begin(), l.xs.end(), p.x - tau)
-                           - l.xs.begin())
-                       - 1;
+        const int km = l.turn_x_minus[ix];
         if (km >= 0 && freeH(l, iy, km, ix)) {
           planar(km, iy, 1);
         }
       }
       if (turn_y) {
-        const int kp = static_cast<int>(
-            std::lower_bound(l.ys.begin(), l.ys.end(), p.y + tau)
-            - l.ys.begin());
+        const int kp = l.turn_y_plus[iy];
         if (kp < l.ny() && freeV(l, ix, iy, kp)) {
           planar(ix, kp, 2);
         }
-        const int km = static_cast<int>(
-                           std::upper_bound(l.ys.begin(), l.ys.end(), p.y - tau)
-                           - l.ys.begin())
-                       - 1;
+        const int km = l.turn_y_minus[iy];
         if (km >= 0 && freeV(l, ix, km, iy)) {
           planar(ix, km, 3);
         }
@@ -443,9 +469,12 @@ OffTrackResult OffTrackSearch::run(const OffTrackRequest& req)
     }
     OffTrackPath path;
     path.target_id = targets[k].second;
-    path.cost = dist_[reached[k]];
+    path.cost = states_[reached[k]].dist;
     std::vector<RouteNode> full;
-    for (int64_t s = reached[k]; s >= 0; s = parent_[s]) {
+    for (int64_t s = reached[k]; s >= 0;
+         s = states_[s].parent == kNoParent
+                 ? int64_t{-1}
+                 : static_cast<int64_t>(states_[s].parent)) {
       const size_t v = static_cast<size_t>(s / kStates);
       const int z = layer_of(v);
       const LayerIndex& l = index_[z];

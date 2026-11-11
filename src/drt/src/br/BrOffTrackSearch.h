@@ -164,6 +164,12 @@ class OffTrackSearch
     std::vector<int> up_y;
     std::vector<int> down_x;
     std::vector<int> down_y;
+    // Turn arcs: per line the nearest line at distance >= tau above
+    // (index, nx / ny if none) and below (index, -1 if none).
+    std::vector<int> turn_x_plus;
+    std::vector<int> turn_x_minus;
+    std::vector<int> turn_y_plus;
+    std::vector<int> turn_y_minus;
     int nx() const { return static_cast<int>(xs.size()); }
     int ny() const { return static_cast<int>(ys.size()); }
   };
@@ -171,18 +177,31 @@ class OffTrackSearch
   // iy0 < iy1 on column ix) avoids all open obstacle interiors.
   bool freeH(LayerIndex& l, int iy, int ix0, int ix1);
   bool freeV(LayerIndex& l, int ix, int iy0, int iy1);
-
+  // Per-layer indexes; their buffers are reused across runs.
   std::vector<LayerIndex> index_;
-  // State labels, valid where stamp_ == epoch_ (buffers are reused across
-  // runs without clearing).
-  std::vector<int64_t> dist_;
-  std::vector<int64_t> parent_;
-  std::vector<uint32_t> stamp_;
-  std::vector<int8_t> via_memo_;
-  std::vector<uint32_t> via_stamp_;
-  // Future cost per grid vertex, valid where future_stamp_ == epoch_.
-  std::vector<int64_t> future_memo_;
-  std::vector<uint32_t> future_stamp_;
+  // Label of a state of G, valid where stamp == epoch_ (buffers are reused
+  // across runs without clearing). A run addresses fewer than 2^32 - 1
+  // states (their labels alone would take 64 GiB); kNoParent marks a
+  // source.
+  static constexpr uint32_t kNoParent = 0xffffffffu;
+  struct StateLabel
+  {
+    int64_t dist;
+    uint32_t parent;
+    uint32_t stamp;
+  };
+  std::vector<StateLabel> states_;
+  // Per grid vertex, each field valid where its stamp == epoch_: future
+  // cost, via to the layer above allowed, target vertex.
+  struct VertexMemo
+  {
+    int64_t future;
+    uint32_t future_stamp;
+    uint32_t via_stamp;
+    uint32_t target_stamp;
+    int8_t via;
+  };
+  std::vector<VertexMemo> vertices_;
   uint32_t epoch_ = 0;
 };
 
