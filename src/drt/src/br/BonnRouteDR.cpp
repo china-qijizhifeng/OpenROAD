@@ -24,6 +24,7 @@
 
 #include "br/BrBlockageGrid.h"
 #include "br/BrCore.h"
+#include "br/BrFixedShapes.h"
 #include "br/BrGeometry.h"
 #include "br/BrOffTrackSearch.h"
 #include "br/BrPathCleanup.h"
@@ -1061,46 +1062,41 @@ void BonnRouteDR::buildFixed()
       }
     }
   }
-  // Shape-grid layers are independent; each receives the shapes of its
-  // drt layer and the projections of the cut layer below (changeShape),
-  // in the order of the drt-layer loop: the cut below comes first. One
-  // thread per grid layer inserts them in that order.
-  struct Source
-  {
-    frLayerNum fr;
-    bool projection;
-  };
+  // Shape-grid layer g receives the shapes of its drt layer and the
+  // projections of the cut layer below (changeShape), in the order of the
+  // drt-layer loop: the cut below comes first. insertFixedShapes inserts
+  // them in tile-row bands in parallel, with the result of that order.
   setup_phases_.fixed_classes = timer.elapsed() - setup_phases_.fixed_query;
-  std::vector<std::vector<Source>> sources(shape_classes_.numLayers());
+  std::vector<std::vector<br::FixedShapeInsert>> inserts(
+      shape_classes_.numLayers());
   for (int fr = 0; fr < num_fr; fr++) {
     const int g = gridLayer(fr);
     if (g < 0) {
       continue;
     }
-    sources[g].push_back({static_cast<frLayerNum>(fr), false});
     const int above = projectionLayer(g);
-    if (above >= 0) {
-      sources[above].push_back({static_cast<frLayerNum>(fr), true});
-    }
-  }
-#pragma omp parallel for num_threads(threads) schedule(dynamic, 1)
-  for (int g = 0; g < static_cast<int>(sources.size()); g++) {
-    br::ShapeGridWriteCache cache;
-    for (const Source& source : sources[g]) {
-      for (const FixedShape& f : fixed[source.fr]) {
-        const br::ShapeType type
-            = f.owner >= 0 ? br::ShapeType::kPin : br::ShapeType::kBlockage;
-        if (!shape_grid_.insert(g,
-                                brRect(f.rect),
-                                source.projection ? f.projection_cls : f.cls,
-                                type,
-                                f.owner,
-                                cache)) {
-          inconsistent_updates_++;
-        }
+    for (const FixedShape& f : fixed[fr]) {
+      const br::ShapeType type
+          = f.owner >= 0 ? br::ShapeType::kPin : br::ShapeType::kBlockage;
+      inserts[g].push_back({brRect(f.rect), f.cls, type, f.owner});
+      if (above >= 0) {
+        inserts[above].push_back(
+            {brRect(f.rect), f.projection_cls, type, f.owner});
       }
     }
   }
+  inconsistent_updates_ += br::insertFixedShapes(
+      shape_grid_,
+      inserts,
+      br::ChunkAxis{tile_x0_, tile_dx_, tiles_x_},
+      br::ChunkAxis{tile_y0_, tile_dy_, tiles_y_},
+      2 * threads,
+      [threads](const int count, const std::function<void(int)>& body) {
+#pragma omp parallel for num_threads(threads) schedule(dynamic, 1)
+        for (int k = 0; k < count; k++) {
+          body(k);
+        }
+      });
   for (int fr = 0; fr < num_fr; fr++) {
     for (const FixedShape& f : fixed[fr]) {
       if (f.owner >= 0) {

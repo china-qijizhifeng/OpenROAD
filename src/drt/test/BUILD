@@ -32,6 +32,16 @@ cc_test(
     deps = ["//src/drt:bonnroute_core"],
 )
 
+cc_test(
+    name = "bonnroute_fixed_shapes_test",
+    size = "small",
+    srcs = [
+        "BonnRouteFixedShapesTest.cpp",
+        "BonnRouteRoutingSpaceTestUtil.h",
+    ],
+    deps = ["//src/drt:bonnroute_core"],
+)
+
 cc_binary(
     name = "bonnroute_offtrack_bench",
     testonly = True,
