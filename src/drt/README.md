@@ -129,6 +129,16 @@ set_bonnroute_dr_param name value
 | `retry_dilation` | `2` | Extra guide tiles for a retry. |
 | `use_intervals` | `0` | Use vertex search by default; `1` selects interval label sets. |
 | `ripup` | `0` | Leave unresolved nets to FlexDR by default; `1` enables serial rip-up and rerouting. |
+| `interval_via_property` | `1` | Interval property (ii) of Section 4.1 also for vias; `0` relaxes vias per vertex. |
+| `component_regions` | `1` | Search each connection first inside the GR tiles of a shortest guide-tile path to another component (Section 4.4). |
+| `ripup_depth` | `3` | Maximum depth of a rip-up sequence; a failed sequence restores the original routing (Section 4.4). |
+| `ripup_passes` | `2` | Rip-up passes over unrouted nets; each later pass enlarges the routing area by one tile. |
+| `partitions` | `1` | Route in a sequence of balanced thread partitions with decreasing region counts (Section 5.1); `0` uses batches of nets with disjoint boxes. |
+| `partition_regions` | `0` | Regions of the first partition; `0` means twice the thread count. |
+| `reservations` | `0` | Reserve legal track-assignment wires for their nets and discount them (Ahrens et al., arXiv:2111.06169, Section 5.2). Selects the vertex search. |
+| `discount_numerator` / `discount_denominator` | `3` / `4` | Cost factor of reserved edges for their own net. |
+| `reserve_min_layer` | `0` | Lowest track-graph layer whose input wires become reservations. |
+| `potential` | `0` | Future cost: `0` l1 bound of the 2013 paper; arXiv:2111.06169 potentials `1` l1 (Table 3), `2` simple model, `3` general model. |
 | `verbose` | `1` | Print coverage and search statistics. |
 
 The interval search maintains reduced-distance label envelopes on tracks,
@@ -145,19 +155,16 @@ Unrouted nets and rule violations are handled by FlexDR. Final DRC, wirelength
 and runtime therefore describe the combined flow. The log reports BonnRoute's
 own routed/skipped/failed counts, search effort and elapsed time separately.
 
-By default, nets unresolved after the parallel phase go straight to FlexDR.
-If serial rip-up is enabled, removing a committed route can open a clean
-route for a previously failed net, so the serial queue still retries those
-nets.
+By default, nets unresolved after the partitioned phase go straight to
+FlexDR. With `ripup 1`, each unresolved net starts a rip-up sequence: victims
+are removed, the new route is committed and the victims are reconnected,
+recursively up to `ripup_depth`; if any step fails, every net touched by the
+sequence is restored. Primary pin access paths are reserved as complete
+geometry before routing and released when their net is connected.
 
-Neither the default configuration nor enabling both `use_intervals` and
-`ripup` reproduces the full paper algorithm. Interval event ordering and
-propagation differ from Algorithm 4; the rip-up queue has per-net limits but
-no rollback of a failed rip-up sequence. Pin reservations, connection-region
-selection and parallel scheduling also differ. See the
-[paper-fidelity notes](BonnRouteFidelity.md) for the source-level comparison.
-The measured benefit of vertex search with rip-up disabled is a configuration
-tradeoff in the combined flow, not an optimization of a faithful reproduction.
+See the [paper-fidelity notes](BonnRouteFidelity.md) for what remains
+different from the paper. Configuration comparisons in the combined flow are
+tradeoffs of that flow, not evidence about a faithful reproduction.
 
 The database-independent search core has a Bazel regression target:
 

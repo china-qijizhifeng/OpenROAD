@@ -4,8 +4,9 @@ This adapter implements parts of Gester et al., *BonnRoute: Algorithms and Data
 Structures for Fast and Good VLSI Routing*, TODAES 18(2), 2013. It is an
 experimental GR and initial-DR implementation combined with CUGR and FlexDR.
 Neither its default configuration nor its explicit interval/rip-up mode is a
-complete reproduction of the paper. The comparisons below describe routing
-code measured at `450f22fcc924cbc4084f45596fbf30762b1db207`.
+complete reproduction of the paper. The measurements section refers to code at
+`450f22fcc924cbc4084f45596fbf30762b1db207`; the tables describe the current
+source.
 
 ## Models of connectivity, capacity and geometry
 
@@ -24,26 +25,33 @@ These are verified model differences. Their individual effects on runtime,
 wirelength, vias and final routing quality have not been isolated by controlled
 experiments. They cannot yet be assigned shares of the measured regression.
 
-## DR execution differs as well
+## DR execution
 
-| Area | Paper | Current adapter |
+| Area | Paper | Adapter |
 | ----- | ----- | ----- |
-| Interval search (Section 4.1, Algorithm 4) | Among intervals active at the same reduced distance, choose by maximum future cost; propagate using the maximum-future-cost representative specified by the algorithm. | Label envelopes and dominance removal exist, but equal-key events use interval ID. Processing still visits settled vertices, including individual via relaxations; the representative shortcut applies only to restricted jog cases. Label values are obtained by scanning labels. |
-| Pin access reservations (Sections 4.3–4.4) | Select a conflict-free set of complete primary paths from access catalogues and reserve them; reservations of participating components are temporarily removed, then released when connected. New paths can be generated as needed. | Reserve the top pad of the first option's access vias in the fixed index. This does not implement the complete path-reservation lifecycle or dynamic off-track access generation. |
-| Connection regions (Section 4.4) | Select a path between components along the global routing and construct the search region from that path's tiles. | Grow a tree starting at terminal 0, searching the union of all net guides and access-point tiles, with dilation. |
-| Rip-up sequences (Section 4.4) | Bound sequence depth and restore the original state if the sequence fails. | Use a serial victim queue with per-net rip-up limits. Commit a new route after removing victims; there is no sequence-wide rollback if victim rerouting fails. |
-| Parallel routing (Section 5.1) | Use a sequence of balanced spatial partitions, change the partitions, and reduce region/thread counts later to permit longer connections. Route critical nets first. | Batch nets with disjoint full-net bounding boxes plus halos, search in parallel, then commit in net order. The rip-up queue uses a single worker. This does not implement the paper's partition sequence. |
+| Interval search (Section 4.1, Algorithm 4) | Among intervals active at the same reduced distance, choose by maximum future cost; relax each neighbouring interval once from the member of J_I(delta) with maximum future cost. | Equal-key events are ordered by the maximum future cost of their flat run; label values come from prefix/suffix minima in O(log labels); jogs to a neighbouring interval are relaxed once from the representative. Property (ii) includes vias (`interval_via_property 1`), so via-heterogeneous runs split; with `0` vias are relaxed per settled vertex. Only the l1 future cost and unit wire costs are supported. |
+| Pin access reservations (Sections 4.3–4.4) | Conflict-free primary access paths reserved before routing; removed temporarily for the connecting components; released once connected. Paths can be generated on the fly. | The first conflict-free option of each pin is reserved as complete geometry (stub wires and via) with exact per-owner counts and released when the net is committed. Options are chosen per pin greedily, not by the paper's per-circuit-class destructive bounding, and no paths are generated on the fly. |
+| Connection regions (Section 4.4) | Route along a shortest global-routing path from the source component to another component; the area is the tiles of that path plus adjacent layers. | `component_regions 1`: breadth-first tile path over the guides from the current tree to the nearest unconnected terminal; the search runs in those tiles plus `layer_dilation` layers and falls back to all guide tiles if it fails. |
+| Rip-up sequences (Section 4.4) | Bounded depth; restore the original situation if the sequence fails; later passes with more effort and larger areas. | Recursive sequence bounded by `ripup_depth` with a journal of every touched net; failure restores all of them. `ripup_passes` later passes enlarge the area by one tile each. Sequences are serial. |
+| Parallel routing (Section 5.1) | Sequence of balanced partitions; threads change routing only inside their region; fewer regions later; critical nets first. | `partitions 1`: weighted-quantile column/row partitions of pending nets' boxes, alternating shifted cuts, region count halved every two partitions down to one. A net is routed in a partition only if its box (with halo) lies inside one region. There is no separate critical-net step. |
 
-Source entry points are [`IntervalSearch::Event`](src/br/BrCore.h),
-[`IntervalSearch::value` and `process`](src/br/BrInterval.cpp), and
-[`BonnRouteDR::reserveAccess`, `buildRegion`, `connectInRegion`, `routeParallel`
-and `routeRipupQueue`](src/br/BonnRouteDR.cpp).
+The default leaves unresolved nets to FlexDR (`ripup 0`) and uses the vertex
+search (`use_intervals 0`). Section 5.2 of the 2013 paper uses an external
+router for DRC cleanup, so the combination itself is compatible; the counts
+of nets left to FlexDR are reported per run.
 
-The default `use_intervals=0`, `ripup=0` bypasses two paper mechanisms. Setting
-both parameters to `1` selects the existing implementations but does not close
-the differences above. Differential tests against Dijkstra establish results
-on the tested core graphs; they do not establish the paper's interval-search
-complexity or full geometric completeness.
+## arXiv:2111.06169 (reservations and potentials)
+
+`reservations 1` implements Section 5.2 of Ahrens et al.: preferred-direction
+track-assignment wires on track whose pieces (cut at GCell boundaries) conflict
+neither with fixed shapes, pin reservations nor other nets' input wires become
+reservations of their net. They block other nets and cost
+`discount_numerator / discount_denominator` of normal wire cost for the owner;
+costs use an integral unit of `discount_denominator`. The future cost hook
+(`FutureCostOracle`) accepts the potentials of Sections 2–4; with `potential 0`
+the l1 bound uses the minimum of normal and discounted rates and stays
+feasible. Paper statements about multi-labeling, path post-processing and
+backup rip-up searches are not modelled.
 
 ## Future cost and external cleanup
 
