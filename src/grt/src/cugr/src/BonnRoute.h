@@ -20,6 +20,7 @@
 #pragma once
 
 #include <array>
+#include <atomic>
 #include <cstdint>
 #include <memory>
 #include <string>
@@ -87,6 +88,16 @@ struct BonnRouteParams
   bool full_graph = false;
   // Run CUGR maze rip-up and reroute on nets still on overflowed edges.
   bool maze_cleanup = true;
+  // Sec. 2.2: the oracle's Dijkstra uses goal orientation (A*) with a
+  // consistent lower bound: l1 distance times the cheapest edge and via
+  // costs, and ALT bounds from `landmarks` landmarks [Goldberg and
+  // Harrelson 2005] recomputed every `landmark_refresh` phases.
+  int goal_orientation = 1;
+  int landmarks = 8;
+  int landmark_refresh = 25;
+  // Debug: rerun every oracle without goal orientation and compare the
+  // connection costs (reported as "goal check").
+  bool goal_check = false;
   bool verbose = true;
 
   // Returns false if the name is unknown.
@@ -159,6 +170,52 @@ class BonnRouteGlobal
     int oracle_failures = 0;
   };
   struct Scratch;
+  // Cost and path signature of one Algorithm 1 connection (goal_check).
+  struct Segment
+  {
+    double cost = 0.0;
+    uint64_t path = 0;
+  };
+  struct GoalEntry
+  {
+    double key;  // dist + h
+    double dist;
+    int64_t node;
+    uint32_t version;  // target set the key's h was computed for
+  };
+  struct GoalTarget
+  {
+    int l;
+    int x;
+    int y;
+    int64_t vertex;  // global (layer, x, y) index for the landmarks
+  };
+  // Lower bound h of one oracle call (see goalBound()).
+  struct GoalContext
+  {
+    // Full cost per unit of |dx|, |dy| and per via; objective part alone.
+    double cx = 0.0;
+    double cy = 0.0;
+    double cv = 0.0;
+    double ox = 0.0;
+    double oy = 0.0;
+    double ov = 0.0;
+    const uint8_t* via_steps = nullptr;  // [mask][from][to]
+    std::vector<GoalTarget> targets;
+    bool exact = true;
+    int lx = 0;
+    int hx = 0;
+    int ly = 0;
+    int hy = 0;
+    int ll = 0;
+    int hl = 0;
+    // ALT: landmark distances of the targets per landmark, as an interval.
+    const float* alt = nullptr;
+    double alt_scale = 0.0;
+    std::vector<float> alt_lo;
+    std::vector<float> alt_hi;
+    uint32_t version = 0;
+  };
   struct OracleResult
   {
     bool ok = false;
@@ -175,7 +232,40 @@ class BonnRouteGlobal
   OracleResult oracle(const NetState& state,
                       Scratch& scratch,
                       bool objective_only,
-                      bool whole_grid) const;
+                      bool whole_grid,
+                      std::vector<Segment>* segments = nullptr) const;
+  template <bool kGoal>
+  OracleResult oracleImpl(const NetState& state,
+                          Scratch& scratch,
+                          bool objective_only,
+                          bool whole_grid,
+                          std::vector<Segment>* segments) const;
+  void initGoal(GoalContext& goal,
+                const NetState& state,
+                bool objective_only,
+                int x0,
+                int y0,
+                int x1,
+                int y1,
+                int num_layers) const;
+  void setGoalTargets(GoalContext& goal,
+                      const NetState& state,
+                      const std::vector<char>& connected,
+                      int num_layers) const;
+  double goalBound(const GoalContext& goal, int l, int x, int y) const;
+  // Phase-start lower bounds: cheapest wire price per direction and the
+  // landmark distances of the congestion part of the costs.
+  void updateGoalBounds(bool landmarks);
+  void landmarkDijkstra(int64_t source, std::vector<double>& dist) const;
+  double viaPriceBound(int l, int x, int y) const;
+  void buildViaSteps();
+  // Debug comparison of a goal-oriented oracle call with plain Dijkstra.
+  void checkGoal(const NetState& state,
+                 Scratch& reference,
+                 bool objective_only,
+                 bool whole_grid,
+                 bool ok,
+                 const std::vector<Segment>& segments);
   // tree_edges holds vertex pairs; edge_pins[i] is the GRNet pin index of
   // pair i if it is a pin-clique edge, else -1.
   // Without need_usage (the congestion-free pilot reads only the tree and
@@ -192,6 +282,11 @@ class BonnRouteGlobal
   void applyCapacities(const std::vector<double>& capacities);
   void reportCapacities() const;
   double padCost(int layer, int x, int y, double pad, const GRNet* net) const;
+  double padCostFactor(int layer,
+                       int x,
+                       int y,
+                       double pad,
+                       double factor) const;
   std::shared_ptr<GRTreeNode> buildTree(const Candidate& candidate) const;
   double logCost(const Candidate& candidate) const;
   double linearCost(const Candidate& candidate) const;
@@ -262,6 +357,23 @@ class BonnRouteGlobal
   double estimate_time_ = 0.0;
   double base_objective_ = 0.0;
   std::vector<int> order_;  // nets taking part in resource sharing
+
+  // Goal orientation (Sec. 2.2).
+  std::vector<uint8_t> via_steps_;              // [lo][hi][mask][from][to]
+  std::vector<double> ndr_min_;                 // per layer, over the nets
+  std::array<double, 2> min_weight_{0.0, 0.0};  // per direction
+  std::vector<int64_t> landmark_vertices_;
+  std::vector<float> landmark_dist_;  // vertex * landmarks + k
+  double landmark_shift_ = 0.0;
+  bool landmarks_valid_ = false;
+  int landmark_updates_ = 0;
+  double landmark_time_ = 0.0;
+  int64_t search_pops_ = 0;
+  int64_t search_settled_ = 0;
+  std::atomic<int64_t> goal_checked_{0};
+  std::atomic<int64_t> goal_segments_{0};
+  std::atomic<int64_t> goal_ties_{0};
+  std::atomic<int64_t> goal_mismatches_{0};
 
   // Statistics.
   int64_t oracle_calls_ = 0;

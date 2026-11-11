@@ -10,6 +10,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
 #include <limits>
 #include <memory>
 #include <random>
@@ -87,6 +88,14 @@ bool BonnRouteParams::set(const std::string& name, const double value)
     capacity_single_tile_layers = std::max(1, static_cast<int>(value));
   } else if (name == "capacity_single_tile_margin") {
     capacity_single_tile_margin = std::max(0.0, value);
+  } else if (name == "goal_orientation") {
+    goal_orientation = std::clamp(static_cast<int>(value), 0, 1);
+  } else if (name == "landmarks") {
+    landmarks = std::clamp(static_cast<int>(value), 0, 64);
+  } else if (name == "landmark_refresh") {
+    landmark_refresh = std::max(1, static_cast<int>(value));
+  } else if (name == "goal_check") {
+    goal_check = value != 0.0;
   } else if (name == "verbose") {
     verbose = value != 0.0;
   } else {
@@ -108,7 +117,10 @@ struct alignas(kCacheLine) BonnRouteGlobal::Scratch
   std::vector<uint32_t> term_stamp;
   std::vector<int32_t> term;
   std::vector<std::pair<double, int64_t>> heap;
+  std::vector<GoalEntry> goal_heap;
   uint32_t epoch = 0;
+  int64_t pops = 0;
+  int64_t settled = 0;
 
   // n vertices; dist / parent / stamp are per (vertex, via state) node.
   void prepare(size_t n)
@@ -128,6 +140,7 @@ struct alignas(kCacheLine) BonnRouteGlobal::Scratch
       epoch = 1;
     }
     heap.clear();
+    goal_heap.clear();
   }
 };
 
@@ -177,6 +190,7 @@ BonnRouteGlobal::BonnRouteGlobal(GridGraph* grid_graph,
           = {lower_len + higher_len, lower_len > 0, higher_len > 0};
     }
   }
+  buildViaSteps();
 }
 
 BonnRouteGlobal::~BonnRouteGlobal() = default;
@@ -204,6 +218,15 @@ double BonnRouteGlobal::padCost(const int layer,
                                 const double pad,
                                 const GRNet* net) const
 {
+  return padCostFactor(layer, x, y, pad, net->getNdrCost(layer));
+}
+
+double BonnRouteGlobal::padCostFactor(const int layer,
+                                      const int x,
+                                      const int y,
+                                      const double pad,
+                                      const double factor) const
+{
   if (!via_demand_ || pad <= 0.0) {
     return 0.0;
   }
@@ -212,7 +235,7 @@ double BonnRouteGlobal::padCost(const int layer,
   if (flank.sum == 0) {
     return 0.0;
   }
-  const double demand = pad / flank.sum * net->getNdrCost(layer);
+  const double demand = pad / flank.sum * factor;
   double cost = 0.0;
   if (flank.lower) {
     const int lx = direction == MetalLayer::H ? x - 1 : x;
@@ -337,7 +360,28 @@ BonnRouteGlobal::OracleResult BonnRouteGlobal::oracle(
     const NetState& state,
     Scratch& scratch,
     const bool objective_only,
-    const bool whole_grid) const
+    const bool whole_grid,
+    std::vector<Segment>* segments) const
+{
+  if (params_.goal_orientation != 0) {
+    return oracleImpl<true>(
+        state, scratch, objective_only, whole_grid, segments);
+  }
+  return oracleImpl<false>(
+      state, scratch, objective_only, whole_grid, segments);
+}
+
+// kGoal = Sec. 2.2's goal orientation: the same search with the heap keyed
+// by dist + h, h a consistent lower bound of the remaining distance to the
+// unconnected terminals (goalBound()). Without it the search is plain
+// Dijkstra keyed by dist.
+template <bool kGoal>
+BonnRouteGlobal::OracleResult BonnRouteGlobal::oracleImpl(
+    const NetState& state,
+    Scratch& scratch,
+    const bool objective_only,
+    const bool whole_grid,
+    std::vector<Segment>* segments) const
 {
   OracleResult result;
   const GRNet* net = state.net;
@@ -360,9 +404,42 @@ BonnRouteGlobal::OracleResult BonnRouteGlobal::oracle(
   };
   auto greater = [](const std::pair<double, int64_t>& a,
                     const std::pair<double, int64_t>& b) { return a > b; };
+  // Goal orientation: heap entries carry dist + h and the target-set
+  // version their h was computed for.
+  [[maybe_unused]] GoalContext goal;
+  if constexpr (kGoal) {
+    initGoal(goal, state, objective_only, x0, y0, x1, y1, num_layers);
+  }
+  [[maybe_unused]] auto goal_greater
+      = [](const GoalEntry& a, const GoalEntry& b) {
+          if (a.key != b.key) {
+            return a.key > b.key;
+          }
+          if (a.dist != b.dist) {
+            return a.dist < b.dist;  // deeper first among equal keys
+          }
+          return a.node > b.node;
+        };
+  [[maybe_unused]] auto vertex_of = [&](int64_t v) {
+    const int l = static_cast<int>(v / plane);
+    const int64_t rem = v % plane;
+    return std::array<int, 3>{l,
+                              x0 + static_cast<int>(rem / height),
+                              y0 + static_cast<int>(rem % height)};
+  };
+  [[maybe_unused]] auto bound = [&](int64_t node) {
+    const auto [l, x, y] = vertex_of(node / 3);
+    return goalBound(goal, l, x, y);
+  };
   auto push = [&](double d, int64_t node) {
-    scratch.heap.emplace_back(d, node);
-    std::push_heap(scratch.heap.begin(), scratch.heap.end(), greater);
+    if constexpr (kGoal) {
+      scratch.goal_heap.push_back({d + bound(node), d, node, goal.version});
+      std::push_heap(
+          scratch.goal_heap.begin(), scratch.goal_heap.end(), goal_greater);
+    } else {
+      scratch.heap.emplace_back(d, node);
+      std::push_heap(scratch.heap.begin(), scratch.heap.end(), greater);
+    }
   };
   auto relax = [&](int64_t from, int64_t to, double d) {
     if (scratch.stamp[to] != scratch.epoch || d < scratch.dist[to]) {
@@ -438,22 +515,66 @@ BonnRouteGlobal::OracleResult BonnRouteGlobal::oracle(
       }
     }
   };
+  auto refresh_targets = [&]() {
+    if constexpr (kGoal) {
+      setGoalTargets(goal, state, connected, num_layers);
+    }
+  };
   // Algorithm 1, step 1: the component of the first terminal (driver).
   {
     const auto& c = state.terminals[0].cells.front();
     const int64_t root = index(c[0], c[1], c[2]);
     add_source(root);
     connect_at(root);
+    refresh_targets();
   }
+  auto heap_empty = [&]() {
+    if constexpr (kGoal) {
+      return scratch.goal_heap.empty();
+    } else {
+      return scratch.heap.empty();
+    }
+  };
   const double obj = objective_weight_;
   double last_connection_cost = 0.0;
-  while (!scratch.heap.empty() && remaining > 0) {
-    std::pop_heap(scratch.heap.begin(), scratch.heap.end(), greater);
-    const auto [d, node] = scratch.heap.back();
-    scratch.heap.pop_back();
-    if (d > scratch.dist[node]) {
-      continue;
+  while (!heap_empty() && remaining > 0) {
+    double d;
+    int64_t node;
+    if constexpr (kGoal) {
+      std::pop_heap(
+          scratch.goal_heap.begin(), scratch.goal_heap.end(), goal_greater);
+      const GoalEntry entry = scratch.goal_heap.back();
+      scratch.goal_heap.pop_back();
+      scratch.pops++;
+      d = entry.dist;
+      node = entry.node;
+      if (d > scratch.dist[node]) {
+        continue;
+      }
+      if (entry.version != goal.version) {
+        // Fewer targets since the push: h can only have grown. Re-key the
+        // entry if it is no longer the minimum.
+        const double key = d + bound(node);
+        if (key > entry.key && !scratch.goal_heap.empty()
+            && goal_greater(GoalEntry{key, d, node, goal.version},
+                            scratch.goal_heap.front())) {
+          scratch.goal_heap.push_back({key, d, node, goal.version});
+          std::push_heap(
+              scratch.goal_heap.begin(), scratch.goal_heap.end(), goal_greater);
+          continue;
+        }
+      }
+    } else {
+      std::pop_heap(scratch.heap.begin(), scratch.heap.end(), greater);
+      d = scratch.heap.back().first;
+      node = scratch.heap.back().second;
+      scratch.heap.pop_back();
+      scratch.pops++;
+      if (d > scratch.dist[node]) {
+        continue;
+      }
     }
+    scratch.settled++;
     const int64_t u = node / 3;
     const int s = static_cast<int>(node % 3);
     if (scratch.tree_stamp[u] != scratch.epoch
@@ -473,12 +594,20 @@ BonnRouteGlobal::OracleResult BonnRouteGlobal::oracle(
         added.push_back(cur / 3);
         cur = p;
       }
+      if (segments != nullptr) {
+        uint64_t key = 1469598103934665603ULL;
+        for (const int64_t v : added) {
+          key = (key ^ static_cast<uint64_t>(v)) * 1099511628211ULL;
+        }
+        segments->push_back({d, key});
+      }
       for (const int64_t v : added) {
         add_source(v);
       }
       for (const int64_t v : added) {
         connect_at(v);
       }
+      refresh_targets();
       continue;
     }
     const int l = static_cast<int>(u / plane);
@@ -558,6 +687,455 @@ BonnRouteGlobal::OracleResult BonnRouteGlobal::oracle(
   }
   result.ok = true;
   return result;
+}
+
+// ---------------------------------------------------------------------------
+// Goal orientation (Sec. 2.2: "a variant of goal-orientation with landmarks
+// [Goldberg and Harrelson 2005]").
+//
+// Every oracle edge cost is (objective weight) * (wire objective or via
+// weight) + (price part: wire weight * NDR factor, or via-pad prices). Prices
+// never decrease (applyPrices only adds), so bounds taken from earlier prices
+// stay lower bounds. h(v) = max(L1(v), O(v) + A(v)), each term a consistent
+// lower bound of the remaining distance to the nearest unconnected target:
+//   L1: min over targets of cx|dx| + cy|dy| + cv * vias(dx, dy, l -> l_t),
+//       with cx = objective weight * cheapest wire objective in the region
+//       + cheapest wire price per direction (phase start) * the net's
+//       smallest NDR factor, cv = objective weight * via weight, and
+//       vias() the fewest layer changes that reach a wire layer of each
+//       needed direction and then the target layer (via_steps_);
+//   O:  the objective part of L1 alone;
+//   A:  ALT on the price part: max over landmarks of the distance of the
+//       landmark distance d_k(v) to the targets' interval [min, max] of
+//       d_k(t), with d_k from a Dijkstra over the per-edge minimum price
+//       part (smallest NDR factor, cheapest via-entry state).
+// The objective and price parts of a path bound O and A separately, so
+// O + A is a lower bound; L1, O and A are 1-Lipschitz along every edge with
+// respect to its cost, so the max is consistent.
+
+namespace {
+constexpr int kExactTargets = 16;
+constexpr uint8_t kUnreachable = 255;
+}  // namespace
+
+void BonnRouteGlobal::buildViaSteps()
+{
+  const int L = num_layers_;
+  via_steps_.assign(static_cast<size_t>(L) * L * 4 * L * L, kUnreachable);
+  for (int lo = 0; lo < L; lo++) {
+    for (int hi = lo; hi < L; hi++) {
+      // Wire layers lo..hi; vias pass any layer 0..hi.
+      auto bits = [&](int l) {
+        if (l < lo || l > hi) {
+          return 0;
+        }
+        return layer_direction_[l] == MetalLayer::H ? 1 : 2;
+      };
+      uint8_t* table
+          = via_steps_.data() + (static_cast<size_t>(lo) * L + hi) * 4 * L * L;
+      for (int from = 0; from <= hi; from++) {
+        // BFS over (layer, directions seen).
+        std::vector<int> dist(static_cast<size_t>(L) * 4, -1);
+        std::vector<std::pair<int, int>> queue;
+        const int start_bits = bits(from);
+        dist[from * 4 + start_bits] = 0;
+        queue.emplace_back(from, start_bits);
+        for (size_t k = 0; k < queue.size(); k++) {
+          const auto [l, seen] = queue[k];
+          for (const int next : {l - 1, l + 1}) {
+            if (next < 0 || next > hi) {
+              continue;
+            }
+            const int nseen = seen | bits(next);
+            if (dist[next * 4 + nseen] < 0) {
+              dist[next * 4 + nseen] = dist[l * 4 + seen] + 1;
+              queue.emplace_back(next, nseen);
+            }
+          }
+        }
+        for (int mask = 0; mask < 4; mask++) {
+          for (int to = 0; to <= hi; to++) {
+            int best = -1;
+            for (int seen = 0; seen < 4; seen++) {
+              const int dd = dist[to * 4 + seen];
+              if ((seen & mask) == mask && dd >= 0 && (best < 0 || dd < best)) {
+                best = dd;
+              }
+            }
+            // A direction without a wire layer: no path; fall back to the
+            // layer distance (any value is admissible then).
+            table[(mask * L + from) * L + to] = static_cast<uint8_t>(
+                best >= 0 ? std::min(best, 254) : std::abs(from - to));
+          }
+        }
+      }
+    }
+  }
+}
+
+void BonnRouteGlobal::initGoal(GoalContext& goal,
+                               const NetState& state,
+                               const bool objective_only,
+                               const int x0,
+                               const int y0,
+                               const int x1,
+                               const int y1,
+                               const int num_layers) const
+{
+  const GRNet* net = state.net;
+  const LayerRange& range = net->getLayerRange();
+  auto cheapest = [&](int direction, int lo, int hi) {
+    double best = 0.0;
+    bool any = false;
+    for (int c = lo; c < hi; c++) {
+      const double w = wire_objective_[direction][c];
+      best = any ? std::min(best, w) : w;
+      any = true;
+    }
+    return best;
+  };
+  const double objective_x = cheapest(MetalLayer::H, x0, x1);
+  const double objective_y = cheapest(MetalLayer::V, y0, y1);
+  const double scale = objective_only ? 1.0 : objective_weight_;
+  goal.ox = scale * objective_x;
+  goal.oy = scale * objective_y;
+  goal.ov = scale * params_.via_weight;
+  goal.cx = goal.ox;
+  goal.cy = goal.oy;
+  goal.cv = goal.ov;
+  if (!objective_only) {
+    double factor = std::numeric_limits<double>::infinity();
+    for (int l = std::max(0, range.min_layer); l < num_layers; l++) {
+      factor = std::min(factor, net->getNdrCost(l));
+    }
+    if (std::isfinite(factor)) {
+      goal.cx += min_weight_[MetalLayer::H] * factor;
+      goal.cy += min_weight_[MetalLayer::V] * factor;
+    }
+  }
+  const int lo = std::clamp(range.min_layer, 0, num_layers - 1);
+  const int L = num_layers_;
+  goal.via_steps
+      = via_steps_.data()
+        + (static_cast<size_t>(lo) * L + (num_layers - 1)) * 4 * L * L;
+  const int K = params_.landmarks;
+  goal.alt = nullptr;
+  if (!objective_only && K > 0 && landmarks_valid_) {
+    goal.alt = landmark_dist_.data();
+    goal.alt_scale = std::exp(landmark_shift_ - shift_);
+    goal.alt_lo.assign(K, 0.0F);
+    goal.alt_hi.assign(K, 0.0F);
+  }
+  goal.version = 0;
+}
+
+void BonnRouteGlobal::setGoalTargets(GoalContext& goal,
+                                     const NetState& state,
+                                     const std::vector<char>& connected,
+                                     const int num_layers) const
+{
+  goal.targets.clear();
+  for (size_t t = 0; t < state.terminals.size(); t++) {
+    if (connected[t]) {
+      continue;
+    }
+    for (const auto& c : state.terminals[t].cells) {
+      if (c[0] < num_layers) {
+        goal.targets.push_back(
+            {c[0],
+             c[1],
+             c[2],
+             static_cast<int64_t>(edgeIndex(c[0], c[1], c[2]))});
+      }
+    }
+  }
+  goal.exact = goal.targets.size() <= kExactTargets;
+  goal.lx = goal.ly = goal.ll = std::numeric_limits<int>::max();
+  goal.hx = goal.hy = goal.hl = std::numeric_limits<int>::min();
+  for (const GoalTarget& t : goal.targets) {
+    goal.lx = std::min(goal.lx, t.x);
+    goal.hx = std::max(goal.hx, t.x);
+    goal.ly = std::min(goal.ly, t.y);
+    goal.hy = std::max(goal.hy, t.y);
+    goal.ll = std::min(goal.ll, t.l);
+    goal.hl = std::max(goal.hl, t.l);
+  }
+  if (goal.alt != nullptr) {
+    const int K = params_.landmarks;
+    for (int k = 0; k < K; k++) {
+      float lo = std::numeric_limits<float>::infinity();
+      float hi = -std::numeric_limits<float>::infinity();
+      for (const GoalTarget& t : goal.targets) {
+        const float d = goal.alt[t.vertex * K + k];
+        lo = std::min(lo, d);
+        hi = std::max(hi, d);
+      }
+      goal.alt_lo[k] = lo;
+      goal.alt_hi[k] = hi;
+    }
+  }
+  goal.version++;
+}
+
+double BonnRouteGlobal::goalBound(const GoalContext& goal,
+                                  const int l,
+                                  const int x,
+                                  const int y) const
+{
+  if (goal.targets.empty()) {
+    return 0.0;
+  }
+  const int L = num_layers_;
+  double full;
+  double objective;
+  if (goal.exact) {
+    full = std::numeric_limits<double>::infinity();
+    objective = full;
+    for (const GoalTarget& t : goal.targets) {
+      const int dx = std::abs(x - t.x);
+      const int dy = std::abs(y - t.y);
+      const int mask = (dx != 0 ? 1 : 0) | (dy != 0 ? 2 : 0);
+      const int vias = goal.via_steps[(mask * L + l) * L + t.l];
+      full = std::min(full, goal.cx * dx + goal.cy * dy + goal.cv * vias);
+      objective
+          = std::min(objective, goal.ox * dx + goal.oy * dy + goal.ov * vias);
+    }
+  } else {
+    auto gap = [](int v, int lo, int hi) {
+      return v < lo ? lo - v : (v > hi ? v - hi : 0);
+    };
+    const int dx = gap(x, goal.lx, goal.hx);
+    const int dy = gap(y, goal.ly, goal.hy);
+    const int dl = gap(l, goal.ll, goal.hl);
+    full = goal.cx * dx + goal.cy * dy + goal.cv * dl;
+    objective = goal.ox * dx + goal.oy * dy + goal.ov * dl;
+  }
+  if (goal.alt == nullptr) {
+    return full;
+  }
+  const int K = params_.landmarks;
+  const float* d = goal.alt + static_cast<int64_t>(edgeIndex(l, x, y)) * K;
+  double alt = 0.0;
+  for (int k = 0; k < K; k++) {
+    const double dv = d[k];
+    const double below = goal.alt_lo[k] - dv;
+    const double above = dv - goal.alt_hi[k];
+    // Float storage: give back the rounding of both distances.
+    const double slack
+        = 1.2e-7
+          * (std::abs(dv)
+             + std::max(std::abs(goal.alt_lo[k]), std::abs(goal.alt_hi[k])));
+    alt = std::max(alt, std::max(below, above) - slack);
+  }
+  return std::max(full, objective + alt * goal.alt_scale);
+}
+
+// Lower bound of the price part of a via between l and l + 1 at (x, y):
+// the cheaper direction and via-entry state, smallest NDR factors.
+double BonnRouteGlobal::viaPriceBound(const int l,
+                                      const int x,
+                                      const int y) const
+{
+  const double lower = via_pad_lower_[l];
+  const double up_l = l > 0 ? std::min(lower,
+                                       std::max(via_pad_upper_[l - 1], lower)
+                                           - via_pad_upper_[l - 1])
+                            : lower;
+  const double up
+      = padCostFactor(l, x, y, up_l, ndr_min_[l])
+        + padCostFactor(l + 1, x, y, via_pad_upper_[l], ndr_min_[l + 1]);
+  const double upper = via_pad_upper_[l];
+  const double down_h = std::min(
+      upper, std::max(upper, via_pad_lower_[l + 1]) - via_pad_lower_[l + 1]);
+  const double down = padCostFactor(l + 1, x, y, down_h, ndr_min_[l + 1])
+                      + padCostFactor(l, x, y, lower, ndr_min_[l]);
+  return std::min(up, down);
+}
+
+void BonnRouteGlobal::landmarkDijkstra(const int64_t source,
+                                       std::vector<double>& dist) const
+{
+  const int64_t X = x_size_;
+  const int64_t Y = y_size_;
+  const int64_t P = X * Y;
+  dist.assign(P * num_layers_, std::numeric_limits<double>::infinity());
+  using Entry = std::pair<double, int64_t>;
+  std::vector<Entry> heap;
+  auto greater = [](const Entry& a, const Entry& b) { return a > b; };
+  dist[source] = 0.0;
+  heap.emplace_back(0.0, source);
+  while (!heap.empty()) {
+    std::pop_heap(heap.begin(), heap.end(), greater);
+    const double d = heap.back().first;
+    const int64_t v = heap.back().second;
+    heap.pop_back();
+    if (d > dist[v]) {
+      continue;
+    }
+    const int y = static_cast<int>(v % Y);
+    const int x = static_cast<int>((v / Y) % X);
+    const int l = static_cast<int>(v / P);
+    auto relax = [&](int64_t w, double c) {
+      if (d + c < dist[w]) {
+        dist[w] = d + c;
+        heap.emplace_back(d + c, w);
+        std::push_heap(heap.begin(), heap.end(), greater);
+      }
+    };
+    if (l >= min_layer_) {
+      const double f = ndr_min_[l];
+      if (layer_direction_[l] == MetalLayer::H) {
+        if (x > 0) {
+          relax(v - Y, weight_[edgeIndex(l, x - 1, y)] * f);
+        }
+        if (x + 1 < X) {
+          relax(v + Y, weight_[edgeIndex(l, x, y)] * f);
+        }
+      } else {
+        if (y > 0) {
+          relax(v - 1, weight_[edgeIndex(l, x, y - 1)] * f);
+        }
+        if (y + 1 < Y) {
+          relax(v + 1, weight_[edgeIndex(l, x, y)] * f);
+        }
+      }
+    }
+    if (l + 1 < num_layers_) {
+      relax(v + P, viaPriceBound(l, x, y));
+    }
+    if (l > 0) {
+      relax(v - P, viaPriceBound(l - 1, x, y));
+    }
+  }
+}
+
+void BonnRouteGlobal::updateGoalBounds(const bool landmarks)
+{
+  // Cheapest current wire price per direction on the priced layers.
+  min_weight_ = {std::numeric_limits<double>::infinity(),
+                 std::numeric_limits<double>::infinity()};
+  for (int l = min_layer_; l < num_layers_; l++) {
+    const int direction = layer_direction_[l];
+    const int xe = direction == MetalLayer::H ? x_size_ - 1 : x_size_;
+    const int ye = direction == MetalLayer::H ? y_size_ : y_size_ - 1;
+    double best = min_weight_[direction];
+    for (int x = 0; x < xe; x++) {
+      for (int y = 0; y < ye; y++) {
+        best = std::min(best, weight_[edgeIndex(l, x, y)]);
+      }
+    }
+    min_weight_[direction] = best;
+  }
+  for (double& w : min_weight_) {
+    if (!std::isfinite(w)) {
+      w = 0.0;
+    }
+  }
+  const int K = params_.landmarks;
+  if (!landmarks || K <= 0) {
+    return;
+  }
+  utl::Timer timer;
+  const int64_t R = static_cast<int64_t>(num_layers_) * x_size_ * y_size_;
+  std::vector<std::vector<double>> dist(K);
+  if (landmark_vertices_.empty()) {
+    // Spread over the die boundary (where farthest-point selection ends up
+    // on a nearly uniform grid), alternating the lowest priced and the top
+    // layer.
+    const int64_t perimeter = 2 * static_cast<int64_t>(x_size_ - 1)
+                              + 2 * static_cast<int64_t>(y_size_ - 1);
+    for (int k = 0; k < K; k++) {
+      int64_t p = perimeter > 0 ? perimeter * k / K : 0;
+      int x = 0;
+      int y = 0;
+      if (p < x_size_ - 1) {
+        x = static_cast<int>(p);
+      } else if ((p -= x_size_ - 1) < y_size_ - 1) {
+        x = x_size_ - 1;
+        y = static_cast<int>(p);
+      } else if ((p -= y_size_ - 1) < x_size_ - 1) {
+        x = x_size_ - 1 - static_cast<int>(p);
+        y = y_size_ - 1;
+      } else {
+        p -= x_size_ - 1;
+        y = y_size_ - 1 - static_cast<int>(p);
+      }
+      const int l = k % 2 == 0 ? std::min(min_layer_, num_layers_ - 1)
+                               : num_layers_ - 1;
+      landmark_vertices_.push_back(edgeIndex(l, x, y));
+    }
+  }
+  {
+    const int threads = std::max(1, params_.threads);
+#pragma omp parallel for num_threads(threads) schedule(dynamic, 1)
+    for (int k = 0; k < K; k++) {
+      landmarkDijkstra(landmark_vertices_[k], dist[k]);
+    }
+  }
+  landmark_dist_.resize(R * K);
+  for (int64_t v = 0; v < R; v++) {
+    for (int k = 0; k < K; k++) {
+      // Unreachable vertices give no bound.
+      const double d = dist[k][v];
+      landmark_dist_[v * K + k]
+          = std::isfinite(d) ? static_cast<float>(d) : 0.0F;
+    }
+  }
+  // An unreachable vertex has distance 0 for every landmark; with a finite
+  // target interval this could overstate h. Disable ALT if any exist.
+  bool all_finite = true;
+  for (int k = 0; k < K && all_finite; k++) {
+    for (int64_t v = 0; v < R; v++) {
+      if (!std::isfinite(dist[k][v])) {
+        all_finite = false;
+        break;
+      }
+    }
+  }
+  landmarks_valid_ = all_finite;
+  landmark_shift_ = shift_;
+  landmark_updates_++;
+  landmark_time_ += timer.elapsed();
+}
+
+void BonnRouteGlobal::checkGoal(const NetState& state,
+                                Scratch& reference,
+                                const bool objective_only,
+                                const bool whole_grid,
+                                const bool ok,
+                                const std::vector<Segment>& segments)
+{
+  std::vector<Segment> expected;
+  const OracleResult r = oracleImpl<false>(
+      state, reference, objective_only, whole_grid, &expected);
+  goal_checked_++;
+  bool mismatch = r.ok != ok;
+  const size_t n = std::min(segments.size(), expected.size());
+  for (size_t i = 0; i < n && !mismatch; i++) {
+    const double a = segments[i].cost;
+    const double b = expected[i].cost;
+    goal_segments_++;
+    if (std::abs(a - b) > 1e-9 * std::max(1.0, std::abs(b))) {
+      mismatch = true;
+      if (goal_mismatches_ < 5) {
+        logger_->report(
+            "BonnRoute goal check: net {} connection {} cost {:.12g}, "
+            "Dijkstra {:.12g}.",
+            state.net->getName(),
+            i,
+            a,
+            b);
+      }
+      break;
+    }
+    if (segments[i].path != expected[i].path) {
+      goal_ties_++;  // equal cost, other path: later connections differ
+      break;
+    }
+  }
+  if (mismatch) {
+    goal_mismatches_++;
+  }
 }
 
 bool BonnRouteGlobal::buildCandidate(
@@ -912,6 +1490,8 @@ void BonnRouteGlobal::pilot(std::vector<double>* stack_counts)
 {
   const int threads = std::max(1, params_.threads);
   std::vector<Scratch> scratch(threads);
+  const bool check = params_.goal_check && params_.goal_orientation != 0;
+  std::vector<Scratch> reference(check ? threads : 0);
   const int num_nets = static_cast<int>(order_.size());
   // Congestion-free objective: guess for the objective resource bound.
   std::vector<double> objective(num_nets, 0.0);
@@ -921,9 +1501,22 @@ void BonnRouteGlobal::pilot(std::vector<double>* stack_counts)
 #pragma omp parallel for num_threads(threads) schedule(dynamic, 16)
   for (int i = 0; i < num_nets; i++) {
     Scratch& s = scratch[omp_get_thread_num()];
-    OracleResult r = oracle(states_[order_[i]], s, true, false);
+    std::vector<Segment> segments;
+    std::vector<Segment>* record = check ? &segments : nullptr;
+    OracleResult r = oracle(states_[order_[i]], s, true, false, record);
+    bool whole = false;
     if (!r.ok) {
-      r = oracle(states_[order_[i]], s, true, true);
+      segments.clear();
+      r = oracle(states_[order_[i]], s, true, true, record);
+      whole = true;
+    }
+    if (check) {
+      checkGoal(states_[order_[i]],
+                reference[omp_get_thread_num()],
+                true,
+                whole,
+                r.ok,
+                segments);
     }
     objective[i] = r.ok ? r.candidate.objective : 0.0;
     states_[order_[i]].log_base_objective
@@ -948,6 +1541,10 @@ void BonnRouteGlobal::pilot(std::vector<double>* stack_counts)
   base_objective_ = 0.0;
   for (const double o : objective) {
     base_objective_ += o;
+  }
+  for (const Scratch& s : scratch) {
+    search_pops_ += s.pops;
+    search_settled_ += s.settled;
   }
   if (stack_counts == nullptr) {
     return;
@@ -1149,6 +1746,9 @@ void BonnRouteGlobal::resourceSharing()
 {
   const int threads = std::max(1, params_.threads);
   std::vector<Scratch> scratch(threads);
+  const bool goal = params_.goal_orientation != 0;
+  const bool check = params_.goal_check && goal;
+  std::vector<Scratch> reference(check ? threads : 0);
   const int num_nets = static_cast<int>(order_.size());
 
   const double base_objective = base_objective_;
@@ -1214,6 +1814,9 @@ void BonnRouteGlobal::resourceSharing()
       = std::log1p(std::max(0.0, params_.reuse_tolerance));
   for (int phase = 0; phase < params_.phases; phase++) {
     int64_t phase_calls = 0;
+    if (goal) {
+      updateGoalBounds(phase % params_.landmark_refresh == 0);
+    }
     for (int begin = 0; begin < num_nets; begin += batch) {
       const int end = std::min(num_nets, begin + batch);
       // Prices are frozen during the parallel part of the batch.
@@ -1243,9 +1846,22 @@ void BonnRouteGlobal::resourceSharing()
           }
         }
         Scratch& s = scratch[omp_get_thread_num()];
-        OracleResult r = oracle(state, s, false, false);
+        std::vector<Segment> segments;
+        std::vector<Segment>* record = check ? &segments : nullptr;
+        OracleResult r = oracle(state, s, false, false, record);
+        bool whole = false;
         if (!r.ok) {
-          r = oracle(state, s, false, true);
+          segments.clear();
+          r = oracle(state, s, false, true, record);
+          whole = true;
+        }
+        if (check) {
+          checkGoal(state,
+                    reference[omp_get_thread_num()],
+                    false,
+                    whole,
+                    r.ok,
+                    segments);
         }
         if (r.ok) {
           r.log_cost = logCost(r.candidate);
@@ -1310,6 +1926,12 @@ void BonnRouteGlobal::resourceSharing()
     }
     oracle_calls_ += phase_calls;
     const int done = phase + 1;
+    if (done == params_.phases) {
+      for (const Scratch& sc : scratch) {
+        search_pops_ += sc.pops;
+        search_settled_ += sc.settled;
+      }
+    }
     if (params_.verbose
         && (done == 1 || done % 25 == 0 || done == params_.phases)) {
       // ln y_r = eps * (sum of normalized loads); divide by phases for the
@@ -1522,6 +2144,17 @@ void BonnRouteGlobal::run()
     state.net->setRoutingTree(node);
     grid_graph_->addTreeUsage(node, state.net->getNdrCosts());
   }
+  ndr_min_.assign(num_layers_, std::numeric_limits<double>::infinity());
+  for (const int index : order_) {
+    for (int l = 0; l < num_layers_; l++) {
+      ndr_min_[l] = std::min(ndr_min_[l], states_[index].net->getNdrCost(l));
+    }
+  }
+  for (double& f : ndr_min_) {
+    if (!std::isfinite(f)) {
+      f = 1.0;
+    }
+  }
   std::vector<double> stack_counts;
   const bool count_stacks = estimate && params_.capacity_stacked_vias;
   pilot(count_stacks ? &stack_counts : nullptr);
@@ -1570,6 +2203,24 @@ void BonnRouteGlobal::run()
         "from the committed demand cost.",
         cost_mismatches_,
         cost_checks_);
+    logger_->report(
+        "BonnRoute search: goal orientation {}, {} heap pops, {} settled; "
+        "{} landmarks, {} landmark updates {:.2f}s.",
+        params_.goal_orientation,
+        search_pops_,
+        search_settled_,
+        params_.goal_orientation != 0 ? params_.landmarks : 0,
+        landmark_updates_,
+        landmark_time_);
+    if (params_.goal_check && params_.goal_orientation != 0) {
+      logger_->report(
+          "BonnRoute goal check: {} oracle calls, {} connections compared, "
+          "{} equal-cost ties, {} mismatches.",
+          goal_checked_.load(),
+          goal_segments_.load(),
+          goal_ties_.load(),
+          goal_mismatches_.load());
+    }
     logger_->report(
         "BonnRoute: {} oracle calls, {} reuses, {:.2f} candidates/net, "
         "resource sharing {:.2f}s, total {:.2f}s.",
