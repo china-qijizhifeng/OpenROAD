@@ -769,6 +769,7 @@ proc have_detailed_route { block } {
 sta::define_cmd_args "set_bonnroute_param" { name value }
 
 proc set_bonnroute_param { args } {
+  sta::parse_key_args "set_bonnroute_param" args keys {} flags {}
   if { [llength $args] != 2 } {
     utl::error GRT 762 "set_bonnroute_param requires a name and a value."
   }

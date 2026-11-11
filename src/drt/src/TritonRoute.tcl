@@ -534,6 +534,7 @@ sta::define_cmd_args "set_bonnroute_dr_param" { name value }
 sta::define_cmd_args "set_bonnroute_profile" { name }
 
 proc set_bonnroute_profile { args } {
+  sta::parse_key_args "set_bonnroute_profile" args keys {} flags {}
   if { [llength $args] != 1 } {
     utl::error DRT 9108 "set_bonnroute_profile requires a profile name."
   }
@@ -552,6 +553,7 @@ proc set_bonnroute_profile { args } {
 }
 
 proc set_bonnroute_dr_param { args } {
+  sta::parse_key_args "set_bonnroute_dr_param" args keys {} flags {}
   if { [llength $args] != 2 } {
     utl::error DRT 9102 "set_bonnroute_dr_param requires a name and a value."
   }
