@@ -150,6 +150,15 @@ If serial rip-up is enabled, removing a committed route can open a clean
 route for a previously failed net, so the serial queue still retries those
 nets.
 
+Neither the default configuration nor enabling both `use_intervals` and
+`ripup` reproduces the full paper algorithm. Interval event ordering and
+propagation differ from Algorithm 4; the rip-up queue has per-net limits but
+no rollback of a failed rip-up sequence. Pin reservations, connection-region
+selection and parallel scheduling also differ. See the
+[paper-fidelity notes](BonnRouteFidelity.md) for the source-level comparison.
+The measured benefit of vertex search with rip-up disabled is a configuration
+tradeoff in the combined flow, not an optimization of a faithful reproduction.
+
 The database-independent search core has a Bazel regression target:
 
 ```shell

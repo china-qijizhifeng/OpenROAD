@@ -111,6 +111,11 @@ the selected graph and cost model; the paper's approximation theorem has not
 been established for this adapter. Report cleanup settings alongside quality
 and timing measurements.
 
+See the [paper-fidelity notes](../drt/BonnRouteFidelity.md) for the pin and
+capacity models, DR execution differences, and limits of the performance
+comparisons. The current configuration is a partial implementation combined
+with CUGR and FlexDR; its timings do not measure a complete paper reproduction.
+
 ### Set Routing Layers
 
 This command sets the minimum and maximum routing layers for signal and clock nets.
