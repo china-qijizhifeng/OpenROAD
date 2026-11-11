@@ -65,6 +65,9 @@ struct OffTrackSource
   int layer = 0;
   // All grid vertices in the closed box are sources.
   Box region;
+  // Initial distance (e.g. a penalty for an access point pin access did
+  // not choose); the future cost stays admissible.
+  int64_t cost = 0;
 };
 
 struct OffTrackTarget

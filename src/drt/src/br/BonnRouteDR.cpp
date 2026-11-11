@@ -1577,12 +1577,14 @@ void BonnRouteDR::accessSources(const Term& term,
                                 const bool preferred_only) const
 {
   out.clear();
-  auto add = [&](const frAccessPoint* ap, const odb::Point& p) {
+  auto add = [&](const frAccessPoint* ap,
+                 const odb::Point& p,
+                 const bool preferred = true) {
     const frViaDef* via = nullptr;
     if (ap->hasAccess(frDirEnum::U) && ap->hasViaDef()) {
       via = ap->getViaDefs(1).front();
     }
-    out.push_back({ap->getLayerNum(), p, via});
+    out.push_back({ap->getLayerNum(), p, via, preferred});
   };
   if (term.inst_term != nullptr) {
     frInst* inst = term.inst_term->getInst();
@@ -1604,7 +1606,7 @@ void BonnRouteDR::accessSources(const Term& term,
         }
         odb::Point p = ap->getPoint();
         xform.apply(p);
-        add(ap.get(), p);
+        add(ap.get(), p, pref == nullptr || ap.get() == pref);
       }
     }
   } else if (term.bterm != nullptr) {
@@ -1946,7 +1948,8 @@ void BonnRouteDR::offTrackCatalogue(const int net,
                                     const Term& term,
                                     const Worker* worker,
                                     std::vector<AccessOption>& out,
-                                    AccessStats& stats) const
+                                    AccessStats& stats,
+                                    const int extra_radius) const
 {
   out.clear();
   stats.pins++;
@@ -1982,7 +1985,7 @@ void BonnRouteDR::offTrackCatalogue(const int net,
   std::vector<AccessSource> aps;
   if (from_aps) {
     std::vector<AccessSource> all;
-    accessSources(term, all, params_.offtrack_preferred_access_points);
+    accessSources(term, all);
     // Access points off the manufacturing grid would put the via and the
     // lines of the blockage grid off it.
     const frCoord mfg_grid
@@ -2067,7 +2070,8 @@ void BonnRouteDR::offTrackCatalogue(const int net,
     max_pitch = std::max(max_pitch, layers_[z].pitch);
     max_tau = std::max(max_tau, tau_[z]);
     const br::TrackLayer& l = graph_.layers[z];
-    const frCoord r = params_.offtrack_radius * layers_[z].pitch;
+    const frCoord r
+        = (params_.offtrack_radius + extra_radius) * layers_[z].pitch;
     const frCoord clo = (l.horizontal ? pin_box.yMin() : pin_box.xMin()) - r;
     const frCoord chi = (l.horizontal ? pin_box.yMax() : pin_box.xMax()) + r;
     const frCoord alo = (l.horizontal ? pin_box.xMin() : pin_box.yMin()) - r;
@@ -2171,8 +2175,22 @@ void BonnRouteDR::offTrackCatalogue(const int net,
     req.layers[s].grid = grid[s];
   }
   req.window = window;
-  for (const odb::Rect& r : pin) {
-    req.sources.push_back({0, toBox(r)});
+  // Access points pin access did not choose start with the stubs' penalty
+  // (pin_cost pitches), so their paths enter the catalogue only where they
+  // reach targets the chosen one does not.
+  const int64_t ap_penalty = static_cast<int64_t>(params_.pin_cost)
+                             * std::max<frCoord>(max_pitch, 1);
+  if (from_aps) {
+    for (const AccessSource& a : aps) {
+      const int64_t c = params_.offtrack_preferred_access_points && !a.preferred
+                            ? ap_penalty
+                            : 0;
+      req.sources.push_back({0, toBox(odb::Rect(a.point, a.point)), c});
+    }
+  } else {
+    for (const odb::Rect& r : pin) {
+      req.sources.push_back({0, toBox(r)});
+    }
   }
   for (size_t k = 0; k < targets.size(); k++) {
     req.targets.push_back(
@@ -2288,6 +2306,16 @@ void BonnRouteDR::offTrackCatalogue(const int net,
       const Cost len = std::abs(a.p.x - b.p.x) + std::abs(a.p.y - b.p.y);
       const bool preferred = (a.p.y == b.p.y) == layers_[z].horizontal;
       cost += len * (preferred ? 1 : params_.jog_factor) * unit();
+    }
+    if (from_aps && params_.offtrack_preferred_access_points
+        && !opt.route.empty()) {
+      for (const AccessSource& a : aps) {
+        if (toGrid(a.point) == opt.route.front().p && !a.preferred) {
+          cost += static_cast<Cost>(params_.pin_cost) * layers_[0].pitch
+                  * unit();
+          break;
+        }
+      }
     }
     opt.cost = cost;
     if (opt.route.size() == 1 || opt.route[1].layer == opt.route[0].layer) {
@@ -2550,13 +2578,11 @@ void BonnRouteDR::buildOffTrackAccess(const std::vector<char>& pre_skip)
       if (params_.offtrack_from_access_points) {
         // The access points the catalogue paths start at (label -1 - p).
         std::vector<AccessSource> aps;
-        accessSources(nets_[ia.terms[p].first].terms[ia.terms[p].second],
-                      aps,
-                      params_.offtrack_preferred_access_points);
+        accessSources(nets_[ia.terms[p].first].terms[ia.terms[p].second], aps);
         for (const AccessSource& a : aps) {
           sig.addShape(a.layer,
                        {a.point.x(), a.point.y(), a.point.x(), a.point.y()},
-                       -1 - static_cast<int>(p));
+                       (a.preferred ? -1 : -1001) - static_cast<int>(p));
         }
       }
     }
@@ -2768,9 +2794,7 @@ void BonnRouteDR::buildOffTrackAccess(const std::vector<char>& pre_skip)
         continue;
       }
       std::vector<AccessSource> member_aps;
-      accessSources(nets_[net].terms[t],
-                    member_aps,
-                    params_.offtrack_preferred_access_points);
+      accessSources(nets_[net].terms[t], member_aps);
       for (const AccessOption& opt : cd.catalogues[p]) {
         AccessOption mo;
         if (!map_option(opt, m, member_aps, mo)) {
@@ -2830,7 +2854,7 @@ void BonnRouteDR::buildOffTrackAccess(const std::vector<char>& pre_skip)
         reserve_fallback(net, term);
         continue;
       }
-      term.options = std::move(cats[p]);
+      keepStubs(term, cats[p]);
       if (choice[p] >= 0) {
         reserve(net, term, choice[p]);
       }
@@ -2847,7 +2871,7 @@ void BonnRouteDR::buildOffTrackAccess(const std::vector<char>& pre_skip)
       continue;
     }
     const std::vector<int> choice = solve(cats, {net_id});
-    term.options = std::move(cats[0]);
+    keepStubs(term, cats[0]);
     if (choice[0] >= 0) {
       reserve(net, term, choice[0]);
     }
@@ -2908,6 +2932,23 @@ void BonnRouteDR::buildOffTrackAccess(const std::vector<char>& pre_skip)
   }
 }
 
+void BonnRouteDR::keepStubs(Term& term, std::vector<AccessOption>& catalogue)
+{
+  // The catalogue first (primary indices refer to it), then the access
+  // stubs built from the same access points: a pin whose catalogue paths
+  // are all blocked later still has the stubs' alternatives on other
+  // tracks and positions (on unidirectional layers the catalogue of an
+  // access point is confined to one track).
+  std::vector<AccessOption> stubs = std::move(term.options);
+  term.options = std::move(catalogue);
+  for (AccessOption& stub : stubs) {
+    if (term.options.size() >= 1000) {
+      break;
+    }
+    term.options.push_back(std::move(stub));
+  }
+}
+
 bool BonnRouteDR::regenerateAccess(NetData& net, const int t, Worker& worker)
 {
   Term& term = net.terms[t];
@@ -2916,7 +2957,9 @@ bool BonnRouteDR::regenerateAccess(NetData& net, const int t, Worker& worker)
   }
   AccessStats stats;
   std::vector<AccessOption> fresh;
-  offTrackCatalogue(net.id, term, &worker, fresh, stats);
+  // Against the current routing space, two pitches farther out (Sec. 4.4
+  // "we dynamically generate new access paths").
+  offTrackCatalogue(net.id, term, &worker, fresh, stats, 2);
   worker.regenerations++;
   int added = 0;
   for (AccessOption& opt : fresh) {
@@ -3540,6 +3583,7 @@ bool BonnRouteDR::connectWithoutOwnShapes(NetData& net,
       }
     }
     if (std::ranges::find(valid[t], 1) == valid[t].end()) {
+      worker.access_failures++;
       return false;
     }
   }
@@ -4935,16 +4979,20 @@ void BonnRouteDR::main()
     br::CleanupStats cleanup;
     int64_t regenerations = 0;
     int64_t regenerated_paths = 0;
+    int64_t access_failures = 0;
     for (const Worker& w : workers_) {
+      access_failures += w.access_failures;
       cleanup.add(w.cleanup);
       regenerations += w.regenerations;
       regenerated_paths += w.regenerated_paths;
     }
     if (params_.offtrack_access) {
       logger_->report(
-          "BonnRoute DR: {} dynamic access path generations added {} paths.",
+          "BonnRoute DR: {} dynamic access path generations added {} paths; "
+          "{} connections failed for a pin without feasible access option.",
           regenerations,
-          regenerated_paths);
+          regenerated_paths,
+          access_failures);
     }
     logger_->report(
         "BonnRoute DR contact guard: {} nets with {} truncated pin contacts "

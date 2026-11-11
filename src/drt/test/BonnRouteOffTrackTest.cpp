@@ -1365,6 +1365,116 @@ void testOnTrackLayers(std::mt19937& rng)
       found);
 }
 
+// ---------------------------------------------------------------------------
+// Sources with initial costs (access points pin access did not choose start
+// with a penalty): the cost equals the minimum over the sources of initial
+// cost + brute-force distance; on an on-track-only layer a blocked chosen
+// access point leaves paths from the others in the catalogue.
+void testSourceCosts(std::mt19937& rng)
+{
+  int cases = 0;
+  int fallback_paths = 0;
+  OffTrackSearch search;
+  for (int it = 0; it < 1000; it++) {
+    Instance in;
+    Instance::Layer l;
+    l.tau = 1 + static_cast<GeoCoord>(rng() % 5);
+    l.obstacles = randomBoxes(rng, static_cast<int>(rng() % 6), 30, 8);
+    in.layers.push_back(l);
+    in.t.p = freePoint(rng, l.obstacles, 30);
+    const GridPoint s1 = freePoint(rng, l.obstacles, 30);
+    const GridPoint s2 = freePoint(rng, l.obstacles, 30);
+    const int64_t c2 = static_cast<int64_t>(rng() % 30);
+    const GeoCoord margin = 4 * l.tau + 4;
+    const Box dom{-margin, -margin, 42 + margin, 42 + margin};
+    in.s.p = s1;
+    const int64_t b1 = bruteForce(in, dom);
+    in.s.p = s2;
+    const int64_t b2 = bruteForce(in, dom);
+    const int64_t want = std::min(b1, b2 >= kInf ? kInf : b2 + c2);
+    BlockageGridInput gin;
+    gin.layers.push_back({l.tau, l.obstacles});
+    gin.points = {s1, s2, in.t.p};
+    OffTrackRequest req;
+    OffTrackLayer ol;
+    ol.grid = buildBlockageGrid(gin)[0];
+    ol.obstacles = l.obstacles;
+    req.layers = {ol};
+    req.window = {-1000000, -1000000, 1000000, 1000000};
+    req.sources
+        = {{0, {s1.x, s1.y, s1.x, s1.y}, 0}, {0, {s2.x, s2.y, s2.x, s2.y}, c2}};
+    req.targets = {{0, in.t.p, 0}};
+    const OffTrackResult res = search.run(req);
+    const int64_t got = res.paths.empty() ? kInf : res.paths.front().cost;
+    CHECK(got == want,
+          "source costs it=%d G=%lld want=%lld",
+          it,
+          static_cast<long long>(got == kInf ? -1 : got),
+          static_cast<long long>(want == kInf ? -1 : want));
+    cases++;
+  }
+  // On-track-only layer: chosen access point on track 10, another on
+  // track 20; an obstacle across track 10 next to the chosen one.
+  for (int it = 0; it < 200; it++) {
+    const std::vector<GeoCoord> tracks{0, 10, 20, 30};
+    const GridPoint chosen{5, 10};
+    const GridPoint other{5, 20};
+    const bool blocked = it % 2 == 0;
+    std::vector<Box> obs;
+    if (blocked) {
+      // Both ways along track 10 enter an obstacle interior at once.
+      obs.push_back({5, 8, 9, 12});
+      obs.push_back({1, 8, 5, 12});
+    }
+    BlockageGridInput gin;
+    gin.layers.push_back({1, obs});
+    gin.points = {chosen, other};
+    OffTrackRequest req;
+    std::vector<OffTrackTarget> targets;
+    for (const GeoCoord y : tracks) {
+      for (GeoCoord x = 0; x <= 30; x += 6) {
+        targets.push_back({0, {x, y}, static_cast<int>(targets.size())});
+        gin.points.push_back({x, y});
+      }
+    }
+    OffTrackLayer ol;
+    ol.grid = buildBlockageGrid(gin)[0];
+    ol.obstacles = obs;
+    req.layers = {ol};
+    req.window = {-100, -100, 100, 100};
+    req.sources = {{0, {chosen.x, chosen.y, chosen.x, chosen.y}, 0},
+                   {0, {other.x, other.y, other.x, other.y}, 20}};
+    req.targets = targets;
+    req.arc_filter =
+        [&](int, const GridPoint& from, const GridPoint&, int, const int dir) {
+          return (dir == 0 || dir == 1)
+                 && std::binary_search(tracks.begin(), tracks.end(), from.y);
+        };
+    const OffTrackResult res = search.run(req);
+    int from_other = 0;
+    for (const OffTrackPath& p : res.paths) {
+      from_other += p.nodes.front().p == other;
+    }
+    if (blocked) {
+      CHECK(!res.paths.empty()
+                && from_other == static_cast<int>(res.paths.size()),
+            "blocked chosen access point: %zu paths, %d from the other",
+            res.paths.size(),
+            from_other);
+      fallback_paths += from_other;
+    } else {
+      CHECK(!res.paths.empty() && res.paths.front().nodes.front().p == chosen,
+            "unblocked: the chosen access point must be first");
+    }
+  }
+  std::printf(
+      "source costs: %d instances equal to the brute-force minimum "
+      "over penalised sources; %d catalogue paths from a non-chosen "
+      "access point where the chosen one is blocked\n",
+      cases,
+      fallback_paths);
+}
+
 }  // namespace
 
 int main()
@@ -1381,6 +1491,7 @@ int main()
   testCleanup(rng);
   testPinContacts(rng);
   testOnTrackLayers(rng);
+  testSourceCosts(rng);
   const double secs
       = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0)
             .count();

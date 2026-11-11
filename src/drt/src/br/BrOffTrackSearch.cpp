@@ -259,9 +259,10 @@ OffTrackResult OffTrackSearch::run(const OffTrackRequest& req)
       for (int iy = y0; iy < l.ny() && l.ys[iy] <= s.region.yhi; iy++) {
         const size_t v = l.base + static_cast<size_t>(ix) * l.ny() + iy;
         const int64_t st = static_cast<int64_t>(v) * kStates + kFresh;
-        if (dist(st) > 0) {
-          set(st, 0, -1);
-          heap.push({future(s.layer, {l.xs[ix], l.ys[iy]}), 0, st});
+        if (dist(st) > s.cost) {
+          set(st, s.cost, -1);
+          heap.push(
+              {s.cost + future(s.layer, {l.xs[ix], l.ys[iy]}), s.cost, st});
         }
       }
     }

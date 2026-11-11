@@ -307,13 +307,23 @@ final check in `writeNets` leaves any net with such a wire to FlexDR
 ("wrong-way or off-track wires" in the log). The test compares the filtered
 search with a brute force restricted the same way.
 
-Access points: by default only the access point pin access chose for each
-pin (`offtrack_preferred_access_points 1`). Pin access chooses them as a
-conflict-free pattern of the instance and its neighbours; catalogue paths
-from other access points of the pin met neighbouring access vias more
-often (metal2 spacing on Nangate45, metal1 on sky130). Access points off the
-manufacturing grid are never used (they put the via and the grid lines off
-it).
+Access points: all access points of the pin's access index, those pin
+access did not choose starting with a penalty of `pin_cost` pitches (an
+initial distance of their sources; `offtrack_preferred_access_points 1`),
+as the access stubs price them. An earlier version used the chosen access
+point only: on asap7, where M2 is on-track-only, every catalogue path of a
+pin then lay on one M2 track, neighbouring primaries on the same track
+blocked them, dynamic generation found the same paths again ("5732
+generations added 0 paths") and 6596 of 17338 nets failed in BonnRoute
+(948 without off-track access). Access points off the manufacturing grid
+are never used (they put the via and the grid lines off it).
+
+Every pin keeps its access stubs after its catalogue paths (the catalogue
+first, so primary indices are unchanged): a pin whose catalogue paths are
+all blocked later still has the stubs' alternatives. Dynamic generation
+searches two pitches beyond `offtrack_radius` against the current routing
+space. The log counts connections that failed because a pin had no
+feasible access option left.
 
 Min-area extensions are written as FlexDR patch wires anchored at their via
 (`frPatchWire`, origin at the via, offset box on the manufacturing grid).

@@ -174,8 +174,10 @@ struct BonnRouteDRParams
   // pin contact at an access point, so 0 is incompatible with it (see
   // OffTrack.md; the final contact guard then drops affected nets).
   bool offtrack_from_access_points = true;
-  // Only the access point pin access chose for each pin (its conflict-free
-  // pattern); 0 uses all access points of the pin.
+  // Prefer the access point pin access chose for each pin (its
+  // conflict-free pattern): paths from the pin's other access points start
+  // with a penalty of pin_cost pitches, as for the access stubs; 0 treats
+  // all access points alike.
   bool offtrack_preferred_access_points = true;
   // Sec. 4.1 searches: per-worker label budget in MB (0: unlimited); a
   // search that would exceed it stops without a path (counted).
@@ -344,6 +346,9 @@ class BonnRouteDR
     int64_t aborted_searches = 0;
     br::CleanupStats cleanup;
     int64_t regenerations = 0;
+    // connect() calls that failed because a pin had no feasible access
+    // option even after dynamic generation.
+    int64_t access_failures = 0;
     int64_t regenerated_paths = 0;
     int64_t searches = 0;
     int64_t path_region_searches = 0;
@@ -414,6 +419,9 @@ class BonnRouteDR
     frLayerNum layer = 0;
     odb::Point point;
     const frViaDef* via = nullptr;
+    // The access point pin access chose for the pin (always for top-level
+    // pins).
+    bool preferred = true;
   };
   // The access points of the pin of `term` (FlexDR's: the instance's pin
   // access index, no-rotation transform; index 0 for top-level pins).
@@ -456,11 +464,13 @@ class BonnRouteDR
                  std::vector<odb::Rect>& rects) const;
   // Catalogue of the pin's off-track access paths against the current
   // routing space (Sec. 4.3).
+  // `extra_radius` pitches beyond offtrack_radius (dynamic generation).
   void offTrackCatalogue(int net,
                          const Term& term,
                          const Worker* worker,
                          std::vector<AccessOption>& out,
-                         AccessStats& stats) const;
+                         AccessStats& stats,
+                         int extra_radius = 0) const;
   void candidateOf(const AccessOption& option,
                    int net,
                    br::AccessCandidate& candidate) const;
@@ -471,6 +481,8 @@ class BonnRouteDR
       const std::vector<int>& nets,
       AccessStats& stats) const;
   bool regenerateAccess(NetData& net, int t, Worker& worker);
+  // term.options := catalogue followed by the term's access stubs.
+  static void keepStubs(Term& term, std::vector<AccessOption>& catalogue);
   bool optionLegal(const AccessOption& option,
                    int net,
                    const Worker* worker) const;
