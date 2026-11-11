@@ -2790,7 +2790,8 @@ void BonnRouteDR::setReservation(Term& term,
 
 void BonnRouteDR::setReservations(NetData& net,
                                   const bool active,
-                                  Worker* local)
+                                  Worker* local,
+                                  br::FastGridBuilder::PendingRemovals* batch)
 {
   if (active) {
     for (Term& term : net.terms) {
@@ -2799,7 +2800,9 @@ void BonnRouteDR::setReservations(NetData& net,
     return;
   }
   // Released together: one exact fast-grid recomputation.
-  br::FastGridBuilder::PendingRemovals pending;
+  br::FastGridBuilder::PendingRemovals own;
+  br::FastGridBuilder::PendingRemovals& pending
+      = batch != nullptr ? *batch : own;
   for (Term& term : net.terms) {
     if (term.reservation_active) {
       for (const RShape& shape : term.reservation) {
@@ -2816,7 +2819,9 @@ void BonnRouteDR::setReservations(NetData& net,
     }
     net.input_reserved = false;
   }
-  fast_builder_.flush(pending);
+  if (batch == nullptr) {
+    fast_builder_.flush(pending);
+  }
 }
 
 void BonnRouteDR::setInputReservation(NetData& net,
@@ -3867,6 +3872,7 @@ void BonnRouteDR::routeSpeculative(const std::vector<int>& order,
   int64_t checked = 0;
   double commit_seconds = 0;
   double check_seconds = 0;
+  double flush_seconds = 0;
   double wall_total = 0;
   double busy_total = 0;
   while (!queue.empty()) {
@@ -3901,6 +3907,12 @@ void BonnRouteDR::routeSpeculative(const std::vector<int>& order,
     // earlier in the batch can conflict: nets whose bounding boxes stay
     // farther apart skip the exact check.
     const double commit_start = omp_get_wtime();
+    // The reservation releases of the whole batch are flushed together
+    // after its commits. No search runs before the flush, inserts take the
+    // maximum with stored levels, and the flush recomputes every removal
+    // candidate exactly against the current shape grid, so the fast grid
+    // is exact again before the next batch is searched.
+    br::FastGridBuilder::PendingRemovals released;
     std::vector<int> retry;
     std::vector<odb::Rect> committed_boxes;
     for (size_t k = 0; k < batch.size(); k++) {
@@ -3942,7 +3954,7 @@ void BonnRouteDR::routeSpeculative(const std::vector<int>& order,
         continue;
       }
       commitNet(net, nullptr);
-      setReservations(net, false, nullptr);
+      setReservations(net, false, nullptr, &released);
       odb::Rect box;
       box.mergeInit();
       for (const RShape& shape : net.shapes) {
@@ -3954,6 +3966,9 @@ void BonnRouteDR::routeSpeculative(const std::vector<int>& order,
       }
       nets++;
     }
+    const double flush_start = omp_get_wtime();
+    fast_builder_.flush(released);
+    flush_seconds += omp_get_wtime() - flush_start;
     commit_seconds += omp_get_wtime() - commit_start;
     for (auto it = retry.rbegin(); it != retry.rend(); ++it) {
       queue.push_front(*it);
@@ -3970,7 +3985,8 @@ void BonnRouteDR::routeSpeculative(const std::vector<int>& order,
         "BonnRoute {} speculative batches: {} batches of up to {} "
         "nets, {} nets committed, {} searched again after a "
         "conflict; parallel search {:.2f}s, thread utilization {:.0f}%; "
-        "serial commit {:.2f}s ({} nets checked exactly, {:.2f}s).",
+        "serial commit {:.2f}s ({} nets checked exactly, {:.2f}s; "
+        "reservation release flush {:.2f}s).",
         stage,
         batches,
         batch_size,
@@ -3980,7 +3996,8 @@ void BonnRouteDR::routeSpeculative(const std::vector<int>& order,
         wall_total > 0 ? 100.0 * busy_total / (wall_total * threads) : 0.0,
         commit_seconds,
         checked,
-        check_seconds);
+        check_seconds,
+        flush_seconds);
   }
 }
 
