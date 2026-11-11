@@ -80,28 +80,29 @@ bool IntervalSearch::inWindow(const int z,
   return true;
 }
 
-int IntervalSearch::transitionSignature(const int z,
-                                        const int i,
-                                        const int j) const
+uint8_t IntervalSearch::computeTransitions(const int z,
+                                           const int i,
+                                           const int j) const
 {
   const At v{z, i, j};
   const TrackLayer& layer = graph_.layers[z];
-  int sig = 0;
-  for (const int di : {-1, 1}) {
-    const int i2 = i + di;
-    size_t li = 0;
-    if (!layer.jogs || !enter(v, kJog) || i2 < 0 || i2 >= layer.numTracks()
-        || !inWindow(z, i2, j, li)
-        || !req_->region->contains(layer, z, i2, j)) {
-      continue;
-    }
-    const At w{z, i2, j};
-    const At edge = di > 0 ? v : w;
-    if (enter(w, kJog) && enter(edge, kJogEdge)) {
-      sig |= di > 0 ? 2 : 1;
-      if (!usableZero(v, kJog) || !usableZero(w, kJog)
-          || !usableZero(edge, kJogEdge)) {
-        sig |= 16;  // penalties cannot be compressed into this interval
+  uint8_t bits = 0;
+  if (layer.jogs && enter(v, kJog)) {
+    const bool v_zero = usableZero(v, kJog);
+    for (const int di : {-1, 1}) {
+      const int i2 = i + di;
+      size_t li = 0;
+      if (i2 < 0 || i2 >= layer.numTracks() || !inWindow(z, i2, j, li)
+          || !req_->region->contains(layer, z, i2, j)) {
+        continue;
+      }
+      const At w{z, i2, j};
+      const At edge = di > 0 ? v : w;
+      if (enter(w, kJog) && enter(edge, kJogEdge)) {
+        bits |= di > 0 ? kTransJogAbove : kTransJogBelow;
+        if (!v_zero || !usableZero(w, kJog) || !usableZero(edge, kJogEdge)) {
+          bits |= kTransPenalty;  // cannot be compressed into an interval
+        }
       }
     }
   }
@@ -120,18 +121,30 @@ int IntervalSearch::transitionSignature(const int z,
     const At w{z2, i2, j2};
     const At lower = dz > 0 ? v : w;
     const At upper = dz > 0 ? w : v;
-    if (enter(lower, kViaUpPad) && enter(lower, kCutUp)
-        && enter(upper, kViaDownPad)) {
-      if (req_->interval_via_property) {
-        sig |= dz > 0 ? 8 : 4;
-      }
-      if (!usableZero(lower, kViaUpPad) || !usableZero(lower, kCutUp)
-          || !usableZero(upper, kViaDownPad)) {
-        sig |= 16;
+    const RipupLevel pad = level(lower, kViaUpPad);
+    const RipupLevel cut = level(lower, kCutUp);
+    const RipupLevel top = level(upper, kViaDownPad);
+    const RipupLevel worst = std::max({pad, cut, top});
+    if (worst == kLegal || (req_->ripup && worst <= req_->max_ripup_level)) {
+      bits |= dz > 0 ? kTransViaAbove : kTransViaBelow;
+      if (worst != kLegal) {
+        bits |= kTransPenalty;
       }
     }
   }
-  return sig;
+  return bits;
+}
+
+uint8_t IntervalSearch::transitions(const int z,
+                                    const int i,
+                                    const int j,
+                                    VertexLabel& label) const
+{
+  if (label.transitions_stamp != epoch_) {
+    label.transitions = computeTransitions(z, i, j);
+    label.transitions_stamp = epoch_;
+  }
+  return label.transitions;
 }
 
 int IntervalSearch::intervalOf(const int z, const int i, const int j)
@@ -152,17 +165,30 @@ int IntervalSearch::buildInterval(const int z, const int i, const int j)
   const Region& region = *req_->region;
   // A vertex may join an interval if it is a plain wire vertex: in the
   // region, unassigned, wire-usable without penalty and not a target.
-  auto plain = [&](int jj, size_t& li) {
-    if (!inWindow(z, i, jj, li) || labels_[li].stamp == epoch_
-        || labels_[li].target_stamp == epoch_
+  // Its transitions (property (ii)) are computed once and kept.
+  const uint8_t property_mask
+      = req_->interval_via_property ? uint8_t{0xff}
+                                    : uint8_t{kTransJogBelow | kTransJogAbove
+                                              | kTransPenalty};
+  auto plain = [&](int jj, uint8_t& sig) {
+    size_t li = 0;
+    if (!inWindow(z, i, jj, li)) {
+      return false;
+    }
+    VertexLabel& label = labels_[li];
+    if (label.stamp == epoch_ || label.target_stamp == epoch_
         || !region.contains(layer, z, i, jj)) {
       return false;
     }
     const At v{z, i, jj};
-    return usableZero(v, kWire)
-           && !(labels_[li].source_stamp == epoch_ && layer.jogs
-                && !usableZero(v, kJog))
-           && !(transitionSignature(z, i, jj) & 16);
+    if (!usableZero(v, kWire)
+        || (label.source_stamp == epoch_ && layer.jogs
+            && !usableZero(v, kJog))) {
+      return false;
+    }
+    const uint8_t bits = transitions(z, i, jj, label);
+    sig = bits & property_mask;
+    return (bits & kTransPenalty) == 0;
   };
   int ja = j;
   int jb = j;
@@ -170,16 +196,14 @@ int IntervalSearch::buildInterval(const int z, const int i, const int j)
   const Cost pi0 = futureCost(z, i, j);
   Cost pi_a = pi0;
   Cost pi_b = pi0;
-  size_t li0 = 0;
-  inWindow(z, i, j, li0);
-  if (!plain(j, li0)) {
+  uint8_t sig = 0;
+  if (!plain(j, sig)) {
     ends_[kEndStartVertex] += 2;
   } else {
-    const int sig = transitionSignature(z, i, j);
     IntervalEnd end = kEndTrack;
     auto joins = [&](int from, int to, Cost& pi_from) {
-      size_t li = 0;
-      if (!plain(to, li)) {
+      uint8_t sig_to = 0;
+      if (!plain(to, sig_to)) {
         end = kEndNeighbour;
         return false;
       }
@@ -188,9 +212,10 @@ int IntervalSearch::buildInterval(const int z, const int i, const int j)
         end = kEndWireEdge;
         return false;
       }
-      const int sig_to = transitionSignature(z, i, to);
       if (sig_to != sig) {
-        end = ((sig_to ^ sig) & 3) != 0 ? kEndJogProperty : kEndViaProperty;
+        end = ((sig_to ^ sig) & (kTransJogBelow | kTransJogAbove)) != 0
+                  ? kEndJogProperty
+                  : kEndViaProperty;
         return false;
       }
       // Adjacent members must have the same slope, exactly +1 or -1.
@@ -393,7 +418,14 @@ void IntervalSearch::process(const int id, const Cost delta)
   auto j_of = [&](int k) { return dir > 0 ? ja + k : jb - k; };
   auto k_of = [&](int j) { return dir > 0 ? j - ja : jb - j; };
   res_->settled += g - f;
-  const int signature = transitionSignature(z, i, j_of(f));
+  // Members of a longer interval are plain: their transitions are cached
+  // and carry no penalties.
+  auto bits_of = [&](int k) {
+    size_t li = 0;
+    inWindow(z, i, j_of(k), li);
+    return labels_[li].transitions;
+  };
+  const uint8_t signature = single ? 0 : bits_of(f);
   auto relax_to = [&](int from_k, int z2, int i2, int j2, Cost cost) {
     const Cost pi = intervals_[id].futureCost(layer, j_of(from_k));
     const int next_id = intervalOf(z2, i2, j2);
@@ -426,19 +458,25 @@ void IntervalSearch::process(const int id, const Cost delta)
   // skip the entire run when the interval has no vias in that direction.
   for (const int dz : {-1, 1}) {
     const int z2 = z + dz;
+    const uint8_t via_bit = dz > 0 ? kTransViaAbove : kTransViaBelow;
     if (z2 < 0 || z2 >= graph_.numLayers()
-        || (!single && req_->interval_via_property
-            && !(signature & (dz > 0 ? 8 : 4)))) {
+        || (!single && req_->interval_via_property && !(signature & via_bit))) {
       continue;
     }
     for (int k = f; k < g; k++) {
       const int j = j_of(k);
-      const At v{z, i, j};
       const int i2 = dz > 0 ? layer.up_track[j] : layer.down_track[j];
       const int j2 = dz > 0 ? layer.up_pos[i] : layer.down_pos[i];
+      if (!single) {
+        if (bits_of(k) & via_bit) {
+          relax_to(k, z2, i2, j2, graph_.via_cost[std::min(z, z2)]);
+        }
+        continue;
+      }
       if (i2 < 0 || j2 < 0 || !region.contains(graph_.layers[z2], z2, i2, j2)) {
         continue;
       }
+      const At v{z, i, j};
       const At w{z2, i2, j2};
       const At lower = dz > 0 ? v : w;
       const At upper = dz > 0 ? w : v;
@@ -456,51 +494,48 @@ void IntervalSearch::process(const int id, const Cost delta)
 
   // Algorithm 4, lines 13-17: process a neighboring jog interval once,
   // choosing the member of J_I(delta) with maximum pi. Interval membership
-  // includes all jog/via availability; transitions carrying penalties are
+  // includes all jog availability; transitions carrying penalties are
   // singletons. No per-vertex jog labeling is needed on a clean run.
   if (layer.jogs) {
     for (const int di : {-1, 1}) {
       const int i2 = i + di;
+      const uint8_t jog_bit = di > 0 ? kTransJogAbove : kTransJogBelow;
       if (i2 < 0 || i2 >= layer.numTracks()
-          || (!single && !(signature & (di > 0 ? 2 : 1)))) {
+          || (!single && !(signature & jog_bit))) {
         continue;
       }
-      for (int k = f; k < g;) {
-        const int j = j_of(k);
-        const At v{z, i, j};
-        const At w{z, i2, j};
-        const At edge = di > 0 ? v : w;
-        size_t li = 0;
-        inWindow(z, i, j, li);
-        const bool source = labels_[li].source_stamp == epoch_;
-        if (!region.contains(layer, z, i2, j) || !(source || enter(v, kJog))
-            || !enter(w, kJog) || !enter(edge, kJogEdge)) {
-          k++;
-          continue;
-        }
-        const int next_id = intervalOf(z, i2, j);
-        if (next_id < 0) {
-          k++;
-          continue;
-        }
-        const Interval& next = intervals_[next_id];
-        const int last_j = dir > 0 ? std::min(j_of(g - 1), next.jb)
-                                   : std::max(j_of(g - 1), next.ja);
-        const int end = k_of(last_j) + 1;
-        const int representative = end - 1;
-        const int jr = j_of(representative);
-        const At vr{z, i, jr};
-        const At wr{z, i2, jr};
-        const At er = di > 0 ? vr : wr;
-        size_t lr = 0;
-        inWindow(z, i, jr, lr);
+      if (!single) {
+        // Every member has the jog (property (ii)); one relaxation per
+        // neighbouring interval, at its last member of J_I(delta).
         const Cost cost
-            = layer.jog_factor * std::abs(layer.tracks[i2] - layer.tracks[i])
-              + penalty(wr, kJog) + penalty(er, kJogEdge)
-              + (labels_[lr].source_stamp == epoch_ ? 0 : penalty(vr, kJog));
-        relax_to(representative, z, i2, jr, cost);
-        k = end;
+            = layer.jog_factor * std::abs(layer.tracks[i2] - layer.tracks[i]);
+        for (int k = f; k < g;) {
+          const int next_id = intervalOf(z, i2, j_of(k));
+          const Interval& next = intervals_[next_id];
+          const int last_j = dir > 0 ? std::min(j_of(g - 1), next.jb)
+                                     : std::max(j_of(g - 1), next.ja);
+          const int end = k_of(last_j) + 1;
+          relax_to(end - 1, z, i2, j_of(end - 1), cost);
+          k = end;
+        }
+        continue;
       }
+      const int j = ja;
+      const At v{z, i, j};
+      const At w{z, i2, j};
+      const At edge = di > 0 ? v : w;
+      size_t li = 0;
+      inWindow(z, i, j, li);
+      const bool source = labels_[li].source_stamp == epoch_;
+      if (!region.contains(layer, z, i2, j) || !(source || enter(v, kJog))
+          || !enter(w, kJog) || !enter(edge, kJogEdge)) {
+        continue;
+      }
+      const Cost cost
+          = layer.jog_factor * std::abs(layer.tracks[i2] - layer.tracks[i])
+            + penalty(w, kJog) + penalty(edge, kJogEdge)
+            + (source ? 0 : penalty(v, kJog));
+      relax_to(0, z, i2, j, cost);
     }
   }
 

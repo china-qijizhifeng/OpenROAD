@@ -472,9 +472,21 @@ class IntervalSearch
   };
 
   Cost futureCost(int z, int i, int j) const;
+  // FastGridReader::level, inlined: the run cursors answer most queries
+  // of a track scan without a call.
   RipupLevel level(const At a, Kind k) const
   {
-    return reader_.level(a.z, a.i, a.j, k, req_->wire_type, &counters_);
+    return detail::levelOf(
+        grid_,
+        a.z,
+        a.i,
+        a.j,
+        k,
+        req_->wire_type,
+        reader_.ignoredOwner(),
+        &counters_,
+        [this](int z, int i, int j) { return reader_.wiringWord(z, i, j); },
+        [this](int z, int i, int c) { return reader_.viaWord(z, i, c); });
   }
   bool usableZero(At v, Kind k) const;
   bool enter(At v, Kind k) const;
@@ -482,7 +494,19 @@ class IntervalSearch
   bool inWindow(int z, int i, int j, size_t& li) const;
   int intervalOf(int z, int i, int j);
   int buildInterval(int z, int i, int j);
-  int transitionSignature(int z, int i, int j) const;
+  // Jog and via transitions of a vertex (kTrans* bits), computed once per
+  // search and kept in its vertex label.
+  enum : uint8_t
+  {
+    kTransJogBelow = 1,
+    kTransJogAbove = 2,
+    kTransViaBelow = 4,
+    kTransViaAbove = 8,
+    kTransPenalty = 16,  // an existing transition carries a rip-up penalty
+  };
+  struct VertexLabel;
+  uint8_t transitions(int z, int i, int j, VertexLabel& label) const;
+  uint8_t computeTransitions(int z, int i, int j) const;
   Cost value(const Interval& iv, int k) const;
   const Label* argLabel(const Interval& iv, int k) const;
   void rebuildEnvelope(Interval& iv);
@@ -512,8 +536,10 @@ class IntervalSearch
     uint32_t stamp = 0;
     uint32_t source_stamp = 0;
     uint32_t target_stamp = 0;
+    uint32_t transitions_stamp = 0;
     int32_t interval_id = 0;
     int32_t target_index = 0;
+    uint8_t transitions = 0;
   };
   mutable PagedLabels<VertexLabel> labels_;
   uint32_t epoch_ = 0;
