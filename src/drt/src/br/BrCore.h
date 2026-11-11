@@ -155,6 +155,11 @@ struct SearchRequest
   // Interval property (ii) of Sec. 4.1 for vias as well as jogs. Without
   // it, intervals ignore via availability and relax vias per vertex.
   bool interval_via_property = true;
+  // Among intervals at the same key, process the one whose J_I(delta)
+  // reaches the smallest future cost first (the vertex search's deeper-
+  // first rule) instead of the largest (Algorithm 4, line 12). Both are
+  // exact; this one reaches the targets early in the last key level.
+  bool interval_nearest_first = false;
   // pi_H of Sec. 4.1 with lb_via(z) = cost of the cheapest via stack from z
   // to a target layer (exact); false keeps dz * (cheapest via).
   bool exact_future_cost = true;
@@ -463,7 +468,8 @@ class IntervalSearch
         return key > o.key;
       }
       // Algorithm 4, line 12: among intervals at delta, choose the one
-      // whose settled run contains the largest future cost.
+      // whose settled run contains the largest future cost (max_future is
+      // its negation with interval_nearest_first). Sinks come first.
       if (max_future != o.max_future) {
         return max_future < o.max_future;
       }
@@ -560,6 +566,9 @@ class IntervalSearch
     uint16_t info = 0;
     Cost pending_delta = 0;
   };
+  bool nearest_first_ = false;
+  Cost tieKey(const Cost pi) const { return nearest_first_ ? -pi : pi; }
+  static constexpr Cost kSinkTie = kInfCost;
   // Event::interval of a deferred label; Event::aux indexes pending_.
   static constexpr int32_t kPendingEvent = -2;
   struct Pending

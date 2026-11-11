@@ -462,36 +462,46 @@ static int randomCases(const int cases,
     PathSearch ps(g, f);
     IntervalSearch is(g, f);
     SearchResult ri = modern ? SearchResult{} : is.run(q);
-    // The same search with intervals that ignore via availability.
+    // The same search with intervals that ignore via availability, and
+    // with the nearest-first order among equal keys.
     q.interval_via_property = false;
+    q.interval_nearest_first = c % 2 == 0;
     const SearchResult rn = modern ? SearchResult{} : is.run(q);
     q.interval_via_property = true;
+    q.interval_nearest_first = c % 2 != 0;
+    const SearchResult rf = modern ? SearchResult{} : is.run(q);
+    q.interval_nearest_first = false;
     SearchResult rvx = ps.run(q);
     Ref ref{g, f, q};
     Cost rc = ref.run();
     Cost ci = ri.found ? ri.cost : kInfCost,
          cv = rvx.found ? rvx.cost : kInfCost;
     Cost cn = rn.found ? rn.cost : kInfCost;
+    Cost cf = rf.found ? rf.cost : kInfCost;
     Cost pi = ri.found ? ref.pathCost(ri) : kInfCost;
     Cost pn = rn.found ? ref.pathCost(rn) : kInfCost;
+    Cost pf = rf.found ? ref.pathCost(rf) : kInfCost;
     const Cost pv = rvx.found ? ref.pathCost(rvx) : kInfCost;
     if (modern) {
-      ci = pi = cn = pn = rc;
+      ci = pi = cn = pn = cf = pf = rc;
     }
-    if (ci != rc || cv != rc || cn != rc || pi != ci || pn != cn || pv != cv
-        || (ri.found && !validPath(ri, q)) || (rn.found && !validPath(rn, q))
+    if (ci != rc || cv != rc || cn != rc || cf != rc || pi != ci || pn != cn
+        || pf != cf || pv != cv || (ri.found && !validPath(ri, q))
+        || (rn.found && !validPath(rn, q)) || (rf.found && !validPath(rf, q))
         || (rvx.found && !validPath(rvx, q))) {
       fails++;
       if (fails < 10) {
         printf(
             "case %d mismatch: interval %lld (path %lld) interval without "
-            "via property %lld (path %lld) vertex %lld (path %lld) ref "
-            "%lld\n",
+            "via property %lld (path %lld) other order %lld (path %lld) "
+            "vertex %lld (path %lld) ref %lld\n",
             c,
             (long long) ci,
             (long long) pi,
             (long long) cn,
             (long long) pn,
+            (long long) cf,
+            (long long) pf,
             (long long) cv,
             (long long) pv,
             (long long) rc);
@@ -534,7 +544,7 @@ static int randomCases(const int cases,
 static int pitchCases(const int cases)
 {
   std::mt19937 rng(9876);
-  int64_t fails = 0, found = 0, pops[3] = {}, settled[3] = {};
+  int64_t fails = 0, found = 0, pops[5] = {}, settled[5] = {};
   for (int c = 0; c < cases; c++) {
     TrackGraph g;
     const int Z = 3 + rng() % 3;
@@ -678,16 +688,20 @@ static int pitchCases(const int cases)
     }
     PathSearch ps(g, f);
     IntervalSearch is(g, f);
-    SearchResult r[3];
+    SearchResult r[5];
     r[0] = is.run(q);
     q.interval_via_property = false;
     r[1] = is.run(q);
+    q.interval_nearest_first = true;
+    r[3] = is.run(q);
     q.interval_via_property = true;
+    r[4] = is.run(q);
+    q.interval_nearest_first = false;
     r[2] = ps.run(q);
     Ref ref{g, f, q};
     const Cost rc = ref.run();
     bool ok = true;
-    for (int m = 0; m < 3; m++) {
+    for (int m = 0; m < 5; m++) {
       const Cost cm = r[m].found ? r[m].cost : kInfCost;
       ok &= cm == rc;
       ok &= !r[m].found || (ref.pathCost(r[m]) == cm && validPath(r[m], q));
@@ -696,25 +710,34 @@ static int pitchCases(const int cases)
     }
     found += r[2].found;
     if (!ok && fails++ < 10) {
-      printf("pitch case %d mismatch: interval %lld / %lld vertex %lld ref %lld\n",
-             c,
-             (long long) (r[0].found ? r[0].cost : kInfCost),
-             (long long) (r[1].found ? r[1].cost : kInfCost),
-             (long long) (r[2].found ? r[2].cost : kInfCost),
-             (long long) rc);
+      printf(
+          "pitch case %d mismatch: interval %lld / %lld, nearest first %lld / "
+          "%lld, vertex %lld ref %lld\n",
+          c,
+          (long long) (r[0].found ? r[0].cost : kInfCost),
+          (long long) (r[1].found ? r[1].cost : kInfCost),
+          (long long) (r[4].found ? r[4].cost : kInfCost),
+          (long long) (r[3].found ? r[3].cost : kInfCost),
+          (long long) (r[2].found ? r[2].cost : kInfCost),
+          (long long) rc);
     }
   }
   printf(
       "pitch cases %d found %lld fails %lld | heap pops interval %lld / "
-      "without via property %lld / vertex %lld | settled %lld / %lld / %lld\n",
+      "without via property %lld / nearest first %lld / %lld / vertex %lld | "
+      "settled %lld / %lld / %lld / %lld / %lld\n",
       cases,
       (long long) found,
       (long long) fails,
       (long long) pops[0],
       (long long) pops[1],
+      (long long) pops[4],
+      (long long) pops[3],
       (long long) pops[2],
       (long long) settled[0],
       (long long) settled[1],
+      (long long) settled[4],
+      (long long) settled[3],
       (long long) settled[2]);
   return fails != 0;
 }
@@ -807,8 +830,12 @@ static int obstacleDetour()
     Ref reference{graph, grid, request};
     const SearchResult with_vias = interval.run(request);
     request.interval_via_property = false;
-    for (const auto& result :
-         {vertex.run(request), with_vias, interval.run(request)}) {
+    const SearchResult without_vias = interval.run(request);
+    request.interval_nearest_first = true;
+    for (const auto& result : {vertex.run(request),
+                               with_vias,
+                               without_vias,
+                               interval.run(request)}) {
       if (!result.found || result.cost != 1100
           || reference.pathCost(result) != result.cost) {
         std::printf("failed to detour around blocked edge: horizontal=%d\n",
@@ -886,6 +913,7 @@ static int reusedSearch()
       Ref reference{graph, grid, request};
       const Cost expected = reference.run();
       request.interval_via_property = query % 2 == 0;
+      request.interval_nearest_first = query % 4 >= 2;
       const SearchResult first_mode = interval.run(request);
       request.interval_via_property = !request.interval_via_property;
       for (const auto& result :

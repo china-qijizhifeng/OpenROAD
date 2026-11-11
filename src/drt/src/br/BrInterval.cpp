@@ -502,10 +502,10 @@ void IntervalSearch::pushEvent(const int interval)
   const Cost pi = iv.futureCost(graph_.layers[iv.z], iv.jOf(end - 1));
   res_->heap_pushes++;
   if (direct_) {
-    direct_event_ = Event{key, pi, interval, iv.frontier};
+    direct_event_ = Event{key, tieKey(pi), interval, iv.frontier};
     return;
   }
-  heap_.push_back(Event{key, pi, interval, iv.frontier});
+  heap_.push_back(Event{key, tieKey(pi), interval, iv.frontier});
   std::push_heap(heap_.begin(), heap_.end(), std::greater<>());
 }
 
@@ -536,6 +536,23 @@ void IntervalSearch::addLabel(const int interval,
   iv.labels.insert(at, Label{k, delta, pred_interval, pred_k, num_labels_});
   rebuildEnvelope(iv);
   num_labels_++;
+  if (iv.ja == iv.jb) {
+    // Targets are single-vertex intervals, so terminal costs are exact. The
+    // sink is queued with the label: once its key is the minimum, no other
+    // path is cheaper (Algorithm 4, line 25, checked as early as possible).
+    size_t li = 0;
+    inWindow(iv.z, iv.i, iv.ja, li);
+    if (labels_[li].target_stamp == epoch_) {
+      const auto& t = req_->targets[labels_[li].target_index];
+      // delta includes pi(t) <= t.cost (the box cost is the cheapest
+      // terminal cost), so the sink key stays >= delta.
+      const Cost pi_t = iv.futureCost(layer, iv.ja);
+      heap_.push_back(Event{
+          delta - pi_t + t.cost, kSinkTie, -1, labels_[li].target_index});
+      std::push_heap(heap_.begin(), heap_.end(), std::greater<>());
+      res_->heap_pushes++;
+    }
+  }
   pushEvent(interval);
 }
 
@@ -597,7 +614,7 @@ void IntervalSearch::process(const int id, const Cost delta)
     w.pending_pred_k = from_k;
     pending_.push_back({z2, i2, j2});
     heap_.push_back(Event{d2,
-                          pi_w,
+                          tieKey(pi_w),
                           kPendingEvent,
                           static_cast<int32_t>(pending_.size() - 1)});
     std::push_heap(heap_.begin(), heap_.end(), std::greater<>());
@@ -629,22 +646,6 @@ void IntervalSearch::process(const int id, const Cost delta)
                     + next.futureCost(graph_.layers[z2], j2);
     return value(next, k2) <= d2;
   };
-
-  // Targets are single-vertex intervals, so terminal costs are exact.
-  if (single) {
-    size_t li = 0;
-    inWindow(z, i, ja, li);
-    if (labels_[li].target_stamp == epoch_) {
-      const auto& t = req_->targets[labels_[li].target_index];
-      // delta includes pi(t) <= t.cost (the box cost is the cheapest
-      // terminal cost), so the sink key stays >= delta.
-      const Cost pi_t = intervals_[id].futureCost(layer, ja);
-      heap_.push_back(
-          Event{delta - pi_t + t.cost, 0, -1, labels_[li].target_index});
-      std::push_heap(heap_.begin(), heap_.end(), std::greater<>());
-      res_->heap_pushes++;
-    }
-  }
 
   // On perpendicular layers each crossing reaches a different track and
   // hence a different neighboring interval. Enumerate those adjacencies;
@@ -778,6 +779,7 @@ SearchResult IntervalSearch::run(const SearchRequest& request)
   }
   heap_.clear();
   pending_.clear();
+  nearest_first_ = request.interval_nearest_first;
   num_used_ = 0;
   if (intervals_.size() > kKeptIntervals) {
     intervals_.resize(kKeptIntervals);
@@ -918,8 +920,8 @@ SearchResult IntervalSearch::run(const SearchRequest& request)
     const Interval& iv = intervals_[e.interval];
     if (iv.frontier >= iv.n() || iv.frontier != e.aux
         || value(iv, iv.frontier) != e.key
-        || iv.futureCost(graph_.layers[iv.z],
-                         iv.jOf(frontierEnd(iv, e.key) - 1))
+        || tieKey(iv.futureCost(graph_.layers[iv.z],
+                                iv.jOf(frontierEnd(iv, e.key) - 1)))
                != e.max_future) {
       continue;
     }
