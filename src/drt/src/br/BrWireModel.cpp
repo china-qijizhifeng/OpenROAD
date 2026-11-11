@@ -85,6 +85,9 @@ Coord SpacingTable::minValue() const
 Coord LayerRules::reach() const
 {
   Coord r = std::max(spacing.maxValue(), projection_spacing);
+  for (const Coord s : ndr_spacing) {
+    r = std::max(r, s);
+  }
   if (!via_layer && line_end.active()) {
     r = std::max({r, line_end.space, line_end.within});
   }
@@ -104,6 +107,7 @@ size_t ShapeClassHash::operator()(const ShapeClass& c) const
   h = h * 257 + c.run_column_x;
   h = h * 257 + c.run_column_y;
   h = h * 2 + (c.line_end ? 1 : 0);
+  h = h * 257 + c.ndr;
   return std::hash<uint64_t>()(h);
 }
 
@@ -115,6 +119,7 @@ void ShapeClassTable::setLayers(std::vector<LayerRules> layers)
   const size_t n = layers_.size();
   rule_reach_.clear();
   wide_row_.clear();
+  wide_ndr_.assign(n, {});
   class_reach_ = std::make_unique<std::atomic<Coord>[]>(n);
   narrow_reach_ = std::make_unique<std::atomic<Coord>[]>(n);
   layer_classes_.assign(n, {});
@@ -129,8 +134,14 @@ void ShapeClassTable::setLayers(std::vector<LayerRules> layers)
     const SpacingTable& t = rules.spacing;
     const int last = std::max(t.numColumns() - 1, 0);
     int row = std::max(t.numRows(), 1);
+    const int64_t base = t.numRows() > 0 && t.numColumns() > 0
+                             ? t.at(0, 0, last)
+                             : t.maxValue();
+    for (const Coord s : rules.ndr_spacing) {
+      wide_ndr_[l].push_back(wide_percent_ > 0
+                             && int64_t{s} * 100 >= base * wide_percent_);
+    }
     if (wide_percent_ > 0 && t.numRows() > 0 && t.numColumns() > 0) {
-      const int64_t base = t.at(0, 0, last);
       for (int r = 1; r < t.numRows(); r++) {
         if (int64_t{t.at(r, r, last)} * 100 >= base * wide_percent_) {
           row = r;
@@ -195,7 +206,8 @@ ClassId ShapeClassTable::intern(const ShapeClass& c)
 
 ShapeClass ShapeClassTable::describe(const int layer,
                                      const Rect& rect,
-                                     const ShapeRole role) const
+                                     const ShapeRole role,
+                                     const int ndr) const
 {
   const LayerRules& rules = layers_[layer];
   ShapeClass c;
@@ -219,6 +231,9 @@ ShapeClass ShapeClassTable::describe(const int layer,
     // The line-end edge runs across the preferred direction.
     const Coord edge = rules.horizontal ? rect.dy() : rect.dx();
     c.line_end = edge < rules.line_end.max_edge;
+  }
+  if (c.kind == ShapeClassKind::kMetal && rules.ndrSpacing(ndr) > 0) {
+    c.ndr = static_cast<uint8_t>(ndr);
   }
   return c;
 }
@@ -245,6 +260,13 @@ Requirement ShapeClassTable::requirement(const ClassId a, const ClassId b) const
     r.facing_x = t.at(
         ca.width_row, cb.width_row, column(ca.run_column_y, cb.run_column_y));
     r.diagonal = t.at(ca.width_row, cb.width_row, 0);
+    // NDR spacing: max with the table value, Euclidean (drt's
+    // checkMetalSpacing_prl with checkNDRs).
+    const Coord ndr
+        = std::max(rules.ndrSpacing(ca.ndr), rules.ndrSpacing(cb.ndr));
+    r.facing_x = std::max(r.facing_x, ndr);
+    r.facing_y = std::max(r.facing_y, ndr);
+    r.diagonal = std::max(r.diagonal, ndr);
     r.overlap = true;
     r.line_end = rules.line_end.active();
     return r;
@@ -371,16 +393,18 @@ WireType makeWireType(const WireTypeGeometry& geometry,
     }
     const Coord half = w / 2;
     const Rect square{-half, -half, w - half, w - half};
-    t.preferred[z]
-        = {true,
-           square,
-           classes.classify(
-               wiringGridLayer(z), square, ShapeRole::kPreferredWire)};
-    t.non_preferred[z]
-        = {true,
-           square,
-           classes.classify(
-               wiringGridLayer(z), square, ShapeRole::kNonPreferredWire)};
+    t.preferred[z] = {true,
+                      square,
+                      classes.classify(wiringGridLayer(z),
+                                       square,
+                                       ShapeRole::kPreferredWire,
+                                       geometry.ndr)};
+    t.non_preferred[z] = {true,
+                          square,
+                          classes.classify(wiringGridLayer(z),
+                                           square,
+                                           ShapeRole::kNonPreferredWire,
+                                           geometry.ndr)};
   }
   t.via.resize(geometry.via.size());
   for (size_t z = 0; z < geometry.via.size(); z++) {
@@ -391,17 +415,19 @@ WireType makeWireType(const WireTypeGeometry& geometry,
     const int zi = static_cast<int>(z);
     ViaModel& m = t.via[z];
     m.valid = true;
-    m.bottom
-        = {true,
-           g.bottom,
-           classes.classify(wiringGridLayer(zi), g.bottom, ShapeRole::kViaPad)};
+    m.bottom = {
+        true,
+        g.bottom,
+        classes.classify(
+            wiringGridLayer(zi), g.bottom, ShapeRole::kViaPad, geometry.ndr)};
     m.cut = {true,
              g.cut,
              classes.classify(viaGridLayer(zi), g.cut, ShapeRole::kCut)};
     m.top = {
         true,
         g.top,
-        classes.classify(wiringGridLayer(zi + 1), g.top, ShapeRole::kViaPad)};
+        classes.classify(
+            wiringGridLayer(zi + 1), g.top, ShapeRole::kViaPad, geometry.ndr)};
     const int above = viaGridLayer(zi + 1);
     if (above < classes.numLayers()
         && classes.layer(above).projection_spacing > 0) {

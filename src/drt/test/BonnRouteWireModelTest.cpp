@@ -157,6 +157,19 @@ int classesAndRules(std::mt19937& rng)
       // The interaction distance of the pair is within the reaches of the
       // interned classes (narrowReach for two narrow classes), and beyond
       // it no rule applies.
+      // NDR spacing (drt: max with the table value) on metal pairs.
+      const ShapeClass& ca = classes.get(a.cls);
+      const ShapeClass& cb = classes.get(b.cls);
+      if (ca.kind == ShapeClassKind::kMetal
+          && cb.kind == ShapeClassKind::kMetal) {
+        const LayerRules& lr = classes.layer(a.layer);
+        const Coord ndr
+            = std::max(lr.ndrSpacing(ca.ndr), lr.ndrSpacing(cb.ndr));
+        const Requirement q = classes.requirement(a.cls, b.cls);
+        if (q.facing_x < ndr || q.facing_y < ndr || q.diagonal < ndr) {
+          fails++;
+        }
+      }
       const Coord dist = classes.distance(a.cls, b.cls);
       const Coord r = std::max(classes.reachOf(a.cls), classes.reachOf(b.cls));
       if (dist > r
