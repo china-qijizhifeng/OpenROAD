@@ -15,6 +15,7 @@
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
+#include <utility>
 #include <vector>
 
 #include "br/BrCore.h"
@@ -107,6 +108,9 @@ struct BonnRouteDRParams
   // Debug: repeat every search that used a potential with pi_H and count
   // cost differences (a feasible potential has none).
   bool potential_check = false;
+  // pi_H with the exact via-stack bound lb_via of Sec. 4.1 and the
+  // smallest terminal cost per target box; 0 keeps dz * (cheapest via).
+  bool exact_future_cost = true;
   // Sec. 4.2 wire spreading: extra cost (pitches of the layer) of a wire
   // vertex beside an occupied track, in GCells whose global routing
   // utilization (dbGCellGrid usage / capacity) is at most
@@ -261,6 +265,7 @@ class BonnRouteDR
     std::unique_ptr<br::IntervalSearch> interval_search;
     br::PotentialOracle potential;
     int64_t potential_fallbacks = 0;
+    double potential_seconds = 0;
     int64_t potential_checks = 0;
     int64_t potential_mismatches = 0;
     // Guide path of the last buildPathRegion: planar tile steps minus the
@@ -557,6 +562,9 @@ class BonnRouteDR
   // Statistics.
   int64_t ripup_events_ = 0;
   int64_t rollbacks_ = 0;
+  double partition_wall_ = 0;
+  double partition_busy_ = 0;
+  double partition_capacity_ = 0;
 };
 
 }  // namespace drt

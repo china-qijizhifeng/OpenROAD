@@ -98,6 +98,8 @@ struct TargetBox
 {
   Coord xlo, ylo, xhi, yhi;
   int zlo, zhi;
+  // Smallest terminal cost of the targets in the box; added to the bound.
+  Cost cost = 0;
 };
 
 // Lower bound on the cost from a location to the targets of a search
@@ -153,6 +155,9 @@ struct SearchRequest
   // Interval property (ii) of Sec. 4.1 for vias as well as jogs. Without
   // it, intervals ignore via availability and relax vias per vertex.
   bool interval_via_property = true;
+  // pi_H of Sec. 4.1 with lb_via(z) = cost of the cheapest via stack from z
+  // to a target layer (exact); false keeps dz * (cheapest via).
+  bool exact_future_cost = true;
   // Optional future cost; nullptr selects the l1 bound pi_H on the target
   // boxes. Only the vertex search supports an oracle and discounts.
   const FutureCostOracle* future_cost = nullptr;
@@ -332,6 +337,8 @@ class PathSearch
   mutable LegalityCounters counters_;
   mutable FastGridReader reader_;
   Cost min_via_cost_ = 0;
+  std::vector<Cost> via_prefix_;  // via_prefix_[z] = cost of vias 0 -> z
+  Cost viaBound(int z, const TargetBox& box) const;
   Cost min_wire_rate_ = 1;
 
   // Search window: per layer track range [i0, i0 + ni) and position range
@@ -397,6 +404,20 @@ class IntervalSearch
   }
   int64_t intervals() const { return num_intervals_; }
   int64_t labels() const { return num_labels_; }
+  // Why intervals end (Sec. 4.1 properties), counted per interval end.
+  enum IntervalEnd : uint8_t
+  {
+    kEndTrack = 0,        // end of the track or of the search window
+    kEndStartVertex,      // the start vertex cannot join any interval
+    kEndNeighbour,        // neighbour unusable, target, source or outside R
+    kEndWireEdge,         // preferred-direction edge unusable
+    kEndJogProperty,      // property (ii) differs for jogs
+    kEndViaProperty,      // property (ii) differs for vias only
+    kEndFutureCostSlope,  // property (i) fails
+    kNumIntervalEnds
+  };
+  int64_t intervalEnds(IntervalEnd reason) const { return ends_[reason]; }
+  int64_t intervalVertices() const { return interval_vertices_; }
 
  private:
   struct Label
@@ -477,6 +498,8 @@ class IntervalSearch
   mutable LegalityCounters counters_;
   mutable FastGridReader reader_;
   Cost min_via_cost_ = 0;
+  std::vector<Cost> via_prefix_;  // via_prefix_[z] = cost of vias 0 -> z
+  Cost viaBound(int z, const TargetBox& box) const;
 
   struct Window
   {
@@ -497,6 +520,8 @@ class IntervalSearch
   std::vector<Interval> intervals_;
   std::vector<Event> heap_;
   int64_t num_intervals_ = 0;
+  std::array<int64_t, kNumIntervalEnds> ends_{};
+  int64_t interval_vertices_ = 0;
   int64_t num_labels_ = 0;
 };
 

@@ -33,11 +33,13 @@
 
 #pragma once
 
+#include <algorithm>
 #include <cstdint>
 #include <functional>
 #include <memory>
 #include <mutex>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 #include "br/BrGeometry.h"

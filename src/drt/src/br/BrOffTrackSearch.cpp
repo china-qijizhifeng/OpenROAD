@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <cstdlib>
 #include <functional>
 #include <queue>
 #include <utility>

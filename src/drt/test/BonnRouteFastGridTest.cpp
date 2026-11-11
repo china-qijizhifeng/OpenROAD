@@ -7,6 +7,7 @@
 // vertex legality does not imply edge legality, incremental updates equal
 // to a rebuild from scratch, and the checker path for other wire types.
 
+#include <algorithm>
 #include <cstdint>
 #include <cstdio>
 #include <random>

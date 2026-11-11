@@ -10,6 +10,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
 #include <deque>
 #include <limits>
 #include <memory>
@@ -89,6 +90,8 @@ bool BonnRouteDRParams::set(const std::string& name, const double value)
     reserve_min_layer = std::max(0, v);
   } else if (name == "potential") {
     potential = std::clamp(v, 0, 4);
+  } else if (name == "exact_future_cost") {
+    exact_future_cost = v != 0;
   } else if (name == "potential_check") {
     potential_check = v != 0;
   } else if (name == "potential_detour_tiles") {
@@ -2868,6 +2871,7 @@ bool BonnRouteDR::connectInRegion(NetData& net,
                       / params_.discount_denominator;
   req.use_intervals = params_.use_intervals;
   req.interval_via_property = params_.interval_via_property;
+  req.exact_future_cost = params_.exact_future_cost;
   std::unordered_set<size_t> in_tree;
   std::vector<size_t> tree;
   std::vector<std::pair<size_t, Cost>> sources;
@@ -2912,15 +2916,16 @@ bool BonnRouteDR::connectInRegion(NetData& net,
           {opt.vertex, opt.cost, t * 1024 + static_cast<int>(o)});
       const auto [x, y] = graph_.point(opt.vertex);
       if (per_point) {
-        req.target_boxes.push_back({x, y, x, y, opt.z, opt.z});
+        req.target_boxes.push_back({x, y, x, y, opt.z, opt.z, opt.cost});
         continue;
       }
       if (t != box_term) {
-        req.target_boxes.push_back({x, y, x, y, opt.z, opt.z});
+        req.target_boxes.push_back({x, y, x, y, opt.z, opt.z, opt.cost});
         box_term = t;
         continue;
       }
       br::TargetBox& box = req.target_boxes.back();
+      box.cost = std::min(box.cost, opt.cost);
       box.xlo = std::min(box.xlo, x);
       box.ylo = std::min(box.ylo, y);
       box.xhi = std::max(box.xhi, x);
@@ -2972,12 +2977,14 @@ bool BonnRouteDR::connectInRegion(NetData& net,
       worker.potential_fallbacks++;
       return;
     }
+    const double prepare_start = omp_get_wtime();
     worker.potential.prepare(model,
                              graph_,
                              req,
                              gcells,
                              params_.discount_numerator,
                              params_.discount_denominator);
+    worker.potential_seconds += omp_get_wtime() - prepare_start;
     req.future_cost = &worker.potential;
   };
   auto run = [&](const bool path_region) {
@@ -3447,9 +3454,12 @@ void BonnRouteDR::routePartitions(const std::vector<int>& order,
     }
     // Each region is routed by one thread, which changes routing only
     // inside it; its nets are routed and committed in order.
+    std::vector<double> busy(regions.size(), 0);
+    const double wall_start = omp_get_wtime();
 #pragma omp parallel for num_threads(threads) schedule(dynamic, 1)
     for (int r = 0; r < static_cast<int>(regions.size()); r++) {
       Worker& w = workers_[omp_get_thread_num()];
+      const double region_start = omp_get_wtime();
       for (const int id : members[r]) {
         NetData& net = nets_[id];
         if (connect(net, false, w)) {
@@ -3461,7 +3471,19 @@ void BonnRouteDR::routePartitions(const std::vector<int>& order,
           region_failed[r].push_back(id);
         }
       }
+      busy[r] = omp_get_wtime() - region_start;
     }
+    const double wall = omp_get_wtime() - wall_start;
+    double busy_sum = 0;
+    double busy_max = 0;
+    for (const double b : busy) {
+      busy_sum += b;
+      busy_max = std::max(busy_max, b);
+    }
+    partition_wall_ += wall;
+    partition_busy_ += busy_sum;
+    partition_capacity_
+        += wall * std::min<int>(threads, static_cast<int>(regions.size()));
     for (const auto& f : region_failed) {
       failed.insert(failed.end(), f.begin(), f.end());
     }
@@ -3473,12 +3495,16 @@ void BonnRouteDR::routePartitions(const std::vector<int>& order,
       logger_->info(utl::DRT,
                     9103,
                     "BonnRoute {} {}: {} regions, {} nets inside, {} "
-                    "deferred.",
+                    "deferred; {:.2f}s, longest region {:.2f}s, thread "
+                    "utilization {:.0f}%.",
                     stage,
                     partition,
                     regions.size(),
                     routed,
-                    next.size());
+                    next.size(),
+                    wall,
+                    busy_max,
+                    wall > 0 ? 100.0 * busy_sum / (wall * threads) : 0.0);
     }
     pending.swap(next);
     partition++;
@@ -3842,7 +3868,51 @@ void BonnRouteDR::main()
         graph_.numLayers(),
         graph_.numVertices(),
         setup_time);
+    if (params_.use_intervals) {
+      std::array<int64_t, br::IntervalSearch::kNumIntervalEnds> ends{};
+      int64_t vertices = 0;
+      int64_t count = 0;
+      for (const Worker& w : workers_) {
+        if (!w.interval_search) {
+          continue;
+        }
+        for (int e = 0; e < br::IntervalSearch::kNumIntervalEnds; e++) {
+          ends[e] += w.interval_search->intervalEnds(
+              static_cast<br::IntervalSearch::IntervalEnd>(e));
+        }
+        vertices += w.interval_search->intervalVertices();
+        count += w.interval_search->intervals();
+      }
+      logger_->report(
+          "BonnRoute DR intervals: {:.2f} vertices per interval; interval "
+          "ends: track {}, start vertex {}, neighbour {}, wire edge {}, jog "
+          "property {}, via property {}, future cost slope {}.",
+          count > 0 ? static_cast<double>(vertices) / count : 0.0,
+          ends[0],
+          ends[1],
+          ends[2],
+          ends[3],
+          ends[4],
+          ends[5],
+          ends[6]);
+    }
+    logger_->report(
+        "BonnRoute DR partitions: {:.2f}s wall, {:.1f}% of {} threads busy "
+        "({:.1f}% of the usable regions).",
+        partition_wall_,
+        partition_wall_ > 0
+            ? 100.0 * partition_busy_ / (partition_wall_ * workers_.size())
+            : 0.0,
+        workers_.size(),
+        partition_capacity_ > 0 ? 100.0 * partition_busy_ / partition_capacity_
+                                : 0.0);
     if (params_.potential != 0) {
+      double potential_seconds = 0;
+      for (const Worker& w : workers_) {
+        potential_seconds += w.potential_seconds;
+      }
+      logger_->report("BonnRoute DR: {:.2f}s thread time preparing potentials.",
+                      potential_seconds);
       int64_t prepares[3] = {0, 0, 0};
       int64_t fallbacks = 0;
       int64_t checks = 0;

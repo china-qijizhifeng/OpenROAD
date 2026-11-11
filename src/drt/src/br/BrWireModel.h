@@ -10,10 +10,12 @@
 
 #pragma once
 
+#include <algorithm>
 #include <cstdint>
 #include <mutex>
 #include <string>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 #include "br/BrGeometry.h"

@@ -8,6 +8,7 @@
 // configuration 0 is never stored, and collect() reports exactly the
 // content of the area it declares known.
 
+#include <algorithm>
 #include <cstdint>
 #include <cstdio>
 #include <map>

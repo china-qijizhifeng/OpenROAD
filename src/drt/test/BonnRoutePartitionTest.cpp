@@ -9,6 +9,7 @@
 // shape grid content, the fast grid words and every query answer equal a
 // serial run of the same sequences (also run it with -fsanitize=thread).
 
+#include <algorithm>
 #include <cstdint>
 #include <cstdio>
 #include <map>
