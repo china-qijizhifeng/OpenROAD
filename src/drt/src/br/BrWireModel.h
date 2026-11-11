@@ -11,7 +11,9 @@
 #pragma once
 
 #include <algorithm>
+#include <atomic>
 #include <cstdint>
+#include <memory>
 #include <mutex>
 #include <string>
 #include <unordered_map>
@@ -19,6 +21,10 @@
 #include <vector>
 
 #include "br/BrGeometry.h"
+
+// Shape classes carry per-layer reaches from the interned classes and wide
+// classes (ShapeClassTable::narrowReach, wide).
+#define BR_SHAPE_CLASS_REACHES 1
 
 namespace drt::br {
 
@@ -222,13 +228,61 @@ class ShapeClassTable
   const ShapeClass& get(const ClassId id) const { return classes_[id]; }
   size_t size() const { return classes_.size(); }
   Requirement requirement(ClassId a, ClassId b) const;
-  Coord reach(const int layer) const { return reach_[layer]; }
+  // Largest distance at which shapes of the two classes violate a rule
+  // (spacing, line-end extensions; 1 for an overlap rule), 0 for classes
+  // of different layers.
+  Coord distance(ClassId a, ClassId b) const;
+
+  // Interaction distances of a layer (Sec. 3.3/3.4 windows). ruleReach()
+  // (also reach()) bounds every pair the layer's rules allow, including
+  // classes interned later (partition halos, grid borders, callers that
+  // classify shapes after choosing a window). classReach() bounds every
+  // pair of classes interned so far and narrowReach() every pair of
+  // interned narrow classes; both only grow, when intern() adds a class. A
+  // window around a model of class c must extend by reachOf(c); the shape
+  // grid reports wide pieces from the wider area on its own
+  // (ShapeGrid::collect).
+  Coord ruleReach(const int layer) const { return rule_reach_[layer]; }
+  Coord reach(const int layer) const { return rule_reach_[layer]; }
+  Coord classReach(const int layer) const
+  {
+    return class_reach_[layer].load(std::memory_order_relaxed);
+  }
+  Coord narrowReach(const int layer) const
+  {
+    return narrow_reach_[layer].load(std::memory_order_relaxed);
+  }
+  // Wide classes: shapes whose width row needs at least wideRatioPercent()
+  // of the narrowest row's largest spacing (macro blockages, power
+  // straps). The shape grid keeps their shapes in a separate index, so
+  // that they do not widen every window of their layer.
+  bool wide(const ClassId id) const
+  {
+    const ShapeClass& c = get(id);
+    return c.kind != ShapeClassKind::kCutProjection
+           && c.width_row >= wide_row_[c.layer];
+  }
+  Coord reachOf(const ClassId id) const
+  {
+    const int layer = get(id).layer;
+    return wide(id) ? classReach(layer) : narrowReach(layer);
+  }
+  // Threshold of wide(); takes effect at the next setLayers(). 0: no class
+  // is wide.
+  void setWideRatioPercent(const int percent) { wide_percent_ = percent; }
+  int wideRatioPercent() const { return wide_percent_; }
   // Unique per setLayers() call (keys of per-thread caches).
   uint64_t generation() const { return generation_; }
 
  private:
   std::vector<LayerRules> layers_;
-  std::vector<Coord> reach_;
+  std::vector<Coord> rule_reach_;
+  std::vector<int> wide_row_;
+  std::unique_ptr<std::atomic<Coord>[]> class_reach_;
+  std::unique_ptr<std::atomic<Coord>[]> narrow_reach_;
+  // Interned classes per layer (guarded by mutex_).
+  std::vector<std::vector<ClassId>> layer_classes_;
+  int wide_percent_ = 200;
   uint64_t generation_ = 0;
   std::mutex mutex_;
   std::unordered_map<ShapeClass, ClassId, ShapeClassHash> index_;

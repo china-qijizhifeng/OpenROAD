@@ -572,7 +572,13 @@ class FastGridBuilder final : public LegalityOracle
     GridWindow pieces;
   };
   // Tracks / positions of layer z whose models can meet `rect`.
-  Range wiringRange(int z, const Rect& rect, int grid_layer) const;
+  // Interaction distance of the fast-grid models of a shape-grid layer
+  // (Sec. 3.3 windows), and of those models with a shape of class cls.
+  Coord modelReach(int grid_layer) const;
+  Coord shapeReach(int grid_layer, ClassId cls) const;
+  // Positions whose models can interact with a shape at rect within
+  // shape_reach.
+  Range wiringRange(int z, const Rect& rect, Coord shape_reach) const;
   void trackLevels(int z,
                    int i,
                    int j0,
@@ -617,7 +623,7 @@ class FastGridBuilder final : public LegalityOracle
                 int c1,
                 const std::vector<uint64_t>& words) const;
   void viaRange(int z,
-                int grid_layer,
+                Coord shape_reach,
                 const Rect& rect,
                 const Rect& box,
                 int& i0,
@@ -708,6 +714,8 @@ class FastGridBuilder final : public LegalityOracle
   std::vector<Rect> cut_model_box_;
   std::vector<Rect> projection_model_box_;
   std::vector<bool> has_projection_;
+  // Shape-grid layers with a wide model class (windows use classReach()).
+  std::vector<bool> wide_models_;
 };
 
 }  // namespace drt::br

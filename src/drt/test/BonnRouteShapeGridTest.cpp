@@ -27,6 +27,8 @@ using namespace drt::br::test;
 
 namespace {
 
+int64_t g_wide_shapes = 0;
+
 using CellKey = std::tuple<int, int, int>;  // layer, row, cell
 using Content = std::vector<std::pair<int32_t, CellShape>>;
 
@@ -78,10 +80,59 @@ Content sorted(Content c)
   return c;
 }
 
+using WideKey = std::tuple<Coord, Coord, Coord, Coord, int, int, int, int32_t>;
+
+WideKey wideKey(const GridPiece& p)
+{
+  return {p.rect.xlo,
+          p.rect.ylo,
+          p.rect.xhi,
+          p.rect.yhi,
+          p.cls,
+          static_cast<int>(p.type),
+          p.line_end_ends,
+          p.owner};
+}
+
+// A wide shape as the index stores it: clipped to the grid area, owner
+// only for owned types, line-ends only at unclipped ends; false if nothing
+// is left.
+bool widePiece(const ShapeGrid& grid, const StoredShape& s, GridPiece& out)
+{
+  const ShapeGridLayerGeometry& g = grid.geometry(s.layer);
+  const Coord ga_lo = g.along_origin;
+  const Coord ga_hi = g.along_origin + g.along_cells * g.along_cell;
+  const Coord gc_lo = g.cross_origin;
+  const Coord gc_hi = g.cross_origin + g.cross_cells * g.cross_cell;
+  const Coord a_lo = g.horizontal ? s.rect.xlo : s.rect.ylo;
+  const Coord a_hi = g.horizontal ? s.rect.xhi : s.rect.yhi;
+  const Coord c_lo = g.horizontal ? s.rect.ylo : s.rect.xlo;
+  const Coord c_hi = g.horizontal ? s.rect.yhi : s.rect.xhi;
+  const Coord pa_lo = std::max(a_lo, ga_lo);
+  const Coord pa_hi = std::min(a_hi, ga_hi);
+  const Coord pc_lo = std::max(c_lo, gc_lo);
+  const Coord pc_hi = std::min(c_hi, gc_hi);
+  if (pa_lo >= pa_hi || pc_lo >= pc_hi) {
+    return false;
+  }
+  out.rect = g.horizontal ? Rect{pa_lo, pc_lo, pa_hi, pc_hi}
+                          : Rect{pc_lo, pa_lo, pc_hi, pa_hi};
+  out.cls = s.cls;
+  out.type = s.type;
+  out.owner = isOwned(s.type) ? s.owner : kNoNet;
+  out.line_end_ends = 0;
+  if (grid.classes().get(s.cls).line_end) {
+    out.line_end_ends = static_cast<uint8_t>((a_lo >= ga_lo ? 1 : 0)
+                                             | (a_hi <= ga_hi ? 2 : 0));
+  }
+  return true;
+}
+
 int runCase(std::mt19937& rng, const int case_id)
 {
   ShapeClassTable classes;
   const int num_z = randomInt(rng, 1, 3);
+  classes.setWideRatioPercent(randomWideRatio(rng));
   classes.setLayers(randomRules(rng, num_z, rng() % 2));
   const Coord extent = randomInt(rng, 120, 420);
   ShapeGrid grid;
@@ -129,9 +180,39 @@ int runCase(std::mt19937& rng, const int case_id)
       fails++;
     }
   }
+  // Narrow shapes live in the cells, wide ones in the wide index.
   std::map<CellKey, Content> expected;
+  std::vector<std::vector<GridPiece>> wide_live(classes.numLayers());
   for (const StoredShape& s : live) {
+    if (classes.wide(s.cls)) {
+      GridPiece p;
+      if (widePiece(grid, s, p)) {
+        wide_live[s.layer].push_back(p);
+      }
+      continue;
+    }
     addPieces(grid, s, expected);
+  }
+  int64_t wide_count = 0;
+  for (int layer = 0; layer < classes.numLayers(); layer++) {
+    std::vector<WideKey> want;
+    std::vector<WideKey> have;
+    for (const GridPiece& p : wide_live[layer]) {
+      want.push_back(wideKey(p));
+    }
+    grid.forEachWideShape(
+        layer, [&](const GridPiece& p) { have.push_back(wideKey(p)); });
+    std::ranges::sort(want);
+    std::ranges::sort(have);
+    wide_count += static_cast<int64_t>(want.size());
+    if (want != have) {
+      std::printf("case %d: wide index of layer %d differs (%zu vs %zu)\n",
+                  case_id,
+                  layer,
+                  want.size(),
+                  have.size());
+      fails++;
+    }
   }
   // Stored content per cell and interval invariants.
   std::map<CellKey, Content> stored;
@@ -257,8 +338,58 @@ int runCase(std::mt19937& rng, const int case_id)
     GridWindow out;
     grid.collect(layer, window, out);
     const ShapeGridLayerGeometry& g = grid.geometry(layer);
+    // Wide pieces: live ones, each once, all of those within reach -
+    // narrowReach of the window or of a known row (closed).
+    const Coord extra = classes.classReach(layer) - classes.narrowReach(layer);
+    std::vector<WideKey> wide_got;
+    for (const GridPiece& p : out.pieces) {
+      if (classes.wide(p.cls)) {
+        wide_got.push_back(wideKey(p));
+      }
+    }
+    std::ranges::sort(wide_got);
+    std::vector<WideKey> wide_all;
+    for (const GridPiece& p : wide_live[layer]) {
+      wide_all.push_back(wideKey(p));
+    }
+    std::ranges::sort(wide_all);
+    if (!std::ranges::includes(wide_all, wide_got)) {
+      std::printf(
+          "case %d query %d: collect reports a wide shape that is "
+          "not stored (or twice)\n",
+          case_id,
+          q);
+      fails++;
+    }
+    auto meets = [&](const Rect& r, const Rect& a) {
+      return r.xhi >= a.xlo && r.xlo <= a.xhi && r.yhi >= a.ylo
+             && r.ylo <= a.yhi;
+    };
+    std::vector<Rect> needed{window.bloated(extra, extra)};
+    for (const KnownRow& row : out.rows) {
+      const Coord lo = std::max(row.along_lo, -(1 << 28));
+      const Coord hi = std::min(row.along_hi, 1 << 28);
+      const Coord clo = std::max(row.cross_lo, -(1 << 28));
+      const Coord chi = std::min(row.cross_hi, 1 << 28);
+      const Rect known = g.horizontal ? Rect{lo, clo, hi - 1, chi - 1}
+                                      : Rect{clo, lo, chi - 1, hi - 1};
+      needed.push_back(known.bloated(extra, extra));
+    }
+    for (const GridPiece& p : wide_live[layer]) {
+      const bool need = std::ranges::any_of(
+          needed, [&](const Rect& a) { return meets(p.rect, a); });
+      if (need && !std::ranges::binary_search(wide_got, wideKey(p))) {
+        std::printf(
+            "case %d query %d: collect misses a wide shape\n", case_id, q);
+        fails++;
+        break;
+      }
+    }
     std::map<CellKey, Content> got;
     for (const GridPiece& p : out.pieces) {
+      if (classes.wide(p.cls)) {
+        continue;
+      }
       StoredShape s{layer, p.rect, p.cls, p.type, p.owner};
       std::map<CellKey, Content> one;
       addPieces(grid, s, one);
@@ -310,6 +441,11 @@ int runCase(std::mt19937& rng, const int case_id)
     std::printf("case %d: shared cell count\n", case_id);
     fails++;
   }
+  if (st.wide_shapes != wide_count) {
+    std::printf("case %d: wide shape count\n", case_id);
+    fails++;
+  }
+  g_wide_shapes += wide_count;
   return fails;
 }
 
@@ -323,6 +459,10 @@ int main()
   for (int c = 0; c < cases && fails < 10; c++) {
     fails += runCase(rng, c);
   }
-  std::printf("shape grid: %d cases, %d failures\n", cases, fails);
+  std::printf(
+      "shape grid: %d cases, %d failures, %lld wide shapes at the end\n",
+      cases,
+      fails,
+      static_cast<long long>(g_wide_shapes));
   return fails != 0;
 }

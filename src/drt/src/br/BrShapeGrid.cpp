@@ -4,9 +4,11 @@
 #include "br/BrShapeGrid.h"
 
 #include <algorithm>
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <limits>
 #include <memory>
 #include <mutex>
 #include <utility>
@@ -134,6 +136,8 @@ void ShapeGrid::init(const ShapeClassTable* classes,
     layer.blocks.clear();
     layer.blocks.resize(static_cast<size_t>(layer.along_chunks)
                         * layer.cross_chunks);
+    layer.wide = std::make_unique<WideList[]>(
+        static_cast<size_t>(layer.along_chunks) * layer.cross_chunks);
   }
 }
 
@@ -734,6 +738,94 @@ bool ShapeGrid::apply(const int layer_index,
   return ok;
 }
 
+bool ShapeGrid::updateWide(const int layer_index,
+                           const Rect& rect,
+                           const ClassId cls,
+                           const ShapeType type,
+                           const int32_t owner,
+                           const bool insert,
+                           const uint8_t line_end_ends)
+{
+  Layer& layer = layers_[layer_index];
+  const ShapeGridLayerGeometry& g = layer.geom;
+  const int64_t a_lo = g.horizontal ? rect.xlo : rect.ylo;
+  const int64_t a_hi = g.horizontal ? rect.xhi : rect.yhi;
+  const int64_t c_lo = g.horizontal ? rect.ylo : rect.xlo;
+  const int64_t c_hi = g.horizontal ? rect.yhi : rect.xhi;
+  if (a_lo >= a_hi || c_lo >= c_hi) {
+    return true;
+  }
+  // Clipped to the grid area like the cell pieces; a clipped end is no
+  // line-end.
+  const int64_t ga_lo = g.along_origin;
+  const int64_t ga_hi = ga_lo + int64_t{g.along_cells} * g.along_cell;
+  const int64_t gc_lo = g.cross_origin;
+  const int64_t gc_hi = gc_lo + int64_t{g.cross_cells} * g.cross_cell;
+  const auto pa_lo = static_cast<Coord>(std::max(a_lo, ga_lo));
+  const auto pa_hi = static_cast<Coord>(std::min(a_hi, ga_hi));
+  const auto pc_lo = static_cast<Coord>(std::max(c_lo, gc_lo));
+  const auto pc_hi = static_cast<Coord>(std::min(c_hi, gc_hi));
+  if (pa_lo >= pa_hi || pc_lo >= pc_hi) {
+    return true;
+  }
+  WideShape w;
+  GridPiece& p = w.piece;
+  p.rect = g.horizontal ? Rect{pa_lo, pc_lo, pa_hi, pc_hi}
+                        : Rect{pc_lo, pa_lo, pc_hi, pa_hi};
+  p.cls = cls;
+  p.type = type;
+  p.owner = owner;
+  if (classes_->get(cls).line_end) {
+    p.line_end_ends = static_cast<uint8_t>(
+        ((line_end_ends & 1) != 0 && a_lo >= ga_lo ? 1 : 0)
+        | ((line_end_ends & 2) != 0 && a_hi <= ga_hi ? 2 : 0));
+  }
+  const auto cell0 = floorDivide(pa_lo - ga_lo, g.along_cell);
+  const auto cell1 = floorDivide(pa_hi - 1 - ga_lo, g.along_cell);
+  const auto row0 = floorDivide(pc_lo - gc_lo, g.cross_cell);
+  const auto row1 = floorDivide(pc_hi - 1 - gc_lo, g.cross_cell);
+  w.cell_chunk_lo = layer.cell_chunk[cell0];
+  w.cell_chunk_hi = layer.cell_chunk[cell1];
+  w.row_chunk_lo = layer.row_chunk[row0];
+  w.row_chunk_hi = layer.row_chunk[row1];
+  auto list = [&](int q, int k) -> WideList& {
+    return layer.wide[static_cast<size_t>(q) * layer.along_chunks + k];
+  };
+  auto same = [&](const WideShape& o) {
+    return o.piece.rect == p.rect && o.piece.cls == p.cls
+           && o.piece.type == p.type && o.piece.owner == p.owner
+           && o.piece.line_end_ends == p.line_end_ends;
+  };
+  if (!insert) {
+    // A removal is applied only if the shape is present.
+    for (int q = w.row_chunk_lo; q <= w.row_chunk_hi; q++) {
+      for (int k = w.cell_chunk_lo; k <= w.cell_chunk_hi; k++) {
+        WideList& l = list(q, k);
+        std::lock_guard lock(l.mutex);
+        if (std::ranges::none_of(l.shapes, same)) {
+          return false;
+        }
+      }
+    }
+  }
+  for (int q = w.row_chunk_lo; q <= w.row_chunk_hi; q++) {
+    for (int k = w.cell_chunk_lo; k <= w.cell_chunk_hi; k++) {
+      WideList& l = list(q, k);
+      std::lock_guard lock(l.mutex);
+      if (insert) {
+        l.shapes.push_back(w);
+      } else {
+        const auto it = std::ranges::find_if(l.shapes, same);
+        *it = l.shapes.back();
+        l.shapes.pop_back();
+      }
+      l.size.store(static_cast<uint32_t>(l.shapes.size()),
+                   std::memory_order_release);
+    }
+  }
+  return true;
+}
+
 bool ShapeGrid::insert(const int layer,
                        const Rect& rect,
                        const ClassId cls,
@@ -742,6 +834,15 @@ bool ShapeGrid::insert(const int layer,
                        ShapeGridWriteCache& cache,
                        const uint8_t line_end_ends)
 {
+  if (classes_->wide(cls)) {
+    return updateWide(layer,
+                      rect,
+                      cls,
+                      type,
+                      isOwned(type) ? owner : kNoNet,
+                      true,
+                      line_end_ends);
+  }
   return update(layer,
                 rect,
                 cls,
@@ -760,6 +861,15 @@ bool ShapeGrid::remove(const int layer,
                        ShapeGridWriteCache& cache,
                        const uint8_t line_end_ends)
 {
+  if (classes_->wide(cls)) {
+    return updateWide(layer,
+                      rect,
+                      cls,
+                      type,
+                      isOwned(type) ? owner : kNoNet,
+                      false,
+                      line_end_ends);
+  }
   return update(layer,
                 rect,
                 cls,
@@ -846,13 +956,13 @@ void ShapeGrid::collect(const int layer_index,
   const int r1 = clampRow(floorDivide(c_hi - g.cross_origin, g.cross_cell));
   const int k0 = layer.cell_chunk[c0];
   const int k1 = layer.cell_chunk[c1];
+  const int horizon_lo
+      = std::max(c0 - kKnownHorizon, layer.chunk_first_cell[k0]);
+  const int horizon_hi
+      = std::min(c1 + kKnownHorizon, layer.chunk_first_cell[k1 + 1] - 1);
   thread_local std::vector<int32_t> found;
   for (int r = r0; r <= r1; r++) {
     const int row_chunk = layer.row_chunk[r];
-    const int horizon_lo
-        = std::max(c0 - kKnownHorizon, layer.chunk_first_cell[k0]);
-    const int horizon_hi
-        = std::min(c1 + kKnownHorizon, layer.chunk_first_cell[k1 + 1] - 1);
     int known_lo = horizon_lo;
     int known_hi = horizon_hi;
     for (int k = k0; k <= k1; k++) {
@@ -935,11 +1045,111 @@ void ShapeGrid::collect(const int layer_index,
     }
     out.rows.push_back(kr);
   }
+  // Wide shapes near the window and the known rows (which lie inside the
+  // rows r0..r1 and the cells horizon_lo..horizon_hi).
+  const Coord extra = std::max<Coord>(
+      0,
+      classes_->classReach(layer_index) - classes_->narrowReach(layer_index));
+  const int64_t along_lo = std::min<int64_t>(
+      a_lo, g.along_origin + int64_t{horizon_lo} * g.along_cell);
+  const int64_t along_hi = std::max<int64_t>(
+      a_hi, g.along_origin + int64_t{horizon_hi + 1} * g.along_cell);
+  const int64_t cross_lo
+      = std::min<int64_t>(c_lo, g.cross_origin + int64_t{r0} * g.cross_cell);
+  const int64_t cross_hi = std::max<int64_t>(
+      c_hi, g.cross_origin + int64_t{r1 + 1} * g.cross_cell);
+  auto clampCoord = [](int64_t v) {
+    return static_cast<Coord>(
+        std::clamp<int64_t>(v,
+                            std::numeric_limits<Coord>::min(),
+                            std::numeric_limits<Coord>::max()));
+  };
+  const Rect area{clampCoord(along_lo - extra),
+                  clampCoord(cross_lo - extra),
+                  clampCoord(along_hi + extra),
+                  clampCoord(cross_hi + extra)};
+  collectWide(layer, area, out);
+}
+
+void ShapeGrid::collectWide(const Layer& layer,
+                            const Rect& area,
+                            GridWindow& out) const
+{
+  // `area` holds (along, cross) coordinates as (x, y), closed.
+  const ShapeGridLayerGeometry& g = layer.geom;
+  auto cellOf = [&](Coord a) {
+    return static_cast<int>(std::clamp<int64_t>(
+        floorDivide(int64_t{a} - g.along_origin, g.along_cell),
+        0,
+        g.along_cells - 1));
+  };
+  auto rowOf = [&](Coord c) {
+    return static_cast<int>(std::clamp<int64_t>(
+        floorDivide(int64_t{c} - g.cross_origin, g.cross_cell),
+        0,
+        g.cross_cells - 1));
+  };
+  const int k0 = layer.cell_chunk[cellOf(area.xlo)];
+  const int k1 = layer.cell_chunk[cellOf(area.xhi)];
+  const int q0 = layer.row_chunk[rowOf(area.ylo)];
+  const int q1 = layer.row_chunk[rowOf(area.yhi)];
+  for (int q = q0; q <= q1; q++) {
+    for (int k = k0; k <= k1; k++) {
+      const WideList& l
+          = layer.wide[static_cast<size_t>(q) * layer.along_chunks + k];
+      if (l.size.load(std::memory_order_acquire) == 0) {
+        continue;
+      }
+      std::lock_guard lock(l.mutex);
+      for (const WideShape& w : l.shapes) {
+        // Once per shape: from the first of its chunks inside the area.
+        if (k != std::max(w.cell_chunk_lo, k0)
+            || q != std::max(w.row_chunk_lo, q0)) {
+          continue;
+        }
+        const Rect& r = w.piece.rect;
+        const Coord pa_lo = g.horizontal ? r.xlo : r.ylo;
+        const Coord pa_hi = g.horizontal ? r.xhi : r.yhi;
+        const Coord pc_lo = g.horizontal ? r.ylo : r.xlo;
+        const Coord pc_hi = g.horizontal ? r.yhi : r.xhi;
+        if (pa_hi < area.xlo || pa_lo > area.xhi || pc_hi < area.ylo
+            || pc_lo > area.yhi) {
+          continue;
+        }
+        out.pieces.push_back(w.piece);
+      }
+    }
+  }
+}
+
+void ShapeGrid::forEachWideShape(
+    const int layer_index,
+    const std::function<void(const GridPiece&)>& fn) const
+{
+  const Layer& layer = layers_[layer_index];
+  for (int q = 0; q < layer.cross_chunks; q++) {
+    for (int k = 0; k < layer.along_chunks; k++) {
+      const WideList& l
+          = layer.wide[static_cast<size_t>(q) * layer.along_chunks + k];
+      std::lock_guard lock(l.mutex);
+      for (const WideShape& w : l.shapes) {
+        if (w.cell_chunk_lo == k && w.row_chunk_lo == q) {
+          fn(w.piece);
+        }
+      }
+    }
+  }
 }
 
 void ShapeGrid::compact()
 {
   for (Layer& layer : layers_) {
+    const size_t lists
+        = static_cast<size_t>(layer.along_chunks) * layer.cross_chunks;
+    for (size_t k = 0; k < lists; k++) {
+      std::lock_guard lock(layer.wide[k].mutex);
+      layer.wide[k].shapes.shrink_to_fit();
+    }
     for (auto& b : layer.blocks) {
       if (b) {
         b->nodes.shrink_to_fit();
@@ -966,6 +1176,20 @@ ShapeGrid::Statistics ShapeGrid::statistics() const
                 + layer.chunk_first_row.capacity())
                    * sizeof(int)
                + layer.blocks.capacity() * sizeof(layer.blocks[0]);
+    const size_t lists
+        = static_cast<size_t>(layer.along_chunks) * layer.cross_chunks;
+    s.bytes += lists * sizeof(WideList);
+    for (size_t k = 0; k < lists; k++) {
+      const WideList& l = layer.wide[k];
+      std::lock_guard lock(l.mutex);
+      s.bytes += l.shapes.capacity() * sizeof(WideShape);
+      for (const WideShape& w : l.shapes) {
+        s.wide_shapes
+            += static_cast<size_t>(w.row_chunk_lo) * layer.along_chunks
+                   + w.cell_chunk_lo
+               == k;
+      }
+    }
     for (const auto& b : layer.blocks) {
       if (!b) {
         continue;

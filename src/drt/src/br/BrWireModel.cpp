@@ -8,6 +8,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <memory>
 #include <mutex>
 #include <stdexcept>
 #include <utility>
@@ -111,12 +112,50 @@ void ShapeClassTable::setLayers(std::vector<LayerRules> layers)
   static std::atomic<uint64_t> generations{0};
   generation_ = ++generations;
   layers_ = std::move(layers);
-  reach_.clear();
-  for (const LayerRules& l : layers_) {
-    reach_.push_back(l.reach());
+  const size_t n = layers_.size();
+  rule_reach_.clear();
+  wide_row_.clear();
+  class_reach_ = std::make_unique<std::atomic<Coord>[]>(n);
+  narrow_reach_ = std::make_unique<std::atomic<Coord>[]>(n);
+  layer_classes_.assign(n, {});
+  for (size_t l = 0; l < n; l++) {
+    const LayerRules& rules = layers_[l];
+    // An overlap rule makes touching shapes interact at distance 1.
+    rule_reach_.push_back(std::max<Coord>(rules.reach(), 1));
+    class_reach_[l].store(0, std::memory_order_relaxed);
+    narrow_reach_[l].store(0, std::memory_order_relaxed);
+    // The table is nondecreasing: row r's largest value bounds every pair
+    // of rows up to r.
+    const SpacingTable& t = rules.spacing;
+    const int last = std::max(t.numColumns() - 1, 0);
+    int row = std::max(t.numRows(), 1);
+    if (wide_percent_ > 0 && t.numRows() > 0 && t.numColumns() > 0) {
+      const int64_t base = t.at(0, 0, last);
+      for (int r = 1; r < t.numRows(); r++) {
+        if (int64_t{t.at(r, r, last)} * 100 >= base * wide_percent_) {
+          row = r;
+          break;
+        }
+      }
+    }
+    wide_row_.push_back(row);
   }
   index_.clear();
   classes_.clear();
+}
+
+Coord ShapeClassTable::distance(const ClassId a, const ClassId b) const
+{
+  const Requirement r = requirement(a, b);
+  Coord d = std::max({r.facing_x, r.facing_y, r.diagonal});
+  if (r.line_end) {
+    const LineEndRule& le = layers_[get(a).layer].line_end;
+    d = std::max({d, le.space, le.within});
+  }
+  if (r.overlap) {
+    d = std::max<Coord>(d, 1);
+  }
+  return d;
 }
 
 ClassId ShapeClassTable::intern(const ShapeClass& c)
@@ -131,8 +170,27 @@ ClassId ShapeClassTable::intern(const ShapeClass& c)
   if (id > 0xffff) {
     throw std::length_error("too many shape classes");
   }
-  index_.emplace(c, static_cast<ClassId>(id));
-  return static_cast<ClassId>(id);
+  const auto cls = static_cast<ClassId>(id);
+  index_.emplace(c, cls);
+  // Grow the interaction distances of the layer by the pairs of the new
+  // class with the interned ones (itself included).
+  if (c.layer >= 0 && static_cast<size_t>(c.layer) < layers_.size()) {
+    std::vector<ClassId>& list = layer_classes_[c.layer];
+    list.push_back(cls);
+    const bool narrow = !wide(cls);
+    Coord all = class_reach_[c.layer].load(std::memory_order_relaxed);
+    Coord near = narrow_reach_[c.layer].load(std::memory_order_relaxed);
+    for (const ClassId other : list) {
+      const Coord d = distance(cls, other);
+      all = std::max(all, d);
+      if (narrow && !wide(other)) {
+        near = std::max(near, d);
+      }
+    }
+    class_reach_[c.layer].store(all, std::memory_order_relaxed);
+    narrow_reach_[c.layer].store(near, std::memory_order_relaxed);
+  }
+  return cls;
 }
 
 ShapeClass ShapeClassTable::describe(const int layer,

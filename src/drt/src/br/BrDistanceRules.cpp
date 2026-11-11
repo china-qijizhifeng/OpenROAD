@@ -289,8 +289,8 @@ void DistanceRuleChecker::check(const Point l,
   result.intervals = 0;
   result.x_lo_known_bound = result.x_hi_known_bound = false;
   result.y_lo_known_bound = result.y_hi_known_bound = false;
-  // One shape-grid window per layer: all models bloated by the layer's
-  // interaction distance.
+  // One shape-grid window per layer: all models bloated by their
+  // interaction distance (wide pieces beyond it come from collect()).
   scratch.layers.clear();
   for (const LocatedModel& m : models) {
     if (std::ranges::find(scratch.layers, m.layer) == scratch.layers.end()) {
@@ -307,14 +307,15 @@ void DistanceRuleChecker::check(const Point l,
     const int layer = scratch.layers[k];
     bool first = true;
     Rect hull;
+    Coord reach = 0;
     for (const LocatedModel& m : models) {
       if (m.layer == layer) {
         const Rect placed = m.rect.translated(l);
         hull = first ? placed : hull.hull(placed);
         first = false;
+        reach = std::max(reach, classes.reachOf(m.cls));
       }
     }
-    const Coord reach = classes.reach(layer);
     scratch.base_windows[k] = hull.bloated(reach, reach);
     grid_->collect(
         layer,
@@ -614,7 +615,7 @@ RipupLevel DistanceRuleChecker::shapeLevel(const int layer,
 {
   thread_local GridWindow window;
   const ShapeClassTable& classes = grid_->classes();
-  const Coord reach = classes.reach(layer);
+  const Coord reach = classes.reachOf(cls);
   grid_->collect(layer, rect.bloated(reach, reach), window);
   const PlacedShape shape{rect, cls, line_end_ends};
   RipupLevel level = 0;

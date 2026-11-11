@@ -806,16 +806,7 @@ Coord interaction(const ShapeClassTable& classes,
   const uint32_t key = (static_cast<uint32_t>(model) << 16) | piece;
   Entry& e = cache[(model * 131u + piece) & 4095u];
   if (e.generation != classes.generation() || e.key != key) {
-    const Requirement r = classes.requirement(model, piece);
-    Coord d = std::max({r.facing_x, r.facing_y, r.diagonal});
-    if (r.line_end) {
-      const LineEndRule& le = classes.layer(classes.get(model).layer).line_end;
-      d = std::max({d, le.space, le.within});
-    }
-    if (r.overlap) {
-      d = std::max<Coord>(d, 1);
-    }
-    e = {classes.generation(), key, d};
+    e = {classes.generation(), key, classes.distance(model, piece)};
   }
   return e.d;
 }
@@ -860,8 +851,18 @@ void FastGridBuilder::init(const TrackGraph* graph,
   cut_model_box_.assign(num_z, Rect{});
   projection_model_box_.assign(num_z, Rect{});
   has_projection_.assign(num_z, false);
+  const ShapeClassTable& classes = checker_->grid().classes();
+  wide_models_.assign(classes.numLayers(), false);
   std::vector<LocatedModel> models;
   for (int z = 0; z < num_z; z++) {
+    models.clear();
+    pointModels(z, models);
+    viaModels(z, models);
+    for (const LocatedModel& m : models) {
+      if (classes.wide(m.cls)) {
+        wide_models_[m.layer] = true;
+      }
+    }
     models.clear();
     pointModels(z, models);
     for (size_t k = 0; k < models.size(); k++) {
@@ -890,6 +891,19 @@ Point FastGridBuilder::location(const int z, const int i, const int j) const
 {
   const auto [x, y] = graph_->layers[z].point(i, j);
   return {x, y};
+}
+
+Coord FastGridBuilder::modelReach(const int grid_layer) const
+{
+  const ShapeClassTable& classes = checker_->grid().classes();
+  return wide_models_[grid_layer] ? classes.classReach(grid_layer)
+                                  : classes.narrowReach(grid_layer);
+}
+
+Coord FastGridBuilder::shapeReach(const int grid_layer, const ClassId cls) const
+{
+  return std::max(modelReach(grid_layer),
+                  checker_->grid().classes().reachOf(cls));
 }
 
 void FastGridBuilder::pointModels(const int z,
@@ -988,7 +1002,7 @@ void FastGridBuilder::trackLevels(const int z,
   const Point a = location(z, i, j0);
   const Point b = location(z, i, j1);
   sg.collect(
-      g, windowOf(a, b, wiring_model_box_[z], classes.reach(g)), out.pieces);
+      g, windowOf(a, b, wiring_model_box_[z], modelReach(g)), out.pieces);
   thread_local std::vector<LineSpan> spans;
   for (const GridPiece& p : out.pieces.pieces) {
     if (p.owner == ignored && p.owner != kNoNet && isOwned(p.type)) {
@@ -1053,7 +1067,7 @@ void FastGridBuilder::jogLevels(const int z,
   const Point a = location(z, p, j0);
   const Point b = location(z, p, j1);
   thread_local GridWindow window;
-  sg.collect(g, windowOf(a, b, box, classes.reach(g)), window);
+  sg.collect(g, windowOf(a, b, box, modelReach(g)), window);
   thread_local std::vector<LineSpan> spans;
   for (const GridPiece& piece : window.pieces) {
     if (piece.owner == ignored && piece.owner != kNoNet
@@ -1208,7 +1222,7 @@ void FastGridBuilder::computeVia(const int z,
                             ? cut_model_box_[z]
                             : projection_model_box_[z];
       sg.collect(
-          layer_index, windowOf(a, b, box, classes.reach(layer_index)), window);
+          layer_index, windowOf(a, b, box, modelReach(layer_index)), window);
       for (const GridPiece& p : window.pieces) {
         if (p.owner == ignored && p.owner != kNoNet && isOwned(p.type)) {
           continue;
@@ -1403,13 +1417,14 @@ std::vector<std::array<int, 3>> FastGridBuilder::rebuildJobs() const
   return jobs;
 }
 
-FastGridBuilder::Range FastGridBuilder::wiringRange(const int z,
-                                                    const Rect& rect,
-                                                    const int grid_layer) const
+FastGridBuilder::Range FastGridBuilder::wiringRange(
+    const int z,
+    const Rect& rect,
+    const Coord shape_reach) const
 {
   const TrackLayer& layer = graph_->layers[z];
   const Rect& box = wiring_model_box_[z];
-  const int64_t reach = checker_->grid().classes().reach(grid_layer) + 1;
+  const int64_t reach = int64_t{shape_reach} + 1;
   const int64_t x_lo = int64_t{rect.xlo} - box.xhi - reach;
   const int64_t x_hi = int64_t{rect.xhi} - box.xlo + reach;
   const int64_t y_lo = int64_t{rect.ylo} - box.yhi - reach;
@@ -1433,7 +1448,7 @@ FastGridBuilder::Range FastGridBuilder::wiringRange(const int z,
 }
 
 void FastGridBuilder::viaRange(const int z,
-                               const int grid_layer,
+                               const Coord shape_reach,
                                const Rect& rect,
                                const Rect& box,
                                int& i0,
@@ -1442,7 +1457,7 @@ void FastGridBuilder::viaRange(const int z,
                                int& c1) const
 {
   const TrackLayer& layer = graph_->layers[z];
-  const int64_t reach = checker_->grid().classes().reach(grid_layer) + 1;
+  const int64_t reach = int64_t{shape_reach} + 1;
   const int64_t x_lo = int64_t{rect.xlo} - box.xhi - reach;
   const int64_t x_hi = int64_t{rect.xhi} - box.xlo + reach;
   const int64_t y_lo = int64_t{rect.ylo} - box.yhi - reach;
@@ -1484,7 +1499,7 @@ void FastGridBuilder::insertWiring(const int z,
   const TrackLayer& layer = graph_->layers[z];
   const int np = layer.numPositions();
   const int nt = layer.numTracks();
-  const Range r = wiringRange(z, s.rect, g);
+  const Range r = wiringRange(z, s.rect, shapeReach(g, s.cls));
   const int tb0 = std::max(0, std::min(r.i0, r.p0));
   const int tb1 = std::min(nt - 1, std::max(r.i1, r.p1 + 1));
   const int jb0 = std::max(0, std::min(r.j0, r.e0));
@@ -1658,7 +1673,7 @@ void FastGridBuilder::insertVia(const int z,
   // models of via layer z on layer 2z + 3.
   int i0, i1, c0, c1;
   viaRange(z,
-           g,
+           shapeReach(g, s.cls),
            s.rect,
            projection ? projection_model_box_[z] : cut_model_box_[z],
            i0,
@@ -1738,7 +1753,7 @@ void FastGridBuilder::wiringCandidates(const int z,
                                        Candidates& out) const
 {
   const TrackLayer& layer = graph_->layers[z];
-  const Range r = wiringRange(z, s.rect, g);
+  const Range r = wiringRange(z, s.rect, shapeReach(g, s.cls));
   const ShapeClassTable& classes = checker_->grid().classes();
   thread_local std::vector<LocatedModel> models;
   models.clear();
@@ -1812,7 +1827,7 @@ void FastGridBuilder::viaCandidates(const int z,
 {
   int i0, i1, c0, c1;
   viaRange(z,
-           g,
+           shapeReach(g, s.cls),
            s.rect,
            projection ? projection_model_box_[z] : cut_model_box_[z],
            i0,
@@ -1894,9 +1909,9 @@ void FastGridBuilder::recomputeCandidates(
   const ShapeGrid& sg = checker_->grid();
   const ShapeClassTable& classes = sg.classes();
   const int g = wiringGridLayer(z);
-  const Coord reach = classes.reach(g);
+  const Coord reach = modelReach(g);
   // One window for all tracks, including the neighbouring tracks of the
-  // jog pairs.
+  // jog pairs; collect() adds the wide pieces beyond it.
   Rect window;
   bool first = true;
   for (const Track& t : tracks) {
@@ -1919,10 +1934,15 @@ void FastGridBuilder::recomputeCandidates(
   pointModels(z, models);
   const bool h = layer.horizontal;
   const Rect& box = wiring_model_box_[z];
+  // Interaction distance of the models with a piece.
+  auto piece_reach = [&](const GridPiece& p) {
+    return std::max(reach, classes.reachOf(p.cls));
+  };
   auto cross_meets = [&](const GridPiece& p, Coord lo, Coord hi) {
     const Coord p_lo = h ? p.rect.ylo : p.rect.xlo;
     const Coord p_hi = h ? p.rect.yhi : p.rect.xhi;
-    return p_hi > lo - reach && p_lo < hi + reach;
+    const Coord d = piece_reach(p);
+    return p_hi > lo - d && p_lo < hi + d;
   };
   auto skip = [&](const GridPiece& p) {
     return p.owner == ignored && p.owner != kNoNet && isOwned(p.type);
@@ -1944,8 +1964,8 @@ void FastGridBuilder::recomputeCandidates(
       const Coord pa_lo = h ? p.rect.xlo : p.rect.ylo;
       const Coord pa_hi = h ? p.rect.xhi : p.rect.yhi;
       if (skip(p) || !cross_meets(p, c_lo, c_hi)
-          || pa_lo >= along_hi + (h ? box.xhi : box.yhi) + reach
-          || pa_hi <= along_lo + (h ? box.xlo : box.ylo) - reach) {
+          || pa_lo >= along_hi + (h ? box.xhi : box.yhi) + piece_reach(p)
+          || pa_hi <= along_lo + (h ? box.xlo : box.ylo) - piece_reach(p)) {
         continue;
       }
       near.push_back(static_cast<uint32_t>(&p - pieces.pieces.data()));
@@ -2254,7 +2274,8 @@ void FastGridBuilder::shapeChanged(const int grid_layer, const Rect& rect)
     if (z >= graph_->numLayers()) {
       return;
     }
-    const Range r = wiringRange(z, rect, grid_layer);
+    const Range r = wiringRange(
+        z, rect, checker_->grid().classes().classReach(grid_layer));
     const int nt = graph_->layers[z].numTracks();
     const int np = graph_->layers[z].numPositions();
     const int i0 = std::max(0, std::min(r.i0, r.p0));
@@ -2276,7 +2297,7 @@ void FastGridBuilder::shapeChanged(const int grid_layer, const Rect& rect)
     }
     int i0, i1, c0, c1;
     viaRange(vz,
-             grid_layer,
+             checker_->grid().classes().classReach(grid_layer),
              rect,
              projection ? projection_model_box_[vz] : cut_model_box_[vz],
              i0,

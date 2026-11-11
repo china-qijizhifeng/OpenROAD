@@ -84,6 +84,14 @@ inline ShapeType randomType(std::mt19937& rng)
   return static_cast<ShapeType>(rng() % 5);
 }
 
+// Threshold of ShapeClassTable::wide() for a random case: none, every row
+// above the first, or rows with clearly larger spacing.
+inline int randomWideRatio(std::mt19937& rng)
+{
+  constexpr int kRatios[] = {0, 100, 130, 200};
+  return kRatios[rng() % 4];
+}
+
 // A random shape on `layer` inside [0, extent)^2.
 inline StoredShape randomShape(std::mt19937& rng,
                                ShapeClassTable& classes,

@@ -108,6 +108,7 @@ int classesAndRules(std::mt19937& rng)
   for (int c = 0; c < 300; c++) {
     ShapeClassTable classes;
     const int num_z = randomInt(rng, 1, 3);
+    classes.setWideRatioPercent(randomWideRatio(rng));
     classes.setLayers(randomRules(rng, num_z, rng() % 2));
     const Coord extent = 300;
     std::vector<StoredShape> shapes;
@@ -128,7 +129,9 @@ int classesAndRules(std::mt19937& rng)
                      >= rules.line_end.max_edge)) {
         fails++;
       }
-      if (classes.reach(s.layer) < rules.spacing.maxValue()) {
+      if (classes.ruleReach(s.layer) < rules.spacing.maxValue()
+          || classes.classReach(s.layer) > classes.ruleReach(s.layer)
+          || classes.narrowReach(s.layer) > classes.classReach(s.layer)) {
         fails++;
       }
     }
@@ -151,8 +154,16 @@ int classesAndRules(std::mt19937& rng)
                            PlacedShape{b.rect.translated(d), b.cls, 3})) {
         fails++;
       }
-      // Beyond the reach no rule applies.
-      const Coord r = classes.reach(a.layer);
+      // The interaction distance of the pair is within the reaches of the
+      // interned classes (narrowReach for two narrow classes), and beyond
+      // it no rule applies.
+      const Coord dist = classes.distance(a.cls, b.cls);
+      const Coord r = std::max(classes.reachOf(a.cls), classes.reachOf(b.cls));
+      if (dist > r
+          || (!classes.wide(a.cls) && !classes.wide(b.cls)
+              && dist > classes.narrowReach(a.layer))) {
+        fails++;
+      }
       const Rect far = b.rect.translated(
           {a.rect.xhi - b.rect.xlo + r + randomInt(rng, 0, 10), 0});
       if (shapesViolate(classes, pa, PlacedShape{far, b.cls, 3})) {

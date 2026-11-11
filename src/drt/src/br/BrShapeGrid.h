@@ -30,10 +30,18 @@
 // table. Threads that route in disjoint tile regions therefore never touch
 // the same tree. The configuration table is shared, append-only and locked
 // on insertion; writers memoise configuration transitions per thread.
+//
+// Wide shapes (ShapeClassTable::wide(), e.g. macro blockages and power
+// straps) interact over larger distances than all other shapes of their
+// layer. They are kept whole in a separate index of per-tile-chunk lists
+// instead of the cells, and collect() adds those within the extra distance
+// (classReach - narrowReach) of the area it reports, so that windows bloated by
+// the narrow reach see them exactly.
 
 #pragma once
 
 #include <algorithm>
+#include <atomic>
 #include <cstdint>
 #include <functional>
 #include <memory>
@@ -253,7 +261,11 @@ class ShapeGrid
   // meeting `window` (closed), plus the area whose content is thereby
   // known: per row from the end of the preceding interval to the start of
   // the following one, within the tile chunks the window meets and at most
-  // kKnownHorizon cells beyond the window.
+  // kKnownHorizon cells beyond the window. Wide shapes are reported whole
+  // (clipped to the grid area), once each, if they meet the window or the
+  // known area bloated by classReach - narrowReach of the layer; a window that
+  // extends at least narrowReach beyond a model therefore holds every
+  // shape the model can violate, also for its shifts inside the known area.
   static constexpr int kKnownHorizon = 128;
   void collect(int layer, const Rect& window, GridWindow& out) const;
 
@@ -278,7 +290,8 @@ class ShapeGrid
     int64_t chunks = 0;
     size_t configurations = 0;
     size_t configuration_shapes = 0;
-    size_t bytes = 0;  // trees, cell maps, configuration table
+    int64_t wide_shapes = 0;
+    size_t bytes = 0;  // trees, cell maps, configuration table, wide index
   };
   Statistics statistics() const;
   // Releases spare capacity after a bulk build.
@@ -300,8 +313,29 @@ class ShapeGrid
       int layer,
       const std::function<void(const IntervalView&)>& fn) const;
   int chunkOfCell(int layer, int cell) const;
+  // Tests: visit every stored wide shape of a layer once.
+  void forEachWideShape(int layer,
+                        const std::function<void(const GridPiece&)>& fn) const;
 
  private:
+  // A wide shape in the lists of the tile chunks it meets.
+  struct WideShape
+  {
+    GridPiece piece;
+    int cell_chunk_lo = 0;
+    int cell_chunk_hi = 0;
+    int row_chunk_lo = 0;
+    int row_chunk_hi = 0;
+  };
+  // Writers are the threads owning the chunk (Sec. 5.1); readers of
+  // collect() windows that reach into another region's chunk only take
+  // pieces that do not affect their own answers, under the lock.
+  struct WideList
+  {
+    mutable std::mutex mutex;
+    std::atomic<uint32_t> size{0};
+    std::vector<WideShape> shapes;
+  };
   struct Node
   {
     int32_t begin;
@@ -340,6 +374,8 @@ class ShapeGrid
     std::vector<int> cell_chunk;        // per cell
     std::vector<int> row_chunk;         // per row
     std::vector<std::unique_ptr<Block>> blocks;
+    // Wide shapes per tile chunk (row chunk * along_chunks + cell chunk).
+    std::unique_ptr<WideList[]> wide;
   };
   // State of a run of cells.
   struct Segment
@@ -358,6 +394,14 @@ class ShapeGrid
               bool insert,
               uint8_t line_end_ends,
               ShapeGridWriteCache& cache);
+  bool updateWide(int layer,
+                  const Rect& rect,
+                  ClassId cls,
+                  ShapeType type,
+                  int32_t owner,
+                  bool insert,
+                  uint8_t line_end_ends);
+  void collectWide(const Layer& layer, const Rect& area, GridWindow& out) const;
   bool apply(int layer,
              const Rect& rect,
              ClassId cls,

@@ -40,6 +40,25 @@ Shape-grid layer numbering: wiring layer `z` of the track graph is layer
   table, the two-widths table and the range rules, so bucket borders match
   drt's lookup for both strict and non-strict comparisons
   (`BonnRouteWireModelTest` checks this against random rule functions).
+* **Interaction distances** (the window widths of Sec. 3.3/3.4).
+  `distance(a, b)` is the largest distance at which shapes of two classes
+  violate a rule (spacing, line-end extension, 1 for an overlap rule).
+  Per layer `ShapeClassTable` keeps three bounds: `ruleReach` (= `reach`)
+  = the table's largest value (partition halos, shape-grid border, callers
+  that classify shapes after choosing a window), `classReach` = the largest
+  `distance` between any two classes interned so far, and `narrowReach` =
+  the same over narrow classes only. Both grow monotonically inside
+  `intern()` (under its lock, atomics for the readers). A class is **wide**
+  when its width row's largest spacing is at least `wideRatioPercent()`
+  (default 200 %) of the narrowest row's; wide shapes go to a separate index
+  (A2), so a macro blockage or wide strap no longer widens every window of
+  its layer. `reachOf(c)` = `classReach` for a wide class, `narrowReach`
+  otherwise; a window around models extends by the largest `reachOf` of the
+  models. Nangate45 metal2-6 have tables up to 1.5 um (3000 DBU) for 1.5 um
+  wide shapes; with only wires and pins on a layer the windows extend by
+  the 0.07 um narrow spacing instead (`bonnroute_routing_space_bench` with
+  `BR_RULES=n45`). The criterion only affects speed: exactness holds for
+  every threshold, and the tests draw it at random.
 
 ### Rule treatment (Sec. 3.1 "conservative or optimistic modeling")
 
@@ -98,6 +117,17 @@ segment, so constant point levels on an edge imply its level.
   (`setNetRipupLevel`, default 1). The fast grid stores "the lowest level at
   which the shape becomes legal" = maximum level of the violating shapes.
 * Removal is atomic (a dry run checks every piece first).
+* **Wide shapes** (*choice*, see A1): kept whole (clipped to the grid area)
+  in per-tile-chunk lists instead of the cells; a shape is listed in every
+  chunk it meets and reported once, from the first chunk of the queried
+  area. `collect(window)` adds the wide shapes within
+  `classReach - narrowReach`
+  of the window and of the known rows it returns. A window that extends at
+  least `narrowReach` beyond a model therefore holds every shape the model
+  can violate, for every location whose window lies in the known area.
+  The lists are written by the thread owning the chunk like the trees; a
+  reader whose wider area reaches into another region's chunk takes the
+  list's lock and only sees shapes outside its own models' reach.
 
 ## A3 Distance rule checking (Sec. 3.4)
 
@@ -109,8 +139,9 @@ segment, so constant point levels on an edge imply its level.
   model's shapes are one group). `shapeLevel` checks one placed shape with the
   reference pairwise rule on the stored pieces.
 * Only `ShapeGrid::collect` is used: per layer it returns the pieces of all
-  intervals meeting the window (models bloated by the layer's interaction
-  distance) and the area **known** from them — per row from the end of the
+  intervals meeting the window (models bloated by their interaction
+  distance `reachOf`, A1), the wide shapes near it (A2) and the area
+  **known** from them — per row from the end of the
   preceding interval to the start of the following one, limited to the tile
   chunks the window meets and to 128 cells (`kKnownHorizon`) beyond it.
   *Choice of maximality*: an interval ends where the answer changes or where a
@@ -208,8 +239,9 @@ segment, so constant point levels on an edge imply its level.
   thread count (configuration ids may differ between runs; they are content
   addressed and nothing depends on their values). `netTileBox` adds
   `halo_tiles_` tiles beyond the largest routing area, computed from the
-  interaction distance (`2 · (reach + model + cell) + pitch`, rounded up to
-  tiles), so all reads and writes of a net stay in its region.
+  rule interaction distance (`2 · (ruleReach + model + cell) + pitch`,
+  rounded up to tiles), so all reads and writes of a net stay in its region;
+  the halo does not depend on the classes interned later.
   `BonnRoutePartitionTest` checks equality with a serial run; run it with
   `-fsanitize=thread` as well.
 * Search scratch: per-vertex labels live in 1024-label pages allocated when a
@@ -265,6 +297,9 @@ segment, so constant point levels on an edge imply its level.
   lengths; queries stay O(window) instead of following empty rows arbitrarily
   far.
 * Shared cells exist only for inputs that already violate diff-net rules.
+* Windows extend by the interaction distance of the classes that occur, and
+  wide shapes live outside the cells (A1, A2); the paper sizes windows by
+  the rules. Same answers, smaller windows.
 * No inter-layer via rule between the cut below the lowest track layer and the
   first track via layer is modelled.
 
