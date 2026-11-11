@@ -4704,9 +4704,6 @@ void BonnRouteDR::main()
   buildRoutingSpace();
   if (params_.spreading) {
     buildSpreadTiles();
-    if (params_.spread_from_extra_space) {
-      loadExtraSpace();
-    }
   }
   workers_.resize(std::max(1, router_cfg_->MAX_THREADS));
   for (Worker& w : workers_) {
@@ -4720,6 +4717,10 @@ void BonnRouteDR::main()
   buildNets();
   buildFixed();
   buildSameNetRules();
+  // Reads the extra space of the nets built above (grt/BonnRouteExtraSpace.h).
+  if (params_.spreading && params_.spread_from_extra_space) {
+    loadExtraSpace();
+  }
   std::vector<char> pre_skip(nets_.size());
   for (const NetData& net : nets_) {
     pre_skip[net.id] = net.skip;
