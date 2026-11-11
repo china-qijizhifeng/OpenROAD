@@ -1981,9 +1981,9 @@ OffTrackResult ReferenceOffTrackSearch::run(const OffTrackRequest& req)
   return res;
 }
 
-// Random requests (one to three layers, points-only pin layers, layers
-// without wires, source costs, duplicate targets, target limits, cost
-// limits, via rules, arc filters and on-track-only layers): the search
+// Random requests (one to three layers, tau 0 to 5, points-only pin
+// layers, layers without wires, source costs, duplicate targets, target limits,
+// cost limits, via rules, arc filters and on-track-only layers): the search
 // returns exactly what the reference returns (paths, their order and
 // nodes, and every counter), with one instance of each reused across all
 // requests.
@@ -2005,7 +2005,9 @@ void testSearchMatchesReference(std::mt19937& rng)
     std::vector<char> on_tracks(layers, 0);
     std::vector<char> horizontal(layers, 0);
     for (int z = 0; z < layers; z++) {
-      const GeoCoord tau = 1 + static_cast<GeoCoord>(rng() % 5);
+      // tau 0: turn arcs of length 0 (point segments).
+      const GeoCoord tau
+          = rng() % 10 == 0 ? 0 : 1 + static_cast<GeoCoord>(rng() % 5);
       const int count = large ? 40 : static_cast<int>(rng() % 10);
       const std::vector<Box> obs = randomBoxes(rng, count, size, 12);
       const bool points_only = z == 0 && layers > 1 && rng() % 4 == 0;

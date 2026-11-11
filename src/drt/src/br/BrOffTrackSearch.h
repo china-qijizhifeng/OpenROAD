@@ -175,10 +175,15 @@ class OffTrackSearch
     std::vector<Box> by_xlo;
     // Per row (y) / column (x), built on first use: the sorted, merged
     // open intervals (lo, hi) of obstacle interiors crossing the line, as
-    // [begin, end) of `intervals`; begin = -1 until built.
+    // [begin, end) of `intervals`, and the prefix counts of the unit
+    // segments between consecutive lines that meet one of them (row iy:
+    // row_blocked[iy * nx + k] = blocked segments among the first k);
+    // begin = -1 until built.
     std::vector<std::pair<int, int>> row_span;
     std::vector<std::pair<int, int>> col_span;
     std::vector<std::pair<GeoCoord, GeoCoord>> intervals;
+    std::vector<int32_t> row_blocked;
+    std::vector<int32_t> col_blocked;
     // Index of each line in the layer above / below, or -1.
     std::vector<int> up_x;
     std::vector<int> up_y;
@@ -198,8 +203,10 @@ class OffTrackSearch
     std::vector<int64_t> near_x;
     std::vector<int64_t> near_y;
   };
-  // True if the segment between grid lines ix0 < ix1 on row iy (resp.
-  // iy0 < iy1 on column ix) avoids all open obstacle interiors.
+  // True if the segment between grid lines ix0 <= ix1 on row iy (resp.
+  // iy0 <= iy1 on column ix) avoids all open obstacle interiors: no unit
+  // segment between them meets an interval (a point segment: the point is
+  // in none).
   bool freeH(LayerIndex& l, int iy, int ix0, int ix1);
   bool freeV(LayerIndex& l, int ix, int iy0, int iy1);
 

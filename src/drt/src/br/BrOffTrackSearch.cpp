@@ -124,20 +124,55 @@ void turnLines(const std::vector<GeoCoord>& v,
 
 }  // namespace
 
+namespace {
+
+// Prefix counts of the unit segments [lines[k], lines[k + 1]] that meet one
+// of the sorted, disjoint open intervals [begin, end): out[k] = number of
+// blocked segments among the first k.
+void blockedPrefix(const std::vector<GeoCoord>& lines,
+                   const std::pair<GeoCoord, GeoCoord>* begin,
+                   const std::pair<GeoCoord, GeoCoord>* end,
+                   int32_t* out)
+{
+  const int n = static_cast<int>(lines.size());
+  int32_t count = 0;
+  const std::pair<GeoCoord, GeoCoord>* it = begin;
+  for (int k = 0; k + 1 < n; k++) {
+    out[k] = count;
+    // First interval with hi > lines[k] (the intervals are disjoint and
+    // sorted, so their upper ends increase).
+    while (it != end && it->second <= lines[k]) {
+      ++it;
+    }
+    count += it != end && it->first < lines[k + 1];
+  }
+  if (n > 0) {
+    out[n - 1] = count;
+  }
+}
+
+}  // namespace
+
 bool OffTrackSearch::freeH(LayerIndex& l,
                            const int iy,
                            const int ix0,
                            const int ix1)
 {
   std::pair<int, int>& span = l.row_span[iy];
+  int32_t* blocked = l.row_blocked.data() + static_cast<size_t>(iy) * l.nx;
   if (span.first < 0) {
     thread_local std::vector<std::pair<GeoCoord, GeoCoord>> scratch;
     span.first = static_cast<int>(l.intervals.size());
     lineIntervals(l.by_ylo, l.ys[iy], true, scratch, l.intervals);
     span.second = static_cast<int>(l.intervals.size());
+    const auto* data = l.intervals.data();
+    blockedPrefix(l.xs, data + span.first, data + span.second, blocked);
   }
-  const auto* data = l.intervals.data();
-  return !meets(data + span.first, data + span.second, l.xs[ix0], l.xs[ix1]);
+  if (ix0 == ix1) {
+    const auto* data = l.intervals.data();
+    return !meets(data + span.first, data + span.second, l.xs[ix0], l.xs[ix1]);
+  }
+  return blocked[ix1] == blocked[ix0];
 }
 
 bool OffTrackSearch::freeV(LayerIndex& l,
@@ -146,14 +181,20 @@ bool OffTrackSearch::freeV(LayerIndex& l,
                            const int iy1)
 {
   std::pair<int, int>& span = l.col_span[ix];
+  int32_t* blocked = l.col_blocked.data() + static_cast<size_t>(ix) * l.ny;
   if (span.first < 0) {
     thread_local std::vector<std::pair<GeoCoord, GeoCoord>> scratch;
     span.first = static_cast<int>(l.intervals.size());
     lineIntervals(l.by_xlo, l.xs[ix], false, scratch, l.intervals);
     span.second = static_cast<int>(l.intervals.size());
+    const auto* data = l.intervals.data();
+    blockedPrefix(l.ys, data + span.first, data + span.second, blocked);
   }
-  const auto* data = l.intervals.data();
-  return !meets(data + span.first, data + span.second, l.ys[iy0], l.ys[iy1]);
+  if (iy0 == iy1) {
+    const auto* data = l.intervals.data();
+    return !meets(data + span.first, data + span.second, l.ys[iy0], l.ys[iy1]);
+  }
+  return blocked[iy1] == blocked[iy0];
 }
 
 OffTrackResult OffTrackSearch::run(const OffTrackRequest& req)
@@ -205,6 +246,11 @@ OffTrackResult OffTrackSearch::run(const OffTrackRequest& req)
     l.row_span.assign(l.ny, {-1, -1});
     l.col_span.assign(l.nx, {-1, -1});
     l.intervals.clear();
+    const size_t cells = static_cast<size_t>(l.nx) * l.ny;
+    if (l.row_blocked.size() < cells) {
+      l.row_blocked.resize(cells);
+      l.col_blocked.resize(cells);
+    }
     turnLines(l.xs, in.grid.tau, l.turn_x_plus, l.turn_x_minus);
     turnLines(l.ys, in.grid.tau, l.turn_y_plus, l.turn_y_minus);
     l.row_on_track.clear();
