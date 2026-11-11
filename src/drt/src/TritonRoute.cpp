@@ -373,6 +373,7 @@ void TritonRoute::resetDb(const char* file_name)
 void TritonRoute::clearDesign()
 {
   invalidateChangeTracking();
+  bonnroute_dr_.reset();
   design_ = std::make_unique<frDesign>(logger_, router_cfg_.get());
 }
 
@@ -1294,17 +1295,57 @@ int TritonRoute::main()
   }
   invalidateChangeTracking();
   prep();
-  ta();
-  if (bonnroute_ && !distributed_) {
-    if (!bonnroute_params_) {
-      bonnroute_params_ = std::make_unique<BonnRouteDRParams>();
+  if (bonnroute_ && !distributed_ && !bonnroute_params_) {
+    bonnroute_params_ = std::make_unique<BonnRouteDRParams>();
+  }
+  // arXiv:2111.06169 Sec. 5.2: a -bonnroute call on a design that already
+  // carries routing routes the changed nets with BonnRoute against it;
+  // FlexDR then only checks the changed regions and repairs markers.
+  bool has_routing = false;
+  if (bonnroute_ && !distributed_ && bonnroute_params_->incremental
+      && !router_cfg_->SINGLE_STEP_DR) {
+    for (const auto& net : getDesign()->getTopBlock()->getNets()) {
+      if (net->hasInitialRouting()) {
+        has_routing = true;
+        break;
+      }
     }
-    BonnRouteDR bonnroute(getDesign(),
-                          logger_,
-                          router_cfg_.get(),
-                          *bonnroute_params_,
-                          db_->getChip()->getBlock());
-    bonnroute.main();
+  }
+  bonnroute_cleanup_ = false;
+  if (has_routing) {
+    if (!bonnroute_params_->incremental_resident || !bonnroute_dr_
+        || !bonnroute_dr_->residentFor(getDesign())) {
+      bonnroute_dr_ = std::make_unique<BonnRouteDR>(getDesign(),
+                                                    logger_,
+                                                    router_cfg_.get(),
+                                                    *bonnroute_params_,
+                                                    db_->getChip()->getBlock());
+      bonnroute_dr_->buildFromDesign();
+    }
+    std::vector<odb::Rect> regions;
+    bonnroute_dr_->routeIncremental(regions);
+    incremental_changed_regions_ = std::move(regions);
+    bonnroute_cleanup_ = true;
+    if (!bonnroute_params_->incremental_resident) {
+      bonnroute_dr_.reset();
+    }
+  } else {
+    ta();
+    if (bonnroute_ && !distributed_) {
+      auto bonnroute = std::make_unique<BonnRouteDR>(getDesign(),
+                                                     logger_,
+                                                     router_cfg_.get(),
+                                                     *bonnroute_params_,
+                                                     db_->getChip()->getBlock());
+      bonnroute->main();
+      if (bonnroute_params_->incremental
+          && bonnroute_params_->incremental_resident) {
+        bonnroute->keepRoutingSpace();
+        bonnroute_dr_ = std::move(bonnroute);
+      } else {
+        bonnroute_dr_.reset();
+      }
+    }
   }
   if (distributed_) {
     asio::post(*dist_pool_,
@@ -1312,6 +1353,7 @@ int TritonRoute::main()
   }
   dr();
   incremental_changed_regions_.reset();
+  bonnroute_cleanup_ = false;
   if (!router_cfg_->SINGLE_STEP_DR) {
     endFR();
     if (!distributed_) {

@@ -1486,8 +1486,14 @@ void FlexDR::optimizationFlow(const SearchRepairArgs& args,
   // and no violation has no net to route and would re-check unchanged,
   // violation-free geometry, so it is skipped.  Workers are checked just
   // before their batch runs, after the earlier batches' changes.
-  const bool skip_unaffected = args.ripupMode == RipUpMode::INCR && !dist_on_
-                               && incremental_changed_regions_.has_value();
+  // After BonnRoute's incremental routing (arXiv:2111.06169 Sec. 5.2) the
+  // repair iterations run only the workers with markers as well.
+  const bool marker_cleanup
+      = router_ != nullptr && router_->isBonnRouteCleanup();
+  const bool skip_unaffected
+      = (args.ripupMode == RipUpMode::INCR || marker_cleanup) && !dist_on_
+        && incremental_changed_regions_.has_value();
+  const bool markers_only = args.ripupMode != RipUpMode::INCR;
   std::vector<odb::Rect>* changed_regions
       = skip_unaffected ? &incremental_changed_regions_.value() : nullptr;
   const int num_workers = iter_prog.total_num_workers;
@@ -1526,8 +1532,8 @@ void FlexDR::optimizationFlow(const SearchRepairArgs& args,
       if (skip_unaffected) {
         const int num_unaffected = std::erase_if(
             workersInBatch,
-            [this](const std::unique_ptr<FlexDRWorker>& worker) {
-              return !isAffectedByChanges(*worker);
+            [this, markers_only](const std::unique_ptr<FlexDRWorker>& worker) {
+              return !isAffectedByChanges(*worker, markers_only);
             });
         num_unaffected_workers += num_unaffected;
         iter_prog.total_num_workers -= num_unaffected;
@@ -1579,7 +1585,8 @@ void FlexDR::optimizationFlow(const SearchRepairArgs& args,
   }
 }
 
-bool FlexDR::isAffectedByChanges(const FlexDRWorker& worker) const
+bool FlexDR::isAffectedByChanges(const FlexDRWorker& worker,
+                                  const bool markers_only) const
 {
   // Guides are stored between gcell centers; keep one gcell of margin on top
   // of the region the worker reads.
@@ -1590,10 +1597,11 @@ bool FlexDR::isAffectedByChanges(const FlexDRWorker& worker) const
                                     gcell_patterns[1].getSpacing()));
   odb::Rect affected_box;
   worker.getExtBox().bloat(margin, affected_box);
-  if (std::ranges::any_of(*incremental_changed_regions_,
-                          [&affected_box](const odb::Rect& region) {
-                            return affected_box.intersects(region);
-                          })) {
+  if (!markers_only
+      && std::ranges::any_of(*incremental_changed_regions_,
+                             [&affected_box](const odb::Rect& region) {
+                               return affected_box.intersects(region);
+                             })) {
     return true;
   }
   std::vector<frMarker*> markers;

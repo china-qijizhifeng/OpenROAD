@@ -176,6 +176,9 @@ set_bonnroute_dr_param name value
 | `reservations` | `0` | Reserve legal track-assignment wires for their nets and discount them (Ahrens et al., arXiv:2111.06169, Section 5.2). Selects the vertex search. |
 | `discount_numerator` / `discount_denominator` | `3` / `4` | Cost factor of reserved edges for their own net. |
 | `reserve_min_layer` | `0` | Lowest track-graph layer whose input wires become reservations. |
+| `incremental` | `0` | Incremental routing (Ahrens et al., arXiv:2111.06169, Section 5.2): a `detailed_route -bonnroute` call on a design that already carries routing (the antenna-repair ECO) routes the nets that need routing with BonnRoute against the existing routing, with rip-up and reroute, and writes them; FlexDR then checks the changed regions and repairs markers only. Profile `2021` sets `1`. |
+| `incremental_resident` | `1` | Keep the BonnRoute routing space alive across `detailed_route` calls and update it with the design changes; `0` rebuilds it from the design and its routing in every incremental call. |
+| `reserve_short_pitches` | `2` | Incremental routing: legal input wires shorter than this many pitches that connect only to illegal input wires get no reservation (Section 5.2). |
 | `potential` | `0` | Future cost: `0` l1 bound of the 2013 paper; arXiv:2111.06169 potentials `1` l1 (Table 3), `2` simple model (Theorem 3), `3` general model on the search area with discounts (Section 4); `4` uses the general model only for connections whose guide path detours (Gester et al. 2013, Section 4.1), the l1 bound otherwise. |
 | `exact_future_cost` | `1` | The l1 future cost uses the exact via-stack cost to the nearest target layer (`lb_via` of Section 4.1) and the cheapest terminal cost of each target box; `0` uses the layer distance times the cheapest via. |
 | `potential_check` | `0` | Debug: repeat each search that used a potential with the l1 bound and report how many shortest path costs differ (expected 0). |

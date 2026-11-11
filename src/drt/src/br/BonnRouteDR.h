@@ -42,6 +42,8 @@ class Logger;
 
 namespace drt {
 
+class frBlock;
+class frBlockObject;
 class frDesign;
 class frNet;
 class frInst;
@@ -216,6 +218,20 @@ struct BonnRouteDRParams
   // (with FlexGC's patches) and writes back the same result without
   // building the maze grid graph.
   bool cleanup_check_only_workers = false;
+  // Ahrens et al., arXiv:2111.06169, Sec. 5.2 incremental routing: a
+  // detailed_route -bonnroute call on a design that already carries routing
+  // (the antenna-repair ECO) routes the nets that need routing against the
+  // existing routing (rip-up and reroute included) and writes them; FlexDR
+  // then only checks the changed regions and repairs markers
+  // (BrIncremental.cpp).
+  bool incremental = false;
+  // Keep the routing space alive across detailed_route calls and update it
+  // with the design changes since the previous call; 0 rebuilds it from the
+  // design and its routing in every incremental call.
+  bool incremental_resident = true;
+  // Input wires shorter than this many pitches of their layer that connect
+  // only to illegal input wires get no reservation (Sec. 5.2).
+  int reserve_short_pitches = 2;
   bool verbose = true;
   // Algorithm profile: 0 = 2013-improved (default), 1 = 2013-reimpl,
   // 2 = 2021 (2013-reimpl plus Ahrens et al., arXiv:2111.06169).
@@ -241,6 +257,21 @@ class BonnRouteDR
   ~BonnRouteDR();
 
   void main();
+
+  // Incremental mode (BrIncremental.cpp, arXiv:2111.06169 Sec. 5.2).
+  // True if this routing space belongs to `design` and can be updated.
+  bool residentFor(const frDesign* design) const;
+  // Builds the routing space from the design and its existing routing
+  // (first call without BonnRoute, or incremental_resident 0).
+  void buildFromDesign();
+  // After main(): turns the routes written by main() into input routing and
+  // releases all reservations, so that later incremental calls start from
+  // the routing space of the design as written.
+  void keepRoutingSpace();
+  // Updates the routing space with the design changes, routes the nets
+  // that need routing against the existing routing and writes them;
+  // `regions` receives the areas FlexDR checks afterwards.
+  void routeIncremental(std::vector<odb::Rect>& regions);
 
  private:
   struct LayerInfo
@@ -331,6 +362,20 @@ class BonnRouteDR
     std::vector<std::array<int, 3>> guide_tiles;
     // Tiles (z, tile x * tiles_y + tile y) with GR extra space for the net.
     std::vector<std::pair<int, int>> extra_space_tiles;
+    // Routing read from the design (incremental mode, Sec. 5.2): routed
+    // shapes of the net in the routing space while input_present.
+    std::vector<RShape> input_shapes;
+    bool input_present = false;
+    // The input shapes were ripped up in this call: the frNet's routing is
+    // replaced when the net is written.
+    bool input_removed = false;
+    // Terms built for this incremental call (access and guide tiles).
+    bool prepared = false;
+    // The frNet was deleted from the design.
+    bool dead = false;
+    // Fingerprints of the frNet's routing and pins at the last update.
+    uint64_t routing_fp = 0;
+    uint64_t terms_fp = 0;
     int ripups = 0;
     bool routed = false;
     bool failed = false;
@@ -405,6 +450,7 @@ class BonnRouteDR
     std::vector<int> chosen;
     std::vector<char> reserved;
     bool input_reserved;
+    bool input_present;
   };
 
   void buildTrackGraph();
@@ -736,6 +782,72 @@ class BonnRouteDR
   bool routedConflicts(const RShape& shape, int net) const;
   frCoord spacing(int z, frCoord width1, frCoord width2, frCoord prl) const;
   void writeNets();
+
+  // Incremental mode (BrIncremental.cpp).
+  struct FixedEntry
+  {
+    RShape shape;
+    br::ShapeType type;
+    int owner;
+  };
+  // Fixed shapes of an instance in the routing space and the state they
+  // were read in.
+  struct InstRecord
+  {
+    std::string name;
+    odb::Rect bbox;
+    int orient = 0;
+    const void* master = nullptr;
+    std::vector<const frNet*> term_nets;
+    std::vector<FixedEntry> shapes;
+    bool seen = false;
+  };
+  struct SyncStats
+  {
+    int64_t instances_changed = 0;
+    int64_t nets_reread = 0;
+    int64_t nets_added = 0;
+    int64_t nets_removed = 0;
+    int64_t shapes_removed = 0;
+    int64_t shapes_inserted = 0;
+    std::vector<odb::Rect> inst_regions;
+    std::unordered_set<const frInst*> changed_insts;
+  };
+  // buildFixed hook: records the fixed shapes of instances.
+  void recordFixedShape(const frBlockObject* obj,
+                        const RShape& shape,
+                        br::ShapeType type,
+                        int owner);
+  void recordInstanceState(const frInst* inst, InstRecord& record) const;
+  void readInstanceShapes(const frInst* inst, InstRecord& record);
+  void removeInstanceShapes(InstRecord& record, SyncStats& stats);
+  void syncInstances(SyncStats& stats);
+  void syncNets(SyncStats& stats);
+  // Routed shapes of the frNet's own geometry (wires, vias, patches).
+  void routingShapes(const frNet* net, std::vector<RShape>& shapes) const;
+  static uint64_t routingFingerprint(const frNet* net);
+  static uint64_t termsFingerprint(const frNet* net);
+  int addNetData(frNet* net);
+  void setInputShapes(NetData& net,
+                      bool present,
+                      br::FastGridBuilder::PendingRemovals* pending = nullptr);
+  void insertDesignRouting();
+  bool routableType(const NetData& net) const;
+  // Terms, access catalogues and guide tiles of a net routed in this call;
+  // false if BonnRoute cannot route it (FlexDR does).
+  bool prepareNet(NetData& net,
+                  const std::unordered_set<const frInst*>& changed_insts);
+  // Rip-up hook: a victim of an incremental call is prepared before it is
+  // removed; false keeps it in place.
+  bool prepareVictim(int net);
+  std::unordered_map<const frInst*, InstRecord> inst_records_;
+  bool record_fixed_ = false;
+  bool incremental_active_ = false;
+  // writeNets() writes only the nets marked here (empty: all routed nets).
+  std::vector<char> write_mask_;
+  const frDesign* built_design_ = nullptr;
+  const frBlock* built_block_ = nullptr;
+  const std::unordered_set<const frInst*>* victim_changed_insts_ = nullptr;
 
   int tileX(frCoord x) const;
   int tileY(frCoord y) const;
