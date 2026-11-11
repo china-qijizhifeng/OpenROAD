@@ -128,11 +128,14 @@ bool widePiece(const ShapeGrid& grid, const StoredShape& s, GridPiece& out)
   return true;
 }
 
-int runCase(std::mt19937& rng, const int case_id)
+int runCase(std::mt19937& rng, const int case_id, const bool long_case = false)
 {
   ShapeClassTable classes;
   const int num_z = randomInt(rng, 1, 3);
-  classes.setWideRatioPercent(randomWideRatio(rng));
+  // Long cases (see steps below) keep every class narrow: they exercise
+  // the row interval arrays; the wide index is covered by the others.
+  const int wide_ratio = randomWideRatio(rng);
+  classes.setWideRatioPercent(long_case ? 1 << 20 : wide_ratio);
   classes.setLayers(randomRules(rng, num_z, rng() % 2));
   const Coord extent = randomInt(rng, 120, 420);
   ShapeGrid grid;
@@ -150,8 +153,14 @@ int runCase(std::mt19937& rng, const int case_id)
   ShapeGridWriteCache cache;
   std::vector<StoredShape> live;
   int fails = 0;
-  const int steps = randomInt(rng, 10, 120);
+  // Long cases make rows outgrow their slots and the block pools compact;
+  // compact() between steps checks the bulk-build path.
+  const int steps
+      = long_case ? randomInt(rng, 400, 1500) : randomInt(rng, 10, 120);
   for (int step = 0; step < steps; step++) {
+    if (long_case && step % 97 == 50) {
+      grid.compact();
+    }
     if (live.empty() || rng() % 3 != 0) {
       const StoredShape s
           = randomShape(rng,
@@ -459,9 +468,17 @@ int main()
   for (int c = 0; c < cases && fails < 10; c++) {
     fails += runCase(rng, c);
   }
+  // Long sequences: rows outgrow their slots, block pools compact.
+  std::mt19937 long_rng(20261112);
+  const int long_cases = 60;
+  for (int c = 0; c < long_cases && fails < 10; c++) {
+    fails += runCase(long_rng, cases + c, /*long_case=*/true);
+  }
   std::printf(
-      "shape grid: %d cases, %d failures, %lld wide shapes at the end\n",
-      cases,
+      "shape grid: %d cases (%d long), %d failures, %lld wide shapes at the "
+      "end\n",
+      cases + long_cases,
+      long_cases,
       fails,
       static_cast<long long>(g_wide_shapes));
   return fails != 0;
