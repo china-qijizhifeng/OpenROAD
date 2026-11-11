@@ -77,6 +77,13 @@ struct BonnRouteDRParams
   // bounding boxes. partition_regions = 0 uses twice the thread count.
   bool partitions = true;
   int partition_regions = 0;
+  // Late partitions with fewer regions than threads are replaced by batches
+  // of this many pending nets, searched in parallel on the unchanged
+  // routing space and committed in net order; a net whose shapes conflict
+  // with a commit earlier in its batch is searched again in the next batch.
+  // Results depend on the net order and the batch size only. 0 keeps the
+  // partition sequence to its end.
+  int tail_batch = 32;
   // Sec. 5.1: a critical net routing step before the partitions; clock
   // nets are routed first, serially, on the whole chip.
   bool critical_nets = true;
@@ -268,6 +275,8 @@ class BonnRouteDR
   // in parallel).
   struct Worker
   {
+    // Searching in a speculative batch: read-only on shared routing space.
+    bool speculative = false;
     br::Region region;
     std::unique_ptr<br::PathSearch> search;
     std::unique_ptr<br::IntervalSearch> interval_search;
@@ -526,6 +535,9 @@ class BonnRouteDR
                        std::vector<int>& failed,
                        int initial_regions = 0,
                        const char* stage = "partition");
+  void routeSpeculative(const std::vector<int>& order,
+                        std::vector<int>& failed,
+                        const char* stage);
   void partitionRegions(const std::vector<int>& nets,
                         const std::vector<std::array<int, 4>>& boxes,
                         int count,
