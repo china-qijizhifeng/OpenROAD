@@ -304,7 +304,8 @@ segment, so constant point levels on an edge imply its level.
   memory). A search that exceeds it stops without a path
   (`SearchResult::aborted`, counted and reported with the peak scratch) and
   the net goes the usual way of a failed connection. Between searches at most
-  64 MB of pages stay allocated per worker.
+  16 MB of label pages and 2^16 interval records (with their label arrays)
+  stay allocated per worker; a larger search allocates the rest again.
 
 ## Deviations and their reasons
 

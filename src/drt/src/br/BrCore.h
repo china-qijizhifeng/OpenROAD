@@ -211,7 +211,7 @@ class PagedLabels
  public:
   static constexpr int kPageBits = 10;
   static constexpr size_t kPageSize = size_t{1} << kPageBits;
-  static constexpr size_t kKeptBytes = size_t{64} << 20;
+  static constexpr size_t kKeptBytes = size_t{16} << 20;
 
   // Starts a search over `size` window vertices with at most `limit`
   // labels (0: unlimited); returns its epoch.
@@ -683,7 +683,7 @@ class IntervalSearch
   // their label storage for later searches (at most kKeptIntervals).
   std::vector<Interval> intervals_;
   int num_used_ = 0;
-  static constexpr size_t kKeptIntervals = size_t{1} << 18;
+  static constexpr size_t kKeptIntervals = size_t{1} << 16;
   std::vector<Event> heap_;
   int64_t num_intervals_ = 0;
   std::array<int64_t, kNumIntervalEnds> ends_{};
