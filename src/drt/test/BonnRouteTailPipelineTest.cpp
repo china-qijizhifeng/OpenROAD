@@ -13,6 +13,7 @@
 #include <chrono>
 #include <cstdint>
 #include <cstdio>
+#include <functional>
 #include <map>
 #include <mutex>
 #include <random>
