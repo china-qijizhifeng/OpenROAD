@@ -875,7 +875,14 @@ void TritonRoute::dr()
   if (distributed_) {
     dr_->setDistributed(dist_, dist_ip_, dist_port_, shared_volume_);
   }
-  if (bonnroute_ && !distributed_ && bonnroute_params_) {
+  if (bonnroute_cleanup_) {
+    // After BonnRoute's incremental routing (arXiv:2111.06169 Sec. 5.2):
+    // iteration 0 checks the changed regions (check-only workers where all
+    // nets are routed) and routes what BonnRoute left; the repair
+    // iterations follow directly, limited to workers with markers.
+    dr_->setInitialRoutingCleanup(
+        {.incremental_iterations = 0, .check_only_workers = true});
+  } else if (bonnroute_ && !distributed_ && bonnroute_params_) {
     dr_->setInitialRoutingCleanup(
         {.incremental_iterations
          = bonnroute_params_->cleanup_incremental_iterations,

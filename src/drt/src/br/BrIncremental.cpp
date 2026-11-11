@@ -90,6 +90,37 @@ const frInst* ownerInst(const frBlockObject* obj)
 
 }  // namespace
 
+void BonnRouteDR::gridOnlyChange(const RShape& shape,
+                                 const br::ShapeType type,
+                                 const int owner,
+                                 const bool insert)
+{
+  const int g = gridLayer(shape.layer);
+  if (g < 0) {
+    return;
+  }
+  const br::Rect r{shape.rect.xMin(),
+                   shape.rect.yMin(),
+                   shape.rect.xMax(),
+                   shape.rect.yMax()};
+  auto apply = [&](const int layer, const br::ClassId cls) {
+    const bool ok
+        = insert
+              ? shape_grid_.insert(layer, r, cls, type, owner, serial_cache_)
+              : shape_grid_.remove(layer, r, cls, type, owner, serial_cache_);
+    if (!ok) {
+      inconsistent_updates_++;
+    }
+  };
+  apply(g, shapeClass(shape, g));
+  const int above = projectionLayer(g);
+  if (above >= 0) {
+    RShape projection = shape;
+    projection.role = br::ShapeRole::kCutProjection;
+    apply(above, shapeClass(projection, above));
+  }
+}
+
 bool BonnRouteDR::residentFor(const frDesign* design) const
 {
   return design != nullptr && built_design_ == design
@@ -190,9 +221,14 @@ void BonnRouteDR::setInputShapes(NetData& net,
   }
   if (present) {
     for (const RShape& s : net.input_shapes) {
-      changeShape(s, routedShapeType(s.role), net.id, true, nullptr);
+      if (grid_only_) {
+        gridOnlyChange(s, routedShapeType(s.role), net.id, true);
+      } else {
+        changeShape(s, routedShapeType(s.role), net.id, true, nullptr);
+      }
     }
-    net.input_present = true;
+    // A net without routing has no input routing.
+    net.input_present = !net.input_shapes.empty();
     net.input_removed = false;
     return;
   }
@@ -200,7 +236,11 @@ void BonnRouteDR::setInputShapes(NetData& net,
   br::FastGridBuilder::PendingRemovals& batch
       = pending != nullptr ? *pending : own;
   for (const RShape& s : net.input_shapes) {
-    changeShape(s, routedShapeType(s.role), net.id, false, nullptr, &batch);
+    if (grid_only_) {
+      gridOnlyChange(s, routedShapeType(s.role), net.id, false);
+    } else {
+      changeShape(s, routedShapeType(s.role), net.id, false, nullptr, &batch);
+    }
   }
   if (pending == nullptr) {
     fast_builder_.flush(own);
@@ -411,7 +451,7 @@ void BonnRouteDR::syncNets(SyncStats& stats)
   // Many changes (FlexDR's clean-up after the first BonnRoute run): update
   // the shape grid only and rebuild the fast grid once.
   const bool bulk = changed_shapes > 200000;
-  bulk_insert_ = bulk;
+  grid_only_ = bulk;
   std::vector<RShape> shapes;
   for (const int id : reread) {
     NetData& data = nets_[id];
@@ -421,8 +461,12 @@ void BonnRouteDR::syncNets(SyncStats& stats)
       setInputShapes(data, false, &pending);
     }
     for (const RShape& s : data.shapes) {
-      changeShape(
-          s, routedShapeType(s.role), data.id, false, nullptr, &pending);
+      if (bulk) {
+        gridOnlyChange(s, routedShapeType(s.role), data.id, false);
+      } else {
+        changeShape(
+            s, routedShapeType(s.role), data.id, false, nullptr, &pending);
+      }
       stats.shapes_removed++;
     }
     fast_builder_.flush(pending);
@@ -436,7 +480,7 @@ void BonnRouteDR::syncNets(SyncStats& stats)
     data.routing_fp = fp[id];
     stats.nets_reread++;
   }
-  bulk_insert_ = false;
+  grid_only_ = false;
   if (bulk) {
     rebuildFastGrid();
   }
@@ -456,7 +500,7 @@ void BonnRouteDR::syncNets(SyncStats& stats)
 
 void BonnRouteDR::insertDesignRouting()
 {
-  bulk_insert_ = true;
+  grid_only_ = true;
   for (NetData& data : nets_) {
     routingShapes(data.net, data.input_shapes);
     if (!data.input_shapes.empty()) {
@@ -465,7 +509,7 @@ void BonnRouteDR::insertDesignRouting()
     data.routing_fp = routingFingerprint(data.net);
     data.terms_fp = termsFingerprint(data.net);
   }
-  bulk_insert_ = false;
+  grid_only_ = false;
   rebuildFastGrid();
   shape_grid_.compact();
   grid_.compact();
@@ -807,7 +851,9 @@ void BonnRouteDR::applyClassification(NetData& net,
     stats.reserved++;
     net.input_reservation.insert(
         net.input_reservation.end(), piece.shapes.begin(), piece.shapes.end());
-    if (piece.kind != 0) {
+    // Discounted runs need the vertex search with discount costs
+    // (`reservations 1`); otherwise the reservation only keeps the space.
+    if (piece.kind != 0 || !modernSearch()) {
       continue;
     }
     // Discount runs on the track the wire lies on (as reserveInputWires).
@@ -1045,6 +1091,26 @@ void BonnRouteDR::routeIncremental(std::vector<odb::Rect>& regions)
             });
       if (near) {
         candidates.push_back(data.id);
+      }
+    }
+  }
+  if (logger_->debugCheck(utl::DRT, "incremental", 2)) {
+    int reported = 0;
+    for (const NetData& data : nets_) {
+      if (data.dead || data.net == nullptr || reported >= 20) {
+        continue;
+      }
+      if (terms_changed[data.id]
+          || (!data.input_present && routableType(data))) {
+        logger_->report(
+            "  BonnRoute incremental net {}: routable {} input {} "
+            "pins changed {} terms {}",
+            data.net->getName(),
+            routableType(data),
+            data.input_present,
+            static_cast<bool>(terms_changed[data.id]),
+            data.net->getInstTerms().size() + data.net->getBTerms().size());
+        reported++;
       }
     }
   }

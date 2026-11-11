@@ -892,6 +892,13 @@ class BonnRouteDR
   const frDesign* built_design_ = nullptr;
   const frBlock* built_block_ = nullptr;
   const std::unordered_set<const frInst*>* victim_changed_insts_ = nullptr;
+  // Bulk updates of the incremental mode change the shape grid only; the
+  // fast grid is rebuilt afterwards.
+  bool grid_only_ = false;
+  void gridOnlyChange(const RShape& shape,
+                      br::ShapeType type,
+                      int owner,
+                      bool insert);
 
   int tileX(frCoord x) const;
   int tileY(frCoord y) const;
