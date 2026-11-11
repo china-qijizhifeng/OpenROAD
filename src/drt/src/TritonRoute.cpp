@@ -876,7 +876,8 @@ void TritonRoute::dr()
   }
   if (bonnroute_ && !distributed_ && bonnroute_params_) {
     dr_->setInitialRoutingCleanup(
-        {.resume_iteration = bonnroute_params_->cleanup_resume_iteration,
+        {.incremental_iterations
+         = bonnroute_params_->cleanup_incremental_iterations,
          .check_only_workers = bonnroute_params_->cleanup_check_only_workers});
   }
   if (router_cfg_->SINGLE_STEP_DR) {

@@ -2302,17 +2302,18 @@ int FlexDR::main()
       break;
     }
     // Iterations 1 and 2 keep every net with initial routing fixed
-    // (incremental mode); with resume_iteration 3 the repair that rips up
-    // such nets at violations follows iteration 0 directly.
-    if (iter_ == 0 && incremental
-        && initial_routing_cleanup_.resume_iteration > 1) {
+    // (incremental mode); after the configured number of them, the repair
+    // that rips up such nets at violations (iteration 3) follows.
+    if (incremental && iter_ < 2
+        && iter_ == initial_routing_cleanup_.incremental_iterations) {
       if (router_cfg_->VERBOSE > 0) {
         logger_->info(DRT,
                       9120,
-                      "Initial routing clean-up continues with iteration {}.",
-                      initial_routing_cleanup_.resume_iteration);
+                      "Initial routing clean-up continues with iteration 3 "
+                      "after iteration {}.",
+                      iter_);
       }
-      iter_ = initial_routing_cleanup_.resume_iteration - 1;
+      iter_ = 2;
     }
     ++iter_;
   }

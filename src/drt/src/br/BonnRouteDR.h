@@ -186,10 +186,10 @@ struct BonnRouteDRParams
   // incremental mode, which reroutes only nets without initial routing
   // (the nets BonnRoute left) and keeps every BonnRoute net fixed; iteration
   // 3 is the first that rips up nets at violations. After iteration 0 (which
-  // routes the left nets and checks every tile), the clean-up continues at
-  // iteration cleanup_resume_iteration; 1 is FlexDR's own sequence, 3 starts
-  // the marker-driven repair directly.
-  int cleanup_resume_iteration = 1;
+  // routes the left nets and checks every tile), the clean-up runs the first
+  // cleanup_incremental_iterations of the incremental iterations 1 and 2 and
+  // continues with iteration 3; 2 is FlexDR's own sequence.
+  int cleanup_incremental_iterations = 2;
   // In the incremental iterations, a FlexDR worker whose nets all carry
   // initial routing has nothing to reroute; it runs the design-rule check
   // (with FlexGC's patches) and writes back the same result without

@@ -97,9 +97,10 @@ class FlexDR
   // router (detailed_route -bonnroute). Defaults keep FlexDR's own flow.
   struct InitialRoutingCleanup
   {
-    // Iteration that follows iteration 0 when nets carry initial routing;
-    // 1 keeps FlexDR's sequence, 3 omits the incremental iterations 1 and 2.
-    int resume_iteration = 1;
+    // How many of the incremental iterations 1 and 2 run when nets carry
+    // initial routing; iteration 3 follows the last of them. 2 keeps
+    // FlexDR's sequence.
+    int incremental_iterations = 2;
     // In the incremental iterations 0-2, a worker whose nets all carry
     // initial routing runs only the design-rule check.
     bool check_only_workers = false;
