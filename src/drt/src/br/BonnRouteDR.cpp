@@ -3794,6 +3794,34 @@ void BonnRouteDR::main()
         graph_.numLayers(),
         graph_.numVertices(),
         setup_time);
+    if (params_.use_intervals) {
+      std::array<int64_t, br::IntervalSearch::kNumIntervalEnds> ends{};
+      int64_t vertices = 0;
+      int64_t count = 0;
+      for (const Worker& w : workers_) {
+        if (!w.interval_search) {
+          continue;
+        }
+        for (int e = 0; e < br::IntervalSearch::kNumIntervalEnds; e++) {
+          ends[e] += w.interval_search->intervalEnds(
+              static_cast<br::IntervalSearch::IntervalEnd>(e));
+        }
+        vertices += w.interval_search->intervalVertices();
+        count += w.interval_search->intervals();
+      }
+      logger_->report(
+          "BonnRoute DR intervals: {:.2f} vertices per interval; interval "
+          "ends: track {}, start vertex {}, neighbour {}, wire edge {}, jog "
+          "property {}, via property {}, future cost slope {}.",
+          count > 0 ? static_cast<double>(vertices) / count : 0.0,
+          ends[0],
+          ends[1],
+          ends[2],
+          ends[3],
+          ends[4],
+          ends[5],
+          ends[6]);
+    }
     logger_->report(
         "BonnRoute DR partitions: {:.2f}s wall, {:.1f}% of {} threads busy "
         "({:.1f}% of the usable regions).",

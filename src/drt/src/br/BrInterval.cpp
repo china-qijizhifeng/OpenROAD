@@ -170,18 +170,25 @@ int IntervalSearch::buildInterval(const int z, const int i, const int j)
   Cost pi_b = pi0;
   size_t li0 = 0;
   inWindow(z, i, j, li0);
-  if (plain(j, li0)) {
+  if (!plain(j, li0)) {
+    ends_[kEndStartVertex] += 2;
+  } else {
     const int sig = transitionSignature(z, i, j, graph_.vertex(z, i, j));
+    IntervalEnd end = kEndTrack;
     auto joins = [&](int from, int to, Cost& pi_from) {
       size_t li = 0;
       if (!plain(to, li)) {
+        end = kEndNeighbour;
         return false;
       }
       const int a = std::min(from, to);
       if (!usableZero(graph_.vertex(z, i, a), kWireEdge)) {
+        end = kEndWireEdge;
         return false;
       }
-      if (transitionSignature(z, i, to, graph_.vertex(z, i, to)) != sig) {
+      const int sig_to = transitionSignature(z, i, to, graph_.vertex(z, i, to));
+      if (sig_to != sig) {
+        end = ((sig_to ^ sig) & 3) != 0 ? kEndJogProperty : kEndViaProperty;
         return false;
       }
       // Adjacent members must have the same slope, exactly +1 or -1.
@@ -191,19 +198,25 @@ int IntervalSearch::buildInterval(const int z, const int i, const int j)
       const Cost dpi = pi_to - pi_from;
       const int c = dpi == step ? 1 : (dpi == -step ? -1 : 0);
       if (c == 0 || (cls != 0 && c != cls)) {
+        end = kEndFutureCostSlope;
         return false;
       }
       cls = c;
       pi_from = pi_to;
       return true;
     };
+    end = kEndTrack;
     while (jb + 1 < layer.numPositions() && joins(jb, jb + 1, pi_b)) {
       jb++;
     }
+    ends_[end]++;
+    end = kEndTrack;
     while (ja > 0 && joins(ja, ja - 1, pi_a)) {
       ja--;
     }
+    ends_[end]++;
   }
+  interval_vertices_ += jb - ja + 1;
   Interval iv;
   iv.z = z;
   iv.i = i;

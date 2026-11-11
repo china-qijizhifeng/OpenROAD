@@ -392,6 +392,20 @@ class IntervalSearch
   }
   int64_t intervals() const { return num_intervals_; }
   int64_t labels() const { return num_labels_; }
+  // Why intervals end (Sec. 4.1 properties), counted per interval end.
+  enum IntervalEnd : uint8_t
+  {
+    kEndTrack = 0,        // end of the track or of the search window
+    kEndStartVertex,      // the start vertex cannot join any interval
+    kEndNeighbour,        // neighbour unusable, target, source or outside R
+    kEndWireEdge,         // preferred-direction edge unusable
+    kEndJogProperty,      // property (ii) differs for jogs
+    kEndViaProperty,      // property (ii) differs for vias only
+    kEndFutureCostSlope,  // property (i) fails
+    kNumIntervalEnds
+  };
+  int64_t intervalEnds(IntervalEnd reason) const { return ends_[reason]; }
+  int64_t intervalVertices() const { return interval_vertices_; }
 
  private:
   struct Label
@@ -493,6 +507,8 @@ class IntervalSearch
   std::vector<Interval> intervals_;
   std::vector<Event> heap_;
   int64_t num_intervals_ = 0;
+  std::array<int64_t, kNumIntervalEnds> ends_{};
+  int64_t interval_vertices_ = 0;
   int64_t num_labels_ = 0;
 };
 
