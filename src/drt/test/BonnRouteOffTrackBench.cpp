@@ -619,7 +619,7 @@ int main(int argc, char** argv)
   const int patterns = argc > 4 ? std::atoi(argv[4]) : 0;
   // Signature area: cell box plus this many metal2 pitches (as
   // access_class_margin); -1 = the previous reach of a pin's search.
-  const int margin = argc > 5 ? std::atoi(argv[5]) : 1;
+  const int margin = argc > 5 ? std::atoi(argv[5]) : 0;
   std::mt19937 rng(seed);
   const std::vector<Master> masters = makeMasters(rng);
   const Chip chip = makeChip(rng, masters, rows, cells, patterns);
