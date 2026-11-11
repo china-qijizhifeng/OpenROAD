@@ -13,6 +13,7 @@
 #pragma once
 
 #include <algorithm>
+#include <chrono>
 #include <cstdint>
 #include <vector>
 
@@ -92,9 +93,19 @@ class PotentialOracle : public FutureCostOracle
                             discount_numerator,
                             discount_denominator});
         }
+      {
+        const auto start = std::chrono::steady_clock::now();
         builder_.build(*request.region, grid, rates_, wires_, tiles_);
+        const auto built = std::chrono::steady_clock::now();
         general_.prepare(tiles_, targets_);
+        const auto done = std::chrono::steady_clock::now();
+        build_seconds_ += std::chrono::duration<double>(built - start).count();
+        propagation_seconds_
+            += std::chrono::duration<double>(done - built).count();
+        tile_columns_ += tiles_.numColumns();
+        tile_rows_ += tiles_.numRows();
         break;
+      }
     }
     prepares_[static_cast<int>(model)]++;
   }
@@ -116,6 +127,17 @@ class PotentialOracle : public FutureCostOracle
   {
     return prepares_[static_cast<int>(model)];
   }
+  // General model: thread time building tile cost models and propagating
+  // the potential, summed tile model columns and rows, and the counters of
+  // the propagation (boundary elements, heap pops).
+  double buildSeconds() const { return build_seconds_; }
+  double propagationSeconds() const { return propagation_seconds_; }
+  int64_t tileColumns() const { return tile_columns_; }
+  int64_t tileRows() const { return tile_rows_; }
+  const PotentialCounters& generalCounters() const
+  {
+    return general_.counters();
+  }
 
  private:
   Model model_ = Model::kL1;
@@ -128,6 +150,10 @@ class PotentialOracle : public FutureCostOracle
   TileCostModel tiles_;
   GeneralPotential general_;
   int64_t prepares_[3] = {0, 0, 0};
+  double build_seconds_ = 0;
+  double propagation_seconds_ = 0;
+  int64_t tile_columns_ = 0;
+  int64_t tile_rows_ = 0;
 };
 
 }  // namespace drt::br

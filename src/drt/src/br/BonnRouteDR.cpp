@@ -93,12 +93,12 @@ void BonnRouteDRParams::applyProfile(const int which)
   access_classes = true;
   reservations = false;
   if (profile == 2) {
-    // 2021: the experiments of Ahrens et al., arXiv:2111.06169 on top of
-    // 2013-reimpl: the general-model potential for every search (Sec. 4,
-    // Table 3) and legal input wires as reservations of their nets at a
-    // discount of delta = 3/4 (Sec. 5.2, Tables 4 and 6).
+    // 2021: the bulk routing experiment of Ahrens et al., arXiv:2111.06169
+    // (Table 3) on top of 2013-reimpl: the general-model potential for every
+    // search, in the interval search. Reservations (Sec. 5.2, Tables 4-6)
+    // belong to incremental routing, whose input is a legal detailed
+    // routing; `reservations 1` with discount 3/4 enables them separately.
     potential = 3;
-    reservations = true;
     discount_numerator = 3;
     discount_denominator = 4;
   }
@@ -4922,6 +4922,33 @@ void BonnRouteDR::main()
           prepares[m] += w.potential.prepares(
               static_cast<br::PotentialOracle::Model>(m));
         }
+      }
+      if (prepares[2] > 0) {
+        double build_seconds = 0;
+        double propagation_seconds = 0;
+        int64_t columns = 0;
+        int64_t rows = 0;
+        int64_t elements = 0;
+        int64_t pops = 0;
+        for (const Worker& w : workers_) {
+          build_seconds += w.potential.buildSeconds();
+          propagation_seconds += w.potential.propagationSeconds();
+          columns += w.potential.tileColumns();
+          rows += w.potential.tileRows();
+          elements += w.potential.generalCounters().boundary_elements;
+          pops += w.potential.generalCounters().heap_pops;
+        }
+        const double n = static_cast<double>(prepares[2]);
+        logger_->report(
+            "BonnRoute DR: general potential: tile models {:.2f}s, "
+            "propagation {:.2f}s thread time; per preparation {:.1f} x {:.1f} "
+            "tiles, {:.0f} boundary elements, {:.0f} heap pops.",
+            build_seconds,
+            propagation_seconds,
+            columns / n,
+            rows / n,
+            elements / n,
+            pops / n);
       }
       logger_->report(
           "BonnRoute DR: potential {}: {} l1, {} simple, {} general "
