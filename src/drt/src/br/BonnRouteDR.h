@@ -17,6 +17,10 @@
 #include <vector>
 
 #include "br/BrCore.h"
+#include "br/BrGeometry.h"
+#include "br/BrPathCleanup.h"
+#include "br/BrPinAccess.h"
+#include "br/BrSameNetRules.h"
 #include "frBaseTypes.h"
 #include "frRTree.h"
 #include "odb/geom.h"
@@ -29,6 +33,9 @@ namespace drt {
 
 class frDesign;
 class frNet;
+class frInst;
+class frInstTerm;
+class frBTerm;
 class frLayer;
 class frViaDef;
 struct RouterConfiguration;
@@ -81,6 +88,34 @@ struct BonnRouteDRParams
   // model (Section 4, guide area and discounts). Reservations or a
   // potential select the vertex search.
   int potential = 0;
+  // Off-track pin access (Sec. 3.7, 3.8, 4.3, 4.4): per pin a catalogue of
+  // shortest tau-feasible paths on the blockage grid to on-track points
+  // within `offtrack_radius` pitches, primary paths per circuit class by
+  // destructive bounding. 0 selects the previous access stubs from
+  // OpenROAD access points and greedy reservations.
+  bool offtrack_access = true;
+  int offtrack_radius = 2;
+  // Regenerate a pin's catalogue when fewer of its paths remain feasible
+  // (Sec. 4.4 "If no or only a small number of access paths remains
+  // feasible, we dynamically generate new access paths").
+  int offtrack_regenerate = 2;
+  // Minimum segment length tau in DBU; 0 derives it from the same-net
+  // rules (Sec. 3.7). `offtrack_notch_tau` adds notch spacing + width.
+  int offtrack_tau = 0;
+  bool offtrack_notch_tau = false;
+  // Reuse a circuit class's catalogues and conflict-free solution for all
+  // its instances; 0 solves every instance separately.
+  bool access_classes = true;
+  int access_node_limit = 20000;
+  // Weights of the conflict-free solution (Sec. 4.3), in pitches of the
+  // bottom track layer: per blocked track, per missing on-track
+  // continuation direction; spreading per DBU two endpoints are closer than
+  // two pitches.
+  int access_track_weight = 1;
+  int access_direction_weight = 1;
+  int access_spread_weight = 1;
+  // Same-net post-processing of each connection (Sec. 4.4).
+  bool postprocess = true;
   bool verbose = true;
 
   bool set(const std::string& name, double value);
@@ -142,6 +177,11 @@ class BonnRouteDR
     bool planar = false;
     odb::Point ap;
     frLayerNum ap_layer = 0;
+    // The path from the pin to the vertex as route nodes (drt layer
+    // numbers); the post-processing combines it with on-track paths.
+    std::vector<br::RouteNode> route;
+    // Generated on the blockage grid (legality is checked for all shapes).
+    bool offtrack = false;
   };
   struct Term
   {
@@ -149,6 +189,10 @@ class BonnRouteDR
     std::vector<RShape> reservation;
     bool reservation_active = false;
     int chosen = -1;
+    // The pin, for dynamic generation of access paths.
+    frInstTerm* inst_term = nullptr;
+    frBTerm* bterm = nullptr;
+    int primary = -1;
   };
   struct NetData
   {
@@ -193,6 +237,9 @@ class BonnRouteDR
     std::unordered_set<int> released;
     std::vector<std::pair<RShape, int>> released_shapes;
     std::vector<int> committed;
+    br::CleanupStats cleanup;
+    int64_t regenerations = 0;
+    int64_t regenerated_paths = 0;
     int64_t searches = 0;
     int64_t path_region_searches = 0;
     int64_t heap_pops = 0;
@@ -216,6 +263,74 @@ class BonnRouteDR
   void buildNets();
   void buildAccess(NetData& net);
   void reserveAccess(NetData& net);
+
+  // Off-track pin access (Sec. 3.7-3.8, 4.3-4.4); see OffTrack.md.
+  class Legality;
+  struct AccessStats
+  {
+    int64_t pins = 0;
+    int64_t searches = 0;
+    int64_t paths = 0;
+    int64_t empty = 0;
+    int64_t fallback = 0;
+    int64_t drc_rejected = 0;
+    int64_t same_net_rejected = 0;
+    int64_t grid_vertices = 0;
+    int64_t settled = 0;
+    double search_seconds = 0;
+    int64_t instances = 0;
+    int64_t classes = 0;
+    int64_t class_reused = 0;
+    int64_t reselected = 0;
+    int64_t mapping_failed = 0;
+    int64_t selections = 0;
+    int64_t selection_nodes = 0;
+    int64_t selection_optimal = 0;
+    int64_t primaries = 0;
+    double seconds = 0;
+    void add(const AccessStats& o);
+  };
+  void buildSameNetRules();
+  void buildLowLayerIndex();
+  // pre_skip: net skip flags before buildAccess.
+  void buildOffTrackAccess(const std::vector<char>& pre_skip);
+  // Rectangles of the pin on its access layer (the lowest routing layer
+  // that is a track layer or directly below the lowest one).
+  bool pinShapes(const Term& term,
+                 frLayerNum& layer,
+                 std::vector<odb::Rect>& rects) const;
+  // Catalogue of the pin's off-track access paths against the current
+  // routing space (Sec. 4.3).
+  void offTrackCatalogue(int net,
+                         const Term& term,
+                         const Worker* worker,
+                         std::vector<AccessOption>& out,
+                         AccessStats& stats) const;
+  void candidateOf(const AccessOption& option,
+                   int net,
+                   br::AccessCandidate& candidate) const;
+  // Chooses primary paths for `pins` (net ids per pin) by destructive
+  // bounding; -1 for pins without a feasible path.
+  std::vector<int> choosePrimaries(
+      const std::vector<const std::vector<AccessOption>*>& catalogues,
+      const std::vector<int>& nets,
+      AccessStats& stats) const;
+  bool regenerateAccess(NetData& net, int t, Worker& worker);
+  bool optionLegal(const AccessOption& option,
+                   int net,
+                   const Worker* worker) const;
+  const frViaDef* viaDefAbove(frLayerNum lower) const;
+  // Route nodes -> wires and vias of the net; via defs of `hints` at their
+  // points take precedence over the defaults.
+  void routeToGeometry(const std::vector<br::RouteNode>& nodes,
+                       const std::vector<OutVia>& hints,
+                       NetData& net) const;
+  // Sec. 4.4 post-processing of one connection.
+  void postprocessConnection(std::vector<br::RouteNode>& nodes,
+                             const std::vector<OutVia>& hints,
+                             int net,
+                             Worker& worker,
+                             std::vector<OutWire>& patches) const;
   // With `local`, shape-index updates are deferred (see Worker).
   void setReservations(NetData& net, bool active, Worker* local = nullptr);
   void reserveInputWires();
@@ -325,6 +440,15 @@ class BonnRouteDR
 
   std::vector<NetData> nets_;
   std::unordered_map<const frNet*, int> net_index_;
+  // Same-net rules and tau per track layer z; cleanup layers per drt layer.
+  std::vector<br::SameNetLayerRules> same_net_rules_;
+  std::vector<br::GeoCoord> tau_;
+  std::vector<br::CleanupLayer> cleanup_layers_;
+  // Fixed shapes of the pin layer and cut directly below the lowest track
+  // layer (not covered by the shape index), per drt layer.
+  std::vector<RTree<int>> low_tree_;
+  std::vector<frCoord> low_spacing_;
+  AccessStats access_stats_;
   // Statistics.
   int64_t ripup_events_ = 0;
   int64_t rollbacks_ = 0;

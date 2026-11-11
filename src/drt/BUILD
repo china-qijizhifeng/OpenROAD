@@ -41,10 +41,22 @@ cc_library(
 cc_library(
     name = "bonnroute_core",
     srcs = [
+        "src/br/BrBlockageGrid.cpp",
         "src/br/BrCore.cpp",
         "src/br/BrInterval.cpp",
+        "src/br/BrOffTrackSearch.cpp",
+        "src/br/BrPathCleanup.cpp",
+        "src/br/BrPinAccess.cpp",
     ],
-    hdrs = ["src/br/BrCore.h"],
+    hdrs = [
+        "src/br/BrBlockageGrid.h",
+        "src/br/BrCore.h",
+        "src/br/BrGeometry.h",
+        "src/br/BrOffTrackSearch.h",
+        "src/br/BrPathCleanup.h",
+        "src/br/BrPinAccess.h",
+        "src/br/BrSameNetRules.h",
+    ],
     includes = ["src"],
 )
 
