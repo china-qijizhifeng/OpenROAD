@@ -4773,6 +4773,41 @@ void BonnRouteDR::main()
     routeRipupQueue(failed_first);
   }
   writeNets();
+  if (params_.verbose) {
+    // Fingerprint of the routes handed to FlexDR (FNV-1a over nets, wires
+    // and vias in net order): equal routes give equal digests across builds.
+    uint64_t digest = 14695981039346656037ULL;
+    auto mix = [&digest](const int64_t value) {
+      digest = (digest ^ static_cast<uint64_t>(value)) * 1099511628211ULL;
+    };
+    int64_t digest_wires = 0;
+    int64_t digest_vias = 0;
+    for (const NetData& net : nets_) {
+      mix(net.id);
+      mix(net.routed);
+      for (const OutWire& w : net.wires) {
+        mix(w.layer);
+        mix(w.begin.x());
+        mix(w.begin.y());
+        mix(w.end.x());
+        mix(w.end.y());
+        mix(w.patch);
+        digest_wires++;
+      }
+      for (const OutVia& v : net.vias) {
+        for (const char c : v.def->getName()) {
+          mix(c);
+        }
+        mix(v.point.x());
+        mix(v.point.y());
+        digest_vias++;
+      }
+    }
+    logger_->report("BonnRoute DR output digest {:016x}: {} wires, {} vias.",
+                    digest,
+                    digest_wires,
+                    digest_vias);
+  }
   int routed = 0;
   int failed = 0;
   int skipped = 0;
