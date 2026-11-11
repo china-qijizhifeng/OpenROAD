@@ -199,11 +199,13 @@ struct SearchResult
 // Per-vertex labels of a search window, stored in pages that a search
 // allocates when it touches them: memory follows the explored part of the
 // window, not its bounding box (a net spanning the die has a window of
-// most of the track graph). Pages are reused by later searches; stale
-// labels carry older epochs. A search may be limited to a number of pages;
-// beyond it, labels go to a scratch page and overflow() is set (the search
-// then stops). Between searches at most kKeptBytes of pages stay allocated.
-template <typename Label>
+// most of the track graph). Pages are reused by later searches. With
+// kClear, a page is reset to Label{} when a search first touches it, so
+// labels need no epoch of their own; otherwise stale labels carry older
+// epochs. A search may be limited to a number of pages; beyond it, labels
+// go to a scratch page and overflow() is set (the search then stops).
+// Between searches at most kKeptBytes of pages stay allocated.
+template <typename Label, bool kClear = false>
 class PagedLabels
 {
  public:
@@ -254,6 +256,10 @@ class PagedLabels
       }
       page_index_[p] = static_cast<uint32_t>(used_++);
       peak_pages_ = std::max(peak_pages_, used_);
+      if constexpr (kClear) {
+        Label* page = pool_[page_index_[p]].get();
+        std::fill(page, page + kPageSize, Label{});
+      }
     }
     return pool_[page_index_[p]][index & (kPageSize - 1)];
   }
@@ -290,7 +296,7 @@ class PathSearch
   size_t scratchBytes() const { return labels_.bytes(); }
   size_t peakScratchBytes() const
   {
-    return labels_.peakPages() * PagedLabels<Label>::kPageSize * sizeof(Label);
+    return labels_.peakPages() * Labels::kPageSize * sizeof(Label);
   }
 
  private:
@@ -370,17 +376,24 @@ class PathSearch
   void setupWindow(const SearchRequest& request);
   std::vector<Window> window_;
 
+  // Labels of one search (pages reset on first touch, see PagedLabels):
+  // dist = kInfCost until the vertex is labelled; marks tell sources,
+  // targets (target_index) and discounted edges (j, j + 1) at j.
+  enum Mark : uint8_t
+  {
+    kMarkSource = 1,
+    kMarkTarget = 2,
+    kMarkDiscount = 4,
+  };
   struct Label
   {
-    Cost dist = 0;
-    uint32_t stamp = 0;
-    uint32_t source_stamp = 0;
-    uint32_t target_stamp = 0;
-    uint32_t discount_stamp = 0;  // edge (j, j + 1) at j
+    Cost dist = kInfCost;
     int32_t target_index = 0;
     uint8_t parent = 0;
+    uint8_t marks = 0;
   };
-  mutable PagedLabels<Label> labels_;
+  using Labels = PagedLabels<Label, /*kClear=*/true>;
+  mutable Labels labels_;
   uint32_t epoch_ = 0;
   std::vector<Item> heap_;
 };
@@ -407,8 +420,7 @@ class IntervalSearch
   size_t scratchBytes() const { return labels_.bytes(); }
   size_t peakScratchBytes() const
   {
-    return labels_.peakPages() * PagedLabels<VertexLabel>::kPageSize
-           * sizeof(VertexLabel);
+    return labels_.peakPages() * Labels::kPageSize * sizeof(VertexLabel);
   }
   int64_t intervals() const { return num_intervals_; }
   int64_t labels() const { return num_labels_; }
@@ -558,21 +570,27 @@ class IntervalSearch
     size_t wbase = 0;
   };
   std::vector<Window> window_;
+  // Per-vertex state of one search (pages reset on first touch, see
+  // PagedLabels); marks tell which fields hold data of this search.
+  enum VertexMark : uint8_t
+  {
+    kMarkInterval = 1,  // interval_id: the vertex's interval
+    kMarkSource = 2,
+    kMarkTarget = 4,    // target_index
+    kMarkInfo = 8,      // info
+    kMarkPending = 16,  // pending_*: best deferred label
+  };
   struct VertexLabel
   {
-    uint32_t stamp = 0;
-    uint32_t source_stamp = 0;
-    uint32_t target_stamp = 0;
-    uint32_t info_stamp = 0;
-    int32_t interval_id = 0;
-    int32_t target_index = 0;
     // Best deferred label of a vertex outside every interval (see
     // relaxations in process): delta and predecessor.
-    uint32_t pending_stamp = 0;
+    Cost pending_delta = 0;
+    int32_t interval_id = 0;
+    int32_t target_index = 0;
     int32_t pending_pred_interval = 0;
     int32_t pending_pred_k = 0;
     uint16_t info = 0;
-    Cost pending_delta = 0;
+    uint8_t marks = 0;
   };
   bool nearest_first_ = false;
   Cost tieKey(const Cost pi) const { return nearest_first_ ? -pi : pi; }
@@ -599,7 +617,8 @@ class IntervalSearch
   // While direct_, pushEvent stores the event in direct_event_ instead.
   bool direct_ = false;
   Event direct_event_{0, 0, -1, 0};
-  mutable PagedLabels<VertexLabel> labels_;
+  using Labels = PagedLabels<VertexLabel, /*kClear=*/true>;
+  mutable Labels labels_;
   // labels_[li] through the last page used (most lookups stay on a track).
   VertexLabel& label(const size_t li) const
   {
@@ -613,9 +632,8 @@ class IntervalSearch
     }
     return l;
   }
-  static constexpr int kLabelPageBits = PagedLabels<VertexLabel>::kPageBits;
-  static constexpr size_t kLabelPageMask
-      = PagedLabels<VertexLabel>::kPageSize - 1;
+  static constexpr int kLabelPageBits = Labels::kPageBits;
+  static constexpr size_t kLabelPageMask = Labels::kPageSize - 1;
   mutable size_t label_page_ = ~size_t{0};
   mutable VertexLabel* label_base_ = nullptr;
   // Per target box of the track being built: cross cost, along range.

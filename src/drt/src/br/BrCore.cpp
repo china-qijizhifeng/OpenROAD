@@ -83,7 +83,7 @@ Cost PathSearch::wireCost(const int z,
   }
   size_t li = 0;
   const bool discounted = local(z, i, std::min(j, j2), li)
-                          && labels_[li].discount_stamp == epoch_;
+                          && (labels_[li].marks & kMarkDiscount) != 0;
   return length * (discounted ? req_->discount_rate : graph_.wire_unit)
          + spread;
 }
@@ -123,10 +123,9 @@ bool PathSearch::relax(const size_t from_v,
   if (!local(z, i, j, li)) {
     return false;
   }
-  if (labels_[li].stamp == epoch_ && g >= labels_[li].dist) {
+  if (g >= labels_[li].dist) {
     return false;
   }
-  labels_[li].stamp = epoch_;
   labels_[li].dist = g;
   labels_[li].parent = parent;
   const auto [x, y] = graph_.layers[z].point(i, j);
@@ -143,8 +142,8 @@ void PathSearch::settle(const int z,
   res_->settled++;
   size_t li = 0;
   local(z, i, j, li);
-  const bool is_source = labels_[li].source_stamp == epoch_;
-  if (labels_[li].target_stamp == epoch_) {
+  const bool is_source = (labels_[li].marks & kMarkSource) != 0;
+  if ((labels_[li].marks & kMarkTarget) != 0) {
     const auto& t = req_->targets[labels_[li].target_index];
     push(Item{g + t.cost, g, v, 2, labels_[li].target_index});
   }
@@ -263,7 +262,7 @@ void PathSearch::setupWindow(const SearchRequest& request)
     for (int j = run.jlo; j < run.jhi; j++) {
       size_t li = 0;
       if (local(run.z, run.i, j, li)) {
-        labels_[li].discount_stamp = epoch_;
+        labels_[li].marks |= kMarkDiscount;
       }
     }
   }
@@ -294,12 +293,12 @@ SearchResult PathSearch::run(const SearchRequest& request)
     if (!local(z, i, j, li)) {
       continue;
     }
-    if (labels_[li].target_stamp == epoch_
+    if ((labels_[li].marks & kMarkTarget) != 0
         && request.targets[labels_[li].target_index].cost
                <= request.targets[t].cost) {
       continue;
     }
-    labels_[li].target_stamp = epoch_;
+    labels_[li].marks |= kMarkTarget;
     labels_[li].target_index = static_cast<int32_t>(t);
   }
   for (const auto& [v, c] : request.sources) {
@@ -309,11 +308,10 @@ SearchResult PathSearch::run(const SearchRequest& request)
     if (!local(z, i, j, li)) {
       continue;
     }
-    labels_[li].source_stamp = epoch_;
-    if (labels_[li].stamp == epoch_ && labels_[li].dist <= c) {
+    labels_[li].marks |= kMarkSource;
+    if (labels_[li].dist <= c) {
       continue;
     }
-    labels_[li].stamp = epoch_;
     labels_[li].dist = c;
     labels_[li].parent = kSource;
     const auto [x, y] = graph_.layers[z].point(i, j);
@@ -346,7 +344,7 @@ SearchResult PathSearch::run(const SearchRequest& request)
     const TrackLayer& layer = graph_.layers[z];
     const Region& region = *request.region;
     settle(z, i, j, item.v, item.g);
-    const bool is_source = labels_[li].source_stamp == epoch_;
+    const bool is_source = (labels_[li].marks & kMarkSource) != 0;
     if (item.dir == 0) {
       // Vertex label: start runs in both preferred directions.
       if (!is_source && !enter(At{z, i, j}, kWire)) {
@@ -397,10 +395,9 @@ SearchResult PathSearch::run(const SearchRequest& request)
       if (!local(z, i, j2, lw)) {
         break;
       }
-      if (labels_[lw].stamp == epoch_ && ng >= labels_[lw].dist) {
+      if (ng >= labels_[lw].dist) {
         break;
       }
-      labels_[lw].stamp = epoch_;
       labels_[lw].dist = ng;
       labels_[lw].parent = d > 0 ? kFromLower : kFromHigher;
       const auto [x, y] = layer.point(i, j2);

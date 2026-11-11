@@ -100,11 +100,20 @@ segment, so constant point levels on an edge imply its level.
   append-only (configurations are never reclaimed); writers memoise
   transitions (configuration, piece, insert/remove) → configuration per thread.
 * Intervals: maximal runs of cells with equal (configuration, owner) in
-  preferred direction, in an **AVL tree per row** keyed by the first cell.
-  *Choice*: rows are split at global-routing-tile borders into chunks with
-  their own AVL tree, node pool and shared-cell table (see A5 concurrency);
-  an interval never crosses a chunk. Insert / remove of a shape is
-  O((k + 1) log n) per row chunk, k = intervals it meets.
+  preferred direction, per row sorted by the first cell (the paper keeps
+  them in an AVL tree per row). *Choice*: rows are split at
+  global-routing-tile borders into chunks with their own interval set and
+  shared-cell table (see A5 concurrency); an interval never crosses a
+  chunk. A row chunk holds few intervals (tens on the measured designs),
+  so its set is a sorted array of 16-byte records (first cell, last cell,
+  configuration, owner) instead of a tree: lookups are binary searches,
+  enumeration is a linear scan in the same order, and an update moves the
+  tail of one short array. The arrays of a tile chunk's rows share one
+  contiguous pool; a row that outgrows its slots moves to the end of the
+  pool with a quarter of headroom, and the pool is compacted when a
+  quarter of it is left behind (and after the bulk build). Insert / remove
+  of a shape is O(log n + k + n) per row chunk, k = intervals it meets,
+  n = intervals of the row chunk.
 * Owner: "for each nonempty interval we store the net that the shapes of this
   interval belong to". Blockage pieces have no owner; pins, reservations,
   wires and vias are owned. A cell that would hold owned shapes of two nets
@@ -254,7 +263,11 @@ segment, so constant point levels on an edge imply its level.
   `-fsanitize=thread` as well.
 * Search scratch: per-vertex labels live in 1024-label pages allocated when a
   search touches them (`PagedLabels`), so a die-spanning window costs a page
-  table, not 29 B per window vertex per worker.
+  table, not one label per window vertex per worker. A page is reset when a
+  search first touches it, so labels carry flags instead of per-field
+  epochs: 16 bytes per vertex-search label (distance, target index,
+  parent, source / target / discount flags) and 32 bytes per
+  interval-search vertex label.
 
 ## Merge with the potentials, spreading, critical nets and off-track work
 
@@ -285,8 +298,11 @@ segment, so constant point levels on an edge imply its level.
   (`BonnRouteDR::usable`): the fast grid, and where it reports a blockage the
   exact checker with that net's shapes ignored
   (`FastGridBuilder::exactLevel`), since the fast grid is net-agnostic.
-* Search scratch: `search_label_mb` (default 512 MB per worker) bounds the
-  labels of one search; a search that exceeds it stops without a path
+* Search scratch: `search_label_mb` (default 512) bounds one search to
+  `search_label_mb` · 2^20 / 32 labels (32 bytes was the vertex-search
+  label when the budget was introduced; the count is kept, so searches
+  stop at the same label, and vertex-search pages now take half of that
+  memory). A search that exceeds it stops without a path
   (`SearchResult::aborted`, counted and reported with the peak scratch) and
   the net goes the usual way of a failed connection. Between searches at most
   64 MB of pages stay allocated per worker.

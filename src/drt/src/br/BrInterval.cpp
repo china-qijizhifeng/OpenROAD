@@ -274,9 +274,9 @@ uint16_t IntervalSearch::info(const int z,
                               const int j,
                               VertexLabel& label) const
 {
-  if (label.info_stamp != epoch_) {
+  if ((label.marks & kMarkInfo) == 0) {
     label.info = computeInfo(z, i, j, vias_at_build_);
-    label.info_stamp = epoch_;
+    label.marks |= kMarkInfo;
   }
   return label.info;
 }
@@ -306,7 +306,7 @@ int IntervalSearch::intervalOf(const int z, const int i, const int j)
   if (!inWindow(z, i, j, li)) {
     return -1;
   }
-  if (label(li).stamp == epoch_) {
+  if ((label(li).marks & kMarkInterval) != 0) {
     return label(li).interval_id;
   }
   return buildInterval(z, i, j);
@@ -328,14 +328,14 @@ int IntervalSearch::buildInterval(const int z, const int i, const int j)
       return false;
     }
     VertexLabel& lab = label(li);
-    if (lab.stamp == epoch_ || lab.target_stamp == epoch_
+    if ((lab.marks & (kMarkInterval | kMarkTarget)) != 0
         || !region.contains(layer, z, i, jj)) {
       return false;
     }
     bits = info(z, i, jj, lab);
     sig = bits & property_mask;
     return (bits & kInfoWireLegal) != 0
-           && !(lab.source_stamp == epoch_ && layer.jogs
+           && !((lab.marks & kMarkSource) != 0 && layer.jogs
                 && !(bits & kInfoJogLegal))
            && (bits & (kTransPenalty | kInfoSpread)) == 0;
   };
@@ -447,7 +447,7 @@ int IntervalSearch::buildInterval(const int z, const int i, const int j)
   for (int jj = ja; jj <= jb; jj++) {
     size_t li = 0;
     inWindow(z, i, jj, li);
-    label(li).stamp = epoch_;
+    label(li).marks |= kMarkInterval;
     label(li).interval_id = id;
   }
   num_intervals_++;
@@ -608,7 +608,7 @@ void IntervalSearch::addLabel(const int interval,
     // path is cheaper (Algorithm 4, line 25, checked as early as possible).
     size_t li = 0;
     inWindow(iv.z, iv.i, iv.ja, li);
-    if (label(li).target_stamp == epoch_) {
+    if ((label(li).marks & kMarkTarget) != 0) {
       const auto& t = req_->targets[label(li).target_index];
       // delta includes pi(t) <= t.cost (the box cost is the cheapest
       // terminal cost), so the sink key stays >= delta.
@@ -703,7 +703,7 @@ void IntervalSearch::process(const int id, const Cost delta, int g)
     VertexLabel& w = label(li);
     const Cost from = delta + cost - intervals_[id].futureCost(layer, j_of(from_k));
     p = Probe{&w, z2, i2, j2, 0, 0};
-    if (w.stamp == epoch_) {
+    if ((w.marks & kMarkInterval) != 0) {
       const Interval& next = intervals_[w.interval_id];
       const int k2 = next.kOf(j2);
       p.pi = next.futureCost(graph_.layers[z2], j2);
@@ -712,20 +712,20 @@ void IntervalSearch::process(const int id, const Cost delta, int g)
     }
     p.pi = futureCost(z2, i2, j2);
     p.d2 = from + p.pi;
-    return w.pending_stamp != epoch_ || w.pending_delta > p.d2;
+    return (w.marks & kMarkPending) == 0 || w.pending_delta > p.d2;
   };
   auto commit = [&](int from_k, const Probe& p, Cost extra) {
     VertexLabel& w = *p.head;
     const Cost d2 = p.d2 + extra;
-    if (w.stamp == epoch_) {
+    if ((w.marks & kMarkInterval) != 0) {
       const Interval& next = intervals_[w.interval_id];
       addLabel(w.interval_id, next.kOf(p.j), d2, id, from_k);
       return;
     }
-    if (w.pending_stamp == epoch_ && w.pending_delta <= d2) {
+    if ((w.marks & kMarkPending) != 0 && w.pending_delta <= d2) {
       return;
     }
-    w.pending_stamp = epoch_;
+    w.marks |= kMarkPending;
     w.pending_delta = d2;
     w.pending_pred_interval = id;
     w.pending_pred_k = from_k;
@@ -823,7 +823,7 @@ void IntervalSearch::process(const int id, const Cost delta, int g)
       const At edge = di > 0 ? v : w;
       size_t li = 0;
       inWindow(z, i, j, li);
-      const bool source = label(li).source_stamp == epoch_;
+      const bool source = (label(li).marks & kMarkSource) != 0;
       if (!region.contains(layer, z, i2, j) || !(source || enter(v, kJog))
           || !enter(w, kJog) || !enter(edge, kJogEdge)) {
         continue;
@@ -859,7 +859,7 @@ void IntervalSearch::process(const int id, const Cost delta, int g)
     const At edge = dj > 0 ? v : w;
     size_t li = 0;
     inWindow(z, i, j, li);
-    if ((label(li).source_stamp != epoch_ && !enter(v, kWire))
+    if (((label(li).marks & kMarkSource) == 0 && !enter(v, kWire))
         || !enter(w, kWire) || !enter(edge, kWireEdge)) {
       continue;
     }
@@ -951,12 +951,12 @@ SearchResult IntervalSearch::run(const SearchRequest& request)
     if (!inWindow(z, i, j, li)) {
       continue;
     }
-    if (label(li).target_stamp == epoch_
+    if ((label(li).marks & kMarkTarget) != 0
         && request.targets[label(li).target_index].cost
                <= request.targets[t].cost) {
       continue;
     }
-    label(li).target_stamp = epoch_;
+    label(li).marks |= kMarkTarget;
     label(li).target_index = static_cast<int32_t>(t);
   }
   for (const auto& [v, c] : request.sources) {
@@ -964,7 +964,7 @@ SearchResult IntervalSearch::run(const SearchRequest& request)
     graph_.decode(v, z, i, j);
     size_t li = 0;
     if (inWindow(z, i, j, li)) {
-      label(li).source_stamp = epoch_;
+      label(li).marks |= kMarkSource;
     }
   }
   // Algorithm 4, lines 1-4 (with source costs): every source gets a label
@@ -981,10 +981,10 @@ SearchResult IntervalSearch::run(const SearchRequest& request)
     VertexLabel& w = label(li);
     const Cost pi = futureCost(z, i, j);
     const Cost d = c + pi;
-    if (w.pending_stamp == epoch_ && w.pending_delta <= d) {
+    if ((w.marks & kMarkPending) != 0 && w.pending_delta <= d) {
       continue;
     }
-    w.pending_stamp = epoch_;
+    w.marks |= kMarkPending;
     w.pending_delta = d;
     w.pending_pred_interval = -1;
     w.pending_pred_k = -1;
@@ -1013,10 +1013,10 @@ SearchResult IntervalSearch::run(const SearchRequest& request)
       size_t li = 0;
       inWindow(p.z, p.i, p.j, li);
       VertexLabel& w = label(li);
-      if (w.pending_stamp != epoch_ || w.pending_delta != e.key) {
+      if ((w.marks & kMarkPending) == 0 || w.pending_delta != e.key) {
         continue;  // superseded by a cheaper deferred label
       }
-      w.pending_stamp = 0;
+      w.marks &= ~kMarkPending;
       const int pred_interval = w.pending_pred_interval;
       const int pred_k = w.pending_pred_k;
       const int id = intervalOf(p.z, p.i, p.j);

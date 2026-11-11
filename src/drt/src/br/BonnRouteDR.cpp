@@ -783,7 +783,9 @@ void BonnRouteDR::buildRoutingSpace()
   interaction_reach_ = need + max_pitch;
   halo_tiles_ = static_cast<int>(
       std::max<int64_t>(1, (2 * need + max_pitch + tile - 1) / tile));
-  // Search label budget (labels of the vertex search: 32 bytes).
+  // Search label budget: a label count, search_label_mb MiB of 32-byte
+  // labels (the vertex-search label size when the budget was introduced;
+  // the count is kept so that searches stop at the same label).
   label_limit_ = static_cast<size_t>(std::max(0, params_.search_label_mb))
                  * (size_t{1} << 20) / 32;
 }
