@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: BSD-3-Clause
 # Copyright (c) 2022-2025, The OpenROAD Authors
 
+load("@rules_cc//cc:cc_binary.bzl", "cc_binary")
 load("@rules_cc//cc:cc_test.bzl", "cc_test")
 load("@rules_python//python:defs.bzl", "py_library", "py_test")
 load("//test:regression.bzl", "doc_check_test", "regression_test")
@@ -18,6 +19,20 @@ cc_test(
     name = "bonnroute_potential_test",
     size = "medium",
     srcs = ["BonnRoutePotentialTest.cpp"],
+    deps = ["//src/drt:bonnroute_core"],
+)
+
+cc_test(
+    name = "bonnroute_offtrack_test",
+    size = "medium",
+    srcs = ["BonnRouteOffTrackTest.cpp"],
+    deps = ["//src/drt:bonnroute_core"],
+)
+
+cc_binary(
+    name = "bonnroute_offtrack_bench",
+    testonly = True,
+    srcs = ["BonnRouteOffTrackBench.cpp"],
     deps = ["//src/drt:bonnroute_core"],
 )
 

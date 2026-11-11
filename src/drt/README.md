@@ -122,9 +122,18 @@ set_bonnroute_dr_param name value
 | `jog_factor` | `4` | Non-preferred direction wire cost multiplier. |
 | `ripup_cost` | `40` | Base rip-up penalty in pitches of the bottom routing layer. |
 | `max_ripups` | `3` | Maximum rip-ups per net. |
-| `max_access_jog` | `2` | Maximum pin-to-track jog in pitches. |
-| `max_access_options` | `8` | Maximum access options retained per pin. |
-| `pin_cost` | `2` | Extra cost of a non-preferred access point, in pitches. |
+| `max_access_jog` | `2` | Maximum pin-to-track jog in pitches (access stubs, `offtrack_access 0`). |
+| `max_access_options` | `8` | Maximum access options (catalogue paths) retained per pin. |
+| `pin_cost` | `2` | Extra cost of a non-preferred access point, in pitches (access stubs). |
+| `offtrack_access` | `1` | Off-track pin access (Sections 3.8, 4.3): per pin a catalogue of shortest minimum-segment-length paths on the blockage grid, primary paths per circuit class by destructive bounding; `0` uses OpenROAD access points with short stubs and greedy reservations. |
+| `offtrack_radius` | `2` | Radius of the on-track endpoints of catalogue paths around the pin, in pitches. |
+| `offtrack_regenerate` | `2` | Generate a pin's catalogue again against the current routing when fewer of its paths are feasible (Section 4.4). |
+| `offtrack_tau` | `0` | Minimum segment length in DBU; `0` derives it per layer from the same-net rules (Section 3.7). |
+| `offtrack_notch_tau` | `0` | `1` adds notch spacing plus width to the derived minimum segment length. |
+| `access_classes` | `1` | Share catalogues and conflict-free solutions within circuit classes; `0` solves every instance separately. |
+| `access_node_limit` | `20000` | Node limit of destructive bounding per circuit; beyond it the greedy choice is used. |
+| `access_track_weight` / `access_direction_weight` / `access_spread_weight` | `1` / `1` / `1` | Weights of the conflict-free solution: pitches per blocked track, pitches per missing on-track continuation, cost per DBU two endpoints are closer than two pitches. |
+| `postprocess` | `1` | Same-net post-processing of each connection (Section 4.4). `offtrack_access 0` with `postprocess 0` is the previous behaviour. |
 | `layer_dilation` | `1` | Extra routing layers around a guide. |
 | `retry_dilation` | `2` | Extra guide tiles for a retry. |
 | `use_intervals` | `0` | Use vertex search by default; `1` selects interval label sets. |
@@ -153,9 +162,16 @@ relaxed per vertex because adjacent layers can have different track pitches.
 The fast grid checks wire and jog edges as well as their endpoints, including
 obstacles that lie strictly between track vertices.
 
-The adapter uses OpenROAD pin-access results and spacing models for its
-initial routing. It does not implement the paper's full shape-grid exception
-checker, off-track blockage-grid search, or blockage-aware future cost.
+With `offtrack_access 1` pin access follows Sections 3.7, 3.8 and 4.3:
+same-net rules are mapped to a minimum segment length per layer, each pin gets
+a catalogue of shortest minimum-segment-length paths on the blockage grid
+(Algorithm 3) to nearby on-track points, and a conflict-free primary path per
+pin is chosen per circuit class by destructive bounding and reserved. Each
+connection is combined with its access paths and post-processed for same-net
+rules (Section 4.4). The interpretation choices are listed in
+[OffTrack.md](src/br/OffTrack.md). Diff-net legality of off-track geometry
+still uses the adapter's spacing model; the paper's full shape-grid exception
+checker and blockage-aware future cost are not implemented.
 Unrouted nets and rule violations are handled by FlexDR. Final DRC, wirelength
 and runtime therefore describe the combined flow. The log reports BonnRoute's
 own routed/skipped/failed counts, search effort and elapsed time separately.
@@ -180,6 +196,20 @@ bazelisk test //src/drt/test:bonnroute_core_test
 It checks obstacle-edge geometry and compares interval and vertex searches
 with a plain Dijkstra reference on generated graphs, including returned path
 costs, pin ownership, restricted regions, via edges and rip-up penalties.
+
+The off-track modules have their own randomized test and a measurement
+binary on generated standard-cell rows:
+
+```shell
+bazelisk test //src/drt/test:bonnroute_offtrack_test
+bazelisk run //src/drt/test:bonnroute_offtrack_bench -- 12 40 1
+```
+
+The test compares Algorithm 3 with a literal transcription, shortest paths on
+the path-preserving digraph with brute-force shortest minimum-segment-length
+paths (Theorem 3.2, one and two layers), destructive bounding with exhaustive
+enumeration, circuit signatures under the eight lattice isometries, and the
+post-processing invariants.
 
 ### Detailed Route Debugging
 
