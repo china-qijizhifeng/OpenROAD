@@ -556,7 +556,11 @@ class IntervalSearch
   };
   mutable PagedLabels<VertexLabel> labels_;
   uint32_t epoch_ = 0;
+  // intervals_[0, num_used_) belong to the current search; the others keep
+  // their label storage for later searches (at most kKeptIntervals).
   std::vector<Interval> intervals_;
+  int num_used_ = 0;
+  static constexpr size_t kKeptIntervals = size_t{1} << 18;
   std::vector<Event> heap_;
   int64_t num_intervals_ = 0;
   std::array<int64_t, kNumIntervalEnds> ends_{};

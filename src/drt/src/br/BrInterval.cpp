@@ -361,7 +361,13 @@ int IntervalSearch::buildInterval(const int z, const int i, const int j)
     ends_[end]++;
   }
   interval_vertices_ += jb - ja + 1;
-  Interval iv;
+  // Interval objects are reused across searches with their label storage.
+  const int id = num_used_;
+  if (num_used_ == static_cast<int>(intervals_.size())) {
+    intervals_.emplace_back();
+  }
+  num_used_++;
+  Interval& iv = intervals_[id];
   iv.z = z;
   iv.i = i;
   iv.ja = ja;
@@ -370,8 +376,8 @@ int IntervalSearch::buildInterval(const int z, const int i, const int j)
   iv.dir = cls >= 0 ? 1 : -1;
   // The checked slope determines pi everywhere in the interval.
   iv.future_at_ja = pi_a;
-  const int id = static_cast<int>(intervals_.size());
-  intervals_.push_back(std::move(iv));
+  iv.frontier = 0;
+  iv.labels.clear();
   for (int jj = ja; jj <= jb; jj++) {
     size_t li = 0;
     inWindow(z, i, jj, li);
@@ -399,8 +405,8 @@ Cost IntervalSearch::value(const Interval& iv, const int k) const
 const IntervalSearch::Label* IntervalSearch::argLabel(const Interval& iv,
                                                       const int k) const
 {
-  if (iv.labels.empty()) {
-    return nullptr;
+  if (iv.labels.size() <= 1) {
+    return iv.labels.empty() ? nullptr : &iv.labels[0];
   }
   const auto& positions = graph_.layers[iv.z].positions;
   const int pos = static_cast<int>(
@@ -429,6 +435,9 @@ const IntervalSearch::Label* IntervalSearch::argLabel(const Interval& iv,
 void IntervalSearch::rebuildEnvelope(Interval& iv)
 {
   const int n = static_cast<int>(iv.labels.size());
+  if (n <= 1) {
+    return;  // argLabel needs no envelope
+  }
   iv.prefix_best.resize(n);
   iv.suffix_best.resize(n);
   const auto& positions = graph_.layers[iv.z].positions;
@@ -459,6 +468,13 @@ void IntervalSearch::rebuildEnvelope(Interval& iv)
 int IntervalSearch::frontierEnd(const Interval& iv, const Cost delta) const
 {
   // d is monotone on an interval; J_I(delta) is a contiguous flat run.
+  if (iv.labels.size() == 1) {
+    // Flat from the label towards the target end, increasing beyond it.
+    if (value(iv, iv.frontier) != delta) {
+      return iv.frontier;
+    }
+    return std::max(iv.frontier, iv.labels[0].k) + 1;
+  }
   int lo = iv.frontier;
   int hi = iv.n();
   while (lo < hi) {
@@ -702,7 +718,10 @@ SearchResult IntervalSearch::run(const SearchRequest& request)
     via_prefix_[z] = via_prefix_[z - 1] + graph_.via_cost[z - 1];
   }
   heap_.clear();
-  intervals_.clear();
+  num_used_ = 0;
+  if (intervals_.size() > kKeptIntervals) {
+    intervals_.resize(kKeptIntervals);
+  }
   // Search window over the region and the terminals (as in PathSearch).
   const Region& region = *request.region;
   int bx_lo = region.bx_lo;
