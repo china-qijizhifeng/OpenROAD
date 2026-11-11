@@ -43,8 +43,12 @@ cc_library(
     srcs = [
         "src/br/BrCore.cpp",
         "src/br/BrInterval.cpp",
+        "src/br/BrPotential.cpp",
     ],
-    hdrs = ["src/br/BrCore.h"],
+    hdrs = [
+        "src/br/BrCore.h",
+        "src/br/BrPotential.h",
+    ],
     includes = ["src"],
 )
 
