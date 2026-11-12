@@ -986,6 +986,9 @@ class BonnRouteDR
   int64_t interaction_reach_ = 0;
   size_t label_limit_ = 0;
   std::atomic<int64_t> inconsistent_updates_{0};
+  // Debug group bonnroute_connect: one line per search of a connection
+  // (phase, area, settled vertices) and one per partition region.
+  bool trace_connections_ = false;
   std::vector<Worker> workers_;
   std::vector<LayerInfo> layers_;  // per z
   std::vector<int> z_of_fr_;       // routing layer -> z, -1

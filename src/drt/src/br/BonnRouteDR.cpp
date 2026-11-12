@@ -4574,9 +4574,31 @@ bool BonnRouteDR::connectInRegion(NetData& net,
   auto run = [&](const bool path_region) {
     sync_cuts();
     choose_potential(path_region);
+    const double search_start = trace_connections_ ? omp_get_wtime() : 0.0;
     br::SearchResult res = params_.use_intervals
                                ? worker.interval_search->run(req)
                                : worker.search->run(req);
+    if (trace_connections_) {
+      // The area of the search: bounding box of its allowed tiles.
+      logger_->debug(
+          utl::DRT,
+          "bonnroute_connect",
+          "connect net {} phase {} dilation {} path {} area {} {} {} {} tiles "
+          "{} settled {} found {} ms {:.3f}",
+          net.id,
+          worker.speculative ? "tail"
+                             : (worker.limit != nullptr ? "region" : "serial"),
+          dilation,
+          path_region ? 1 : 0,
+          worker.region.bx_lo,
+          worker.region.by_lo,
+          worker.region.bx_hi,
+          worker.region.by_hi,
+          worker.region.touched.size(),
+          res.settled,
+          res.found ? 1 : 0,
+          1e3 * (omp_get_wtime() - search_start));
+    }
     if (params_.potential_check && req.future_cost != nullptr) {
       // A feasible future cost leaves the shortest path cost unchanged.
       const br::FutureCostOracle* oracle = req.future_cost;
@@ -6038,6 +6060,19 @@ void BonnRouteDR::routePartitions(const std::vector<int>& order,
     } else {
       partitionRegions(pending, boxes, count, partition % 2 == 1, regions);
     }
+    if (trace_connections_) {
+      for (const auto& g : regions) {
+        logger_->debug(utl::DRT,
+                       "bonnroute_connect",
+                       "partition {} {} region {} {} {} {}",
+                       stage,
+                       partition,
+                       g[0],
+                       g[1],
+                       g[2],
+                       g[3]);
+      }
+    }
     std::vector<std::vector<int>> members(regions.size());
     std::vector<std::vector<int>> region_failed(regions.size());
     // Nets that need the dilated area, whose box leaves the region.
@@ -6716,6 +6751,7 @@ void BonnRouteDR::main()
                   "use_intervals is ignored.");
     params_.use_intervals = false;
   }
+  trace_connections_ = logger_->debugCheck(utl::DRT, "bonnroute_connect", 1);
   SetupPhases& phases = setup_phases_;
   utl::Timer phase_timer;
   // Wall seconds since the previous lap.

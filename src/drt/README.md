@@ -201,6 +201,8 @@ set_bonnroute_dr_param name value
 | `cleanup_check_only_workers` | `0` | FlexDR clean-up, incremental iterations 0–2: a worker whose nets all carry BonnRoute's routing has no net to reroute and runs only the design-rule check (with FlexDR's patches), without the maze grid graph. The result equals the full worker's. |
 | `verbose` | `1` | Print coverage and search statistics. |
 
+The debug group `bonnroute_connect` (`set_debug_level DRT bonnroute_connect 1`) prints one line per search of a connection (net, phase, area dilation, path region or whole area, tile box of the area, settled vertices, result, milliseconds) and one line per partition region.
+
 The interval search maintains reduced-distance label envelopes on tracks,
 removes dominated labels, and propagates jog labels between intervals
 (Gester et al., TODAES 18(2), 2013, Section 4.1, Algorithm 4). Via edges are
