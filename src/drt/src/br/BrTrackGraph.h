@@ -40,6 +40,8 @@ struct TrackLayer
   std::vector<int> pos_tile;
   bool jogs = true;
   Cost jog_factor = 4;  // beta_z of Sec. 4.1
+  // Jog cost in tiles of SearchRequest::jog_low_tiles (<= jog_factor).
+  Cost jog_factor_low = 4;
   size_t base = 0;
 
   int numTracks() const { return static_cast<int>(tracks.size()); }

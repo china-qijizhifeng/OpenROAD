@@ -177,6 +177,11 @@ struct SearchRequest
   // such vertices are singletons and the cost enters the wire relaxations.
   const std::vector<std::vector<uint8_t>>* spread_tiles = nullptr;
   Cost spread_cost = 0;
+  // Vertex search: in tiles where global routing left most tracks of the
+  // layer free ([z][tx * tiles_y + ty] != 0), jogs cost the layer's
+  // jog_factor_low instead of jog_factor (a wrong-way wire blocks the
+  // crossing tracks it uses, which matters where they are in demand).
+  const std::vector<std::vector<uint8_t>>* jog_low_tiles = nullptr;
 };
 
 struct SearchResult
@@ -425,6 +430,7 @@ class PathSearch
   // including the wire spreading cost of entering j2.
   Cost wireCost(int z, int i, int j, int j2) const;
   Cost spreadCost(int z, int i, int j) const;
+  Cost jogFactor(int z, int i, int j) const;
   void settle(int z, int i, int j, Cost g);
 
   const TrackGraph& graph_;
@@ -559,7 +565,7 @@ class IntervalSearch
     Cost key;
     Cost max_future;
     int32_t interval;  // -1: sink (target reached), kPendingEvent
-    int32_t aux;  // frontier at enqueue time, target index, pending index
+    int32_t aux;       // frontier at enqueue time, target index, pending index
     bool operator>(const Event& o) const
     {
       if (key != o.key) {
@@ -610,9 +616,9 @@ class IntervalSearch
     kTransJogAbove = 2,
     kTransViaBelow = 4,
     kTransViaAbove = 8,
-    kTransPenalty = 16,  // an existing transition carries a rip-up penalty
-    kInfoWireLegal = 32,  // kWire
-    kInfoJogLegal = 64,   // kJog
+    kTransPenalty = 16,    // an existing transition carries a rip-up penalty
+    kInfoWireLegal = 32,   // kWire
+    kInfoJogLegal = 64,    // kJog
     kInfoEdgeLegal = 128,  // kWireEdge to position j + 1
     kInfoVias = 256,       // the via bits are computed
     kInfoSpread = 512,     // entering the vertex costs the spreading cost

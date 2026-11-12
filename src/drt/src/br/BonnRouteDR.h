@@ -57,6 +57,11 @@ struct BonnRouteDRParams
   int via_cost = 4;
   // Jog cost factor (beta of Sec. 4.1).
   int jog_factor = 4;
+  // Vertex search: jogs cost jog_factor_low (0: off) in GCells whose global
+  // routing usage of the layer is at most jog_low_utilization percent of
+  // its capacity; jog_factor elsewhere.
+  int jog_factor_low = 0;
+  int jog_low_utilization = 50;
   // Rip-up penalty per vertex, in pitches of the bottom layer.
   int ripup_cost = 40;
   int max_ripups = 3;
@@ -259,6 +264,7 @@ class BonnRouteDR
               odb::dbBlock* block = nullptr);
   ~BonnRouteDR();
   bool spreadLayer(int z) const;
+  void buildJogTiles();
 
   void main();
 
@@ -768,6 +774,14 @@ class BonnRouteDR
   // collapse_bridges: replace via up, one wire, via down by a wrong-way
   // wire on the lower layer where that wire is legal. Returns the count.
   int64_t collapseBridges();
+  struct BridgeStats
+  {
+    int64_t candidates = 0;
+    int64_t other_wire = 0;
+    int64_t patch = 0;
+    int64_t other_via_or_pin = 0;
+    int64_t illegal = 0;
+  } bridge_stats_;
 
   int tileX(frCoord x) const;
   int tileY(frCoord y) const;
@@ -821,6 +835,8 @@ class BonnRouteDR
   odb::Rect die_;
   odb::dbBlock* block_ = nullptr;
   std::vector<std::vector<uint8_t>> spread_tiles_;
+  std::vector<std::vector<uint8_t>> jog_low_tiles_;
+  int64_t jog_low_tile_count_ = 0;
   // Global routing extra space (Sec. 2.1) per net, read from odb.
   void loadExtraSpace();
   int64_t extra_space_nets_ = 0;

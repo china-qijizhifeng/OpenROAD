@@ -35,16 +35,13 @@ void TargetBoxBound::setup(const SearchRequest& request,
       Cost via = 0;
       const int iz = static_cast<int>(z);
       if (iz < box.zlo) {
-        via = request.exact_future_cost
-                  ? via_prefix[box.zlo] - via_prefix[iz]
-                  : (box.zlo - iz) * min_via_cost;
+        via = request.exact_future_cost ? via_prefix[box.zlo] - via_prefix[iz]
+                                        : (box.zlo - iz) * min_via_cost;
       } else if (iz > box.zhi) {
-        via = request.exact_future_cost
-                  ? via_prefix[iz] - via_prefix[box.zhi]
-                  : (iz - box.zhi) * min_via_cost;
+        via = request.exact_future_cost ? via_prefix[iz] - via_prefix[box.zhi]
+                                        : (iz - box.zhi) * min_via_cost;
       }
-      constant_[z * n + b]
-          = via + (request.exact_future_cost ? box.cost : 0);
+      constant_[z * n + b] = via + (request.exact_future_cost ? box.cost : 0);
     }
   }
 }
@@ -58,6 +55,23 @@ Cost PathSearch::futureCost(const int z, const Coord x, const Coord y) const
     return 0;
   }
   return boxes_.at(z, x, y, min_wire_rate_);
+}
+
+Cost PathSearch::jogFactor(const int z, const int i, const int j) const
+{
+  const TrackLayer& layer = graph_.layers[z];
+  if (req_->jog_low_tiles == nullptr) {
+    return layer.jog_factor;
+  }
+  const int t = layer.track_tile[i];
+  const int p = layer.pos_tile[j];
+  const int tx = layer.horizontal ? p : t;
+  const int ty = layer.horizontal ? t : p;
+  return (*req_->jog_low_tiles)[z]
+                               [static_cast<size_t>(tx) * graph_.tiles_y + ty]
+                 != 0
+             ? layer.jog_factor_low
+             : layer.jog_factor;
 }
 
 Cost PathSearch::spreadCost(const int z, const int i, const int j) const
@@ -179,13 +193,7 @@ bool PathSearch::relax(const int z,
   label.dist = g;
   label.parent = parent;
   const auto [x, y] = graph_.layers[z].point(i, j);
-  push(Item{g + futureCost(z, x, y),
-            g,
-            i,
-            j,
-            0,
-            static_cast<int8_t>(z),
-            dir});
+  push(Item{g + futureCost(z, x, y), g, i, j, 0, static_cast<int8_t>(z), dir});
   return true;
 }
 
@@ -206,8 +214,7 @@ void PathSearch::settle(const int z, const int i, const int j, const Cost g)
   const At av{z, i, j};
   // Jogs (non-preferred direction, adjacent tracks).
   RipupLevel jog_level = kLegal;
-  if (layer.jogs
-      && (is_source || usable(jog_level = level(av, kJog)))) {
+  if (layer.jogs && (is_source || usable(jog_level = level(av, kJog)))) {
     const Cost own = is_source ? 0 : penalty(av, jog_level);
     for (const int di : {-1, 1}) {
       const int i2 = i + di;
@@ -226,7 +233,7 @@ void PathSearch::settle(const int z, const int i, const int j, const Cost g)
         continue;
       }
       const Cost c
-          = layer.jog_factor * std::abs(layer.tracks[i2] - layer.tracks[i])
+          = jogFactor(z, i, j) * std::abs(layer.tracks[i2] - layer.tracks[i])
             + penalty(aw, lw) + penalty(edge, le) + own;
       relax(z, i2, j, g + c, di > 0 ? kFromTrackBelow : kFromTrackAbove, 0);
     }
@@ -466,8 +473,8 @@ SearchResult PathSearch::run(const SearchRequest& request)
     if (!usable(le)) {
       continue;
     }
-    const Cost ng = item.g + wireCost(z, i, j, j2) + penalty(aw, lw)
-                    + penalty(edge, le);
+    const Cost ng
+        = item.g + wireCost(z, i, j, j2) + penalty(aw, lw) + penalty(edge, le);
     size_t lw_index = 0;
     if (!local(z, i, j2, lw_index)) {
       continue;

@@ -58,7 +58,10 @@ class PotentialOracle : public FutureCostOracle
       if (model != Model::kGeneral && discounted[z]) {
         preferred = std::min(preferred, request.discount_rate);
       }
-      const Cost jog = layer.jogs ? layer.jog_factor : kInfCost;
+      // The cheapest jog rate keeps the bound feasible with jog_low_tiles.
+      const Cost jog = layer.jogs
+                           ? std::min(layer.jog_factor, layer.jog_factor_low)
+                           : kInfCost;
       rates_.horizontal[z] = layer.horizontal ? preferred : jog;
       rates_.vertical[z] = layer.horizontal ? jog : preferred;
       if (z + 1 < num_layers) {
@@ -93,19 +96,20 @@ class PotentialOracle : public FutureCostOracle
                             discount_numerator,
                             discount_denominator});
         }
-      {
-        const auto start = std::chrono::steady_clock::now();
-        builder_.build(*request.region, grid, rates_, wires_, tiles_);
-        const auto built = std::chrono::steady_clock::now();
-        general_.prepare(tiles_, targets_);
-        const auto done = std::chrono::steady_clock::now();
-        build_seconds_ += std::chrono::duration<double>(built - start).count();
-        propagation_seconds_
-            += std::chrono::duration<double>(done - built).count();
-        tile_columns_ += tiles_.numColumns();
-        tile_rows_ += tiles_.numRows();
-        break;
-      }
+        {
+          const auto start = std::chrono::steady_clock::now();
+          builder_.build(*request.region, grid, rates_, wires_, tiles_);
+          const auto built = std::chrono::steady_clock::now();
+          general_.prepare(tiles_, targets_);
+          const auto done = std::chrono::steady_clock::now();
+          build_seconds_
+              += std::chrono::duration<double>(built - start).count();
+          propagation_seconds_
+              += std::chrono::duration<double>(done - built).count();
+          tile_columns_ += tiles_.numColumns();
+          tile_rows_ += tiles_.numRows();
+          break;
+        }
     }
     prepares_[static_cast<int>(model)]++;
   }
