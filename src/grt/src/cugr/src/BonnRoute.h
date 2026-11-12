@@ -368,6 +368,8 @@ class BonnRouteGlobal
   double objectiveWeight() const;
   void resourceSharingConcurrent(double log_tolerance,
                                  double initial_log_objective);
+  // Largest fractional edge load so far: max ln y_r / (epsilon * phases).
+  double maxEdgeLoad(int done) const;
   void renormalize();
   int insertCandidate(NetState& state, Candidate&& candidate);
   void resourceSharing();
@@ -456,6 +458,9 @@ class BonnRouteGlobal
   bool landmarks_valid_ = false;
   int landmark_updates_ = 0;
   double landmark_time_ = 0.0;
+  // Wall seconds of the pilot's oracle calls spent in buildCandidate, summed
+  // over the threads.
+  double pilot_build_time_ = 0.0;
   int64_t search_pops_ = 0;
   int64_t search_settled_ = 0;
   std::atomic<int64_t> goal_checked_{0};

@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <chrono>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -43,6 +44,13 @@ constexpr double kRenormalizeAbove = 600.0;
 constexpr double kRenormalizeTo = 300.0;
 // Destructive interference size of the x86-64/AArch64 targets we build for.
 constexpr std::size_t kCacheLine = 64;
+// Stage and phase timing of the reports (wall clock).
+using SteadyClock = std::chrono::steady_clock;
+double secondsBetween(const SteadyClock::time_point from,
+                      const SteadyClock::time_point to)
+{
+  return std::chrono::duration<double>(to - from).count();
+}
 }  // namespace
 
 void BonnRouteParams::applyProfile(const int which)
@@ -182,6 +190,8 @@ struct alignas(kCacheLine) BonnRouteGlobal::Scratch
   uint32_t epoch = 0;
   int64_t pops = 0;
   int64_t settled = 0;
+  // Wall seconds spent in buildCandidate by this thread.
+  double build_seconds = 0.0;
 
   // n vertices; dist / parent / stamp are per (vertex, via state) node.
   void prepare(size_t n)
@@ -794,8 +804,11 @@ BonnRouteGlobal::OracleResult BonnRouteGlobal::oracleImpl(
     tree_edges.push_back(cell(a));
     tree_edges.push_back(cell(b));
   }
-  if (!buildCandidate(
-          state, tree_edges, edge_pins, !objective_only, result.candidate)) {
+  const SteadyClock::time_point build_start = SteadyClock::now();
+  const bool built = buildCandidate(
+      state, tree_edges, edge_pins, !objective_only, result.candidate);
+  scratch.build_seconds += secondsBetween(build_start, SteadyClock::now());
+  if (!built) {
     return result;
   }
   result.ok = true;
@@ -1995,6 +2008,7 @@ void BonnRouteGlobal::pilot(std::vector<double>* stack_counts)
   for (const Scratch& s : scratch) {
     search_pops_ += s.pops;
     search_settled_ += s.settled;
+    pilot_build_time_ += s.build_seconds;
   }
   if (stack_counts == nullptr) {
     return;
@@ -2266,17 +2280,67 @@ void BonnRouteGlobal::resourceSharing()
     resourceSharingConcurrent(log_tolerance, initial_log_objective);
     return;
   }
+  // Wall seconds per thread: busy time of the current batch, and the phase's
+  // split into reuse tests, search, buildCandidate and cost evaluation.
+  struct alignas(kCacheLine) ThreadTime
+  {
+    double batch = 0.0;
+    double reuse = 0.0;
+    double search = 0.0;
+    double build = 0.0;
+    double cost = 0.0;
+  };
+  // Wall seconds of one phase (or the sum over all phases).
+  struct PhaseTime
+  {
+    double wall = 0.0;
+    double goal = 0.0;
+    double batches = 0.0;
+    double longest = 0.0;  // sum over batches of the busiest thread
+    double busy = 0.0;     // sum over batches and threads
+    double reuse = 0.0;
+    double search = 0.0;
+    double build = 0.0;
+    double cost = 0.0;
+    double apply = 0.0;
+    double weights = 0.0;
+    void add(const PhaseTime& o)
+    {
+      wall += o.wall;
+      goal += o.goal;
+      batches += o.batches;
+      longest += o.longest;
+      busy += o.busy;
+      reuse += o.reuse;
+      search += o.search;
+      build += o.build;
+      cost += o.cost;
+      apply += o.apply;
+      weights += o.weights;
+    }
+  };
+  std::vector<ThreadTime> thread_time(threads);
+  PhaseTime total_time;
+  int64_t num_batches = 0;
+  double report_time = 0.0;
   for (int phase = 0; phase < params_.phases; phase++) {
+    const SteadyClock::time_point phase_start = SteadyClock::now();
+    PhaseTime phase_time;
     int64_t phase_calls = 0;
+    int64_t phase_reuses = 0;
     if (goal) {
       updateGoalBounds(phase % params_.landmark_refresh == 0);
     }
+    phase_time.goal = secondsBetween(phase_start, SteadyClock::now());
     for (int begin = 0; begin < num_nets; begin += batch) {
       const int end = std::min(num_nets, begin + batch);
       // Prices are frozen during the parallel part of the batch.
       const double batch_log_objective = log_objective_price_;
+      const SteadyClock::time_point batch_start = SteadyClock::now();
 #pragma omp parallel for num_threads(threads) schedule(dynamic, 1)
       for (int i = begin; i < end; i++) {
+        const SteadyClock::time_point net_start = SteadyClock::now();
+        ThreadTime& own_time = thread_time[omp_get_thread_num()];
         const NetState& state = states_[order_[i]];
         const int slot = i - begin;
         results[slot].ok = false;
@@ -2296,10 +2360,15 @@ void BonnRouteGlobal::resourceSharing()
               = std::max(state.last_log_cost, log_objective_bound);
           if (now - bound <= log_tolerance) {
             kinds[slot] = Kind::kReuse;
+            const double t = secondsBetween(net_start, SteadyClock::now());
+            own_time.reuse += t;
+            own_time.batch += t;
             continue;
           }
         }
         Scratch& s = scratch[omp_get_thread_num()];
+        const SteadyClock::time_point oracle_start = SteadyClock::now();
+        const double build_before = s.build_seconds;
         std::vector<Segment> segments;
         std::vector<Segment>* record = check ? &segments : nullptr;
         OracleResult r = oracle(state, s, false, false, record);
@@ -2309,6 +2378,7 @@ void BonnRouteGlobal::resourceSharing()
           r = oracle(state, s, false, true, record);
           whole = true;
         }
+        const SteadyClock::time_point oracle_end = SteadyClock::now();
         if (check) {
           checkGoal(state,
                     reference[omp_get_thread_num()],
@@ -2335,7 +2405,24 @@ void BonnRouteGlobal::resourceSharing()
           kinds[slot] = state.last >= 0 ? Kind::kReuse : Kind::kFail;
         }
         results[slot] = std::move(r);
+        const SteadyClock::time_point net_end = SteadyClock::now();
+        const double build = s.build_seconds - build_before;
+        own_time.reuse += secondsBetween(net_start, oracle_start);
+        own_time.search += secondsBetween(oracle_start, oracle_end) - build;
+        own_time.build += build;
+        own_time.cost += secondsBetween(oracle_end, net_end);
+        own_time.batch += secondsBetween(net_start, net_end);
       }
+      const SteadyClock::time_point apply_start = SteadyClock::now();
+      phase_time.batches += secondsBetween(batch_start, apply_start);
+      double longest = 0.0;
+      for (ThreadTime& t : thread_time) {
+        longest = std::max(longest, t.batch);
+        phase_time.busy += t.batch;
+        t.batch = 0.0;
+      }
+      phase_time.longest += longest;
+      num_batches++;
       // Apply the batch in net order: deterministic for any thread count.
       for (int i = begin; i < end; i++) {
         NetState& state = states_[order_[i]];
@@ -2371,13 +2458,26 @@ void BonnRouteGlobal::resourceSharing()
           state.last_log_cost = log_cost;
         } else {
           reuses_++;
+          phase_reuses++;
         }
         Candidate& chosen = state.candidates[state.last];
         chosen.count++;
         applyPrices(chosen);
       }
+      const SteadyClock::time_point weights_start = SteadyClock::now();
+      phase_time.apply += secondsBetween(apply_start, weights_start);
       refreshWeights();
+      phase_time.weights += secondsBetween(weights_start, SteadyClock::now());
     }
+    for (ThreadTime& t : thread_time) {
+      phase_time.reuse += t.reuse;
+      phase_time.search += t.search;
+      phase_time.build += t.build;
+      phase_time.cost += t.cost;
+      t = ThreadTime{};
+    }
+    phase_time.wall = secondsBetween(phase_start, SteadyClock::now());
+    total_time.add(phase_time);
     oracle_calls_ += phase_calls;
     const int done = phase + 1;
     if (done == params_.phases) {
@@ -2386,15 +2486,33 @@ void BonnRouteGlobal::resourceSharing()
         search_settled_ += sc.settled;
       }
     }
+    const SteadyClock::time_point report_start = SteadyClock::now();
+    if (params_.verbose) {
+      logger_->report(
+          "BonnRoute phase timing {:3d}: {:.4f}s, oracle calls {}, reuses {}, "
+          "max edge load {:.3f}; goal bounds {:.4f}s, batches {:.4f}s "
+          "(longest thread {:.4f}s, busy {:.4f}s: reuse {:.4f}s, search "
+          "{:.4f}s, build {:.4f}s, cost {:.4f}s), apply {:.4f}s, weights "
+          "{:.4f}s.",
+          done,
+          phase_time.wall,
+          phase_calls,
+          phase_reuses,
+          maxEdgeLoad(done),
+          phase_time.goal,
+          phase_time.batches,
+          phase_time.longest,
+          phase_time.busy,
+          phase_time.reuse,
+          phase_time.search,
+          phase_time.build,
+          phase_time.cost,
+          phase_time.apply,
+          phase_time.weights);
+    }
     if (params_.verbose
         && (done == 1 || done % 25 == 0 || done == params_.phases)) {
-      // ln y_r = eps * (sum of normalized loads); divide by phases for the
-      // average fractional load lambda_r.
-      double lambda_max = 0.0;
-      for (uint32_t r = 0; r < num_edges_; r++) {
-        lambda_max = std::max(lambda_max, log_price_[r]);
-      }
-      lambda_max /= params_.epsilon * done;
+      const double lambda_max = maxEdgeLoad(done);
       const double lambda_obj = (log_objective_price_ - initial_log_objective)
                                 / (params_.epsilon * done);
       logger_->report(
@@ -2406,11 +2524,45 @@ void BonnRouteGlobal::resourceSharing()
           lambda_obj,
           resourceLoads(done));
     }
+    report_time += secondsBetween(report_start, SteadyClock::now());
     if (params_.extra_space && params_.resource_adapt
         && (done == 1 || done % 25 == 0) && done < params_.phases) {
       adaptResourceBounds(done);
     }
   }
+  if (params_.verbose) {
+    logger_->report(
+        "BonnRoute sharing timing: {} phases {:.3f}s; goal bounds {:.3f}s, "
+        "batches {:.3f}s in {} batches (longest thread {:.3f}s, busy {:.3f}s "
+        "on {} threads: reuse {:.3f}s, search {:.3f}s, build {:.3f}s, cost "
+        "{:.3f}s), apply {:.3f}s, weights {:.3f}s, phase reports {:.3f}s.",
+        params_.phases,
+        total_time.wall,
+        total_time.goal,
+        total_time.batches,
+        num_batches,
+        total_time.longest,
+        total_time.busy,
+        threads,
+        total_time.reuse,
+        total_time.search,
+        total_time.build,
+        total_time.cost,
+        total_time.apply,
+        total_time.weights,
+        report_time);
+  }
+}
+
+double BonnRouteGlobal::maxEdgeLoad(const int done) const
+{
+  // ln y_r = eps * (sum of normalized loads); divide by phases for the
+  // average fractional load lambda_r.
+  double lambda_max = 0.0;
+  for (uint32_t r = 0; r < num_edges_; r++) {
+    lambda_max = std::max(lambda_max, log_price_[r]);
+  }
+  return lambda_max / (params_.epsilon * done);
 }
 
 void BonnRouteGlobal::applyPricesConcurrent(const Candidate& candidate)
@@ -2454,6 +2606,8 @@ void BonnRouteGlobal::resourceSharingConcurrent(
                            [&](int a, int b) { return work(a) > work(b); });
   std::atomic<int64_t> reuses{0};
   for (int phase = 0; phase < params_.phases; phase++) {
+    const SteadyClock::time_point phase_start = SteadyClock::now();
+    const int64_t reuses_before = reuses.load();
     if (goal) {
       updateGoalBounds(phase % params_.landmark_refresh == 0);
     }
@@ -2506,13 +2660,19 @@ void BonnRouteGlobal::resourceSharingConcurrent(
       renormalize();
     }
     const int done = phase + 1;
+    if (params_.verbose) {
+      logger_->report(
+          "BonnRoute phase timing {:3d}: {:.4f}s, oracle calls {}, reuses {}, "
+          "max edge load {:.3f} (concurrent prices).",
+          done,
+          secondsBetween(phase_start, SteadyClock::now()),
+          phase_calls.load(),
+          reuses.load() - reuses_before,
+          maxEdgeLoad(done));
+    }
     if (params_.verbose
         && (done == 1 || done % 25 == 0 || done == params_.phases)) {
-      double lambda_max = 0.0;
-      for (uint32_t r = 0; r < num_edges_; r++) {
-        lambda_max = std::max(lambda_max, log_price_[r]);
-      }
-      lambda_max /= params_.epsilon * done;
+      const double lambda_max = maxEdgeLoad(done);
       const double lambda_obj = (log_objective_price_ - initial_log_objective)
                                 / (params_.epsilon * done);
       logger_->report(
@@ -2703,7 +2863,16 @@ void BonnRouteGlobal::commit()
 void BonnRouteGlobal::run()
 {
   utl::Timer timer;
+  // Wall seconds of the stages, reported with verbose.
+  SteadyClock::time_point mark = SteadyClock::now();
+  auto lap = [&mark]() {
+    const SteadyClock::time_point now = SteadyClock::now();
+    const double seconds = secondsBetween(mark, now);
+    mark = now;
+    return seconds;
+  };
   prepareNets();
+  const double prepare_time = lap();
   min_layer_ = num_layers_;
   for (const GRNet* net : nets_) {
     min_layer_ = std::min(min_layer_, net->getLayerRange().min_layer);
@@ -2712,6 +2881,7 @@ void BonnRouteGlobal::run()
   if (estimate) {
     estimateCapacities();
   }
+  const double capacity_time = lap();
   // Single-gcell nets keep their pin stack; their usage is background.
   // With the Sec. 2.5 estimate, their routes inside the tile are already
   // part of the capacities, so they keep only the pin's cell.
@@ -2741,9 +2911,11 @@ void BonnRouteGlobal::run()
     }
   }
   initSpaceModels();
+  const double trivial_time = lap();
   std::vector<double> stack_counts;
   const bool count_stacks = estimate && params_.capacity_stacked_vias;
   pilot(count_stacks ? &stack_counts : nullptr);
+  const double pilot_time = lap();
   if (estimate) {
     utl::Timer stack_timer;
     if (count_stacks) {
@@ -2753,6 +2925,7 @@ void BonnRouteGlobal::run()
     estimate_time_ += stack_timer.elapsed();
     reportCapacities();
   }
+  const double stacked_vias_time = lap();
   // Edge resources, then power and yield (used with extra_space only).
   const size_t num_resources = static_cast<size_t>(num_edges_) + 2;
   capacity_.assign(num_resources, 0.0);
@@ -2811,11 +2984,30 @@ void BonnRouteGlobal::run()
           yield);
     }
   }
+  const double resources_time = lap();
   resourceSharing();
   const double sharing_time = timer.elapsed();
+  const double sharing_proper_time = lap();
   roundAndRepair();
+  const double rounding_time = lap();
   commit();
+  const double commit_time = lap();
   if (params_.verbose) {
+    logger_->report(
+        "BonnRoute stage timing: prepare nets {:.3f}s, capacity estimate "
+        "{:.3f}s, trivial nets {:.3f}s, pilot {:.3f}s (build {:.3f}s thread "
+        "time), stacked vias {:.3f}s, resources {:.3f}s, resource sharing "
+        "{:.3f}s, rounding {:.3f}s, commit {:.3f}s.",
+        prepare_time,
+        capacity_time,
+        trivial_time,
+        pilot_time,
+        pilot_build_time_,
+        stacked_vias_time,
+        resources_time,
+        sharing_proper_time,
+        rounding_time,
+        commit_time);
     size_t candidates = 0;
     for (const int index : order_) {
       candidates += states_[index].candidates.size();

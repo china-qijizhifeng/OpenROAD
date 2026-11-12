@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -53,6 +54,27 @@
 using utl::GRT;
 
 namespace grt {
+
+namespace {
+// Wall-clock laps for the BonnRoute GR timing reports.
+class StageClock
+{
+ public:
+  // Seconds since the previous lap (or construction).
+  double lap()
+  {
+    const std::chrono::steady_clock::time_point now
+        = std::chrono::steady_clock::now();
+    const double seconds = std::chrono::duration<double>(now - mark_).count();
+    mark_ = now;
+    return seconds;
+  }
+
+ private:
+  std::chrono::steady_clock::time_point mark_
+      = std::chrono::steady_clock::now();
+};
+}  // namespace
 
 // Sentinel demoteNonCriticalNets writes on non-critical nets; not a slack.
 constexpr float kDemotedSlack = std::numeric_limits<float>::max();
@@ -290,6 +312,7 @@ void CUGR::init(const int min_routing_layer,
                 const odb::PtrSet<odb::dbNet>& clock_nets)
 {
   clear();
+  StageClock clock;
   constants_.min_routing_layer = min_routing_layer - 1;
   constants_.gcell_scale
       = bonnroute_ && bonnroute_params_ ? bonnroute_params_->gcell_scale : 1;
@@ -300,7 +323,9 @@ void CUGR::init(const int min_routing_layer,
                                      max_routing_layer,
                                      clock_nets,
                                      verbose_);
+  const double design_time = clock.lap();
   grid_graph_ = std::make_unique<GridGraph>(design_.get(), constants_, logger_);
+  const double grid_graph_time = clock.lap();
   debugPrint(logger_,
              GRT,
              "report",
@@ -324,6 +349,14 @@ void CUGR::init(const int min_routing_layer,
     net_indices_.push_back(index);
     db_net_map_[base_net.getDbNet()] = gr_nets_.back().get();
     index++;
+  }
+  if (bonnroute_ && verbose_) {
+    logger_->report(
+        "BonnRoute GR shell timing: CUGR init design {:.3f}s, grid graph "
+        "{:.3f}s, nets {:.3f}s.",
+        design_time,
+        grid_graph_time,
+        clock.lap());
   }
 }
 
@@ -1111,11 +1144,20 @@ std::vector<odb::dbNet*> CUGR::route(bool incremental)
   }
 
   const bool use_bonnroute = bonnroute_ && !incremental;
+  StageClock clock;
+  double bonnroute_time = 0.0;
+  double congested_time = 0.0;
+  double maze_time = 0.0;
+  double rrr_time = 0.0;
+  size_t congested_after_bonnroute = 0;
   if (use_bonnroute) {
     // Stages 1-3 replaced by resource sharing, rounding and re-choosing;
     // the CUGR maze stages below clean up the remaining overflow.
     bonnRoute(net_indices);
+    bonnroute_time = clock.lap();
     updateCongestedNets(net_indices);
+    congested_time += clock.lap();
+    congested_after_bonnroute = net_indices.size();
   } else {
     patternRoute(net_indices);
 
@@ -1141,13 +1183,17 @@ std::vector<odb::dbNet*> CUGR::route(bool incremental)
     if (verbose_ && !net_indices.empty()) {
       logger_->report("Stage 4: Maze routing on sparsified graph.");
     }
+    clock.lap();
     mazeRoute(net_indices, CugrStage::mazeRoute, /* iteration */ 0, {});
     debugPass("stage 4");
+    maze_time = clock.lap();
     if (!incremental) {
       updateCongestedNets(net_indices);
     }
+    congested_time += clock.lap();
 
     iterativeRRR(net_indices, {});
+    rrr_time = clock.lap();
   } else if (verbose_) {
     logger_->report(
         "BonnRoute: CUGR clean-up disabled; {} nets remain on overflowed "
@@ -1162,9 +1208,22 @@ std::vector<odb::dbNet*> CUGR::route(bool incremental)
     }
   }
 
+  clock.lap();
   printStatistics();
   reportBonnRouteCapacityOverflow();
   exportBonnRouteExtraSpace(incremental, net_indices);
+  if (use_bonnroute && verbose_) {
+    logger_->report(
+        "BonnRoute GR shell timing: route BonnRoute {:.3f}s, congested nets "
+        "{:.3f}s ({} nets after BonnRoute), maze {:.3f}s, rip-up and reroute "
+        "{:.3f}s, statistics and exports {:.3f}s.",
+        bonnroute_time,
+        congested_time,
+        congested_after_bonnroute,
+        maze_time,
+        rrr_time,
+        clock.lap());
+  }
 
   if (incremental) {
     incremental_routing_ = false;

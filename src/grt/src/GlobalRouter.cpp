@@ -547,11 +547,21 @@ void GlobalRouter::globalRoute(bool save_guides)
     getMinMaxLayer(min_layer, max_layer);
 
     if (use_cugr_) {
+      utl::Timer init_timer;
       std::vector<Net*> nets = initCUGR(min_layer, max_layer);
       if (verbose_) {
         reportResources();
       }
+      const double init_time = init_timer.elapsed();
+      utl::Timer route_timer;
       findRoutingCugr(nets, /*incremental=*/false);
+      if (verbose_ && cugr_->isBonnRoute()) {
+        logger_->report(
+            "BonnRoute GR shell timing: GlobalRouter init {:.3f}s, route and "
+            "export {:.3f}s.",
+            init_time,
+            route_timer.elapsed());
+      }
     } else {
       std::vector<Net*> nets = initFastRoute(min_layer, max_layer);
       // Capture the initial Steiner-tree wirelength per net for the detour
@@ -582,6 +592,7 @@ void GlobalRouter::globalRoute(bool save_guides)
 
 void GlobalRouter::finishGlobalRouting(bool save_guides)
 {
+  utl::Timer congestion_timer;
   updateDbCongestion();
   saveCongestion();
   congestion_accepted_ = allow_congestion_ || use_cugr_;
@@ -589,6 +600,8 @@ void GlobalRouter::finishGlobalRouting(bool save_guides)
   if (verbose_) {
     reportCongestion();
   }
+  const double congestion_time = congestion_timer.elapsed();
+  utl::Timer wirelength_timer;
   computeWirelength();
   if (verbose_) {
     logger_->info(GRT, 14, "Routed nets: {}", routes_.size());
@@ -597,6 +610,8 @@ void GlobalRouter::finishGlobalRouting(bool save_guides)
   if (!routes_.empty() && hasInitialSteinerWirelengths()) {
     computeDetourMetrics();
   }
+  const double wirelength_time = wirelength_timer.elapsed();
+  utl::Timer guides_timer;
   if (save_guides) {
     std::vector<odb::dbNet*> nets;
     nets.reserve(block_->getNets().size());
@@ -604,6 +619,14 @@ void GlobalRouter::finishGlobalRouting(bool save_guides)
       nets.push_back(db_net);
     }
     saveGuides(nets);
+  }
+  if (verbose_ && use_cugr_ && cugr_->isBonnRoute()) {
+    logger_->report(
+        "BonnRoute GR shell timing: congestion export and report {:.3f}s, "
+        "wirelength {:.3f}s, guides {:.3f}s.",
+        congestion_time,
+        wirelength_time,
+        guides_timer.elapsed());
   }
 
   if (is_congested_) {
