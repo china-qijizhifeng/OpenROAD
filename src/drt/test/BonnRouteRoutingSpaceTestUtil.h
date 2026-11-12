@@ -64,6 +64,11 @@ inline std::vector<LayerRules> randomRules(std::mt19937& rng,
         r.line_end.space = randomInt(rng, base, base + 10);
         r.line_end.within = randomInt(rng, 1, base);
       }
+      // Nondefault rules: spacing of NDR wires (0: none on this layer).
+      for (int k = rng() % 3; k > 0; k--) {
+        r.ndr_spacing.push_back(
+            rng() % 4 == 0 ? 0 : randomInt(rng, base, 3 * base));
+      }
     }
     rules.push_back(r);
   }
@@ -139,7 +144,12 @@ inline StoredShape randomShape(std::mt19937& rng,
   const Coord x = randomInt(rng, 1, extent - dx - 1);
   const Coord y = randomInt(rng, 1, extent - dy - 1);
   s.rect = {x, y, x + dx, y + dy};
-  s.cls = classes.classify(layer, s.rect, role);
+  // Routed metal of an NDR net now and then.
+  const int ndr
+      = !rules.via_layer && !rules.ndr_spacing.empty()
+            ? randomInt(rng, 0, static_cast<int>(rules.ndr_spacing.size()))
+            : 0;
+  s.cls = classes.classify(layer, s.rect, role, ndr);
   return s;
 }
 
