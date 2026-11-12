@@ -166,6 +166,10 @@ bool BonnRouteDRParams::set(const std::string& name, const double value)
     exact_future_cost = v != 0;
   } else if (name == "potential_check") {
     potential_check = v != 0;
+  } else if (name == "notch_fill") {
+    notch_fill = v != 0;
+  } else if (name == "final_ripup") {
+    final_ripup = v != 0;
   } else if (name == "potential_detour_tiles") {
     potential_detour_tiles = std::max(0, v);
   } else if (name == "critical_nets") {
@@ -1690,6 +1694,7 @@ void BonnRouteDR::AccessStats::add(const AccessStats& o)
   fallback += o.fallback;
   drc_rejected += o.drc_rejected;
   same_net_rejected += o.same_net_rejected;
+  offgrid_rejected += o.offgrid_rejected;
   grid_vertices += o.grid_vertices;
   settled += o.settled;
   search_seconds += o.search_seconds;
@@ -2316,7 +2321,11 @@ void BonnRouteDR::offTrackCatalogue(const int net,
       layer.cost_x = layers_[z].horizontal ? 1 : jog;
       layer.cost_y = layers_[z].horizontal ? jog : 1;
     }
-    grid_in.layers.push_back({z >= 0 ? tau_[z] : 1,
+    // Layers without a track layer (the pin layer below the routing
+    // layers) take the manufacturing grid: their lines at multiples of tau
+    // are also lines of the adjacent layers (Algorithm 3), and tau = 1 put
+    // wires of those layers off the grid.
+    grid_in.layers.push_back({z >= 0 ? tau_[z] : mfg,
                               layer.obstacles,
                               points_only && fr == pin_layer});
     req.layers.push_back(std::move(layer));
@@ -2437,6 +2446,14 @@ void BonnRouteDR::offTrackCatalogue(const int net,
   step_timer.reset();
   for (const br::OffTrackPath& path : res.paths) {
     const Target& target = targets[path.target_id];
+    // Every node is on the manufacturing grid (all blockage-grid lines are);
+    // a path that is not would be an Off Grid violation for drt.
+    if (std::ranges::any_of(path.nodes, [mfg](const br::RouteNode& n) {
+          return n.p.x % mfg != 0 || n.p.y % mfg != 0;
+        })) {
+      stats.offgrid_rejected++;
+      continue;
+    }
     AccessOption opt;
     opt.offtrack = true;
     opt.vertex = target.vertex;
@@ -3137,7 +3154,8 @@ void BonnRouteDR::buildOffTrackAccess(const std::vector<char>& pre_skip)
         "BonnRoute off-track access: {} instances in {} circuit classes, {} "
         "reused class solutions, {} re-solved, {} mapping failures; {} pin "
         "catalogues, {} paths ({:.2f} per pin), {} empty, {} fallback stubs; "
-        "{} DRC-rejected, {} same-net-rejected; {} blockage-grid vertices, "
+        "{} DRC-rejected, {} same-net-rejected, {} off-grid-rejected; {} "
+        "blockage-grid vertices, "
         "{} settled; search {:.2f}s; {} selections ({} optimal, {} nodes); "
         "{} primary paths; {:.2f}s. Empty catalogues: {} without usable "
         "access point or pin shape, {} without usable on-track point, {} "
@@ -3155,6 +3173,7 @@ void BonnRouteDR::buildOffTrackAccess(const std::vector<char>& pre_skip)
         stats.fallback,
         stats.drc_rejected,
         stats.same_net_rejected,
+        stats.offgrid_rejected,
         stats.grid_vertices,
         stats.settled,
         stats.search_seconds,
@@ -5276,6 +5295,7 @@ void BonnRouteDR::routeRipupQueue(const std::vector<int>& failed)
 void BonnRouteDR::writeNets()
 {
   frTechObject* tech = design_->getTech();
+  std::vector<std::pair<frLayerNum, odb::Rect>> notch_fill_rects;
   for (NetData& data : nets_) {
     if (!data.routed) {
       continue;
@@ -5402,8 +5422,165 @@ void BonnRouteDR::writeNets()
       via->setTapered(data.wire_type != 0 && v.wire_type == 0);
       net->addVia(std::move(via));
     }
+    if (params_.notch_fill) {
+      fillNotches(net, data.id, notch_fill_rects);
+    }
     net->setHasInitialRouting(true);
     net->setModified(true);
+  }
+}
+
+void BonnRouteDR::fillNotches(
+    frNet* net,
+    const int id,
+    std::vector<std::pair<frLayerNum, odb::Rect>>& fills)
+{
+  // drt checks the spacing between separated pieces of one net's metal on
+  // a layer (same-net Metal Spacing): a via pad next to a jog of its own
+  // wire, two via pads one pitch apart, a pad next to a pin shape. Filling
+  // the gap joins the pieces into one polygon.
+  struct Piece
+  {
+    frLayerNum layer;
+    odb::Rect rect;
+    bool routed;
+  };
+  std::vector<Piece> pieces;
+  std::vector<std::pair<frLayerNum, odb::Point>> anchors;
+  for (const auto& shape : net->getShapes()) {
+    if (shape->typeId() != frcPathSeg) {
+      continue;
+    }
+    const auto* seg = static_cast<const frPathSeg*>(shape.get());
+    pieces.push_back({seg->getLayerNum(), seg->getBBox(), true});
+    const auto [b, e] = seg->getPoints();
+    anchors.emplace_back(seg->getLayerNum(), b);
+    anchors.emplace_back(seg->getLayerNum(), e);
+  }
+  for (const auto& via : net->getVias()) {
+    const frViaDef* def = via->getViaDef();
+    pieces.push_back({def->getLayer1Num(), via->getLayer1BBox(), true});
+    pieces.push_back({def->getLayer2Num(), via->getLayer2BBox(), true});
+    anchors.emplace_back(def->getLayer1Num(), via->getOrigin());
+    anchors.emplace_back(def->getLayer2Num(), via->getOrigin());
+  }
+  for (const auto& patch : net->getPatchWires()) {
+    pieces.push_back({patch->getLayerNum(), patch->getBBox(), true});
+  }
+  std::vector<frRect> pin_shapes;
+  for (frInstTerm* it : net->getInstTerms()) {
+    it->getShapes(pin_shapes);
+  }
+  for (frBTerm* bt : net->getBTerms()) {
+    bt->getShapes(pin_shapes);
+  }
+  for (const frRect& r : pin_shapes) {
+    pieces.push_back({r.getLayerNum(), r.getBBox(), false});
+  }
+  const size_t original = pieces.size();
+  for (size_t a = 0; a < original; a++) {
+    if (!pieces[a].routed) {
+      continue;
+    }
+    const frLayerNum layer = pieces[a].layer;
+    const int z = layer >= 0 && layer < static_cast<int>(z_of_fr_.size())
+                      ? z_of_fr_[layer]
+                      : -1;
+    if (z < 0) {
+      continue;
+    }
+    for (size_t b = 0; b < original; b++) {
+      if (b == a || pieces[b].layer != layer || (pieces[b].routed && b < a)) {
+        continue;
+      }
+      const odb::Rect& ra = pieces[a].rect;
+      const odb::Rect& rb = pieces[b].rect;
+      const int gx = std::max(rb.xMin() - ra.xMax(), ra.xMin() - rb.xMax());
+      const int gy = std::max(rb.yMin() - ra.yMax(), ra.yMin() - rb.yMax());
+      odb::Rect fill;
+      int gap = 0;
+      int prl = 0;
+      if (gx > 0 && gy < 0) {
+        gap = gx;
+        prl = -gy;
+        fill.init(std::min(ra.xMax(), rb.xMax()),
+                  std::max(ra.yMin(), rb.yMin()),
+                  std::max(ra.xMin(), rb.xMin()),
+                  std::min(ra.yMax(), rb.yMax()));
+      } else if (gy > 0 && gx < 0) {
+        gap = gy;
+        prl = -gx;
+        fill.init(std::max(ra.xMin(), rb.xMin()),
+                  std::min(ra.yMax(), rb.yMax()),
+                  std::min(ra.xMax(), rb.xMax()),
+                  std::max(ra.yMin(), rb.yMin()));
+      } else {
+        continue;
+      }
+      if (gap >= spacing(z, ra.minDXDY(), rb.minDXDY(), prl)) {
+        continue;
+      }
+      // Already joined by another piece.
+      if (std::ranges::any_of(pieces, [&](const Piece& c) {
+            return c.layer == layer && c.rect.contains(fill);
+          })) {
+        continue;
+      }
+      // Legal against other nets: the routing space (their routing, pins
+      // and blockages) and the fills written for earlier nets.
+      const bool along_x = fill.dx() >= fill.dy();
+      RShape shape{layer, fill};
+      shape.role = (fill.dx() == fill.dy() || along_x == layers_[z].horizontal)
+                       ? br::ShapeRole::kPreferredWire
+                       : br::ShapeRole::kNonPreferredWire;
+      if (shapeConflicts(shape, id, nullptr)) {
+        continue;
+      }
+      const frCoord need = spacing(z, fill.minDXDY(), fill.minDXDY(), 0);
+      if (std::ranges::any_of(fills, [&](const auto& other) {
+            if (other.first != layer) {
+              return false;
+            }
+            const odb::Rect& o = other.second;
+            const int dx
+                = std::max(o.xMin() - fill.xMax(), fill.xMin() - o.xMax());
+            const int dy
+                = std::max(o.yMin() - fill.yMax(), fill.yMin() - o.yMax());
+            return std::max(dx, dy) < need;
+          })) {
+        continue;
+      }
+      // Anchored at a via origin or a wire end of the net on this layer
+      // (FlexDR's connectivity check keeps patches only there).
+      const odb::Point center((fill.xMin() + fill.xMax()) / 2,
+                              (fill.yMin() + fill.yMax()) / 2);
+      const std::pair<frLayerNum, odb::Point>* anchor = nullptr;
+      int64_t best = std::numeric_limits<int64_t>::max();
+      for (const auto& candidate : anchors) {
+        if (candidate.first != layer) {
+          continue;
+        }
+        const int64_t d
+            = odb::Point::manhattanDistance(candidate.second, center);
+        if (d < best) {
+          best = d;
+          anchor = &candidate;
+        }
+      }
+      if (anchor == nullptr) {
+        continue;
+      }
+      auto pwire = std::make_unique<frPatchWire>();
+      pwire->setLayerNum(layer);
+      pwire->setOrigin(anchor->second);
+      odb::Rect offset = fill;
+      offset.moveDelta(-anchor->second.x(), -anchor->second.y());
+      pwire->setOffsetBox(offset);
+      net->addPatchWire(std::move(pwire));
+      pieces.push_back({layer, fill, true});
+      fills.emplace_back(layer, fill);
+      notch_fills_++;
+    }
   }
 }
 
@@ -5656,9 +5833,27 @@ void BonnRouteDR::main()
     routeParallel(regular, failed_first);
   }
   const double parallel_time = timer.elapsed();
-  // FlexDR handles unresolved nets unless serial rip-up is requested.
-  if (params_.ripup) {
+  // Unresolved nets get the serial rip-up sequences of Sec. 4.4 (ripup,
+  // or final_ripup for the nets the parallel phases left). A net left to
+  // FlexDR is routed by its iteration 0 over the fixed BonnRoute routing,
+  // which is where its shorts come from.
+  if (params_.ripup || params_.final_ripup) {
+    const double ripup_start = timer.elapsed();
+    const size_t before = failed_first.size();
     routeRipupQueue(failed_first);
+    const auto still = std::ranges::count_if(
+        failed_first, [&](const int id) { return !nets_[id].routed; });
+    if (params_.verbose) {
+      logger_->report(
+          "BonnRoute DR rip-up phase: {} nets, {} routed, {} left; {} rip-ups, "
+          "{} rollbacks; {:.2f}s.",
+          before,
+          static_cast<int64_t>(before) - still,
+          still,
+          ripup_events_,
+          rollbacks_,
+          timer.elapsed() - ripup_start);
+    }
   }
   if (params_.verbose) {
     logger_->report("BonnRoute DR routing digest {:016x}.", routingDigest());
@@ -5975,12 +6170,13 @@ void BonnRouteDR::main()
         "away from access points left to FlexDR; {} via pads on pins away "
         "from access points (not FlexDR terms, kept); {} via pads at access "
         "points marked connected; {} nets with wrong-way or off-track wires "
-        "on on-track-only layers left to FlexDR.",
+        "on on-track-only layers left to FlexDR; {} same-net notch fills.",
         guard_nets_,
         guard_contacts_,
         guard_via_contacts_,
         connected_vias_,
-        wrong_way_nets_);
+        wrong_way_nets_,
+        notch_fills_);
     if (params_.postprocess) {
       logger_->report(
           "BonnRoute DR post-processing: {} layer runs, same-net violations "

@@ -202,6 +202,15 @@ struct BonnRouteDRParams
   int access_spread_weight = 1;
   // Same-net post-processing of each connection (Sec. 4.4).
   bool postprocess = true;
+  // Fill the gap between two separated pieces of one net's metal (wires,
+  // via pads, patches, pins) that are closer than drt's spacing, with a
+  // patch wire, when the fill is legal against other nets (same-net
+  // spacing of via pads and pins, which the path post-processing does not
+  // see).
+  bool notch_fill = true;
+  // Rip-up sequences (Sec. 4.4) for the nets the parallel phases leave,
+  // also when `ripup` is off (2013-improved).
+  bool final_ripup = true;
   // Catalogue paths start at the pin's OpenROAD access points (1) or
   // anywhere on the pin (0, as in the paper). FlexDR's clean-up needs every
   // pin contact at an access point, so 0 is incompatible with it (see
@@ -445,6 +454,7 @@ class BonnRouteDR
     int64_t fallback = 0;
     int64_t drc_rejected = 0;
     int64_t same_net_rejected = 0;
+    int64_t offgrid_rejected = 0;
     int64_t grid_vertices = 0;
     int64_t settled = 0;
     double search_seconds = 0;
@@ -545,6 +555,7 @@ class BonnRouteDR
   bool wireOnTracks(const OutWire& wire) const;
   int64_t wrong_way_nets_ = 0;
   int64_t connected_vias_ = 0;
+  int64_t notch_fills_ = 0;
   void accessPointsOf(const frBlockObject* pin,
                       std::vector<br::RouteNode>& out) const;
   // Pin contacts of the net's geometry that are not access points (wire
@@ -757,6 +768,10 @@ class BonnRouteDR
   bool routedConflicts(const RShape& shape, int net) const;
   frCoord spacing(int z, frCoord width1, frCoord width2, frCoord prl) const;
   void writeNets();
+  // notch_fill for one written net; fills of earlier nets are in `fills`.
+  void fillNotches(frNet* net,
+                   int id,
+                   std::vector<std::pair<frLayerNum, odb::Rect>>& fills);
 
   int tileX(frCoord x) const;
   int tileY(frCoord y) const;
