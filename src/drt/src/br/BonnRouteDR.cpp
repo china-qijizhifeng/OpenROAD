@@ -170,6 +170,8 @@ bool BonnRouteDRParams::set(const std::string& name, const double value)
     notch_fill = v != 0;
   } else if (name == "final_ripup") {
     final_ripup = v != 0;
+  } else if (name == "final_ripup_max_share") {
+    final_ripup_max_share = std::clamp(v, 0, 100);
   } else if (name == "final_ripup_effort") {
     final_ripup_effort = std::max(0, v);
   } else if (name == "potential_detour_tiles") {
@@ -5867,7 +5869,24 @@ void BonnRouteDR::main()
   // or final_ripup for the nets the parallel phases left). A net left to
   // FlexDR is routed by its iteration 0 over the fixed BonnRoute routing,
   // which is where its shorts come from.
-  if (params_.ripup || params_.final_ripup) {
+  // Many failed nets point at rules the routing space does not model
+  // (aes_asap7: 1,698 of ~17k nets; cut spacing tables, EOL keep-out):
+  // rip-up then routes nets FlexDR must clean up anyway (DR stage +3.8%
+  // to +162% for budgets 5% to unlimited), so the final phase is skipped
+  // above final_ripup_max_share percent of the routed nets.
+  const bool final_phase = params_.final_ripup
+                           && static_cast<int64_t>(failed_first.size()) * 100
+                                  <= static_cast<int64_t>(order.size())
+                                         * params_.final_ripup_max_share;
+  if (params_.final_ripup && !final_phase && params_.verbose) {
+    logger_->report(
+        "BonnRoute DR rip-up phase skipped: {} of {} nets failed (more than "
+        "{}%).",
+        failed_first.size(),
+        order.size(),
+        params_.final_ripup_max_share);
+  }
+  if (params_.ripup || final_phase) {
     const double ripup_start = timer.elapsed();
     const size_t before = failed_first.size();
     // final_ripup_effort: the serial phase may settle this percentage of

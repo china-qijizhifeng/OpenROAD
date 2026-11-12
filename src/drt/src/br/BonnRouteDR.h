@@ -214,6 +214,8 @@ struct BonnRouteDRParams
   // Effort budget of that phase in percent of the vertices settled by the
   // parallel phases (0: unlimited).
   int final_ripup_effort = 10;
+  // Skip that phase when more than this percentage of the nets failed.
+  int final_ripup_max_share = 2;
   // Catalogue paths start at the pin's OpenROAD access points (1) or
   // anywhere on the pin (0, as in the paper). FlexDR's clean-up needs every
   // pin contact at an access point, so 0 is incompatible with it (see
