@@ -170,6 +170,8 @@ bool BonnRouteDRParams::set(const std::string& name, const double value)
     notch_fill = v != 0;
   } else if (name == "final_ripup") {
     final_ripup = v != 0;
+  } else if (name == "final_ripup_effort") {
+    final_ripup_effort = std::max(0, v);
   } else if (name == "potential_detour_tiles") {
     potential_detour_tiles = std::max(0, v);
   } else if (name == "critical_nets") {
@@ -5275,14 +5277,22 @@ bool BonnRouteDR::ripupSequence(const int id,
   return true;
 }
 
-void BonnRouteDR::routeRipupQueue(const std::vector<int>& failed)
+void BonnRouteDR::routeRipupQueue(const std::vector<int>& failed,
+                                  const int64_t settled_budget)
 {
   std::vector<int> queue = failed;
   std::vector<SavedRouting> journal;
+  const Worker& worker = workers_.front();
+  const int64_t start = worker.settled;
   for (int pass = 0; pass < params_.ripup_passes && !queue.empty(); pass++) {
     std::vector<int> unrouted;
     for (const int id : queue) {
       if (nets_[id].routed) {
+        continue;
+      }
+      if (settled_budget > 0 && worker.settled - start >= settled_budget) {
+        unrouted.push_back(id);
+        ripup_budget_skipped_++;
         continue;
       }
       journal.clear();
@@ -5532,6 +5542,12 @@ void BonnRouteDR::fillNotches(
         continue;
       }
       if (gap >= spacing(z, ra.minDXDY(), rb.minDXDY(), prl)) {
+        continue;
+      }
+      // The joined metal is as wide as the overlap: below the minimum width
+      // the fill would be a Min Width violation (jpeg: 143 new markers).
+      if (prl < static_cast<int>(
+              design_->getTech()->getLayer(layer)->getMinWidth())) {
         continue;
       }
       // Already joined by another piece.
@@ -5854,17 +5870,32 @@ void BonnRouteDR::main()
   if (params_.ripup || params_.final_ripup) {
     const double ripup_start = timer.elapsed();
     const size_t before = failed_first.size();
-    routeRipupQueue(failed_first);
+    // final_ripup_effort: the serial phase may settle this percentage of
+    // the vertices the parallel phases settled (deterministic). Smaller
+    // nets first, so the budget goes to the most nets.
+    int64_t budget = 0;
+    if (!params_.ripup && params_.final_ripup_effort > 0) {
+      int64_t parallel_settled = 0;
+      for (const Worker& w : workers_) {
+        parallel_settled += w.settled;
+      }
+      budget = parallel_settled * params_.final_ripup_effort / 100;
+      std::ranges::stable_sort(failed_first, [&](int a, int b) {
+        return nets_[a].hpwl < nets_[b].hpwl;
+      });
+    }
+    routeRipupQueue(failed_first, budget);
     const auto still = std::ranges::count_if(
         failed_first, [&](const int id) { return !nets_[id].routed; });
     if (params_.verbose) {
       logger_->report(
-          "BonnRoute DR rip-up phase: {} nets, {} routed, {} left; {} rip-ups, "
-          "{} rollbacks; {:.2f}s ({} connects without rip-up {:.2f}s, {} with "
-          "rip-up {:.2f}s).",
+          "BonnRoute DR rip-up phase: {} nets, {} routed, {} left ({} over "
+          "the effort budget); {} rip-ups, {} rollbacks; {:.2f}s ({} connects "
+          "without rip-up {:.2f}s, {} with rip-up {:.2f}s).",
           before,
           static_cast<int64_t>(before) - still,
           still,
+          ripup_budget_skipped_,
           ripup_events_,
           rollbacks_,
           timer.elapsed() - ripup_start,

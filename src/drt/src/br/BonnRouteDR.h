@@ -211,6 +211,9 @@ struct BonnRouteDRParams
   // Rip-up sequences (Sec. 4.4) for the nets the parallel phases leave,
   // also when `ripup` is off (2013-improved).
   bool final_ripup = true;
+  // Effort budget of that phase in percent of the vertices settled by the
+  // parallel phases (0: unlimited).
+  int final_ripup_effort = 10;
   // Catalogue paths start at the pin's OpenROAD access points (1) or
   // anywhere on the pin (0, as in the paper). FlexDR's clean-up needs every
   // pin contact at an access point, so 0 is incompatible with it (see
@@ -674,7 +677,10 @@ class BonnRouteDR
                   int& xhi,
                   int& yhi) const;
   void routeParallel(const std::vector<int>& order, std::vector<int>& failed);
-  void routeRipupQueue(const std::vector<int>& failed);
+  // settled_budget: stop starting sequences once the serial worker settled
+  // this many vertices in the phase (0: unlimited).
+  void routeRipupQueue(const std::vector<int>& failed,
+                       int64_t settled_budget = 0);
   // try_plain: first try the connection without rip-up. The nets of the
   // rip-up queue have just failed that search, so their sequences start
   // with the rip-up mode search (which finds a legal path at no penalty
@@ -847,6 +853,7 @@ class BonnRouteDR
   // Statistics.
   int64_t ripup_events_ = 0;
   int64_t rollbacks_ = 0;
+  int64_t ripup_budget_skipped_ = 0;
   // Rip-up phase effort: connections without and with rip-up (time, count).
   double ripup_plain_seconds_ = 0;
   double ripup_mode_seconds_ = 0;
