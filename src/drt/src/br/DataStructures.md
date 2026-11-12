@@ -273,11 +273,18 @@ segment, so constant point levels on an edge imply its level.
   is written by the one thread whose region contains it; updates are applied
   in place, no deferral or merge is needed, and results do not depend on the
   thread count (configuration ids may differ between runs; they are content
-  addressed and nothing depends on their values). `netTileBox` adds
-  `halo_tiles_` tiles beyond the largest routing area, computed from the
-  rule interaction distance (`2 · (ruleReach + model + cell) + pitch`,
-  rounded up to tiles), so all reads and writes of a net stay in its region;
-  the halo does not depend on the classes interned later.
+  addressed and nothing depends on their values). `netTileBox` adds a halo
+  beyond the largest routing area, computed from the rule interaction
+  distance (`2 · (ruleReach + model + cell) + pitch`, rounded up to
+  tiles), so all reads and writes of a net stay in its region; the halo
+  does not depend on the classes interned later. The halo is per net
+  (`buildPartitionHalos`): the distance is taken over the grid layers the
+  net can touch, those up to the cut layer above the top layer of its
+  routing area (guides and access options plus `layer_dilation`) and the
+  low layers, so the large distances of the upper layers enter only for
+  nets routed there; a second term covers the access paths around the pins
+  (reservation release, dynamic generation: `(radius + 3)` pitches
+  `+ 2 τ + 2 ·` distance of the layers up to the one above the pin).
   `BonnRoutePartitionTest` checks equality with a serial run; run it with
   `-fsanitize=thread` as well.
 * Access footprint check (`BrAccessFootprint.h`, `partition_check 1`): the

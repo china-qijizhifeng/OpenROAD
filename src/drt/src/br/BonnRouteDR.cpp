@@ -842,6 +842,7 @@ void BonnRouteDR::buildRoutingSpace()
     max_pitch = std::max(max_pitch, info.pitch);
   }
   int64_t need = 0;
+  need_by_grid_layer_.assign(shape_classes_.numLayers(), 0);
   for (int g = 0; g < shape_classes_.numLayers(); g++) {
     const bool low = g >= track_grid_layers_;
     const int z = low ? 0 : g / 2;
@@ -919,9 +920,9 @@ void BonnRouteDR::buildRoutingSpace()
         extent(w.via[z].cut);
       }
     }
-    need = std::max<int64_t>(need,
-                             shape_classes_.ruleReach(g) + model
-                                 + std::max(geom.cross_cell, geom.along_cell));
+    need_by_grid_layer_[g] = int64_t{shape_classes_.ruleReach(g)} + model
+                             + std::max(geom.cross_cell, geom.along_cell);
+    need = std::max(need, need_by_grid_layer_[g]);
   }
   shape_grid_.init(&shape_classes_,
                    geometries,
@@ -956,11 +957,54 @@ void BonnRouteDR::buildRoutingSpace()
   interaction_reach_ = need + max_pitch;
   halo_tiles_ = static_cast<int>(
       std::max<int64_t>(1, (2 * need + max_pitch + tile - 1) / tile));
+  // Per net halos follow in buildPartitionHalos(), once tau is known.
+  area_halo_tiles_.assign(num_z, halo_tiles_);
+  access_halo_tiles_.assign(num_z, halo_tiles_);
   // Search label budget: a label count, search_label_mb MiB of 32-byte
   // labels (the vertex-search label size when the budget was introduced;
   // the count is kept so that searches stop at the same label).
   label_limit_ = static_cast<size_t>(std::max(0, params_.search_label_mb))
                  * (size_t{1} << 20) / 32;
+}
+
+void BonnRouteDR::buildPartitionHalos()
+{
+  const int num_z = graph_.numLayers();
+  const int64_t tile = std::max<int64_t>(1, std::min(tile_dx_, tile_dy_));
+  auto tiles = [tile](const int64_t distance) {
+    return static_cast<int>(
+        std::max<int64_t>(1, (distance + tile - 1) / tile));
+  };
+  // Access paths start within this many pitches of the pin (catalogue
+  // radius, stub jogs); dynamic generation looks two pitches farther and
+  // collects obstacles one pitch plus 2 tau beyond its targets.
+  const int64_t radius
+      = std::max(params_.offtrack_radius, params_.max_access_jog);
+  int64_t reach = 0;
+  frCoord pitch = 0;
+  int64_t tau = 0;
+  for (int z = 0; z < num_z; z++) {
+    // Grid layers of a net up to track layer z: wires up to z, vias up to
+    // the one between z - 1 and z, whose cut projects into the cut layer
+    // above z; the low layers hold pins and access vias.
+    for (int g = 0; g < shape_classes_.numLayers(); g++) {
+      if (g >= track_grid_layers_ || g <= 2 * z + 1) {
+        reach = std::max(reach, need_by_grid_layer_[g]);
+      }
+    }
+    // Pitches of the jog pairs and edges the updates recompute: layer z and
+    // its positions, the tracks of layer z + 1.
+    pitch = std::max(pitch, layers_[std::min(z + 1, num_z - 1)].pitch);
+    pitch = std::max(pitch, layers_[z].pitch);
+    tau = std::max<int64_t>(tau, z < static_cast<int>(tau_.size()) ? tau_[z] : 1);
+    // A shape change writes up to reach + one pitch beyond the shape and
+    // reads up to 2 * reach + one pitch; a query reads up to reach.
+    area_halo_tiles_[z] = tiles(2 * reach + pitch);
+    // Around a pin: its access paths lie within (radius + 1) pitches + 2 tau
+    // and are released like any shape; dynamic generation reads up to
+    // (radius + 3) pitches + 2 tau + reach.
+    access_halo_tiles_[z] = tiles((radius + 3) * pitch + 2 * tau + 2 * reach);
+  }
 }
 
 void BonnRouteDR::rebuildFastGrid()
@@ -4853,6 +4897,45 @@ br::TileBox BonnRouteDR::netCoreTileBox(const NetData& net) const
   return box;
 }
 
+int BonnRouteDR::netTopLayer(const NetData& net) const
+{
+  const int num_z = graph_.numLayers();
+  // Routing area (buildRegion, buildPathRegion): guide and option layers
+  // plus layer_dilation.
+  int top = -1;
+  for (const auto& tile : net.guide_tiles) {
+    top = std::max(top, tile[0]);
+  }
+  for (const Term& term : net.terms) {
+    for (const AccessOption& option : term.options) {
+      top = std::max(top, option.z);
+    }
+  }
+  if (top < 0) {
+    return num_z - 1;
+  }
+  return std::min(top + params_.layer_dilation, num_z - 1);
+}
+
+int BonnRouteDR::netAccessTopLayer(const NetData& net) const
+{
+  const int num_z = graph_.numLayers();
+  int top = 0;
+  for (const RShape& pin : net.pins) {
+    if (pin.layer >= 0 && pin.layer < static_cast<int>(z_of_fr_.size())
+        && z_of_fr_[pin.layer] >= 0) {
+      top = std::max(top, z_of_fr_[pin.layer] + 1);
+    }
+  }
+  return std::min(top, num_z - 1);
+}
+
+int BonnRouteDR::netHaloTiles(const NetData& net) const
+{
+  return std::max(area_halo_tiles_[netTopLayer(net)],
+                  access_halo_tiles_[netAccessTopLayer(net)]);
+}
+
 void BonnRouteDR::netTileBox(const NetData& net,
                              int& xlo,
                              int& ylo,
@@ -4861,7 +4944,7 @@ void BonnRouteDR::netTileBox(const NetData& net,
 {
   const br::TileBox core = netCoreTileBox(net);
   // Retry dilation plus the routing-space interaction halo (Sec. 5.1).
-  const int halo = params_.retry_dilation + halo_tiles_;
+  const int halo = params_.retry_dilation + netHaloTiles(net);
   xlo = core.xlo - halo;
   ylo = core.ylo - halo;
   xhi = core.xhi + halo;
@@ -4975,8 +5058,8 @@ void BonnRouteDR::reportFootprints()
   logger_->report(
       "BonnRoute DR access footprint check: {} region units, {} tail search "
       "units, {} tail commit units, {} recorded accesses; box margin {} "
-      "tiles (retry dilation {} + halo {}); {} accesses outside the net box "
-      "in {} units, {} units outside their region.",
+      "tiles (retry dilation {} + halo {}) at most; {} accesses outside the "
+      "net box in {} units, {} units outside their region.",
       total.units[kPhaseRegion],
       total.units[kPhaseTailSearch],
       total.units[kPhaseTailCommit],
@@ -6516,6 +6599,7 @@ void BonnRouteDR::main()
   buildFixed();
   lap();
   buildSameNetRules();
+  buildPartitionHalos();
   phases.same_net_rules = lap();
   // Reads the extra space of the nets built above (grt/BonnRouteExtraSpace.h).
   if (params_.spreading && params_.spread_from_extra_space) {
@@ -6800,6 +6884,43 @@ void BonnRouteDR::main()
     }
   }
   if (params_.verbose) {
+    // Sec. 5.1: halos of the nets' boxes.
+    std::vector<int64_t> nets_by_top(graph_.numLayers(), 0);
+    std::vector<int64_t> nets_by_access(graph_.numLayers(), 0);
+    std::vector<int64_t> nets_by_halo;
+    for (const NetData& net : nets_) {
+      if (net.skip) {
+        continue;
+      }
+      nets_by_top[netTopLayer(net)]++;
+      nets_by_access[netAccessTopLayer(net)]++;
+      const size_t halo = static_cast<size_t>(netHaloTiles(net));
+      if (nets_by_halo.size() <= halo) {
+        nets_by_halo.resize(halo + 1, 0);
+      }
+      nets_by_halo[halo]++;
+    }
+    std::string by_layer;
+    for (int z = 0; z < graph_.numLayers(); z++) {
+      by_layer += fmt::format(
+          "{}{} area {} tiles ({} nets) access {} tiles ({} nets)",
+          z == 0 ? "" : ", ",
+          layers_[z].layer->getName(),
+          area_halo_tiles_[z],
+          nets_by_top[z],
+          access_halo_tiles_[z],
+          nets_by_access[z]);
+    }
+    std::string by_halo;
+    for (size_t h = 0; h < nets_by_halo.size(); h++) {
+      if (nets_by_halo[h] > 0) {
+        by_halo += fmt::format(" {}:{}", h, nets_by_halo[h]);
+      }
+    }
+    logger_->report(
+        "BonnRoute DR partition halo by top layer: {}; nets by halo tiles{}.",
+        by_layer,
+        by_halo);
     const br::ShapeGrid::Statistics sg = shape_grid_.statistics();
     const br::FastGrid::Statistics fg = grid_.statistics();
     logger_->report(

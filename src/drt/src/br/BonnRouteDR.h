@@ -747,6 +747,15 @@ class BonnRouteDR
                        Worker& worker);
   // Tile box of the net's guides, access options and pins.
   br::TileBox netCoreTileBox(const NetData& net) const;
+  // Highest track layer of the net's routing area: guides and access
+  // options plus layer_dilation.
+  int netTopLayer(const NetData& net) const;
+  // Highest track layer of the access paths of the net's pins: the track
+  // layer above each pin's layer (offTrackCatalogue, buildAccess).
+  int netAccessTopLayer(const NetData& net) const;
+  // Halo of the net's box: the larger of area_halo_tiles_ at netTopLayer
+  // and access_halo_tiles_ at netAccessTopLayer.
+  int netHaloTiles(const NetData& net) const;
   // Tile box of everything the net's searches may touch, with halo.
   void netTileBox(const NetData& net,
                   int& xlo,
@@ -920,8 +929,22 @@ class BonnRouteDR
   std::vector<int> grid_of_fr_;
   int track_grid_layers_ = 0;
   // Tiles between a net's routing area and its partition box border, so
-  // that its routing-space updates and queries stay inside (Sec. 5.1).
+  // that its routing-space updates and queries stay inside (Sec. 5.1): the
+  // value for a routing area on all layers.
   int halo_tiles_ = 1;
+  // Largest distance at which an update or query of a shape-grid layer
+  // reads or writes (rule reach, model, one cell), per layer.
+  std::vector<int64_t> need_by_grid_layer_;
+  // The halo per net (buildPartitionHalos). area_halo_tiles_[z]: routing
+  // area up to track layer z; such a net reads and writes the grid layers
+  // up to the cut layer above z and the low layers, so the interaction
+  // distances of the layers above z, the largest ones, do not enter.
+  // access_halo_tiles_[z]: pins with access paths up to track layer z
+  // (reservation release and dynamic generation of access paths around the
+  // pins).
+  std::vector<int> area_halo_tiles_;
+  std::vector<int> access_halo_tiles_;
+  void buildPartitionHalos();
   // Largest distance at which two shapes of the routing space interact
   // (any layer, incl. via-layer rules), plus one pitch.
   int64_t interaction_reach_ = 0;
