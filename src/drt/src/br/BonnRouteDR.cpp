@@ -5222,17 +5222,31 @@ void BonnRouteDR::restoreRouting(const SavedRouting& saved)
 bool BonnRouteDR::ripupSequence(const int id,
                                 const int depth,
                                 const int dilation,
-                                std::vector<SavedRouting>& journal)
+                                std::vector<SavedRouting>& journal,
+                                const bool try_plain)
 {
   NetData& net = nets_[id];
   Worker& worker = workers_.front();
   journal.push_back(saveRouting(net));
-  if (connect(net, false, worker, dilation)) {
-    commitNet(net);
-    setReservations(net, false);
-    return true;
+  if (try_plain) {
+    const double start = omp_get_wtime();
+    const bool ok = connect(net, false, worker, dilation);
+    ripup_plain_seconds_ += omp_get_wtime() - start;
+    ripup_plain_connects_++;
+    if (ok) {
+      commitNet(net);
+      setReservations(net, false);
+      return true;
+    }
   }
-  if (depth >= params_.ripup_depth || !connect(net, true, worker, dilation)) {
+  if (depth >= params_.ripup_depth) {
+    return false;
+  }
+  const double start = omp_get_wtime();
+  const bool found = connect(net, true, worker, dilation);
+  ripup_mode_seconds_ += omp_get_wtime() - start;
+  ripup_mode_connects_++;
+  if (!found) {
     return false;
   }
   std::vector<int> victims;
@@ -5272,7 +5286,7 @@ void BonnRouteDR::routeRipupQueue(const std::vector<int>& failed)
         continue;
       }
       journal.clear();
-      if (ripupSequence(id, 0, pass, journal)) {
+      if (ripupSequence(id, 0, pass, journal, false)) {
         continue;
       }
       // Sec. 4.4: a failed sequence restores the original situation.
@@ -5846,13 +5860,18 @@ void BonnRouteDR::main()
     if (params_.verbose) {
       logger_->report(
           "BonnRoute DR rip-up phase: {} nets, {} routed, {} left; {} rip-ups, "
-          "{} rollbacks; {:.2f}s.",
+          "{} rollbacks; {:.2f}s ({} connects without rip-up {:.2f}s, {} with "
+          "rip-up {:.2f}s).",
           before,
           static_cast<int64_t>(before) - still,
           still,
           ripup_events_,
           rollbacks_,
-          timer.elapsed() - ripup_start);
+          timer.elapsed() - ripup_start,
+          ripup_plain_connects_,
+          ripup_plain_seconds_,
+          ripup_mode_connects_,
+          ripup_mode_seconds_);
     }
   }
   if (params_.verbose) {

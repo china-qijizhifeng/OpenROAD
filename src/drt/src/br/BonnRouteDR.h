@@ -675,10 +675,15 @@ class BonnRouteDR
                   int& yhi) const;
   void routeParallel(const std::vector<int>& order, std::vector<int>& failed);
   void routeRipupQueue(const std::vector<int>& failed);
+  // try_plain: first try the connection without rip-up. The nets of the
+  // rip-up queue have just failed that search, so their sequences start
+  // with the rip-up mode search (which finds a legal path at no penalty
+  // when one exists).
   bool ripupSequence(int net,
                      int depth,
                      int dilation,
-                     std::vector<SavedRouting>& journal);
+                     std::vector<SavedRouting>& journal,
+                     bool try_plain = true);
   SavedRouting saveRouting(const NetData& net) const;
   int64_t input_wires_ = 0;
   int64_t input_reserved_ = 0;
@@ -842,6 +847,11 @@ class BonnRouteDR
   // Statistics.
   int64_t ripup_events_ = 0;
   int64_t rollbacks_ = 0;
+  // Rip-up phase effort: connections without and with rip-up (time, count).
+  double ripup_plain_seconds_ = 0;
+  double ripup_mode_seconds_ = 0;
+  int64_t ripup_plain_connects_ = 0;
+  int64_t ripup_mode_connects_ = 0;
   double partition_wall_ = 0;
   double partition_busy_ = 0;
   double partition_capacity_ = 0;
