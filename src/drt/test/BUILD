@@ -162,6 +162,17 @@ COMPULSORY_TESTS = [
 PASSFAIL_TESTS = [
 ]
 
+regression_test(
+    name = "bonnroute_incremental_fallback",
+    check_log = False,
+    check_passfail = True,
+    data = [
+        ":regression_resources",
+        "ta_ap_aligned.def",
+        "ta_ap_aligned.route_guide",
+    ],
+)
+
 ALL_TESTS = COMPULSORY_TESTS + PASSFAIL_TESTS
 
 BIG_TESTS = [

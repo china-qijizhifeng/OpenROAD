@@ -272,6 +272,7 @@ class TritonRoute : public PinAccessService
   void initDesign();
   void initGraphics();
   void ta();
+  void prepareBonnRouteFallbacks(std::vector<odb::Rect>& regions);
   void dr();
   void applyUpdates(const std::vector<std::vector<drUpdate>>& updates);
   void getDRCMarkers(std::list<std::unique_ptr<frMarker>>& markers,

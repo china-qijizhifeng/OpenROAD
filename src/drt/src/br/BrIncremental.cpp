@@ -1446,15 +1446,6 @@ void BonnRouteDR::routeIncremental(std::vector<odb::Rect>& regions)
       }
     }
   }
-  frBlock* block = design_->getTopBlock();
-  auto add_guides = [&](const NetData& data) {
-    for (const auto& guide : data.net->getGuides()) {
-      odb::Rect box
-          = block->getGCellBox(block->getGCellIdx(guide->getBeginPoint()));
-      box.merge(block->getGCellBox(block->getGCellIdx(guide->getEndPoint())));
-      regions.push_back(box);
-    }
-  };
   int64_t written = 0;
   int64_t left = 0;
   for (const int id : touched) {
@@ -1481,7 +1472,6 @@ void BonnRouteDR::routeIncremental(std::vector<odb::Rect>& regions)
             s, routedShapeType(s.role), data.id, false, nullptr, &pending);
       }
       fast_builder_.flush(pending);
-      add_guides(data);
       left++;
     }
     data.shapes.clear();
@@ -1497,15 +1487,11 @@ void BonnRouteDR::routeIncremental(std::vector<odb::Rect>& regions)
     if (!data.input_present && !data.net->hasInitialRouting()) {
       // Failed in BonnRoute and never written.
       if (std::ranges::find(touched, id) == touched.end()) {
-        add_guides(data);
         left++;
       }
     }
   }
-  for (const int id : not_prepared) {
-    add_guides(nets_[id]);
-    left++;
-  }
+  left += not_prepared.size();
   regions.insert(
       regions.end(), stats.inst_regions.begin(), stats.inst_regions.end());
   for (NetData& data : nets_) {

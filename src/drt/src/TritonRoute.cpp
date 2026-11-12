@@ -864,6 +864,31 @@ void TritonRoute::ta()
   }
 }
 
+void TritonRoute::prepareBonnRouteFallbacks(std::vector<odb::Rect>& regions)
+{
+  frBlock* block = getDesign()->getTopBlock();
+  bool needs_ta = false;
+  for (const auto& net : block->getNets()) {
+    if (net->hasInitialRouting() || !net->hasGuides()) {
+      continue;
+    }
+    needs_ta = true;
+    // Include every unrouted net, including NDR nets BonnRoute does not try.
+    // All workers along its guides must run to connect its pin components.
+    for (const auto& guide : net->getGuides()) {
+      odb::Rect box
+          = block->getGCellBox(block->getGCellIdx(guide->getBeginPoint()));
+      box.merge(block->getGCellBox(block->getGCellIdx(guide->getEndPoint())));
+      regions.push_back(box);
+    }
+  }
+  if (needs_ta) {
+    // FlexDR creates the boundary pins of unrouted nets from TA guide routes.
+    // Without them, separate workers can leave disconnected pin components.
+    ta();
+  }
+}
+
 void TritonRoute::dr()
 {
   num_drvs_ = -1;
@@ -1331,6 +1356,7 @@ int TritonRoute::main()
     }
     std::vector<odb::Rect> regions;
     bonnroute_dr_->routeIncremental(regions);
+    prepareBonnRouteFallbacks(regions);
     incremental_changed_regions_ = std::move(regions);
     bonnroute_cleanup_ = true;
     if (!bonnroute_params_->incremental_resident) {
