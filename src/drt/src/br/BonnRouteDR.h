@@ -393,10 +393,52 @@ class BonnRouteDR
     frBTerm* bterm = nullptr;
     int primary = -1;
   };
+  // Why a net is left to FlexDR (reportLeftNets): the step at which its
+  // last connect() failed, the outcome of its last rip-up sequence, and the
+  // output guard that dropped its routing.
+  enum LeftStep : uint8_t
+  {
+    kLeftNone = 0,
+    kLeftAccess,        // a pin without a feasible access option
+    kLeftNoPath,        // a connection without a path in the net's area
+    kLeftSearchBudget,  // a search stopped at its label or effort budget
+    kNumLeftSteps
+  };
+  enum RipupOutcome : uint8_t
+  {
+    kRipupNotStarted = 0,
+    kRipupBudget,        // the phase's effort budget was used up
+    kRipupDepth,         // ripup_depth reached
+    kRipupNoPath,        // no path in rip-up mode (LeftStep says why)
+    kRipupVictimLimit,   // a victim was ripped up max_ripups times already
+    kRipupVictimFailed,  // a victim could not be routed again
+    kNumRipupOutcomes
+  };
+  enum LeftGuard : uint8_t
+  {
+    kGuardNone = 0,
+    kGuardPinContact,  // a pin contact away from the pin's access points
+    kGuardOnTrack,     // a wire off the tracks of an on-track-only layer
+  };
+  // What blocks the access options of a pin at the end of routing, the
+  // least severe kind over its options.
+  enum AccessBlock : uint8_t
+  {
+    kAccessNoOption = 0,  // the pin has no access option
+    kAccessFeasible,      // an option is legal now
+    kAccessRouted,        // routed shapes of other nets only
+    kAccessReservation,   // reservations of other nets
+    kAccessFixed,         // blockages or pins of other nets
+    kNumAccessBlocks
+  };
   struct NetData
   {
     frNet* net = nullptr;
     int id = 0;
+    uint8_t left_step = kLeftNone;
+    int left_term = -1;
+    uint8_t ripup_outcome = kRipupNotStarted;
+    uint8_t left_guard = kGuardNone;
     std::vector<Term> terms;
     std::vector<OutWire> wires;
     std::vector<OutVia> vias;
@@ -822,6 +864,17 @@ class BonnRouteDR
                      std::vector<SavedRouting>& journal,
                      bool try_plain = true);
   SavedRouting saveRouting(const NetData& net) const;
+  // Where the running rip-up sequence failed first: the outcome and the
+  // depth of that call.
+  uint8_t sequence_outcome_ = kRipupNotStarted;
+  int sequence_outcome_depth_ = 0;
+  // Kinds of shapes of other nets that `shape` violates: bit 0 blockages,
+  // bit 1 pins, bit 2 reservations, bit 3 routed wires and vias.
+  int blockerKinds(const RShape& shape, int net) const;
+  AccessBlock accessBlock(const NetData& net, const Term& term) const;
+  // Log: the nets left to FlexDR by cause; debug group bonnroute_left
+  // prints one line per net.
+  void reportLeftNets() const;
   int64_t input_wires_ = 0;
   int64_t input_reserved_ = 0;
   void restoreRouting(const SavedRouting& saved);

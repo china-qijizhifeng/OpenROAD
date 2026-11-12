@@ -4204,6 +4204,8 @@ bool BonnRouteDR::connect(NetData& net,
   // searches read the fast grid through an exact overlay with the net's
   // shapes removed, and every checker query of the connection ignores them
   // (see DataStructures.md); the routing space itself is not changed.
+  net.left_step = kLeftNone;
+  net.left_term = -1;
   worker.footprint.setStep(kStepAccess);
   ownShapes(net, worker.own_shapes);
   fast_builder_.buildOverlay(net.id, worker.own_shapes, worker.overlay);
@@ -4295,6 +4297,8 @@ bool BonnRouteDR::connectWithoutOwnShapes(NetData& net,
     }
     if (std::ranges::find(valid[t], 1) == valid[t].end()) {
       worker.access_failures++;
+      net.left_step = kLeftAccess;
+      net.left_term = t;
       return false;
     }
   }
@@ -4355,10 +4359,13 @@ bool BonnRouteDR::connectInRegion(NetData& net,
   // Effort budget of a speculative tail attempt (tail_defer_settled):
   // checked before each search, so an attempt settles at most the budget
   // plus one search; the net is then deferred (see routeSpeculative).
-  auto over_budget = [&worker]() {
+  auto over_budget = [&worker, &net]() {
     if (worker.effort_budget > 0
         && worker.settled - worker.effort_start >= worker.effort_budget) {
       worker.effort_exceeded = true;
+    }
+    if (worker.effort_exceeded) {
+      net.left_step = kLeftSearchBudget;
     }
     return worker.effort_exceeded;
   };
@@ -4667,11 +4674,13 @@ bool BonnRouteDR::connectInRegion(NetData& net,
       }
       req.sources = sources;
       if (!set_targets(false)) {
+        net.left_step = kLeftNoPath;
         return false;
       }
       res = run(false);
     }
     if (!res.found) {
+      net.left_step = res.aborted ? kLeftSearchBudget : kLeftNoPath;
       return false;
     }
     const int t = res.target_id / 1024;
@@ -4767,6 +4776,7 @@ bool BonnRouteDR::connectInRegion(NetData& net,
   }
   for (Term& term : net.terms) {
     if (term.chosen < 0) {
+      net.left_step = kLeftNoPath;
       return false;
     }
     const AccessOption& opt = term.options[term.chosen];
@@ -6287,6 +6297,8 @@ bool BonnRouteDR::ripupSequence(const int id,
     }
   }
   if (depth >= params_.ripup_depth) {
+    sequence_outcome_ = kRipupDepth;
+    sequence_outcome_depth_ = depth;
     return false;
   }
   const double start = omp_get_wtime();
@@ -6294,12 +6306,16 @@ bool BonnRouteDR::ripupSequence(const int id,
   ripup_mode_seconds_ += omp_get_wtime() - start;
   ripup_mode_connects_++;
   if (!found) {
+    sequence_outcome_ = kRipupNoPath;
+    sequence_outcome_depth_ = depth;
     return false;
   }
   std::vector<int> victims;
   collectVictims(net, victims);
   for (const int victim : victims) {
     if (nets_[victim].ripups >= params_.max_ripups) {
+      sequence_outcome_ = kRipupVictimLimit;
+      sequence_outcome_depth_ = depth;
       return false;
     }
   }
@@ -6338,18 +6354,33 @@ void BonnRouteDR::routeRipupQueue(const std::vector<int>& failed,
       if (settled_budget > 0 && worker.settled - start >= settled_budget) {
         unrouted.push_back(id);
         ripup_budget_skipped_++;
+        if (nets_[id].ripup_outcome == kRipupNotStarted) {
+          nets_[id].ripup_outcome = kRipupBudget;
+        }
         continue;
       }
       journal.clear();
+      sequence_outcome_ = kRipupNotStarted;
+      sequence_outcome_depth_ = 0;
       if (ripupSequence(id, 0, pass, journal, false)) {
         continue;
       }
+      // The step the net's own rip-up mode search failed at, before the
+      // rollback restores the routings.
+      const uint8_t step = nets_[id].left_step;
+      const int term = nets_[id].left_term;
       // Sec. 4.4: a failed sequence restores the original situation.
       for (auto it = journal.rbegin(); it != journal.rend(); ++it) {
         restoreRouting(*it);
       }
       rollbacks_++;
       unrouted.push_back(id);
+      // A failure below the net's own call is a victim's.
+      nets_[id].ripup_outcome = sequence_outcome_depth_ > 0
+                                    ? uint8_t{kRipupVictimFailed}
+                                    : sequence_outcome_;
+      nets_[id].left_step = step;
+      nets_[id].left_term = term;
     }
     queue.swap(unrouted);
   }
@@ -6359,6 +6390,188 @@ void BonnRouteDR::routeRipupQueue(const std::vector<int>& failed,
     net.vias.clear();
     net.failed = true;
   }
+}
+
+int BonnRouteDR::blockerKinds(const RShape& shape, const int net) const
+{
+  int kinds = 0;
+  auto scan = [&](const int g, const RShape& s) {
+    const br::Coord reach = shape_classes_.reach(g);
+    const br::Rect r = brRect(s.rect);
+    br::GridWindow pieces;
+    shape_grid_.collect(g, r.bloated(reach, reach), pieces);
+    const br::PlacedShape placed{r, shapeClass(s, g), 3};
+    for (const br::GridPiece& p : pieces.pieces) {
+      if (p.owner == net && net >= 0 && br::isOwned(p.type)) {
+        continue;
+      }
+      if (!br::shapesViolate(shape_classes_,
+                             placed,
+                             br::PlacedShape{p.rect, p.cls, p.line_end_ends})) {
+        continue;
+      }
+      switch (p.type) {
+        case br::ShapeType::kBlockage:
+          kinds |= 1;
+          break;
+        case br::ShapeType::kPin:
+          kinds |= 2;
+          break;
+        case br::ShapeType::kReservation:
+          kinds |= 4;
+          break;
+        default:
+          kinds |= 8;
+          break;
+      }
+    }
+  };
+  const int g = gridLayer(shape.layer);
+  if (g < 0) {
+    return 0;
+  }
+  scan(g, shape);
+  const int above = projectionLayer(g);
+  if (above >= 0) {
+    RShape projection = shape;
+    projection.role = br::ShapeRole::kCutProjection;
+    scan(above, projection);
+  }
+  return kinds;
+}
+
+BonnRouteDR::AccessBlock BonnRouteDR::accessBlock(const NetData& net,
+                                                  const Term& term) const
+{
+  AccessBlock best = kAccessNoOption;
+  bool any = false;
+  std::vector<RShape> via;
+  for (const AccessOption& option : term.options) {
+    int kinds = 0;
+    // The wire at the option's track vertex.
+    const auto [x, y] = graph_.point(option.vertex);
+    const frCoord half = layers_[option.z].width / 2;
+    kinds |= blockerKinds(RShape{layers_[option.z].fr,
+                                 odb::Rect(x - half, y - half, x + half, y + half),
+                                 br::ShapeRole::kPreferredWire},
+                          net.id);
+    for (const OutWire& wire : option.wires) {
+      kinds |= blockerKinds(wireShape(wire), net.id);
+    }
+    for (size_t k = 0; k < option.vias.size(); k++) {
+      via.clear();
+      viaShapes(option.vias[k], via);
+      for (size_t s = 0; s < via.size(); s++) {
+        int v = blockerKinds(via[s], net.id);
+        // Pin access checked the pin-layer pad and the cut of the access
+        // point's own via against the fixed surroundings (optionLegal).
+        if (static_cast<int>(k) == option.pin_via && s + 1 < via.size()) {
+          v &= 4 | 8;
+        }
+        kinds |= v;
+      }
+    }
+    const AccessBlock block = kinds == 0             ? kAccessFeasible
+                              : (kinds & (1 | 2)) != 0 ? kAccessFixed
+                              : (kinds & 4) != 0       ? kAccessReservation
+                                                       : kAccessRouted;
+    best = any ? std::min(best, block) : block;
+    any = true;
+  }
+  return best;
+}
+
+void BonnRouteDR::reportLeftNets() const
+{
+  static constexpr std::array<const char*, kNumLeftSteps> kSteps{
+      "none", "access", "no path", "search budget"};
+  static constexpr std::array<const char*, kNumRipupOutcomes> kOutcomes{
+      "not started",
+      "effort budget",
+      "depth",
+      "no path with rip-up",
+      "victim at its rip-up limit",
+      "victim not routed again"};
+  static constexpr std::array<const char*, kNumAccessBlocks> kBlocks{
+      "no option",
+      "feasible at the end",
+      "routed shapes",
+      "reservations",
+      "fixed shapes or pins"};
+  int64_t left = 0;
+  int64_t guard_contact = 0;
+  int64_t guard_on_track = 0;
+  std::array<int64_t, kNumLeftSteps> by_step{};
+  std::array<int64_t, kNumRipupOutcomes> by_outcome{};
+  std::array<int64_t, kNumAccessBlocks> by_block{};
+  const bool trace = logger_->debugCheck(utl::DRT, "bonnroute_left", 1);
+  for (const NetData& net : nets_) {
+    if (net.routed || net.skip) {
+      continue;
+    }
+    left++;
+    AccessBlock block = kAccessNoOption;
+    const bool access = net.left_guard == kGuardNone
+                        && net.left_step == kLeftAccess && net.left_term >= 0
+                        && net.left_term < static_cast<int>(net.terms.size());
+    if (net.left_guard == kGuardPinContact) {
+      guard_contact++;
+    } else if (net.left_guard == kGuardOnTrack) {
+      guard_on_track++;
+    } else {
+      by_step[net.left_step]++;
+      by_outcome[net.ripup_outcome]++;
+      if (access) {
+        block = accessBlock(net, net.terms[net.left_term]);
+        by_block[block]++;
+      }
+    }
+    if (trace) {
+      logger_->debug(
+          utl::DRT,
+          "bonnroute_left",
+          "left net {} ({}) terms {} hpwl {} guide_tiles {} guard {} step {} "
+          "term {} access {} ripup {} ripups {} dilated {}",
+          net.id,
+          net.net->getName(),
+          net.terms.size(),
+          net.hpwl,
+          net.guide_tiles.size(),
+          static_cast<int>(net.left_guard),
+          kSteps[net.left_step],
+          net.left_term,
+          access ? kBlocks[block] : "-",
+          kOutcomes[net.ripup_outcome],
+          net.ripups,
+          net.dilated_area ? 1 : 0);
+    }
+  }
+  logger_->report(
+      "BonnRoute DR left nets: {}; output guards: {} pin contact, {} "
+      "on-track-only layer; last failed step of the others: {} access ({} "
+      "pin without an option, {} blocked by fixed shapes or pins, {} by "
+      "reservations, {} by routed shapes, {} feasible at the end), {} no "
+      "path, {} search budget, {} none; their rip-up sequence: {} not "
+      "started, {} over the effort budget, {} no path with rip-up, {} victim "
+      "at its rip-up limit, {} victim not routed again, {} depth.",
+      left,
+      guard_contact,
+      guard_on_track,
+      by_step[kLeftAccess],
+      by_block[kAccessNoOption],
+      by_block[kAccessFixed],
+      by_block[kAccessReservation],
+      by_block[kAccessRouted],
+      by_block[kAccessFeasible],
+      by_step[kLeftNoPath],
+      by_step[kLeftSearchBudget],
+      by_step[kLeftNone],
+      by_outcome[kRipupNotStarted],
+      by_outcome[kRipupBudget],
+      by_outcome[kRipupNoPath],
+      by_outcome[kRipupVictimLimit],
+      by_outcome[kRipupVictimFailed],
+      by_outcome[kRipupDepth]);
 }
 
 void BonnRouteDR::writeNets()
@@ -6403,6 +6616,7 @@ void BonnRouteDR::writeNets()
     if (const int64_t bad = pinContactViolations(data, wires, data.vias)) {
       guard_nets_++;
       guard_contacts_ += bad;
+      data.left_guard = kGuardPinContact;
       data.routed = false;
       data.wires.clear();
       data.vias.clear();
@@ -6416,6 +6630,7 @@ void BonnRouteDR::writeNets()
         || !std::ranges::all_of(
             patches, [&](const OutWire& w) { return wireOnTracks(w); })) {
       wrong_way_nets_++;
+      data.left_guard = kGuardOnTrack;
       data.routed = false;
       data.wires.clear();
       data.vias.clear();
@@ -7381,6 +7596,7 @@ void BonnRouteDR::main()
           params_.discount_numerator,
           params_.discount_denominator);
     }
+    reportLeftNets();
     logger_->report(
         "BonnRoute DR: routed {} nets, {} left to FlexDR, {} skipped; {} "
         "searches ({}), {} heap pops, {} settled vertices, {} intervals, "

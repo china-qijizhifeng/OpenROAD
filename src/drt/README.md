@@ -205,6 +205,8 @@ set_bonnroute_dr_param name value
 
 The debug group `bonnroute_connect` (`set_debug_level DRT bonnroute_connect 1`) prints one line per search of a connection (net, phase, area dilation, path region or whole area, tile box of the area, settled vertices, result, milliseconds) and one line per partition region.
 
+The log line `BonnRoute DR left nets` attributes the nets left to FlexDR: the output guard that dropped a routed net, or the step at which the net's last connection attempt failed (a pin without a feasible access option, with the kind of shapes that block its options at the end; no path; a search budget) and the outcome of its last rip-up sequence. The debug group `bonnroute_left` prints one line per such net.
+
 The interval search maintains reduced-distance label envelopes on tracks,
 removes dominated labels, and propagates jog labels between intervals
 (Gester et al., TODAES 18(2), 2013, Section 4.1, Algorithm 4). Via edges are
