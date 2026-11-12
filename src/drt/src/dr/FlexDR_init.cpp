@@ -3294,16 +3294,19 @@ void FlexDRWorker::init(const frDesign* design)
       && (getRipupMode() == RipUpMode::ALL
           || getRipupMode() == RipUpMode::INCR)) {
     skipRouting_ = true;
+    skipped_without_nets_ = true;
     return;
   }
+  only_nets_with_initial_routing_
+      = std::ranges::all_of(nets_, [](const auto& net) {
+          return net->getFrNet()->hasInitialRouting();
+        });
   // Incremental mode reroutes only nets without initial routing
   // (route_queue_init_queue, canRipup); without such a net the route queue
   // stays empty and the worker's result is its design-rule check.
   check_only_ = check_only_without_reroutable_nets_
                 && getRipupMode() == RipUpMode::INCR
-                && std::ranges::all_of(nets_, [](const auto& net) {
-                     return net->getFrNet()->hasInitialRouting();
-                   });
+                && only_nets_with_initial_routing_;
   if (!check_only_) {
     initGridGraph(design);
     initMazeIdx();

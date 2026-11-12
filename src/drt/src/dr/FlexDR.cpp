@@ -815,6 +815,13 @@ void FlexDR::endWorkersBatch(
   ProfileTask profile("DR:end_batch");
   // single thread
   for (auto& worker : workers_batch) {
+    cleanup_statistics_.workers++;
+    cleanup_statistics_.workers_without_markers
+        += worker->getInitNumMarkers() == 0 ? 1 : 0;
+    cleanup_statistics_.workers_without_nets
+        += worker->isSkippedWithoutNets() ? 1 : 0;
+    cleanup_statistics_.workers_with_only_initial_routing
+        += worker->hasOnlyNetsWithInitialRouting() ? 1 : 0;
     if (worker->end(getDesign())) {
       numWorkUnits_ += 1;
     }
@@ -1481,6 +1488,7 @@ void FlexDR::optimizationFlow(const SearchRepairArgs& args,
 
   std::vector<std::vector<std::vector<std::unique_ptr<FlexDRWorker>>>> workers(
       batchStepX * batchStepY);
+  const double create_start = omp_get_wtime();
 
   // In the incremental iterations a worker whose extended box sees no change
   // and no violation has no net to route and would re-check unchanged,
@@ -1514,6 +1522,7 @@ void FlexDR::optimizationFlow(const SearchRepairArgs& args,
     xIdx++;
   }
 
+  cleanup_statistics_.create_seconds += omp_get_wtime() - create_start;
   omp_set_num_threads(router_cfg_->MAX_THREADS);
   int version = 0;
   increaseClipsize_ = false;
@@ -1537,13 +1546,18 @@ void FlexDR::optimizationFlow(const SearchRepairArgs& args,
                                        + std::to_string(workersInBatch.size())
                                        + ">";
         ProfileTask profile(batch_name.c_str());
+        const double batch_start = omp_get_wtime();
         if (dist_on_) {
           processWorkersBatchDistributed(workersInBatch, version, iter_prog);
         } else {
           processWorkersBatch(workersInBatch, iter_prog);
         }
+        cleanup_statistics_.batch_seconds += omp_get_wtime() - batch_start;
       }
+      const double end_batch_start = omp_get_wtime();
       endWorkersBatch(workersInBatch, changed_regions);
+      cleanup_statistics_.end_batch_seconds
+          += omp_get_wtime() - end_batch_start;
     }
   }
 
@@ -1614,6 +1628,8 @@ void FlexDR::searchRepair(const SearchRepairArgs& args)
     return;
   }
   ProfileTask profile(fmt::format("DR:searchRepair{}", iter_).c_str());
+  const double iteration_start = omp_get_wtime();
+  cleanup_statistics_ = {};
 
   if (dist_on_) {
     if ((iter_ % 10 == 0 && iter_ != 60) || iter_ == 3 || iter_ == 15) {
@@ -1657,13 +1673,44 @@ void FlexDR::searchRepair(const SearchRepairArgs& args)
   }
   FlexDRConnectivityChecker checker(
       router_, logger_, router_cfg_, graphics_.get(), dist_on_);
+  const double check_start = omp_get_wtime();
   checker.check(iter_);
+  const double check_seconds = omp_get_wtime() - check_start;
   flow_state_machine_->setFixingMaxSpacing(false);
   if (getDesign()->getTopBlock()->getNumMarkers() == 0
       && getTech()->hasMaxSpacingConstraints()) {
     fixMaxSpacing();
   }
   numViols_.push_back(getDesign()->getTopBlock()->getNumMarkers());
+  if (logger_->debugCheck(DRT, "bonnroute_cleanup", 1)) {
+    const auto& conn = checker.phaseSeconds();
+    logger_->debug(
+        DRT,
+        "bonnroute_cleanup",
+        "cleanup iter {} flow {} ripup_mode {} workers {} without_markers {} "
+        "without_nets {} only_initial_routing {} check_only {} markers {} "
+        "create_s {:.3f} batches_s {:.3f} end_batch_s {:.3f} check_s {:.3f} "
+        "check_init_s {:.3f} check_merge_s {:.3f} check_astar_s {:.3f} "
+        "check_finish_s {:.3f} iteration_s {:.3f}",
+        iter_,
+        flow_state_machine_->getFlowName(),
+        static_cast<int>(args.ripupMode),
+        cleanup_statistics_.workers,
+        cleanup_statistics_.workers_without_markers,
+        cleanup_statistics_.workers_without_nets,
+        cleanup_statistics_.workers_with_only_initial_routing,
+        num_check_only_workers_,
+        getDesign()->getTopBlock()->getNumMarkers(),
+        cleanup_statistics_.create_seconds,
+        cleanup_statistics_.batch_seconds,
+        cleanup_statistics_.end_batch_seconds,
+        check_seconds,
+        conn.init_parallel,
+        conn.merge_serial,
+        conn.astar_parallel,
+        conn.finish_serial,
+        omp_get_wtime() - iteration_start);
+  }
   debugPrint(logger_,
              utl::DRT,
              "workers",
