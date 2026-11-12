@@ -4583,12 +4583,21 @@ bool BonnRouteDR::connectInRegion(NetData& net,
                                ? worker.interval_search->run(req)
                                : worker.search->run(req);
     if (trace_connections_) {
-      // The area of the search: bounding box of its allowed tiles.
+      // The area of the search: bounding box of its allowed tiles, their
+      // number over all layers and the number of distinct planar tiles.
+      std::vector<size_t> planar;
+      planar.reserve(worker.region.touched.size());
+      for (const auto& [z, index] : worker.region.touched) {
+        planar.push_back(index);
+      }
+      std::ranges::sort(planar);
+      const size_t planar_tiles
+          = std::ranges::unique(planar).begin() - planar.begin();
       logger_->debug(
           utl::DRT,
           "bonnroute_connect",
           "connect net {} phase {} dilation {} path {} area {} {} {} {} tiles "
-          "{} settled {} found {} ms {:.3f}",
+          "{} planar {} settled {} found {} ms {:.3f}",
           net.id,
           worker.speculative ? "tail"
                              : (worker.limit != nullptr ? "region" : "serial"),
@@ -4599,6 +4608,7 @@ bool BonnRouteDR::connectInRegion(NetData& net,
           worker.region.bx_hi,
           worker.region.by_hi,
           worker.region.touched.size(),
+          planar_tiles,
           res.settled,
           res.found ? 1 : 0,
           1e3 * (omp_get_wtime() - search_start));
