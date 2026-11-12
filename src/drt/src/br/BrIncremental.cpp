@@ -1382,7 +1382,10 @@ void BonnRouteDR::routeIncremental(std::vector<odb::Rect>& regions)
   std::vector<int> failed;
   routeParallel(order, failed);
   const int64_t first_failed = static_cast<int64_t>(failed.size());
-  if (params_.ripup && !failed.empty()) {
+  // Sec. 4.4 / arXiv:2111.06169 Sec. 5.2: the few nets of an incremental
+  // call that fail get rip-up sequences in every profile; a net left to
+  // FlexDR costs a track assignment and a FlexDR routing pass instead.
+  if ((params_.ripup || params_.incremental_ripup) && !failed.empty()) {
     routeRipupQueue(failed);
   }
   const double route_s = timer.elapsed() - sync_s - access_s;

@@ -255,6 +255,8 @@ bool BonnRouteDRParams::set(const std::string& name, const double value)
     incremental_reservations = v != 0;
   } else if (name == "incremental_potential") {
     incremental_potential = std::clamp(v, 0, 4);
+  } else if (name == "incremental_ripup") {
+    incremental_ripup = v != 0;
   } else if (name == "verbose") {
     verbose = v != 0;
   } else {

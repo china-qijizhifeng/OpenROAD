@@ -252,6 +252,9 @@ struct BonnRouteDRParams
   // Future cost of incremental calls (values of `potential`); 3 is the
   // general model with discounts used in the paper's Tables 4 and 6.
   int incremental_potential = 3;
+  // Rip-up sequences (ripup_depth, ripup_passes) for the nets that fail in
+  // incremental calls, whatever `ripup` is for the first call.
+  bool incremental_ripup = true;
   bool verbose = true;
   // Algorithm profile: 0 = 2013-improved (default), 1 = 2013-reimpl,
   // 2 = 2021 (2013-reimpl plus Ahrens et al., arXiv:2111.06169).
