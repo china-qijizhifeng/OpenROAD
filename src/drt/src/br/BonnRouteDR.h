@@ -111,7 +111,7 @@ struct BonnRouteDRParams
   // Sec. 3.2 / 5.1: route nets with nondefault rules with their wire type
   // (NDR width, vias and spacing) in the critical-net step; 0 leaves them
   // to FlexDR as before.
-  bool route_ndr_nets = false;
+  bool route_ndr_nets = true;
   // Sec. 3.6: wire types held by the fast grid ("a restricted set of
   // frequent wire types"): the default rule and the NDRs used by the most
   // nets, at most 5 (FastGrid::kMaxWireTypes), each by at least
