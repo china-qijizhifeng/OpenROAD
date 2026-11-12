@@ -204,6 +204,8 @@ bool BonnRouteDRParams::set(const std::string& name, const double value)
     jog_low_utilization = std::clamp(v, 0, 100);
   } else if (name == "collapse_bridges") {
     collapse_bridges = v != 0;
+  } else if (name == "collapse_lower_bridges") {
+    collapse_lower_bridges = v != 0;
   } else if (name == "spread_unidirectional") {
     spread_unidirectional = v != 0;
   } else if (name == "spread_cost") {
@@ -4368,101 +4370,117 @@ int64_t BonnRouteDR::collapseBridges()
                   && va.point.y() != vb.point.y())) {
             continue;
           }
-          const int zl = lower >= 0 && lower < static_cast<int>(z_of_fr_.size())
-                             ? z_of_fr_[lower]
-                             : -1;
-          if (zl < 0 || onTracksOnly(lower)) {
-            continue;
-          }
-          const odb::Point A = va.point;
-          const odb::Point B = vb.point;
-          int bridge = -1;
-          int other_wires = 0;
-          int patches = 0;
-          for (size_t k = 0; k < net.wires.size(); k++) {
-            const OutWire& w = net.wires[k];
-            if (w.layer != upper || !segments_touch(w, A, B)) {
+          for (int mode = 0; mode < 2 && !changed; mode++) {
+            // mode 0: the bridge wire is on the upper layer and the jog on the
+            // lower one; mode 1 (collapse_lower_bridges): a wire on the lower
+            // layer between two vias up becomes a wrong-way wire on the upper
+            // layer, when the lower piece only joins two pieces of the upper
+            // layer (sky130: most up-bridges cross met1 power rails and
+            // cannot become met1 jogs).
+            if (mode == 1 && !params_.collapse_lower_bridges) {
               continue;
             }
-            const bool same = !w.patch
-                              && ((w.begin == A && w.end == B)
-                                  || (w.begin == B && w.end == A));
-            if (same && bridge < 0) {
-              bridge = static_cast<int>(k);
-            } else if (w.patch) {
-              patches++;
-            } else {
-              other_wires++;
-            }
-          }
-          if (bridge < 0) {
-            continue;
-          }
-          bridge_stats_.candidates++;
-          if (other_wires > 0 || patches > 0) {
-            (patches > 0 && other_wires == 0 ? bridge_stats_.patch
-                                             : bridge_stats_.other_wire)++;
-            continue;
-          }
-          bool clean = true;
-          for (size_t k = 0; k < net.vias.size() && clean; k++) {
-            if (k == ia || k == ib) {
+            const frLayerNum span = mode == 0 ? upper : lower;
+            const frLayerNum jogl = mode == 0 ? lower : upper;
+            BridgeStats& stats
+                = mode == 0 ? bridge_stats_ : lower_bridge_stats_;
+            const int zl = jogl >= 0 && jogl < static_cast<int>(z_of_fr_.size())
+                               ? z_of_fr_[jogl]
+                               : -1;
+            if (zl < 0 || onTracksOnly(jogl)) {
               continue;
             }
-            const OutVia& v = net.vias[k];
-            if ((v.def->getLayer1Num() == upper
-                 || v.def->getLayer2Num() == upper)
-                && on_segment(v.point, A, B)) {
-              clean = false;
+            const odb::Point A = va.point;
+            const odb::Point B = vb.point;
+            int bridge = -1;
+            int other_wires = 0;
+            int patches = 0;
+            for (size_t k = 0; k < net.wires.size(); k++) {
+              const OutWire& w = net.wires[k];
+              if (w.layer != span || !segments_touch(w, A, B)) {
+                continue;
+              }
+              const bool same = !w.patch
+                                && ((w.begin == A && w.end == B)
+                                    || (w.begin == B && w.end == A));
+              if (same && bridge < 0) {
+                bridge = static_cast<int>(k);
+              } else if (w.patch) {
+                patches++;
+              } else {
+                other_wires++;
+              }
             }
-          }
-          for (const auto& [layer, p] : net.pin_points) {
-            if (layer == upper && on_segment(p, A, B)) {
-              clean = false;
+            if (bridge < 0) {
+              continue;
             }
-          }
-          if (!clean) {
-            bridge_stats_.other_via_or_pin++;
-            continue;
-          }
-          const OutWire jog{lower, A, B, false, net.wire_type};
-          const RShape jog_shape = wireShape(jog);
-          if (shapeConflicts(jog_shape, net.id, nullptr)) {
-            bridge_stats_.illegal++;
-            // Blocked only by routed shapes (rip-up could free the jog) or
-            // by fixed shapes (pins, blockages, power).
-            const int g = gridLayer(lower);
-            const br::RipupLevel level
-                = g < 0 ? br::kNotRemovable
-                        : checker_.shapeLevel(g,
-                                              brRect(jog_shape.rect),
-                                              shapeClass(jog_shape, g),
-                                              3,
-                                              net.id);
-            (level == br::kNotRemovable ? bridge_stats_.illegal_fixed
-                                        : bridge_stats_.illegal_routed)++;
-            continue;
-          }
-          // Remove the bridge from the routing space, insert the jog.
-          std::vector<RShape> old;
-          old.push_back(wireShape(net.wires[bridge]));
-          viaShapes(va, old);
-          viaShapes(vb, old);
-          br::FastGridBuilder::PendingRemovals pending;
-          for (const RShape& s : old) {
+            stats.candidates++;
+            if (other_wires > 0 || patches > 0) {
+              (patches > 0 && other_wires == 0 ? stats.patch
+                                               : stats.other_wire)++;
+              continue;
+            }
+            bool clean = true;
+            for (size_t k = 0; k < net.vias.size() && clean; k++) {
+              if (k == ia || k == ib) {
+                continue;
+              }
+              const OutVia& v = net.vias[k];
+              if ((v.def->getLayer1Num() == span
+                   || v.def->getLayer2Num() == span)
+                  && on_segment(v.point, A, B)) {
+                clean = false;
+              }
+            }
+            for (const auto& [layer, p] : net.pin_points) {
+              if (layer == span && on_segment(p, A, B)) {
+                clean = false;
+              }
+            }
+            if (!clean) {
+              stats.other_via_or_pin++;
+              continue;
+            }
+            const OutWire jog{jogl, A, B, false, net.wire_type};
+            const RShape jog_shape = wireShape(jog);
+            if (shapeConflicts(jog_shape, net.id, nullptr)) {
+              stats.illegal++;
+              // Blocked only by routed shapes (rip-up could free the jog) or
+              // by fixed shapes (pins, blockages, power).
+              const int g = gridLayer(jogl);
+              const br::RipupLevel level
+                  = g < 0 ? br::kNotRemovable
+                          : checker_.shapeLevel(g,
+                                                brRect(jog_shape.rect),
+                                                shapeClass(jog_shape, g),
+                                                3,
+                                                net.id);
+              (level == br::kNotRemovable ? stats.illegal_fixed
+                                          : stats.illegal_routed)++;
+              continue;
+            }
+            // Remove the bridge from the routing space, insert the jog.
+            std::vector<RShape> old;
+            old.push_back(wireShape(net.wires[bridge]));
+            viaShapes(va, old);
+            viaShapes(vb, old);
+            br::FastGridBuilder::PendingRemovals pending;
+            for (const RShape& s : old) {
+              changeShape(
+                  s, routedType(s.role), net.id, false, nullptr, &pending);
+            }
+            fast_builder_.flush(pending);
             changeShape(
-                s, routedType(s.role), net.id, false, nullptr, &pending);
+                jog_shape, routedType(jog_shape.role), net.id, true, nullptr);
+            net.wires.erase(net.wires.begin() + bridge);
+            net.wires.push_back(jog);
+            net.vias.erase(net.vias.begin() + ib);
+            net.vias.erase(net.vias.begin() + ia);
+            shapesOf(net, net.shapes);
+            collapsed++;
+            stats.collapsed++;
+            changed = true;
           }
-          fast_builder_.flush(pending);
-          changeShape(
-              jog_shape, routedType(jog_shape.role), net.id, true, nullptr);
-          net.wires.erase(net.wires.begin() + bridge);
-          net.wires.push_back(jog);
-          net.vias.erase(net.vias.begin() + ib);
-          net.vias.erase(net.vias.begin() + ia);
-          shapesOf(net, net.shapes);
-          collapsed++;
-          changed = true;
         }
       }
     }
@@ -5891,20 +5909,40 @@ void BonnRouteDR::main()
     if (params_.verbose) {
       logger_->report(
           "BonnRoute DR bridges: {} collapsed into wrong-way wires ({} vias "
-          "fewer); kept: {} with other wires on the bridge, {} with patches, "
-          "{} with other vias or pin points, {} illegal against other nets "
-          "({} only routed shapes, {} fixed shapes) (of {} candidate checks); "
-          "{:.2f}s.",
-          collapsed,
-          2 * collapsed,
+          "fewer); kept: {} with other wires on the bridge, {} with "
+          "patches, {} with other vias or pin points, {} illegal against "
+          "other nets ({} only routed shapes, {} fixed shapes) (of {} "
+          "candidate checks).",
+          bridge_stats_.collapsed,
+          2 * bridge_stats_.collapsed,
           bridge_stats_.other_wire,
           bridge_stats_.patch,
           bridge_stats_.other_via_or_pin,
           bridge_stats_.illegal,
           bridge_stats_.illegal_routed,
           bridge_stats_.illegal_fixed,
-          bridge_stats_.candidates,
-          timer.elapsed() - start);
+          bridge_stats_.candidates);
+      if (params_.collapse_lower_bridges) {
+        logger_->report(
+            "BonnRoute DR lower bridges: {} collapsed into wrong-way wires ({} "
+            "vias "
+            "fewer); kept: {} with other wires on the bridge, {} with "
+            "patches, {} with other vias or pin points, {} illegal against "
+            "other nets ({} only routed shapes, {} fixed shapes) (of {} "
+            "candidate checks).",
+            lower_bridge_stats_.collapsed,
+            2 * lower_bridge_stats_.collapsed,
+            lower_bridge_stats_.other_wire,
+            lower_bridge_stats_.patch,
+            lower_bridge_stats_.other_via_or_pin,
+            lower_bridge_stats_.illegal,
+            lower_bridge_stats_.illegal_routed,
+            lower_bridge_stats_.illegal_fixed,
+            lower_bridge_stats_.candidates);
+      }
+      logger_->report("BonnRoute DR bridge collapse: {} bridges, {:.2f}s.",
+                      collapsed,
+                      timer.elapsed() - start);
     }
   }
   if (params_.verbose) {

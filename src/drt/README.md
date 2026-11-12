@@ -137,6 +137,7 @@ set_bonnroute_dr_param name value
 | ----- | ----- | ----- |
 | `via_cost` | `4` | Via cost in pitches of the lower routing layer. |
 | `collapse_bridges` | `1` | After routing, replace a via up, one wire on the layer above and a via down (nothing else of the net on that wire) by a wrong-way wire on the lower layer when it is legal against other nets and the layer allows wrong-way wires: two vias fewer. |
+| `collapse_lower_bridges` | `1` | With `collapse_bridges`, also the reverse: a wire on the lower layer between two vias up (nothing else of the net on it) becomes a wrong-way wire on the upper layer when that is legal. |
 | `jog_factor` | `4` | Non-preferred direction wire cost multiplier. |
 | `jog_factor_low` / `jog_low_utilization` | `0` / `50` | Vertex search: jogs cost `jog_factor_low` (0: off) in GCells whose global routing usage of the layer is at most `jog_low_utilization` percent of its capacity, `jog_factor` elsewhere (a wrong-way wire blocks the crossing tracks it uses). |
 | `ripup_cost` | `40` | Base rip-up penalty in pitches of the bottom routing layer. |

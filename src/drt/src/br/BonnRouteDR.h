@@ -170,6 +170,9 @@ struct BonnRouteDRParams
   // (nothing else of the net on that wire) by a wrong-way wire on the lower
   // layer when it is legal against other nets: two vias fewer.
   bool collapse_bridges = true;
+  // Also the reverse: a wire on the lower layer between two vias up (nothing
+  // else of the net on it) becomes a wrong-way wire on the upper layer.
+  bool collapse_lower_bridges = true;
   // Also spread on layers whose wires must stay on tracks in the preferred
   // direction (unidirectional, LEF58 right-way-on-grid-only).
   bool spread_unidirectional = false;
@@ -783,7 +786,8 @@ class BonnRouteDR
     int64_t illegal = 0;
     int64_t illegal_routed = 0;
     int64_t illegal_fixed = 0;
-  } bridge_stats_;
+    int64_t collapsed = 0;
+  } bridge_stats_, lower_bridge_stats_;
 
   int tileX(frCoord x) const;
   int tileY(frCoord y) const;
