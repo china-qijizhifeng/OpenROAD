@@ -226,6 +226,11 @@ struct SearchResult
   // Legality queries answered by the fast grid / the distance rule checker.
   int64_t fast_grid_queries = 0;
   int64_t checker_queries = 0;
+  // Run labels popped, and those whose continuation (the run label they
+  // pushed one position further along the track) is the very next pop
+  // (vertex search).
+  int64_t run_label_pops = 0;
+  int64_t run_continuations = 0;
   bool aborted = false;  // label budget exceeded
 };
 
