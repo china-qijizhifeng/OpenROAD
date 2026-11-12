@@ -1,0 +1,81 @@
+VERSION 5.8 ;
+DIVIDERCHAR "/" ;
+BUSBITCHARS "[]" ;
+DESIGN bonnroute_port_contact ;
+UNITS DISTANCE MICRONS 1000 ;
+DIEAREA ( 0 0 ) ( 30000 30000 ) ;
+TRACKS X 230 DO 65 STEP 460 LAYER li1 ;
+TRACKS Y 170 DO 88 STEP 340 LAYER li1 ;
+TRACKS X 170 DO 88 STEP 340 LAYER met1 ;
+TRACKS Y 170 DO 88 STEP 340 LAYER met1 ;
+TRACKS X 230 DO 65 STEP 460 LAYER met2 ;
+TRACKS Y 230 DO 65 STEP 460 LAYER met2 ;
+TRACKS X 340 DO 44 STEP 680 LAYER met3 ;
+TRACKS Y 340 DO 44 STEP 680 LAYER met3 ;
+TRACKS X 460 DO 33 STEP 920 LAYER met4 ;
+TRACKS Y 460 DO 33 STEP 920 LAYER met4 ;
+TRACKS X 1700 DO 9 STEP 3400 LAYER met5 ;
+TRACKS Y 1700 DO 9 STEP 3400 LAYER met5 ;
+COMPONENTS 6 ;
+    - b0 sky130_fd_sc_hd__buf_1 + PLACED ( 15180 5440 ) N ;
+    - b1 sky130_fd_sc_hd__buf_1 + PLACED ( 15180 13600 ) N ;
+    - b2 sky130_fd_sc_hd__buf_1 + PLACED ( 15180 21760 ) N ;
+    - b3 sky130_fd_sc_hd__buf_1 + PLACED ( 20930 8160 ) N ;
+    - b4 sky130_fd_sc_hd__buf_1 + PLACED ( 26450 10880 ) N ;
+    - b5 sky130_fd_sc_hd__buf_1 + PLACED ( 18630 19040 ) N ;
+END COMPONENTS
+PINS 6 ;
+    - m3p0 + NET m3p0 + DIRECTION INPUT + USE SIGNAL
+      + PORT
+        + LAYER met3 ( -400 -150 ) ( 400 150 )
+        + PLACED ( 400 4760 ) N ;
+    - m3p1 + NET m3p1 + DIRECTION INPUT + USE SIGNAL
+      + PORT
+        + LAYER met3 ( -400 -150 ) ( 400 150 )
+        + PLACED ( 400 13260 ) N ;
+    - m3p2 + NET m3p2 + DIRECTION INPUT + USE SIGNAL
+      + PORT
+        + LAYER met3 ( -400 -150 ) ( 400 150 )
+        + PLACED ( 400 22440 ) N ;
+    - m2p3 + NET m2p3 + DIRECTION INPUT + USE SIGNAL
+      + PORT
+        + LAYER met2 ( -70 -400 ) ( 70 400 )
+        + PLACED ( 21620 400 ) N ;
+    - m2p4 + NET m2p4 + DIRECTION INPUT + USE SIGNAL
+      + PORT
+        + LAYER met2 ( -70 -400 ) ( 70 400 )
+        + PLACED ( 27140 400 ) N ;
+    - m4p5 + NET m4p5 + DIRECTION INPUT + USE SIGNAL
+      + PORT
+        + LAYER met4 ( -150 -400 ) ( 150 400 )
+        + PLACED ( 19320 29600 ) N ;
+END PINS
+BLOCKAGES 9 ;
+    - LAYER met1
+      RECT ( 0 0 ) ( 6000 30000 ) ;
+    - LAYER met2
+      RECT ( 0 0 ) ( 6000 30000 ) ;
+    - LAYER met3
+      RECT ( 1200 1550 ) ( 6000 7290 ) ;
+    - LAYER met3
+      RECT ( 1200 10390 ) ( 6000 16130 ) ;
+    - LAYER met3
+      RECT ( 1200 19230 ) ( 6000 24970 ) ;
+    - LAYER met1
+      RECT ( 19000 0 ) ( 30000 6000 ) ;
+    - LAYER met2
+      RECT ( 19480 1200 ) ( 23300 6000 ) ;
+    - LAYER met2
+      RECT ( 25000 1200 ) ( 28820 6000 ) ;
+    - LAYER met4
+      RECT ( 15030 22000 ) ( 22690 28800 ) ;
+END BLOCKAGES
+NETS 6 ;
+    - m3p0 ( PIN m3p0 ) ( b0 A ) + USE SIGNAL ;
+    - m3p1 ( PIN m3p1 ) ( b1 A ) + USE SIGNAL ;
+    - m3p2 ( PIN m3p2 ) ( b2 A ) + USE SIGNAL ;
+    - m2p3 ( PIN m2p3 ) ( b3 A ) + USE SIGNAL ;
+    - m2p4 ( PIN m2p4 ) ( b4 A ) + USE SIGNAL ;
+    - m4p5 ( PIN m4p5 ) ( b5 A ) + USE SIGNAL ;
+END NETS
+END DESIGN
