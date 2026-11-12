@@ -1706,7 +1706,8 @@ bool BonnRouteGlobal::buildCandidate(
           // Pin link: the pin's own metal, no wire or via.
           visited[next] = 1;
           const Scratch::TreeVertex& pc = vertices[next];
-          candidate.nodes.push_back({pc.layer, pc.x, pc.y, node_index, link.pin});
+          candidate.nodes.push_back(
+              {pc.layer, pc.x, pc.y, node_index, link.pin});
           stack.emplace_back(static_cast<int32_t>(candidate.nodes.size() - 1),
                              next);
           continue;
@@ -2573,12 +2574,14 @@ void BonnRouteGlobal::resourceSharing()
     resourceSharingConcurrent(log_tolerance, initial_log_objective);
     return;
   }
-  // Wall seconds per thread: busy time of the current batch, and the phase's
-  // split into reuse tests, search, buildCandidate and cost evaluation.
+  // Wall seconds per thread: its span in the current batch (from entering the
+  // parallel region to finishing its last net), and the phase's oracle time
+  // split into search, buildCandidate and cost evaluation. Reuse tests are
+  // not timed one by one: span minus oracle time is the reuse tests plus
+  // loop scheduling.
   struct alignas(kCacheLine) ThreadTime
   {
     double batch = 0.0;
-    double reuse = 0.0;
     double search = 0.0;
     double build = 0.0;
     double cost = 0.0;
@@ -2590,13 +2593,14 @@ void BonnRouteGlobal::resourceSharing()
     double goal = 0.0;
     double batches = 0.0;
     double longest = 0.0;  // sum over batches of the busiest thread
-    double busy = 0.0;     // sum over batches and threads
-    double reuse = 0.0;
+    double busy = 0.0;     // sum over batches and threads of the spans
     double search = 0.0;
     double build = 0.0;
     double cost = 0.0;
     double apply = 0.0;
     double weights = 0.0;
+    // Thread spans minus oracle time: reuse tests and loop scheduling.
+    double reuseAndScheduling() const { return busy - search - build - cost; }
     void add(const PhaseTime& o)
     {
       wall += o.wall;
@@ -2604,7 +2608,6 @@ void BonnRouteGlobal::resourceSharing()
       batches += o.batches;
       longest += o.longest;
       busy += o.busy;
-      reuse += o.reuse;
       search += o.search;
       build += o.build;
       cost += o.cost;
@@ -2630,85 +2633,84 @@ void BonnRouteGlobal::resourceSharing()
       // Prices are frozen during the parallel part of the batch.
       const double batch_log_objective = log_objective_price_;
       const SteadyClock::time_point batch_start = SteadyClock::now();
-#pragma omp parallel for num_threads(threads) schedule(dynamic, 1)
-      for (int i = begin; i < end; i++) {
-        const SteadyClock::time_point net_start = SteadyClock::now();
+#pragma omp parallel num_threads(threads)
+      {
         ThreadTime& own_time = thread_time[omp_get_thread_num()];
-        const NetState& state = states_[order_[i]];
-        const int slot = i - begin;
-        results[slot].ok = false;
-        if (state.last >= 0) {
-          const double now = logCost(state.candidates[state.last]);
-          // Relative to the objective price, which every phase raises.
-          // Reuse certificate. Prices never decrease, so for the current
-          // prices y: opt_n(y) >= opt_n(y_old) >= C_old / sigma, and
-          // opt_n(y) >= y_obj * o* / U >= y_obj * o_base / (sigma U) with
-          // o_base the phase-0 congestion-free oracle objective. Reusing b
-          // when y.g(b) <= (1 + tol) * max(C_old, y_obj o_base / U) keeps
-          // it a (1 + tol) sigma approximation, the oracle's own guarantee.
-          const double log_objective_bound = batch_log_objective
-                                             - std::log(objective_bound_)
-                                             + state.log_base_objective;
-          const double bound
-              = std::max(state.last_log_cost, log_objective_bound);
-          if (now - bound <= log_tolerance) {
-            kinds[slot] = Kind::kReuse;
-            const double t = secondsBetween(net_start, SteadyClock::now());
-            own_time.reuse += t;
-            own_time.batch += t;
-            continue;
+        const SteadyClock::time_point thread_start = SteadyClock::now();
+#pragma omp for schedule(dynamic, 1) nowait
+        for (int i = begin; i < end; i++) {
+          const NetState& state = states_[order_[i]];
+          const int slot = i - begin;
+          results[slot].ok = false;
+          if (state.last >= 0) {
+            const double now = logCost(state.candidates[state.last]);
+            // Relative to the objective price, which every phase raises.
+            // Reuse certificate. Prices never decrease, so for the current
+            // prices y: opt_n(y) >= opt_n(y_old) >= C_old / sigma, and
+            // opt_n(y) >= y_obj * o* / U >= y_obj * o_base / (sigma U) with
+            // o_base the phase-0 congestion-free oracle objective. Reusing b
+            // when y.g(b) <= (1 + tol) * max(C_old, y_obj o_base / U) keeps
+            // it a (1 + tol) sigma approximation, the oracle's own guarantee.
+            const double log_objective_bound = batch_log_objective
+                                               - std::log(objective_bound_)
+                                               + state.log_base_objective;
+            const double bound
+                = std::max(state.last_log_cost, log_objective_bound);
+            if (now - bound <= log_tolerance) {
+              kinds[slot] = Kind::kReuse;
+              continue;
+            }
           }
-        }
-        Scratch& s = scratch[omp_get_thread_num()];
-        const SteadyClock::time_point oracle_start = SteadyClock::now();
-        const double build_before = s.build_seconds;
-        std::vector<Segment> segments;
-        std::vector<Segment>* record = check ? &segments : nullptr;
-        OracleResult r = oracle(state, s, false, false, record);
-        bool whole = false;
-        if (!r.ok) {
-          segments.clear();
-          r = oracle(state, s, false, true, record);
-          whole = true;
-        }
-        const SteadyClock::time_point oracle_end = SteadyClock::now();
-        if (check) {
-          checkGoal(state,
-                    reference[omp_get_thread_num()],
-                    false,
-                    whole,
-                    r.ok,
-                    segments);
-        }
-        if (r.ok) {
-          const auto& usage = resultUsage(state, r);
-          r.log_cost
-              = std::log(std::max(linearCost(r.candidate.objective, usage),
-                                  1e-300))
-                + shift_;
-          // Differential check of the oracle's edge costs against the
-          // committed demand: exact for a single path between single cells.
-          if (state.terminals.size() == 2
-              && state.terminals[0].cells.size() == 1
-              && state.terminals[1].cells.size() == 1) {
-            const double exact = linearCost(r.candidate.objective, usage);
-            r.checked = true;
-            r.mismatch = std::abs(exact - r.search_cost)
-                         > 1e-9 * std::max(1.0, std::abs(exact));
-            r.exact_cost = exact;
+          Scratch& s = scratch[omp_get_thread_num()];
+          const SteadyClock::time_point oracle_start = SteadyClock::now();
+          const double build_before = s.build_seconds;
+          std::vector<Segment> segments;
+          std::vector<Segment>* record = check ? &segments : nullptr;
+          OracleResult r = oracle(state, s, false, false, record);
+          bool whole = false;
+          if (!r.ok) {
+            segments.clear();
+            r = oracle(state, s, false, true, record);
+            whole = true;
           }
-          kinds[slot] = Kind::kNew;
-        } else {
-          kinds[slot] = state.last >= 0 ? Kind::kReuse : Kind::kFail;
+          const SteadyClock::time_point oracle_end = SteadyClock::now();
+          if (check) {
+            checkGoal(state,
+                      reference[omp_get_thread_num()],
+                      false,
+                      whole,
+                      r.ok,
+                      segments);
+          }
+          if (r.ok) {
+            const auto& usage = resultUsage(state, r);
+            r.log_cost
+                = std::log(std::max(linearCost(r.candidate.objective, usage),
+                                    1e-300))
+                  + shift_;
+            // Differential check of the oracle's edge costs against the
+            // committed demand: exact for a single path between single cells.
+            if (state.terminals.size() == 2
+                && state.terminals[0].cells.size() == 1
+                && state.terminals[1].cells.size() == 1) {
+              const double exact = linearCost(r.candidate.objective, usage);
+              r.checked = true;
+              r.mismatch = std::abs(exact - r.search_cost)
+                           > 1e-9 * std::max(1.0, std::abs(exact));
+              r.exact_cost = exact;
+            }
+            kinds[slot] = Kind::kNew;
+          } else {
+            kinds[slot] = state.last >= 0 ? Kind::kReuse : Kind::kFail;
+          }
+          results[slot] = std::move(r);
+          const SteadyClock::time_point net_end = SteadyClock::now();
+          const double build = s.build_seconds - build_before;
+          own_time.search += secondsBetween(oracle_start, oracle_end) - build;
+          own_time.build += build;
+          own_time.cost += secondsBetween(oracle_end, net_end);
         }
-        results[slot] = std::move(r);
-        const SteadyClock::time_point net_end = SteadyClock::now();
-        const double build = s.build_seconds - build_before;
-        own_time.reuse += secondsBetween(net_start, oracle_start);
-        own_time.search += secondsBetween(oracle_start, oracle_end) - build;
-        own_time.build += build;
-        own_time.cost += secondsBetween(oracle_end, net_end);
-        own_time.batch += secondsBetween(net_start, net_end);
+        own_time.batch += secondsBetween(thread_start, SteadyClock::now());
       }
       const SteadyClock::time_point apply_start = SteadyClock::now();
       phase_time.batches += secondsBetween(batch_start, apply_start);
@@ -2768,7 +2770,6 @@ void BonnRouteGlobal::resourceSharing()
       phase_time.weights += secondsBetween(weights_start, SteadyClock::now());
     }
     for (ThreadTime& t : thread_time) {
-      phase_time.reuse += t.reuse;
       phase_time.search += t.search;
       phase_time.build += t.build;
       phase_time.cost += t.cost;
@@ -2801,7 +2802,7 @@ void BonnRouteGlobal::resourceSharing()
           phase_time.batches,
           phase_time.longest,
           phase_time.busy,
-          phase_time.reuse,
+          phase_time.reuseAndScheduling(),
           phase_time.search,
           phase_time.build,
           phase_time.cost,
@@ -2842,7 +2843,7 @@ void BonnRouteGlobal::resourceSharing()
         total_time.longest,
         total_time.busy,
         threads,
-        total_time.reuse,
+        total_time.reuseAndScheduling(),
         total_time.search,
         total_time.build,
         total_time.cost,
