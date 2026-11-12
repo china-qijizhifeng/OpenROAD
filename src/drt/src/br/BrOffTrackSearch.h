@@ -65,6 +65,9 @@ struct OffTrackLayer
   // per grid line once; it equals an arc_filter with the same rule.
   const std::vector<GeoCoord>* tracks = nullptr;
   bool horizontal = true;
+  // Track lines of the layer for the tie-break (OffTrackRequest::
+  // on_track_ties), sorted; preferred direction as `horizontal`.
+  const std::vector<GeoCoord>* tie_tracks = nullptr;
 };
 
 struct OffTrackSource
@@ -121,6 +124,12 @@ struct OffTrackRequest
   // of each vertex. Distances are those of G; among paths of equal cost the
   // returned one may differ.
   bool merge_direction_states = true;
+  // Among paths of equal cost, prefer the least preferred-direction wire
+  // off the tracks (`tie_tracks` of each layer): the search minimises
+  // (cost, off-track preferred length) lexicographically, so path costs
+  // and the reached targets' costs are those of the plain search; the
+  // returned paths reach the tracks as early as their cost allows.
+  bool on_track_ties = false;
 };
 
 struct OffTrackPath
@@ -210,6 +219,9 @@ class OffTrackSearch
     // On-track-only layers: lines on which planar arcs may start.
     std::vector<char> row_on_track;
     std::vector<char> col_on_track;
+    // Tie-break: preferred-direction lines off the tie tracks (rows if the
+    // layer is horizontal, else columns); empty without tie tracks.
+    std::vector<char> line_off_track;
     // Future cost terms per target layer t: l1 distance of each line to
     // the nearest target coordinate of layer t (index t * nx + ix).
     std::vector<int64_t> near_x;

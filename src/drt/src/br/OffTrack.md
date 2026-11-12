@@ -98,6 +98,27 @@ Algorithm 3.
   merged search with the five-state reference on its 6000 requests.
 - `offtrack_hanan_grid 0` restores Algorithm 3 and five states.
 
+## Ties among equal-cost paths: onto the track first
+
+With the jog factor, a jog to the track at the access point followed by
+on-track wire costs as much as preferred-direction wire beside the tracks
+followed by a jog at the target; the search order decides between them.
+With one state per vertex A* settles the preferred-direction prefix first
+(its f stays constant while a jog raises f), so most catalogue paths ran
+off track at the access point's coordinate and shared that prefix; on ibex
+38 fewer pins got a primary path and 12 more nets were left to FlexDR.
+
+`OffTrackRequest::on_track_ties` (`offtrack_on_track_ties 1`, default)
+minimises (cost, preferred-direction wire off the tracks) lexicographically:
+labels hold cost * scale + off-track length, with scale above every simple
+path's off-track length in the window, and the future cost is scaled.
+Costs and reached targets are those of the plain search.
+`testSearchMatchesReference` checks equal costs and no more off-track wire per
+path than the plain search, with five and with merged states. On generated
+sky130-like access situations (`opus-kit/offtrack/AccessShape.cpp`) the share
+of preferred-direction catalogue wire off the tracks is 94% with Algorithm
+3, 78% on the Hanan grid, and 6% with the tie-break.
+
 ## Multi-layer blockage grid
 
 Section 3.8: "we have a blockage grid for each wiring and via layer.

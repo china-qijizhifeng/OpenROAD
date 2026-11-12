@@ -245,6 +245,8 @@ bool BonnRouteDRParams::set(const std::string& name, const double value)
     offtrack_notch_tau = v != 0;
   } else if (name == "offtrack_hanan_grid") {
     offtrack_hanan_grid = v != 0;
+  } else if (name == "offtrack_on_track_ties") {
+    offtrack_on_track_ties = v != 0;
   } else if (name == "offtrack_pin_classes") {
     offtrack_pin_classes = v != 0;
   } else if (name == "offtrack_access_stats") {
@@ -2575,6 +2577,14 @@ void BonnRouteDR::offTrackCatalogue(const int net,
   // The nearest on-track points; some may fail the exact checks below.
   req.max_targets = 2 * params_.max_access_options;
   req.merge_direction_states = params_.offtrack_hanan_grid;
+  req.on_track_ties = params_.offtrack_on_track_ties;
+  for (size_t s = 0; s < frs.size(); s++) {
+    const int z = z_of_fr_[frs[s]];
+    if (z >= 0) {
+      req.layers[s].tie_tracks = &graph_.layers[z].tracks;
+      req.layers[s].horizontal = graph_.layers[z].horizontal;
+    }
+  }
   // On layers whose wires must stay on tracks in the preferred direction
   // (Sec. 3.8: "removing edges that induce a violation"), only planar arcs
   // along a track remain.

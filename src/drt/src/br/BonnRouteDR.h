@@ -203,6 +203,12 @@ struct BonnRouteDRParams
   // tau apart and every Hanan-grid path is tau-feasible). 0 keeps
   // Algorithm 3's lines at multiples of tau and the five direction states.
   bool offtrack_hanan_grid = true;
+  // Among catalogue paths of equal cost, prefer the least preferred-
+  // direction wire off the tracks of the search layers (lexicographic
+  // tie-break; path costs unchanged): paths jog onto a track at the access
+  // point instead of running beside the tracks. 0: ties resolve by the
+  // search order.
+  bool offtrack_on_track_ties = true;
   // D10: catalogues per pin class instead of per circuit class. The key of
   // a pin holds only its own search inputs that are equal between
   // instances of a master (local frame): master, pin, access points with

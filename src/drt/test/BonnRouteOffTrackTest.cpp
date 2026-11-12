@@ -2264,6 +2264,9 @@ void testSearchMatchesReference(std::mt19937& rng)
   int cases = 0;
   int merged_runs = 0;
   int merged_equal_costs = 0;
+  int tie_checks = 0;
+  int64_t tie_off_track = 0;
+  int64_t plain_off_track = 0;
   int with_paths = 0;
   int64_t paths = 0;
   int64_t settled = 0;
@@ -2443,6 +2446,103 @@ void testSearchMatchesReference(std::mt19937& rng)
             a.size(),
             b.size());
     }
+    // On-track ties (five states and merged): the cost of every target id
+    // equals the plain search's, and each path has at most the off-track
+    // preferred-direction length of the plain search's path to that
+    // target (without a target limit, where both reach the same ids; tau
+    // >= 1 as in BonnRouteDR: with tau 0, zero-length turn arcs repeat
+    // nodes and the path's corner nodes are not all kept).
+    bool positive_tau = true;
+    for (const BlockageGridInput::Layer& l : gin.layers) {
+      positive_tau = positive_tau && l.tau >= 1;
+    }
+    if (req.max_targets == 0 && positive_tau) {
+      auto off_track = [&](const OffTrackPath& p) {
+        int64_t len = 0;
+        for (size_t q = 0; q + 1 < p.nodes.size(); q++) {
+          const RouteNode& u = p.nodes[q];
+          const RouteNode& v = p.nodes[q + 1];
+          if (u.layer != v.layer || u.p == v.p) {
+            continue;
+          }
+          const bool along_x = u.p.y == v.p.y;
+          CHECK(along_x || u.p.x == v.p.x, "segment not axis-parallel");
+          const std::vector<GeoCoord>& t = tracks[u.layer];
+          if (along_x == static_cast<bool>(horizontal[u.layer])
+              && !std::binary_search(
+                  t.begin(), t.end(), along_x ? u.p.y : u.p.x)) {
+            len += std::abs(int64_t{u.p.x} - v.p.x)
+                   + std::abs(int64_t{u.p.y} - v.p.y);
+          }
+        }
+        return len;
+      };
+      for (const bool merge : {false, true}) {
+        OffTrackRequest plain = req;
+        plain.merge_direction_states = merge;
+        for (int z = 0; z < layers; z++) {
+          plain.layers[z].horizontal = horizontal[z];
+        }
+        OffTrackRequest tie = plain;
+        tie.on_track_ties = true;
+        for (int z = 0; z < layers; z++) {
+          tie.layers[z].tie_tracks = &tracks[z];
+        }
+        const OffTrackResult rp = search.run(plain);
+        const OffTrackResult rt = search.run(tie);
+        // Target id -1 occurs several times; ids >= 0 are unique.
+        std::map<int, std::pair<int64_t, int64_t>> by_id;
+        for (const OffTrackPath& p : rp.paths) {
+          by_id[p.target_id] = {p.cost, off_track(p)};
+        }
+        bool ok = rp.paths.size() == rt.paths.size();
+        for (const OffTrackPath& p : rt.paths) {
+          if (p.target_id < 0) {
+            continue;
+          }
+          const auto f = by_id.find(p.target_id);
+          ok = ok && f != by_id.end() && f->second.first == p.cost
+               && off_track(p) <= f->second.second;
+          tie_off_track += off_track(p);
+          if (f != by_id.end()) {
+            plain_off_track += f->second.second;
+          }
+        }
+        tie_checks += ok;
+        CHECK(ok, "on-track ties it=%d merge=%d mode=%d", it, merge, mode);
+        if (!ok && failures <= 4) {
+          for (int z = 0; z < layers; z++) {
+            std::printf("  layer %d wires %d points_only %d horizontal %d tau %d cost %lld/%lld tracks", z,
+                        req.layers[z].wires ? 1 : 0, gin.layers[z].points_only ? 1 : 0,
+                        horizontal[z] ? 1 : 0, gin.layers[z].tau,
+                        static_cast<long long>(req.layers[z].cost_x),
+                        static_cast<long long>(req.layers[z].cost_y));
+            for (const GeoCoord t : tracks[z]) {
+              std::printf(" %d", t);
+            }
+            std::printf("\n");
+          }
+          for (const OffTrackPath& p : rp.paths) {
+            std::printf("  plain %d cost %lld off %lld:", p.target_id,
+                        static_cast<long long>(p.cost),
+                        static_cast<long long>(off_track(p)));
+            for (const RouteNode& n : p.nodes) {
+              std::printf(" %d/%d,%d", n.layer, n.p.x, n.p.y);
+            }
+            std::printf("\n");
+          }
+          for (const OffTrackPath& p : rt.paths) {
+            std::printf("  tie %d cost %lld off %lld:", p.target_id,
+                        static_cast<long long>(p.cost),
+                        static_cast<long long>(off_track(p)));
+            for (const RouteNode& n : p.nodes) {
+              std::printf(" %d/%d,%d", n.layer, n.p.x, n.p.y);
+            }
+            std::printf("\n");
+          }
+        }
+      }
+    }
     cases++;
     with_paths += !want.paths.empty();
     paths += static_cast<int64_t>(want.paths.size());
@@ -2473,13 +2573,18 @@ void testSearchMatchesReference(std::mt19937& rng)
   std::printf(
       "search == reference: %d requests (%d with paths, %lld paths, %lld "
       "settled states); merged direction states: %d runs with one state per "
-      "vertex, %d cost checks equal\n",
+      "vertex, %d cost checks equal; on-track ties: %d runs with equal costs "
+      "and no more off-track preferred wire per path (%lld vs %lld in "
+      "total)\n",
       cases,
       with_paths,
       static_cast<long long>(paths),
       static_cast<long long>(settled),
       merged_runs,
-      merged_equal_costs);
+      merged_equal_costs,
+      tie_checks,
+      static_cast<long long>(tie_off_track),
+      static_cast<long long>(plain_off_track));
 }
 
 // BonnRouteDR::choosePrimaries skips candidate shape pairs whose gap in x

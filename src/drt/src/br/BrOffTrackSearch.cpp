@@ -254,6 +254,24 @@ OffTrackResult OffTrackSearch::run(const OffTrackRequest& req)
   const uint32_t stride = single_state ? 1 : kDirectionStates;
   // The "no incoming direction" state of a grid vertex.
   const uint32_t fresh = single_state ? 0 : kFresh;
+  // Tie-break scale: every simple path's off-track preferred length is
+  // below it (per layer at most the window length per line), so
+  // cost * scale + off-track length orders lexicographically. Off (scale
+  // 1) if that would leave less than 2^38 for the cost.
+  int64_t scale = 1;
+  if (req.on_track_ties) {
+    int64_t bound = 1;
+    for (int z = 0; z < num_layers; z++) {
+      const LayerIndex& l = index_[z];
+      if (req.layers[z].tie_tracks == nullptr || l.nx == 0 || l.ny == 0) {
+        continue;
+      }
+      bound += req.layers[z].horizontal
+                   ? int64_t{l.ny} * (int64_t{l.xs.back()} - l.xs.front())
+                   : int64_t{l.nx} * (int64_t{l.ys.back()} - l.ys.front());
+    }
+    scale = bound < (int64_t{1} << 24) ? bound : 1;
+  }
   res.grid_vertices = static_cast<int64_t>(total);
   res.states = static_cast<int64_t>(total) * stride;
   if (total * stride >= kNoParent) {
@@ -283,6 +301,15 @@ OffTrackResult OffTrackSearch::run(const OffTrackRequest& req)
     turnLines(l.ys, in.grid.tau, l.turn_y_plus, l.turn_y_minus);
     l.row_on_track.clear();
     l.col_on_track.clear();
+    l.line_off_track.clear();
+    if (req.on_track_ties && in.tie_tracks != nullptr) {
+      const std::vector<GeoCoord>& lines = in.horizontal ? l.ys : l.xs;
+      l.line_off_track.resize(lines.size());
+      for (size_t k = 0; k < lines.size(); k++) {
+        l.line_off_track[k] = !std::binary_search(
+            in.tie_tracks->begin(), in.tie_tracks->end(), lines[k]);
+      }
+    }
     if (in.tracks != nullptr) {
       // Planar arcs start on a track line in the preferred direction.
       if (in.horizontal) {
@@ -393,10 +420,7 @@ OffTrackResult OffTrackSearch::run(const OffTrackRequest& req)
     }
   }
   // Future cost of grid vertex (ix, iy) of layer z.
-  auto future = [&](const int z, const int ix, const int iy) -> int64_t {
-    if (!req.future_cost) {
-      return 0;
-    }
+  auto futureCost = [&](const int z, const int ix, const int iy) -> int64_t {
     const LayerIndex& l = index_[z];
     int64_t h = kInf;
     for (int k = 0; k < num_target_layers; k++) {
@@ -408,6 +432,12 @@ OffTrackResult OffTrackSearch::run(const OffTrackRequest& req)
                        + req.via_cost * std::abs(t - z));
     }
     return h == kInf ? 0 : h;
+  };
+  auto future = [&](const int z, const int ix, const int iy) -> int64_t {
+    if (!req.future_cost) {
+      return 0;
+    }
+    return scale * futureCost(z, ix, iy);
   };
   // A binary heap ordered by f only (std::priority_queue's push / pop).
   heap_.clear();
@@ -432,9 +462,9 @@ OffTrackResult OffTrackSearch::run(const OffTrackRequest& req)
       for (int iy = y0; iy < l.ny && l.ys[iy] <= s.region.yhi; iy++) {
         const uint32_t v = l.base + static_cast<uint32_t>(ix) * l.ny + iy;
         const uint32_t st = v * stride + fresh;
-        if (dist(st) > s.cost) {
-          labels[st] = {s.cost, kNoParent, epoch};
-          push(s.cost + future(s.layer, ix, iy), st);
+        if (dist(st) > s.cost * scale) {
+          labels[st] = {s.cost * scale, kNoParent, epoch};
+          push(s.cost * scale + future(s.layer, ix, iy), st);
         }
       }
     }
@@ -500,7 +530,7 @@ OffTrackResult OffTrackSearch::run(const OffTrackRequest& req)
     if (cost > dist(st)) {
       continue;
     }
-    if (cost > req.max_cost) {
+    if (cost / scale > req.max_cost) {
       break;
     }
     res.settled++;
@@ -540,8 +570,14 @@ OffTrackResult OffTrackSearch::run(const OffTrackRequest& req)
       if (has_filter && !req.arc_filter(z, p, q, d, dir)) {
         return;
       }
-      const int64_t c = std::abs(int64_t{q.x} - p.x) * in.cost_x
-                        + std::abs(int64_t{q.y} - p.y) * in.cost_y;
+      int64_t c = (std::abs(int64_t{q.x} - p.x) * in.cost_x
+                   + std::abs(int64_t{q.y} - p.y) * in.cost_y)
+                  * scale;
+      if (!l.line_off_track.empty() && (dir < 2) == in.horizontal
+          && l.line_off_track[in.horizontal ? iy : ix]) {
+        // Tie-break: preferred-direction wire off the tracks.
+        c += std::abs(int64_t{q.x} - p.x) + std::abs(int64_t{q.y} - p.y);
+      }
       relax(state(jx, jy, dir), cost + c, z, jx, jy);
     };
     if (in.wires) {
@@ -624,7 +660,7 @@ OffTrackResult OffTrackSearch::run(const OffTrackRequest& req)
       const uint32_t w = n.base + static_cast<uint32_t>(jx) * n.ny + jy;
       const bool ok = nz > z ? via_ok(z, v, p) : via_ok(nz, w, p);
       if (ok) {
-        relax(w * stride + fresh, cost + req.via_cost, nz, jx, jy);
+        relax(w * stride + fresh, cost + req.via_cost * scale, nz, jx, jy);
       }
     }
   }
@@ -636,7 +672,7 @@ OffTrackResult OffTrackSearch::run(const OffTrackRequest& req)
     }
     OffTrackPath path;
     path.target_id = targets[k].second;
-    path.cost = labels[reached[k]].dist;
+    path.cost = labels[reached[k]].dist / scale;
     std::vector<RouteNode> full;
     for (uint32_t s = static_cast<uint32_t>(reached[k]); s != kNoParent;
          s = labels[s].parent) {
