@@ -180,6 +180,7 @@ set_bonnroute_dr_param name value
 | `tail_retry_delay` | `1` | With `tail_pipeline 1`, the batch distance at which a net that conflicted with an earlier commit of its batch is searched again. |
 | `tail_defer_settled` | `300000` | Settled vertices a net may use in its speculative attempt (checked before each of its searches). A net that needs more, almost always one without a route that goes to FlexDR anyway, is deferred to a final pass of the stage without a budget, in net order, so its long search does not hold up the other nets. `0` disables the budget. |
 | `partition_regions` | `0` | Regions of the first partition; `0` means twice the thread count. |
+| `tail_regions` | `0` | With `tail_batch`, the speculative tail takes over at the first partition with fewer regions than this; `0` means the thread count. With `partition_regions` and `tail_regions` both set, the routing is the same for every thread count. |
 | `reservations` | `0` | Reserve legal track-assignment wires for their nets and discount them (Ahrens et al., arXiv:2111.06169, Section 5.2). Selects the vertex search. |
 | `discount_numerator` / `discount_denominator` | `3` / `4` | Cost factor of reserved edges for their own net. |
 | `reserve_min_layer` | `0` | Lowest track-graph layer whose input wires become reservations. |

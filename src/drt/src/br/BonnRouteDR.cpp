@@ -209,6 +209,8 @@ bool BonnRouteDRParams::set(const std::string& name, const double value)
     partitions = v != 0;
   } else if (name == "partition_regions") {
     partition_regions = std::max(0, v);
+  } else if (name == "tail_regions") {
+    tail_regions = std::max(0, v);
   } else if (name == "spread_from_extra_space") {
     spread_from_extra_space = v != 0;
   } else if (name == "spreading") {
@@ -6047,11 +6049,15 @@ void BonnRouteDR::routePartitions(const std::vector<int>& order,
   int count = initial_regions > 0             ? initial_regions
               : params_.partition_regions > 0 ? params_.partition_regions
                                               : 2 * threads;
+  // The tail takes over below this many regions (a partition with fewer
+  // regions than threads leaves threads idle).
+  const int tail_below
+      = params_.tail_regions > 0 ? params_.tail_regions : threads;
   std::vector<int> pending = order;
   std::vector<std::array<int, 4>> regions;
   int partition = 0;
   while (!pending.empty()) {
-    if (params_.tail_batch > 0 && count < threads) {
+    if (params_.tail_batch > 0 && count < tail_below) {
       routeSpeculative(pending, failed, stage);
       return;
     }

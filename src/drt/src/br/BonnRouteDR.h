@@ -88,6 +88,11 @@ struct BonnRouteDRParams
   // bounding boxes. partition_regions = 0 uses twice the thread count.
   bool partitions = true;
   int partition_regions = 0;
+  // The speculative tail (tail_batch) takes over at the first partition
+  // with fewer regions than this; 0 uses the thread count. The routing
+  // depends on the thread count only through these two defaults: with both
+  // parameters set, every thread count gives the same result.
+  int tail_regions = 0;
   // Late partitions with fewer regions than threads are replaced by batches
   // of this many pending nets, searched in parallel on the unchanged
   // routing space and committed in net order; a net whose shapes conflict
