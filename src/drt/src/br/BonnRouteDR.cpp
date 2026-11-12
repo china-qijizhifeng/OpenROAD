@@ -4141,6 +4141,7 @@ bool BonnRouteDR::connectWithoutOwnShapes(NetData& net,
   // Stub and attachment legality depend on the committed shapes, not on
   // the guide dilation. Check them once for both clean windows.
   std::vector<std::vector<char>> valid(num_terms);
+  bool options_grown = false;
   auto option_valid = [&](const AccessOption& opt) {
     const br::RipupLevel level
         = worker.reader.level(opt.vertex, br::kWire, net.wire_type);
@@ -4200,6 +4201,7 @@ bool BonnRouteDR::connectWithoutOwnShapes(NetData& net,
       const bool regenerated = regenerateAccess(net, t, worker);
       worker.footprint.setStep(kStepAccess);
       if (regenerated) {
+        options_grown = true;
         const Term& grown = net.terms[t];
         valid[t].resize(grown.options.size(), 0);
         for (size_t o = before; o < grown.options.size(); o++) {
@@ -4212,16 +4214,43 @@ bool BonnRouteDR::connectWithoutOwnShapes(NetData& net,
       return false;
     }
   }
+  // Sec. 5.1: generated access paths extend the net's area. The thread
+  // continues only where the area's tile box still lies inside its region.
+  if (options_grown && worker.limit != nullptr) {
+    const br::TileBox box = netAreaTileBox(net, extra_dilation);
+    if (!worker.limit->contains(box)) {
+      worker.area_deferred = true;
+      worker.area_deferrals++;
+      return false;
+    }
+    worker.footprint.widen(box);
+  }
   const int retry = params_.retry_dilation + extra_dilation;
   worker.footprint.setStep(kStepSearch);
   if (ripup) {
     return connectInRegion(net, retry, true, valid, worker);
   }
-  if (connectInRegion(net, extra_dilation, false, valid, worker)) {
-    return true;
+  if (!net.dilated_area) {
+    if (connectInRegion(net, extra_dilation, false, valid, worker)) {
+      return true;
+    }
+    // A search skipped for the effort budget says nothing about the area.
+    if (retry == extra_dilation || worker.effort_exceeded) {
+      return false;
+    }
+    net.dilated_area = true;
   }
-  if (retry == extra_dilation) {
-    return false;
+  // Sec. 5.1: the dilated area is searched where its tile box lies inside
+  // the thread's region. Otherwise the net continues there in a later
+  // partition, whose regions are larger, or in the tail.
+  if (worker.limit != nullptr) {
+    const br::TileBox box = netAreaTileBox(net, retry);
+    if (!worker.limit->contains(box)) {
+      worker.area_deferred = true;
+      worker.area_deferrals++;
+      return false;
+    }
+    worker.footprint.widen(box);
   }
   worker.footprint.setStep(kStepRetrySearch);
   return connectInRegion(net, retry, false, valid, worker);
@@ -4949,6 +4978,18 @@ void BonnRouteDR::netTileBox(const NetData& net,
   ylo = core.ylo - halo;
   xhi = core.xhi + halo;
   yhi = core.yhi + halo;
+}
+
+br::TileBox BonnRouteDR::netAreaTileBox(const NetData& net,
+                                        const int dilation) const
+{
+  br::TileBox box = netCoreTileBox(net);
+  const int margin = dilation + netHaloTiles(net);
+  box.xlo = std::max(box.xlo - margin, 0);
+  box.ylo = std::max(box.ylo - margin, 0);
+  box.xhi = std::min(box.xhi + margin, tiles_x_ - 1);
+  box.yhi = std::min(box.yhi + margin, tiles_y_ - 1);
+  return box;
 }
 
 br::TileBox BonnRouteDR::netClippedTileBox(const NetData& net) const
@@ -5878,15 +5919,22 @@ void BonnRouteDR::routePartitions(const std::vector<int>& order,
                                   const int initial_regions,
                                   const char* stage)
 {
+  // Sec. 5.1: a net enters a region that contains the tile box of its
+  // guide area (netAreaTileBox). A net whose connections failed there
+  // enters with the box of the dilated area; connect() tests that box
+  // against the region before it searches the dilated area.
   std::vector<std::array<int, 4>> boxes(nets_.size());
+  auto set_box = [&](const int id) {
+    const NetData& net = nets_[id];
+    const br::TileBox box
+        = netAreaTileBox(net, net.dilated_area ? params_.retry_dilation : 0);
+    boxes[id] = {box.xlo, box.ylo, box.xhi, box.yhi};
+  };
   for (const int id : order) {
-    auto& b = boxes[id];
-    netTileBox(nets_[id], b[0], b[1], b[2], b[3]);
-    b[0] = std::max(b[0], 0);
-    b[1] = std::max(b[1], 0);
-    b[2] = std::min(b[2], tiles_x_ - 1);
-    b[3] = std::min(b[3], tiles_y_ - 1);
+    set_box(id);
   }
+  // Marks of the nets that stay pending after a partition.
+  std::vector<char> stays(nets_.size(), 0);
   const int threads = static_cast<int>(workers_.size());
   int count = initial_regions > 0             ? initial_regions
               : params_.partition_regions > 0 ? params_.partition_regions
@@ -5906,6 +5954,8 @@ void BonnRouteDR::routePartitions(const std::vector<int>& order,
     }
     std::vector<std::vector<int>> members(regions.size());
     std::vector<std::vector<int>> region_failed(regions.size());
+    // Nets that need the dilated area, whose box leaves the region.
+    std::vector<std::vector<int>> region_again(regions.size());
     std::vector<int> next;
     for (const int id : pending) {
       const auto& b = boxes[id];
@@ -5948,7 +5998,11 @@ void BonnRouteDR::routePartitions(const std::vector<int>& order,
           const auto& b = boxes[id];
           beginFootprint(w, net, kPhaseRegion, {b[0], b[1], b[2], b[3]});
         }
-        if (connect(net, false, w)) {
+        w.limit = &region;
+        w.area_deferred = false;
+        const bool connected = connect(net, false, w);
+        w.limit = nullptr;
+        if (connected) {
           w.footprint.setStep(kStepCommit);
           commitNet(net, &w);
           w.footprint.setStep(kStepRelease);
@@ -5956,7 +6010,7 @@ void BonnRouteDR::routePartitions(const std::vector<int>& order,
         } else {
           net.wires.clear();
           net.vias.clear();
-          region_failed[r].push_back(id);
+          (w.area_deferred ? region_again : region_failed)[r].push_back(id);
         }
         if (params_.partition_check) {
           endFootprint(w, net, &region);
@@ -5978,6 +6032,16 @@ void BonnRouteDR::routePartitions(const std::vector<int>& order,
     for (const auto& f : region_failed) {
       failed.insert(failed.end(), f.begin(), f.end());
     }
+    // The nets that continue in the dilated area stay pending with that
+    // area's box, at their positions in the net order.
+    size_t again = 0;
+    for (const auto& a : region_again) {
+      again += a.size();
+      for (const int id : a) {
+        set_box(id);
+        stays[id] = 1;
+      }
+    }
     if (params_.verbose) {
       size_t routed = 0;
       for (const auto& m : members) {
@@ -5987,7 +6051,8 @@ void BonnRouteDR::routePartitions(const std::vector<int>& order,
                     9107,
                     "BonnRoute {} {}: {} regions, {} nets inside, {} "
                     "deferred; {:.2f}s, longest region {:.2f}s, thread "
-                    "utilization {:.0f}%.",
+                    "utilization {:.0f}%; {} nets inside continue in the "
+                    "dilated area later.",
                     stage,
                     partition,
                     regions.size(),
@@ -5995,7 +6060,20 @@ void BonnRouteDR::routePartitions(const std::vector<int>& order,
                     next.size(),
                     wall,
                     busy_max,
-                    wall > 0 ? 100.0 * busy_sum / (wall * threads) : 0.0);
+                    wall > 0 ? 100.0 * busy_sum / (wall * threads) : 0.0,
+                    again);
+    }
+    if (again > 0) {
+      for (const int id : next) {
+        stays[id] = 1;
+      }
+      next.clear();
+      for (const int id : pending) {
+        if (stays[id] != 0) {
+          next.push_back(id);
+          stays[id] = 0;
+        }
+      }
     }
     pending.swap(next);
     partition++;
@@ -6921,6 +6999,28 @@ void BonnRouteDR::main()
         "BonnRoute DR partition halo by top layer: {}; nets by halo tiles{}.",
         by_layer,
         by_halo);
+    // Sec. 4.4 / 5.1: nets that left their guide area.
+    int64_t dilated = 0;
+    int64_t dilated_routed = 0;
+    for (const NetData& net : nets_) {
+      if (net.dilated_area) {
+        dilated++;
+        dilated_routed += net.routed;
+      }
+    }
+    int64_t area_deferrals = 0;
+    for (const Worker& w : workers_) {
+      area_deferrals += w.area_deferrals;
+    }
+    logger_->report(
+        "BonnRoute DR routing areas: {} nets continued in the area dilated "
+        "by {} tiles ({} of them routed); {} times a net's next area did "
+        "not fit its partition region and the net continued in a later "
+        "partition or the tail.",
+        dilated,
+        params_.retry_dilation,
+        dilated_routed,
+        area_deferrals);
     const br::ShapeGrid::Statistics sg = shape_grid_.statistics();
     const br::FastGrid::Statistics fg = grid_.statistics();
     logger_->report(

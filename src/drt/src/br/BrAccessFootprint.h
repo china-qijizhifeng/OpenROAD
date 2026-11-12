@@ -141,6 +141,9 @@ class AccessFootprint
     wide_reads_ = TileBox{};
     unit_violations_ = 0;
   }
+  // Enlarges the allowed box of the unit (its work continues in a larger
+  // area that the caller admitted).
+  void widen(const TileBox& allowed) { allowed_.add(allowed); }
   void setStep(const int step) { step_ = std::clamp(step, 0, kMaxSteps - 1); }
   int step() const { return step_; }
 

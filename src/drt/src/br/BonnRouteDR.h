@@ -401,6 +401,9 @@ class BonnRouteDR
     bool routed = false;
     bool failed = false;
     bool skip = false;
+    // Sec. 4.4 / 5.1: the net's connections failed in the guide area; its
+    // next attempt starts in the area dilated by retry_dilation.
+    bool dilated_area = false;
     int64_t hpwl = 0;
     // Wire type (Sec. 3.2): 0 = default rule, else the net's NDR.
     int wire_type = 0;
@@ -452,6 +455,13 @@ class BonnRouteDR
     FootprintStats footprint_stats;
     // Searching in a speculative batch: read-only on shared routing space.
     bool speculative = false;
+    // Sec. 5.1: the partition region of the thread (nullptr: the whole
+    // chip). A net continues in the dilated area only where that area's tile
+    // box lies inside the region; otherwise connect() stops and sets
+    // area_deferred, and the net continues in a later partition or the tail.
+    const br::TileBox* limit = nullptr;
+    bool area_deferred = false;
+    int64_t area_deferrals = 0;
     // Settled-vertex budget of the current connect (0: none), the settled
     // count at its start, and whether a search was skipped for it.
     int64_t effort_budget = 0;
@@ -756,6 +766,9 @@ class BonnRouteDR
   // Halo of the net's box: the larger of area_halo_tiles_ at netTopLayer
   // and access_halo_tiles_ at netAccessTopLayer.
   int netHaloTiles(const NetData& net) const;
+  // Tile box of the net's searches and commit in its guide area dilated by
+  // `dilation` tiles, with halo, clipped to the tile grid.
+  br::TileBox netAreaTileBox(const NetData& net, int dilation) const;
   // Tile box of everything the net's searches may touch, with halo.
   void netTileBox(const NetData& net,
                   int& xlo,

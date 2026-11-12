@@ -285,6 +285,16 @@ segment, so constant point levels on an edge imply its level.
   nets routed there; a second term covers the access paths around the pins
   (reservation release, dynamic generation: `(radius + 3)` pitches
   `+ 2 τ + 2 ·` distance of the layers up to the one above the pin).
+  A net enters a region that contains the box of its guide area
+  (`netAreaTileBox(net, 0)`: guides, access options and pins plus the
+  halo). The larger areas are admitted at run time: before a thread
+  searches the area dilated by `retry_dilation`, or continues after
+  dynamic generation added access options, it tests the new area's box
+  against its region (`Worker::limit`). A net that does not fit stays
+  pending with `NetData::dilated_area` set and its larger box, at its
+  position in the net order, and continues in a later partition or the
+  tail, where it starts in the dilated area. The test depends on geometry
+  only, so the results do not depend on the thread schedule.
   `BonnRoutePartitionTest` checks equality with a serial run; run it with
   `-fsanitize=thread` as well.
 * Access footprint check (`BrAccessFootprint.h`, `partition_check 1`): the

@@ -159,7 +159,7 @@ set_bonnroute_dr_param name value
 | `offtrack_preferred_access_points` | `1` | Prefer the access point pin access chose for each pin: paths from its other access points start with a penalty of `pin_cost` pitches, as for the access stubs; `0` treats all access points alike. Access points off the manufacturing grid are never used. |
 | `offtrack_from_access_points` | `1` | Start catalogue paths at the pin's OpenROAD access points. `0` starts anywhere on the pin, as in the paper; it is incompatible with the FlexDR clean-up, whose workers need every pin contact at an access point (the contact guard then leaves the affected nets to FlexDR). |
 | `layer_dilation` | `1` | Extra routing layers around a guide. |
-| `retry_dilation` | `2` | Extra guide tiles for a retry. |
+| `retry_dilation` | `2` | A net whose connections fail in its guide area is routed again in the area dilated by this many tiles. A partition thread does so where the dilated area's tile box lies inside its region; otherwise the net continues in a later partition or the tail. |
 | `use_intervals` | `0` | Use vertex search by default; `1` selects interval label sets. |
 | `ripup` | `0` | Leave unresolved nets to FlexDR by default; `1` enables serial rip-up and rerouting. |
 | `interval_via_property` | `1` | Interval property (ii) of Section 4.1 also for vias; `0` relaxes vias per vertex. |
