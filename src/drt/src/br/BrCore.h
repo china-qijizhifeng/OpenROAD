@@ -16,6 +16,7 @@
 #include <cstdint>
 #include <limits>
 #include <memory>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -151,6 +152,12 @@ struct SearchRequest
   // Per-vertex label budget of the search (0: unlimited); a search that
   // exceeds it stops without a path and reports `aborted`.
   size_t label_limit = 0;
+  // Vertex search, not in rip-up mode: before the search, a reverse
+  // reachability search from the targets that visits at most this many
+  // vertices (0: none). If it ends without reaching a source, no target is
+  // reachable and the search returns without a path (`proved_unreachable`).
+  // Exact: it uses the conditions of every forward move.
+  size_t unreachable_probe = 0;
   bool use_intervals = true;
   // Interval property (ii) of Sec. 4.1 for vias as well as jogs. Without
   // it, intervals ignore via availability and relax vias per vertex.
@@ -194,6 +201,10 @@ struct SearchResult
   int64_t fast_grid_queries = 0;
   int64_t checker_queries = 0;
   bool aborted = false;  // label budget exceeded
+  // The reverse reachability search (SearchRequest::unreachable_probe)
+  // proved that no target is reachable; probe_visited counts its vertices.
+  bool proved_unreachable = false;
+  int64_t probe_visited = 0;
 };
 
 // pi_H of Sec. 4.1 over the target boxes of a search, in flat arrays: per
@@ -426,6 +437,10 @@ class PathSearch
   Cost wireCost(int z, int i, int j, int j2) const;
   Cost spreadCost(int z, int i, int j) const;
   void settle(int z, int i, int j, Cost g);
+  // Reverse reachability from the targets within the probe budget: true if
+  // the vertices that can reach a target are all visited and none is a
+  // source (see SearchRequest::unreachable_probe).
+  bool provedUnreachable(const SearchRequest& request, int64_t& visited);
 
   const TrackGraph& graph_;
   const FastGrid& grid_;
@@ -458,6 +473,10 @@ class PathSearch
   }
   void setupWindow(const SearchRequest& request);
   std::vector<Window> window_;
+  // Scratch of provedUnreachable.
+  std::unordered_set<size_t> probe_sources_;
+  std::unordered_set<size_t> probe_seen_;
+  std::vector<size_t> probe_stack_;
 
   // Labels of one search (pages reset on first touch, see PagedLabels):
   // dist = kInfCost until the vertex is labelled; marks tell sources,
@@ -559,7 +578,7 @@ class IntervalSearch
     Cost key;
     Cost max_future;
     int32_t interval;  // -1: sink (target reached), kPendingEvent
-    int32_t aux;  // frontier at enqueue time, target index, pending index
+    int32_t aux;       // frontier at enqueue time, target index, pending index
     bool operator>(const Event& o) const
     {
       if (key != o.key) {
@@ -610,9 +629,9 @@ class IntervalSearch
     kTransJogAbove = 2,
     kTransViaBelow = 4,
     kTransViaAbove = 8,
-    kTransPenalty = 16,  // an existing transition carries a rip-up penalty
-    kInfoWireLegal = 32,  // kWire
-    kInfoJogLegal = 64,   // kJog
+    kTransPenalty = 16,    // an existing transition carries a rip-up penalty
+    kInfoWireLegal = 32,   // kWire
+    kInfoJogLegal = 64,    // kJog
     kInfoEdgeLegal = 128,  // kWireEdge to position j + 1
     kInfoVias = 256,       // the via bits are computed
     kInfoSpread = 512,     // entering the vertex costs the spreading cost

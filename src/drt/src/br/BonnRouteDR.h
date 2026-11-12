@@ -153,6 +153,13 @@ struct BonnRouteDRParams
   // Debug: repeat every search that used a potential with pi_H and count
   // cost differences (a feasible potential has none).
   bool potential_check = false;
+  // Reverse reachability probe before searches in the net's whole routing
+  // area (vertex search, not rip-up): at most this many vertices (0: off).
+  // A search with no reachable target then returns at once (exact).
+  int unreachable_probe = 20000;
+  // Debug: run the search after every proof and count the found paths
+  // (expected 0).
+  bool unreachable_probe_check = false;
   // pi_H with the exact via-stack bound lb_via of Sec. 4.1 and the
   // smallest terminal cost per target box; 0 keeps dz * (cheapest via).
   bool exact_future_cost = true;
@@ -380,6 +387,10 @@ class BonnRouteDR
     double potential_seconds = 0;
     int64_t potential_checks = 0;
     int64_t potential_mismatches = 0;
+    int64_t probes = 0;
+    int64_t probes_proved = 0;
+    int64_t probe_visited = 0;
+    int64_t probe_mismatches = 0;
     // Guide path of the last buildPathRegion: planar tile steps minus the
     // tile distance of its ends.
     int path_detour = 0;

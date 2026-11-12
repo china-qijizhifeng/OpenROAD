@@ -35,16 +35,13 @@ void TargetBoxBound::setup(const SearchRequest& request,
       Cost via = 0;
       const int iz = static_cast<int>(z);
       if (iz < box.zlo) {
-        via = request.exact_future_cost
-                  ? via_prefix[box.zlo] - via_prefix[iz]
-                  : (box.zlo - iz) * min_via_cost;
+        via = request.exact_future_cost ? via_prefix[box.zlo] - via_prefix[iz]
+                                        : (box.zlo - iz) * min_via_cost;
       } else if (iz > box.zhi) {
-        via = request.exact_future_cost
-                  ? via_prefix[iz] - via_prefix[box.zhi]
-                  : (iz - box.zhi) * min_via_cost;
+        via = request.exact_future_cost ? via_prefix[iz] - via_prefix[box.zhi]
+                                        : (iz - box.zhi) * min_via_cost;
       }
-      constant_[z * n + b]
-          = via + (request.exact_future_cost ? box.cost : 0);
+      constant_[z * n + b] = via + (request.exact_future_cost ? box.cost : 0);
     }
   }
 }
@@ -179,13 +176,7 @@ bool PathSearch::relax(const int z,
   label.dist = g;
   label.parent = parent;
   const auto [x, y] = graph_.layers[z].point(i, j);
-  push(Item{g + futureCost(z, x, y),
-            g,
-            i,
-            j,
-            0,
-            static_cast<int8_t>(z),
-            dir});
+  push(Item{g + futureCost(z, x, y), g, i, j, 0, static_cast<int8_t>(z), dir});
   return true;
 }
 
@@ -206,8 +197,7 @@ void PathSearch::settle(const int z, const int i, const int j, const Cost g)
   const At av{z, i, j};
   // Jogs (non-preferred direction, adjacent tracks).
   RipupLevel jog_level = kLegal;
-  if (layer.jogs
-      && (is_source || usable(jog_level = level(av, kJog)))) {
+  if (layer.jogs && (is_source || usable(jog_level = level(av, kJog)))) {
     const Cost own = is_source ? 0 : penalty(av, jog_level);
     for (const int di : {-1, 1}) {
       const int i2 = i + di;
@@ -273,6 +263,132 @@ void PathSearch::settle(const int z, const int i, const int j, const Cost g)
       }
     }
   }
+}
+
+bool PathSearch::provedUnreachable(const SearchRequest& request,
+                                   int64_t& visited)
+{
+  // A forward search moves from u to v only if v is in the region and
+  //  - wire (same track, adjacent positions): u is a source or u allows a
+  //    wire, v allows a wire, and the edge allows one;
+  //  - jog (adjacent tracks, same position, layer with jogs): u is a source
+  //    or u allows a jog, v allows a jog, and the jog edge at the lower
+  //    track allows one;
+  //  - via between a lower vertex a and an upper vertex b: a allows the
+  //    lower pad and the cut, b the upper pad (either direction).
+  // It reaches a target by entering it, so targets outside the region are
+  // unreachable unless they are sources. The reverse search below visits
+  // every u with a forward move u -> v from each visited v; a vertex that
+  // is neither a source nor in the region cannot be left forwards.
+  const Region& region = *request.region;
+  visited = 0;
+  probe_sources_.clear();
+  probe_seen_.clear();
+  probe_stack_.clear();
+  for (const auto& source : request.sources) {
+    probe_sources_.insert(source.first);
+  }
+  for (const auto& target : request.targets) {
+    if (probe_sources_.contains(target.vertex)) {
+      return false;
+    }
+    int z, i, j;
+    graph_.decode(target.vertex, z, i, j);
+    if (region.contains(graph_.layers[z], z, i, j)
+        && probe_seen_.insert(target.vertex).second) {
+      probe_stack_.push_back(target.vertex);
+    }
+  }
+  // Returns true if u reaches a source (stop: not proved).
+  auto reach = [&](const size_t u, const int z, const int i, const int j) {
+    if (probe_sources_.contains(u)) {
+      return true;
+    }
+    if (region.contains(graph_.layers[z], z, i, j)
+        && probe_seen_.insert(u).second) {
+      probe_stack_.push_back(u);
+    }
+    return false;
+  };
+  const auto budget = static_cast<int64_t>(request.unreachable_probe);
+  while (!probe_stack_.empty()) {
+    const size_t v = probe_stack_.back();
+    probe_stack_.pop_back();
+    if (++visited > budget) {
+      return false;
+    }
+    int z, i, j;
+    graph_.decode(v, z, i, j);
+    const TrackLayer& layer = graph_.layers[z];
+    const At av{z, i, j};
+    if (usable(level(av, kWire))) {
+      for (const int d : {-1, 1}) {
+        const int j2 = j + d;
+        if (j2 < 0 || j2 >= layer.numPositions()) {
+          continue;
+        }
+        const size_t u = graph_.vertex(z, i, j2);
+        const At au{z, i, j2};
+        if (!usable(level(At{z, i, std::min(j, j2)}, kWireEdge))) {
+          continue;
+        }
+        if (!probe_sources_.contains(u) && !usable(level(au, kWire))) {
+          continue;
+        }
+        if (reach(u, z, i, j2)) {
+          return false;
+        }
+      }
+    }
+    if (layer.jogs && usable(level(av, kJog))) {
+      for (const int di : {-1, 1}) {
+        const int i2 = i + di;
+        if (i2 < 0 || i2 >= layer.numTracks()) {
+          continue;
+        }
+        const size_t u = graph_.vertex(z, i2, j);
+        const At au{z, i2, j};
+        // Forward u -> v: the jog edge sits at the lower of the two tracks.
+        const At edge = i2 < i ? au : av;
+        if (!usable(level(edge, kJogEdge))) {
+          continue;
+        }
+        if (!probe_sources_.contains(u) && !usable(level(au, kJog))) {
+          continue;
+        }
+        if (reach(u, z, i2, j)) {
+          return false;
+        }
+      }
+    }
+    // Via from below (u = lower end): u's pad and cut, v's upper pad.
+    if (z > 0) {
+      const int i2 = layer.down_track[j];
+      const int j2 = layer.down_pos[i];
+      if (i2 >= 0 && j2 >= 0) {
+        const At au{z - 1, i2, j2};
+        if (usable(level(au, kViaUpPad)) && usable(level(au, kCutUp))
+            && usable(level(av, kViaDownPad))
+            && reach(graph_.vertex(z - 1, i2, j2), z - 1, i2, j2)) {
+          return false;
+        }
+      }
+    }
+    // Via from above (v = lower end): v's pad and cut, u's upper pad.
+    if (z + 1 < graph_.numLayers()) {
+      const int i2 = layer.up_track[j];
+      const int j2 = layer.up_pos[i];
+      if (i2 >= 0 && j2 >= 0) {
+        const At au{z + 1, i2, j2};
+        if (usable(level(av, kViaUpPad)) && usable(level(av, kCutUp))
+            && usable(level(au, kViaDownPad))
+            && reach(graph_.vertex(z + 1, i2, j2), z + 1, i2, j2)) {
+          return false;
+        }
+      }
+    }
+  }
+  return true;
 }
 
 void PathSearch::setupWindow(const SearchRequest& request)
@@ -354,6 +470,11 @@ SearchResult PathSearch::run(const SearchRequest& request)
                        ? graph_.wire_unit
                        : std::min(graph_.wire_unit, request.discount_rate);
   heap_.clear();
+  if (request.unreachable_probe > 0 && !request.ripup
+      && provedUnreachable(request, result.probe_visited)) {
+    result.proved_unreachable = true;
+    return result;
+  }
   boxes_.setup(request, via_prefix_, min_via_cost_);
   setupWindow(request);
 
@@ -466,8 +587,8 @@ SearchResult PathSearch::run(const SearchRequest& request)
     if (!usable(le)) {
       continue;
     }
-    const Cost ng = item.g + wireCost(z, i, j, j2) + penalty(aw, lw)
-                    + penalty(edge, le);
+    const Cost ng
+        = item.g + wireCost(z, i, j, j2) + penalty(aw, lw) + penalty(edge, le);
     size_t lw_index = 0;
     if (!local(z, i, j2, lw_index)) {
       continue;

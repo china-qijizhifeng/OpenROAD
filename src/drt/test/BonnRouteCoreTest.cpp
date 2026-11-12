@@ -10,6 +10,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <functional>
+#include <limits>
 #include <map>
 #include <queue>
 #include <random>
@@ -289,6 +290,7 @@ static int randomCases(const int cases,
   std::mt19937 rng(sparse ? 23456 : 12345);
   int64_t pops_i = 0, pops_v = 0, fails = 0, found = 0, labels = 0, ivs = 0,
           settled_i = 0, settled_v = 0, fast_queries = 0, checker_queries = 0;
+  int64_t probes = 0, proved = 0;
   for (int c = 0; c < cases; c++) {
     TrackGraph g;
     int Z = 2 + rng() % 3;
@@ -476,6 +478,28 @@ static int randomCases(const int cases,
     SearchResult rvx = ps.run(q);
     Ref ref{g, f, q};
     Cost rc = ref.run();
+    if (!q.ripup) {
+      // Reverse reachability probe without a budget: it proves exactly the
+      // searches that have no path.
+      q.unreachable_probe = std::numeric_limits<size_t>::max() / 2;
+      const SearchResult rp = ps.run(q);
+      q.unreachable_probe = 0;
+      probes++;
+      proved += rp.proved_unreachable;
+      if (rp.proved_unreachable != (rc == kInfCost)
+          || (!rp.proved_unreachable
+              && (rp.found != rvx.found || rp.cost != rvx.cost))) {
+        fails++;
+        if (fails < 10) {
+          printf("case %d probe: proved %d, reference %lld, found %d/%d\n",
+                 c,
+                 (int) rp.proved_unreachable,
+                 (long long) rc,
+                 (int) rp.found,
+                 (int) rvx.found);
+        }
+      }
+    }
     Cost ci = ri.found ? ri.cost : kInfCost,
          cv = rvx.found ? rvx.cost : kInfCost;
     Cost cn = rn.found ? rn.cost : kInfCost;
@@ -522,7 +546,8 @@ static int randomCases(const int cases,
   printf(
       "cases %d found %lld fails %lld | heap pops interval %lld vertex %lld "
       "(%.2fx) | intervals %lld labels %lld | settled interval %lld vertex "
-      "%lld | legality queries fast grid %lld checker %lld\n",
+      "%lld | legality queries fast grid %lld checker %lld | probes %lld "
+      "proved %lld\n",
       cases,
       (long long) found,
       (long long) fails,
@@ -534,7 +559,9 @@ static int randomCases(const int cases,
       (long long) settled_i,
       (long long) settled_v,
       (long long) fast_queries,
-      (long long) checker_queries);
+      (long long) checker_queries,
+      (long long) probes,
+      (long long) proved);
   return fails != 0;
 }
 
@@ -568,8 +595,9 @@ static int pitchCases(const int cases, const bool extras = false)
       std::vector<Coord> pos;
       for (const int nz : {z - 1, z + 1}) {
         if (nz >= 0 && nz < Z) {
-          pos.insert(
-              pos.end(), g.layers[nz].tracks.begin(), g.layers[nz].tracks.end());
+          pos.insert(pos.end(),
+                     g.layers[nz].tracks.begin(),
+                     g.layers[nz].tracks.end());
         }
       }
       std::sort(pos.begin(), pos.end());
@@ -599,10 +627,11 @@ static int pitchCases(const int cases, const bool extras = false)
           for (int j = 0; j < l.numPositions();) {
             const int len = 1 + rng() % 24;
             const double x = u(rng);
-            const RipupLevel lv = x < p_fixed ? kNotRemovable
-                                  : x < p_fixed + p_routed
-                                      ? RipupLevel(1 + rng() % kMaxRemovableLevel)
-                                      : kLegal;
+            const RipupLevel lv
+                = x < p_fixed ? kNotRemovable
+                  : x < p_fixed + p_routed
+                      ? RipupLevel(1 + rng() % kMaxRemovableLevel)
+                      : kLegal;
             for (int jj = j; jj < std::min(l.numPositions(), j + len); jj++) {
               const size_t v = g.vertex(z, i, jj);
               if (lv != kLegal) {
@@ -611,7 +640,8 @@ static int pitchCases(const int cases, const bool extras = false)
                 }
               } else if (u(rng) < 0.04) {
                 // Isolated via obstructions (cuts of other nets).
-                f.setLevel(v, rng() % 2 ? kCutUp : kViaDownPad, t, kNotRemovable);
+                f.setLevel(
+                    v, rng() % 2 ? kCutUp : kViaDownPad, t, kNotRemovable);
               }
             }
             j += len;
@@ -1103,7 +1133,8 @@ int main()
          || randomCases(400, false, true) || randomCases(400, true, true)
          || randomCases(300, false, true, 1) || randomCases(300, true, true, 2)
          || randomCases(300, false, true, 3) || randomCases(300, true, true, 3)
-         || randomCases(300, false, false, 3) || randomCases(300, true, false, 1)
+         || randomCases(300, false, false, 3)
+         || randomCases(300, true, false, 1)
          || randomCases(300, false, false, 2)
          || randomCases(400, false, false, 0, true)
          || randomCases(400, true, false, 0, true)

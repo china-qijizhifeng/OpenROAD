@@ -166,6 +166,10 @@ bool BonnRouteDRParams::set(const std::string& name, const double value)
     exact_future_cost = v != 0;
   } else if (name == "potential_check") {
     potential_check = v != 0;
+  } else if (name == "unreachable_probe") {
+    unreachable_probe = std::max(0, v);
+  } else if (name == "unreachable_probe_check") {
+    unreachable_probe_check = v != 0;
   } else if (name == "potential_detour_tiles") {
     potential_detour_tiles = std::max(0, v);
   } else if (name == "critical_nets") {
@@ -4069,9 +4073,27 @@ bool BonnRouteDR::connectInRegion(NetData& net,
   };
   auto run = [&](const bool path_region) {
     choose_potential(path_region);
+    // A search in the whole area that finds nothing settles all of it; the
+    // reverse probe proves most of these failures (an enclosed terminal)
+    // in a few vertices.
+    req.unreachable_probe = !path_region && !ripup && !params_.use_intervals
+                                ? static_cast<size_t>(params_.unreachable_probe)
+                                : 0;
     br::SearchResult res = params_.use_intervals
                                ? worker.interval_search->run(req)
                                : worker.search->run(req);
+    if (req.unreachable_probe > 0) {
+      worker.probes++;
+      worker.probe_visited += res.probe_visited;
+      if (res.proved_unreachable) {
+        worker.probes_proved++;
+        if (params_.unreachable_probe_check) {
+          req.unreachable_probe = 0;
+          const br::SearchResult plain = worker.search->run(req);
+          worker.probe_mismatches += plain.found;
+        }
+      }
+    }
     if (params_.potential_check && req.future_cost != nullptr) {
       // A feasible future cost leaves the shortest path cost unchanged.
       const br::FutureCostOracle* oracle = req.future_cost;
@@ -5852,6 +5874,24 @@ void BonnRouteDR::main()
         workers_.size(),
         partition_capacity_ > 0 ? 100.0 * partition_busy_ / partition_capacity_
                                 : 0.0);
+    if (params_.unreachable_probe > 0) {
+      int64_t probes = 0, proved = 0, visited = 0, mismatches = 0;
+      for (const Worker& w : workers_) {
+        probes += w.probes;
+        proved += w.probes_proved;
+        visited += w.probe_visited;
+        mismatches += w.probe_mismatches;
+      }
+      logger_->report(
+          "BonnRoute DR: unreachable probe: {} probes, {} proved without "
+          "search, {} vertices visited; checked {}, {} proofs contradicted "
+          "by the search.",
+          probes,
+          proved,
+          visited,
+          params_.unreachable_probe_check ? proved : 0,
+          mismatches);
+    }
     if (params_.potential != 0) {
       double potential_seconds = 0;
       for (const Worker& w : workers_) {
