@@ -273,6 +273,41 @@ their own.
   catalogues, primaries and reservations after setup and the routing
   before writeNets, for comparing runs.
 
+## Catalogues per pin class (D10)
+
+With `offtrack_pin_classes 1` the unit of reuse is one pin instead of one
+instance with all its pins.
+
+- Key of a pin (instance's local frame, as the circuit signature): master
+  and pin index; the pin's access points with their vias and, with
+  `offtrack_preferred_access_points 1`, their preferred marks; the shapes of
+  the instance itself (pins and obstructions, marked same net as the pin or
+  not) and the tracks of the two lowest track layers within the pin's search
+  reach (access-point box plus `offtrack_radius` + 3 pitches + 2 tau); the
+  via models and the catalogue parameters. Other pins' preferred marks and
+  connections, neighbours and power shapes are not in the key.
+- Catalogues: each class's catalogue is generated at its first pin (instance
+  order) in that pin's own surroundings, in parallel. Then, in parallel per
+  instance and before any reservation, every other pin maps the catalogue
+  (`map_option`), keeps the paths `optionLegal` at the member, and generates
+  its own catalogue when the mapping fails or fewer than
+  min(`offtrack_regenerate`, catalogue size) paths remain; the instance's
+  conflict-free selection follows. In instance order each instance keeps its
+  selection where the primary paths are legal against earlier reservations,
+  else re-solves on its legal paths, and reserves.
+- Legality equals the circuit-class flow: every kept path is checked at the
+  member. Completeness: paths blocked at the representative by its own
+  neighbours are missing at members unless they regenerate.
+- `offtrack_catalogue_sample n` checks every n-th member pin against a
+  catalogue generated at the member: equal (target, cost) sets, sets with
+  mapped-only or own-only entries, and pins whose whole surroundings within
+  the reach equal the representative's (all shapes, labelled); for those
+  related by a translation the sets must be equal.
+- `offtrack_access_stats 1` (M3) logs the circuit classes with one signature
+  component left out (net groups, preferred marks, shapes not of the
+  instance, tracks), the pin-key classes, and the blockage-grid lines and
+  vertices inside the windows with the grid in use and with the other grid.
+
 ## Conflict-free solution by destructive bounding
 
 The paper names the criteria ("spreading of endpoints, number of blocked

@@ -151,6 +151,9 @@ set_bonnroute_dr_param name value
 | `offtrack_tau` | `0` | Minimum segment length in DBU; `0` derives it per layer from the same-net rules (Section 3.7). |
 | `offtrack_notch_tau` | `0` | `1` adds notch spacing plus width to the derived minimum segment length. |
 | `offtrack_hanan_grid` | `1` | Catalogue searches on the Hanan grid with one state per grid vertex where the minimum segment length is at most the manufacturing grid (same path costs, fewer vertices); `0` uses Algorithm 3's grid and five direction states. |
+| `offtrack_pin_classes` | `0` | Off-track catalogues per pin class: the key holds only the pin's own search inputs (master, pin, access points with vias and preferred marks, the instance's own shapes and the tracks within the pin's reach, local frame). Each class's catalogue is generated at its first pin; other pins map it, keep the paths legal there and generate their own when fewer than `min(offtrack_regenerate, catalogue size)` remain; selection per instance. |
+| `offtrack_access_stats` | `0` | `1` logs the off-track access statistics (circuit classes with one signature component left out, pin-key classes, blockage-grid lines of both grids); results unchanged. |
+| `offtrack_catalogue_sample` | `0` | With `offtrack_pin_classes 1`: every n-th member pin also generates its own catalogue and compares (target, cost) with the mapped one (log only). |
 | `access_classes` | `1` | Share catalogues and conflict-free solutions within circuit classes; `0` solves every instance separately. |
 | `access_node_limit` | `20000` | Node limit of destructive bounding per circuit; beyond it the greedy choice is used. |
 | `access_track_weight` / `access_direction_weight` / `access_spread_weight` | `1` / `1` / `1` | Weights of the conflict-free solution: pitches per blocked track, pitches per missing on-track continuation, cost per DBU two endpoints are closer than two pitches. |

@@ -203,6 +203,23 @@ struct BonnRouteDRParams
   // tau apart and every Hanan-grid path is tau-feasible). 0 keeps
   // Algorithm 3's lines at multiples of tau and the five direction states.
   bool offtrack_hanan_grid = true;
+  // D10: catalogues per pin class instead of per circuit class. The key of
+  // a pin holds only its own search inputs that are equal between
+  // instances of a master (local frame): master, pin, access points with
+  // their vias and preferred marks, the instance's own shapes and the
+  // tracks within the pin's search reach. Each class's catalogue is
+  // generated at its first pin; every other pin maps it, keeps the paths
+  // legal at the member, and generates its own catalogue when fewer than
+  // min(offtrack_regenerate, catalogue size) remain. Selection per
+  // instance. Needs access_classes.
+  bool offtrack_pin_classes = false;
+  // M3 statistics (verbose log, results unchanged): circuit classes with
+  // one signature component left out, pin-key classes, and the blockage
+  // grid lines of both grids.
+  bool offtrack_access_stats = false;
+  // D10 sampled comparison: every n-th member pin also generates its own
+  // catalogue, compared with the mapped one (0: off; results unchanged).
+  int offtrack_catalogue_sample = 0;
   // Reuse a circuit class's catalogues and conflict-free solution for all
   // its instances; 0 solves every instance separately.
   bool access_classes = true;
@@ -512,6 +529,28 @@ class BonnRouteDR
     int64_t empty_rejected = 0;
     int64_t macro_pins = 0;
     int64_t member_regenerated = 0;
+    // D10 pin classes: classes, mapped paths of member pins and those
+    // illegal at the member.
+    int64_t pin_classes = 0;
+    int64_t mapped_options = 0;
+    int64_t mapped_dropped = 0;
+    // Sampled comparison of a member pin's mapped catalogue with the one
+    // generated at the member: sampled pins, equal (target, cost) sets,
+    // pins whose whole search environment equals the representative's
+    // (and of those, related by a translation, and their unequal sets).
+    int64_t sample_pins = 0;
+    int64_t sample_equal = 0;
+    int64_t sample_mapped_only = 0;  // (target, cost) only in the mapped
+    int64_t sample_own_only = 0;     // (target, cost) only in the own
+    int64_t sample_same_environment = 0;
+    int64_t sample_same_environment_translated = 0;
+    int64_t sample_same_environment_translated_unequal = 0;
+    // M3 (c): blockage-grid lines and vertices inside the window with the
+    // grid in use and with the other grid (Hanan / Algorithm 3).
+    int64_t grid_lines = 0;
+    int64_t grid_lines_other = 0;
+    int64_t grid_vertices_other = 0;
+    int64_t search_states = 0;
     std::vector<std::string> empty_examples;
     // Thread seconds of the catalogue steps besides the search: on-track
     // targets, obstacle collection, blockage grid, exact path checks, and

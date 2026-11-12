@@ -13,6 +13,7 @@
 #include <cstdlib>
 #include <deque>
 #include <functional>
+#include <iterator>
 #include <limits>
 #include <memory>
 #include <numeric>
@@ -37,6 +38,7 @@
 #include "db/obj/frBTerm.h"
 #include "db/obj/frBlock.h"
 #include "db/obj/frInst.h"
+#include "db/obj/frInstBlockage.h"
 #include "db/obj/frInstTerm.h"
 #include "db/obj/frNet.h"
 #include "db/obj/frShape.h"
@@ -243,6 +245,12 @@ bool BonnRouteDRParams::set(const std::string& name, const double value)
     offtrack_notch_tau = v != 0;
   } else if (name == "offtrack_hanan_grid") {
     offtrack_hanan_grid = v != 0;
+  } else if (name == "offtrack_pin_classes") {
+    offtrack_pin_classes = v != 0;
+  } else if (name == "offtrack_access_stats") {
+    offtrack_access_stats = v != 0;
+  } else if (name == "offtrack_catalogue_sample") {
+    offtrack_catalogue_sample = std::max(0, v);
   } else if (name == "access_classes") {
     access_classes = v != 0;
   } else if (name == "access_class_margin") {
@@ -1822,6 +1830,21 @@ void BonnRouteDR::AccessStats::add(const AccessStats& o)
   empty_rejected += o.empty_rejected;
   macro_pins += o.macro_pins;
   member_regenerated += o.member_regenerated;
+  pin_classes += o.pin_classes;
+  mapped_options += o.mapped_options;
+  mapped_dropped += o.mapped_dropped;
+  sample_pins += o.sample_pins;
+  sample_equal += o.sample_equal;
+  sample_mapped_only += o.sample_mapped_only;
+  sample_own_only += o.sample_own_only;
+  sample_same_environment += o.sample_same_environment;
+  sample_same_environment_translated += o.sample_same_environment_translated;
+  sample_same_environment_translated_unequal
+      += o.sample_same_environment_translated_unequal;
+  grid_lines += o.grid_lines;
+  grid_lines_other += o.grid_lines_other;
+  grid_vertices_other += o.grid_vertices_other;
+  search_states += o.search_states;
   target_seconds += o.target_seconds;
   blockage_seconds += o.blockage_seconds;
   grid_seconds += o.grid_seconds;
@@ -2495,6 +2518,31 @@ void BonnRouteDR::offTrackCatalogue(const int net,
   const std::vector<br::BlockageGridLayer> grid
       = br::buildBlockageGrid(grid_in);
   stats.grid_seconds += step_timer.elapsed();
+  if (params_.offtrack_access_stats) {
+    // M3 (c): lines and vertices inside the window, of this grid and of the
+    // other one (Hanan lines / Algorithm 3).
+    auto count = [&window](const std::vector<br::BlockageGridLayer>& layers,
+                           int64_t& lines,
+                           int64_t& vertices) {
+      for (const br::BlockageGridLayer& l : layers) {
+        const int64_t nx = std::ranges::count_if(l.xs, [&](br::GeoCoord x) {
+          return x >= window.xlo && x <= window.xhi;
+        });
+        const int64_t ny = std::ranges::count_if(l.ys, [&](br::GeoCoord y) {
+          return y >= window.ylo && y <= window.yhi;
+        });
+        lines += nx + ny;
+        vertices += nx * ny;
+      }
+    };
+    int64_t unused = 0;
+    count(grid, stats.grid_lines, unused);
+    br::BlockageGridInput other = grid_in;
+    other.grid_unit = grid_in.grid_unit > 0 ? 0 : mfg;
+    count(br::buildBlockageGrid(other),
+          stats.grid_lines_other,
+          stats.grid_vertices_other);
+  }
   for (size_t s = 0; s < frs.size(); s++) {
     req.layers[s].grid = grid[s];
   }
@@ -2575,6 +2623,7 @@ void BonnRouteDR::offTrackCatalogue(const int net,
   stats.search_seconds += timer.elapsed();
   stats.searches++;
   stats.grid_vertices += res.grid_vertices;
+  stats.search_states += res.states;
   stats.settled += res.settled;
   step_timer.reset();
   for (const br::OffTrackPath& path : res.paths) {
@@ -2922,10 +2971,28 @@ void BonnRouteDR::buildOffTrackAccess(const std::vector<char>& pre_skip)
   // Layers that influence access paths: up to the cut above the lowest
   // track layer (the search uses the pin layer and the next routing layer).
   const frLayerNum sig_top = layers_.front().fr + 1;
-  const int threads = static_cast<int>(workers_.size());
-#pragma omp parallel for num_threads(threads) schedule(dynamic, 16)
-  for (int k = 0; k < static_cast<int>(instances.size()); k++) {
-    InstanceAccess& ia = instances[k];
+  // Signature components left out by the M3 ablation (bits): pin net
+  // groups, preferred access point marks, shapes not of the instance,
+  // tracks.
+  enum SignatureAblation
+  {
+    kAblateNetGroups = 1,
+    kAblatePreferred = 2,
+    kAblateForeignShapes = 4,
+    kAblateTracks = 8
+  };
+  auto owned_by = [](const frBlockObject* obj, const frInst* inst) {
+    if (obj->typeId() == frcInstTerm) {
+      return static_cast<const frInstTerm*>(obj)->getInst() == inst;
+    }
+    if (obj->typeId() == frcInstBlockage) {
+      return static_cast<const frInstBlockage*>(obj)->getInst() == inst;
+    }
+    return false;
+  };
+  auto instance_signature = [&](const InstanceAccess& ia,
+                                const int k,
+                                const int ablation) {
     br::CircuitSignature sig(ia.place.inverse());
     odb::Rect window = ia.inst->getBBox();
     window.bloat(halo, window);
@@ -2938,6 +3005,9 @@ void BonnRouteDR::buildOffTrackAccess(const std::vector<char>& pre_skip)
           break;
         }
       }
+      if (ablation & kAblateNetGroups) {
+        g = 1;
+      }
       groups.push_back(g);
       sig.addPin(ia.pin_index[p], g);
       if (params_.offtrack_from_access_points) {
@@ -2945,9 +3015,10 @@ void BonnRouteDR::buildOffTrackAccess(const std::vector<char>& pre_skip)
         std::vector<AccessSource> aps;
         accessSources(nets_[ia.terms[p].first].terms[ia.terms[p].second], aps);
         for (const AccessSource& a : aps) {
+          const bool preferred = a.preferred || (ablation & kAblatePreferred);
           sig.addShape(a.layer,
                        {a.point.x(), a.point.y(), a.point.x(), a.point.y()},
-                       (a.preferred ? -1 : -1001) - static_cast<int>(p));
+                       (preferred ? -1 : -1001) - static_cast<int>(p));
         }
       }
     }
@@ -2955,6 +3026,9 @@ void BonnRouteDR::buildOffTrackAccess(const std::vector<char>& pre_skip)
       frRegionQuery::Objects<frBlockObject> result;
       rq->query(window, fr, result);
       for (const auto& [rect, obj] : result) {
+        if ((ablation & kAblateForeignShapes) && !owned_by(obj, ia.inst)) {
+          continue;
+        }
         frNet* owner_net = nullptr;
         if (obj->typeId() == frcInstTerm) {
           owner_net = static_cast<frInstTerm*>(obj)->getNet();
@@ -2987,7 +3061,8 @@ void BonnRouteDR::buildOffTrackAccess(const std::vector<char>& pre_skip)
     // Tracks of the search layers and the layer above (its tracks are the
     // positions of the lowest track layer); higher layers' track phases
     // relative to the cell do not influence access and only split classes.
-    for (int z = 0; z < std::min(num_z, 2); z++) {
+    for (int z = 0; z < std::min(num_z, 2) && !(ablation & kAblateTracks);
+         z++) {
       const br::TrackLayer& l = graph_.layers[z];
       const frCoord lo = l.horizontal ? window.yMin() : window.xMin();
       const frCoord hi = l.horizontal ? window.yMax() : window.xMax();
@@ -3002,13 +3077,43 @@ void BonnRouteDR::buildOffTrackAccess(const std::vector<char>& pre_skip)
     if (!params_.access_classes) {
       sig.addValue(k);
     }
-    ia.signature = sig.finish();
+    return sig.finish();
+  };
+  const int threads = static_cast<int>(workers_.size());
+  // D10: catalogues per pin class (key of the pin's own search inputs)
+  // instead of per circuit class.
+  const bool pin_classes
+      = params_.offtrack_pin_classes && params_.access_classes;
+  // M3 (offtrack_access_stats): circuit classes with one signature
+  // component left out, and the pin-key classes, without changing results.
+  const bool shadow_stats = params_.offtrack_access_stats;
+  std::array<int64_t, 4> ablated_classes{};
+  if (!pin_classes || shadow_stats) {
+#pragma omp parallel for num_threads(threads) schedule(dynamic, 16)
+    for (int k = 0; k < static_cast<int>(instances.size()); k++) {
+      instances[k].signature = instance_signature(instances[k], k, 0);
+    }
+  }
+  if (shadow_stats) {
+    for (int a = 0; a < 4; a++) {
+      std::vector<std::vector<int64_t>> ablated(instances.size());
+#pragma omp parallel for num_threads(threads) schedule(dynamic, 16)
+      for (int k = 0; k < static_cast<int>(instances.size()); k++) {
+        ablated[k] = instance_signature(instances[k], k, 1 << a);
+      }
+      br::CircuitClassTable table;
+      for (const std::vector<int64_t>& sig : ablated) {
+        table.classify(sig);
+      }
+      ablated_classes[a] = table.numClasses();
+    }
   }
   phases.signatures = phase_timer.elapsed();
   phase_timer.reset();
   br::CircuitClassTable table;
   std::vector<int> representative;
-  for (int k = 0; k < static_cast<int>(instances.size()); k++) {
+  for (int k = 0; k < static_cast<int>(instances.size()) && !pin_classes;
+       k++) {
     const auto [cls, is_new] = table.classify(instances[k].signature);
     instances[k].cls = cls;
     if (is_new) {
@@ -3019,6 +3124,13 @@ void BonnRouteDR::buildOffTrackAccess(const std::vector<char>& pre_skip)
   }
   stats.instances = static_cast<int64_t>(instances.size());
   stats.classes = table.numClasses();
+  if (shadow_stats && pin_classes) {
+    br::CircuitClassTable full;
+    for (const InstanceAccess& ia : instances) {
+      full.classify(ia.signature);
+    }
+    stats.classes = full.numClasses();
+  }
   phases.classification = phase_timer.elapsed();
   phase_timer.reset();
   // Catalogues and conflict-free solution of each class representative,
@@ -3151,7 +3263,318 @@ void BonnRouteDR::buildOffTrackAccess(const std::vector<char>& pre_skip)
     }
     return choice;
   };
-  for (int k = 0; k < static_cast<int>(instances.size()); k++) {
+  // D10 pin keys (also for the M3 statistics): per access pin, the inputs
+  // of its own catalogue search that are equal between instances of a
+  // master, in the instance's local frame. `environment` adds every other
+  // shape in the pin's reach (the sampled comparison's test whether a
+  // member sees exactly the representative's surroundings).
+  std::vector<std::vector<int>> pin_class(instances.size());
+  std::vector<std::pair<int, int>> pin_representative;
+  std::vector<int> master_of(instances.size());
+  // Search reach of a pin: targets within the radius, the window margin
+  // (2 tau + pitch) and two pitches for obstacles entering the window.
+  const frCoord pin_reach
+      = (params_.offtrack_radius + 3) * max_pitch + 2 * max_tau;
+  auto pin_key = [&](const InstanceAccess& ia,
+                     const size_t p,
+                     const int master,
+                     const bool environment) {
+    const auto [net, t] = ia.terms[p];
+    const Term& term = nets_[net].terms[t];
+    br::CircuitSignature key(ia.place.inverse());
+    key.addValue(master);
+    key.addValue(ia.pin_index[p]);
+    key.addValue(environment ? 1 : 0);
+    key.addValue(params_.offtrack_radius);
+    key.addValue(params_.max_access_options);
+    key.addValue(params_.jog_factor);
+    key.addValue(params_.pin_cost);
+    key.addPin(ia.pin_index[p], 1);
+    odb::Rect box = ia.inst->getBBox();
+    if (params_.offtrack_from_access_points) {
+      std::vector<AccessSource> aps;
+      accessSources(term, aps);
+      bool first = true;
+      for (const AccessSource& a : aps) {
+        const bool marked
+            = params_.offtrack_preferred_access_points && !a.preferred;
+        key.addShape(a.layer,
+                     {a.point.x(), a.point.y(), a.point.x(), a.point.y()},
+                     marked ? -2 : -1);
+        if (a.via != nullptr) {
+          const frVia v(a.via, a.point);
+          key.addShape(a.via->getLayer1Num(), toBox(v.getLayer1BBox()), -3);
+          key.addShape(a.via->getCutLayerNum(), toBox(v.getCutBBox()), -3);
+          key.addShape(a.via->getLayer2Num(), toBox(v.getLayer2BBox()), -3);
+        }
+        const odb::Rect point(a.point, a.point);
+        if (first) {
+          box = point;
+          first = false;
+        } else {
+          box.merge(point);
+        }
+      }
+    }
+    odb::Rect window = box;
+    window.bloat(pin_reach, window);
+    for (frLayerNum fr = std::max(0, bottom - 2); fr <= sig_top; fr++) {
+      frRegionQuery::Objects<frBlockObject> result;
+      rq->query(window, fr, result);
+      for (const auto& [rect, obj] : result) {
+        const bool own = owned_by(obj, ia.inst);
+        if (!own && !environment) {
+          continue;
+        }
+        const frNet* owner_net = nullptr;
+        if (obj->typeId() == frcInstTerm) {
+          owner_net = static_cast<const frInstTerm*>(obj)->getNet();
+        } else if (obj->typeId() == frcBTerm) {
+          owner_net = static_cast<const frBTerm*>(obj)->getNet();
+        }
+        const bool same_net
+            = owner_net != nullptr && owner_net == nets_[net].net;
+        key.addShape(fr,
+                     toBox(rect.intersect(window)),
+                     (own ? 1 : 3) + (same_net ? 1 : 0));
+      }
+      const frViaDef* via = viaDefAbove(fr);
+      if (via != nullptr) {
+        const frVia v0(via, odb::Point(0, 0));
+        key.addVia(fr,
+                   {{via->getLayer1Num(), toBox(v0.getLayer1BBox())},
+                    {via->getCutLayerNum(), toBox(v0.getCutBBox())},
+                    {via->getLayer2Num(), toBox(v0.getLayer2BBox())}});
+      }
+    }
+    for (int z = 0; z < std::min(num_z, 2); z++) {
+      const br::TrackLayer& l = graph_.layers[z];
+      const frCoord lo = l.horizontal ? window.yMin() : window.xMin();
+      const frCoord hi = l.horizontal ? window.yMax() : window.xMax();
+      for (auto it = std::ranges::lower_bound(l.tracks, lo);
+           it != l.tracks.end() && *it <= hi;
+           ++it) {
+        key.addTrack(z, l.horizontal, *it);
+      }
+    }
+    return key.finish();
+  };
+  if (pin_classes || shadow_stats) {
+    phase_timer.reset();
+    std::unordered_map<const frMaster*, int> master_ids;
+    for (size_t k = 0; k < instances.size(); k++) {
+      const auto [it, inserted] = master_ids.emplace(
+          instances[k].inst->getMaster(), static_cast<int>(master_ids.size()));
+      master_of[k] = it->second;
+    }
+    std::vector<std::vector<std::vector<int64_t>>> keys(instances.size());
+#pragma omp parallel for num_threads(threads) schedule(dynamic, 16)
+    for (int k = 0; k < static_cast<int>(instances.size()); k++) {
+      const InstanceAccess& ia = instances[k];
+      for (size_t p = 0; p < ia.terms.size(); p++) {
+        keys[k].push_back(pin_key(ia, p, master_of[k], false));
+      }
+    }
+    phases.signatures += phase_timer.elapsed();
+    phase_timer.reset();
+    br::CircuitClassTable pin_table;
+    for (size_t k = 0; k < instances.size(); k++) {
+      for (size_t p = 0; p < keys[k].size(); p++) {
+        const auto [cls, is_new] = pin_table.classify(keys[k][p]);
+        pin_class[k].push_back(cls);
+        if (is_new) {
+          pin_representative.emplace_back(static_cast<int>(k),
+                                          static_cast<int>(p));
+        }
+      }
+      keys[k].clear();
+      keys[k].shrink_to_fit();
+    }
+    stats.pin_classes = pin_table.numClasses();
+    phases.classification += phase_timer.elapsed();
+    phase_timer.reset();
+  }
+  if (pin_classes) {
+    // Catalogue of each pin class at its first pin, in that pin's own
+    // surroundings (fixed shapes and pins), in parallel.
+    phase_timer.reset();
+    std::vector<std::vector<AccessOption>> pin_catalogue(
+        pin_representative.size());
+    std::vector<AccessStats> pin_stats(pin_representative.size());
+#pragma omp parallel for num_threads(threads) schedule(dynamic, 1)
+    for (int c = 0; c < static_cast<int>(pin_representative.size()); c++) {
+      const auto [k, p] = pin_representative[c];
+      const auto [net, t] = instances[k].terms[p];
+      offTrackCatalogue(
+          net, nets_[net].terms[t], nullptr, pin_catalogue[c], pin_stats[c]);
+    }
+    for (const AccessStats& s : pin_stats) {
+      stats.add(s);
+      class_total.add(s);
+    }
+    phases.class_catalogues = phase_timer.elapsed();
+    phase_timer.reset();
+    // Per instance, in parallel and before any reservation: each pin maps
+    // its class catalogue and keeps the paths legal here (or generates its
+    // own catalogue), then the instance's conflict-free selection.
+    struct MemberData
+    {
+      std::vector<std::vector<AccessOption>> catalogues;
+      std::vector<int> choice;
+    };
+    std::vector<MemberData> members(instances.size());
+    std::vector<AccessStats> member_stats(instances.size());
+    const int sample = params_.offtrack_catalogue_sample;
+#pragma omp parallel for num_threads(threads) schedule(dynamic, 16)
+    for (int k = 0; k < static_cast<int>(instances.size()); k++) {
+      const InstanceAccess& ia = instances[k];
+      MemberData& md = members[k];
+      AccessStats& ms = member_stats[k];
+      const int n = static_cast<int>(ia.terms.size());
+      md.catalogues.resize(n);
+      std::vector<int> nets;
+      for (const auto& [net, t] : ia.terms) {
+        nets.push_back(net);
+      }
+      for (int p = 0; p < n; p++) {
+        const auto [net, t] = ia.terms[p];
+        const Term& term = nets_[net].terms[t];
+        const int c = pin_class[k][p];
+        const auto [rk, rp] = pin_representative[c];
+        const std::vector<AccessOption>& source = pin_catalogue[c];
+        std::vector<AccessOption>& cat = md.catalogues[p];
+        if (rk == k && rp == p) {
+          cat = source;
+          continue;
+        }
+        const br::Isometry m
+            = ia.place.compose(instances[rk].place.inverse());
+        std::vector<AccessSource> member_aps;
+        accessSources(term, member_aps);
+        bool mapped = true;
+        for (const AccessOption& opt : source) {
+          AccessOption mo;
+          if (!map_option(opt, m, member_aps, mo)) {
+            mapped = false;
+            break;
+          }
+          ms.mapped_options++;
+          if (optionLegal(mo, net, nullptr)) {
+            cat.push_back(std::move(mo));
+          } else {
+            ms.mapped_dropped++;
+          }
+        }
+        const size_t needed = std::min<size_t>(
+            static_cast<size_t>(params_.offtrack_regenerate), source.size());
+        if (!mapped) {
+          ms.mapping_failed++;
+          offTrackCatalogue(net, term, nullptr, cat, ms);
+          continue;
+        }
+        if (cat.size() < needed) {
+          ms.member_regenerated++;
+          offTrackCatalogue(net, term, nullptr, cat, ms);
+          continue;
+        }
+        if (sample > 0 && (static_cast<int64_t>(k) * 31 + p) % sample == 0) {
+          // Sampled comparison with the catalogue generated here.
+          AccessStats own_stats;
+          std::vector<AccessOption> own;
+          offTrackCatalogue(net, term, nullptr, own, own_stats);
+          auto pairs = [](const std::vector<AccessOption>& options) {
+            std::vector<std::pair<size_t, Cost>> out;
+            for (const AccessOption& o : options) {
+              out.emplace_back(o.vertex, o.cost);
+            }
+            std::ranges::sort(out);
+            return out;
+          };
+          const auto a = pairs(cat);
+          const auto b = pairs(own);
+          std::vector<std::pair<size_t, Cost>> only;
+          std::ranges::set_difference(a, b, std::back_inserter(only));
+          const bool mapped_only = !only.empty();
+          only.clear();
+          std::ranges::set_difference(b, a, std::back_inserter(only));
+          const bool own_only = !only.empty();
+          ms.sample_pins++;
+          ms.sample_equal += a == b;
+          ms.sample_mapped_only += mapped_only;
+          ms.sample_own_only += own_only;
+          const InstanceAccess& rep = instances[rk];
+          if (pin_key(ia, p, master_of[k], true)
+              == pin_key(rep, rp, master_of[rk], true)) {
+            ms.sample_same_environment++;
+            const br::Isometry linear = m.linear();
+            if (linear.m00 == 1 && linear.m11 == 1 && linear.m01 == 0
+                && linear.m10 == 0) {
+              ms.sample_same_environment_translated++;
+              ms.sample_same_environment_translated_unequal += a != b;
+            }
+          }
+        }
+      }
+      std::vector<const std::vector<AccessOption>*> ptrs;
+      for (const std::vector<AccessOption>& cat : md.catalogues) {
+        ptrs.push_back(&cat);
+      }
+      md.choice = choosePrimaries(ptrs, nets, ms);
+    }
+    for (const AccessStats& s : member_stats) {
+      stats.add(s);
+    }
+    phases.member_mapping = phase_timer.elapsed();
+    phase_timer.reset();
+    // In instance order: keep the selection where its primary paths are
+    // legal against the reservations of earlier instances, else re-solve;
+    // reserve.
+    for (int k = 0; k < static_cast<int>(instances.size()); k++) {
+      const InstanceAccess& ia = instances[k];
+      MemberData& md = members[k];
+      const int n = static_cast<int>(ia.terms.size());
+      std::vector<int> nets;
+      for (const auto& [net, t] : ia.terms) {
+        nets.push_back(net);
+      }
+      std::vector<std::vector<AccessOption>>& cats = md.catalogues;
+      std::vector<int> choice = md.choice;
+      step_timer.reset();
+      bool reuse = true;
+      for (int p = 0; p < n && reuse; p++) {
+        reuse = choice[p] < 0
+                    ? cats[p].empty()
+                    : optionLegal(cats[p][choice[p]], nets[p], nullptr);
+      }
+      phases.member_legality += step_timer.elapsed();
+      if (reuse) {
+        stats.class_reused++;
+      } else {
+        step_timer.reset();
+        stats.reselected++;
+        choice = solve(cats, nets);
+        phases.member_solve += step_timer.elapsed();
+      }
+      step_timer.reset();
+      for (int p = 0; p < n; p++) {
+        const auto [net_id, t] = ia.terms[p];
+        NetData& net = nets_[net_id];
+        Term& term = net.terms[t];
+        if (cats[p].empty()) {
+          reserve_fallback(net, term);
+          continue;
+        }
+        keepStubs(term, cats[p]);
+        if (choice[p] >= 0) {
+          reserve(net, term, choice[p]);
+        }
+      }
+      phases.member_reservations += step_timer.elapsed();
+      md = MemberData();
+    }
+  }
+  for (int k = 0; k < static_cast<int>(instances.size()) && !pin_classes;
+       k++) {
     const InstanceAccess& ia = instances[k];
     const int rep = representative[ia.cls];
     const ClassData& cd = classes[ia.cls];
@@ -3357,6 +3780,57 @@ void BonnRouteDR::buildOffTrackAccess(const std::vector<char>& pre_skip)
         phases.member_solve,
         phases.member_reservations,
         phases.top_level_pins);
+    if (pin_classes) {
+      logger_->report(
+          "BonnRoute off-track pin classes: {} pin classes; {} mapped paths, "
+          "{} illegal at the member, {} pins with a failed mapping, {} pins "
+          "regenerated; {} instances kept their selection, {} re-solved; "
+          "sample: {} pins, {} equal, {} with mapped-only (target, cost), {} "
+          "with own-only, {} with the representative's environment ({} "
+          "translated, {} of those unequal).",
+          stats.pin_classes,
+          stats.mapped_options,
+          stats.mapped_dropped,
+          stats.mapping_failed,
+          stats.member_regenerated,
+          stats.class_reused,
+          stats.reselected,
+          stats.sample_pins,
+          stats.sample_equal,
+          stats.sample_mapped_only,
+          stats.sample_own_only,
+          stats.sample_same_environment,
+          stats.sample_same_environment_translated,
+          stats.sample_same_environment_translated_unequal);
+    }
+    if (shadow_stats) {
+      logger_->report(
+          "BonnRoute off-track access stats: {} instances, {} circuit "
+          "classes; without net groups {}, without preferred marks {}, "
+          "without foreign shapes {}, without tracks {}; {} pin-key classes "
+          "of {} access pins; blockage grid lines {} (other grid {}), "
+          "vertices {} (other grid {}), search states {}, settled {}.",
+          stats.instances,
+          stats.classes,
+          ablated_classes[0],
+          ablated_classes[1],
+          ablated_classes[2],
+          ablated_classes[3],
+          stats.pin_classes,
+          [&] {
+            int64_t pins = 0;
+            for (const std::vector<int>& c : pin_class) {
+              pins += static_cast<int64_t>(c.size());
+            }
+            return pins;
+          }(),
+          stats.grid_lines,
+          stats.grid_lines_other,
+          stats.grid_vertices,
+          stats.grid_vertices_other,
+          stats.search_states,
+          stats.settled);
+    }
   }
 }
 
