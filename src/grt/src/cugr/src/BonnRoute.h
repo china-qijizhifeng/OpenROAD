@@ -245,8 +245,12 @@ class BonnRouteGlobal
   {
     double key;  // dist + h
     double dist;
-    int64_t node;
+    int32_t node;      // region vertex * 3 + via state
     uint32_t version;  // target set the key's h was computed for
+    // Cell of the node: a pop needs no index decode.
+    int16_t layer;
+    int16_t x;
+    int16_t y;
   };
   struct GoalTarget
   {
@@ -362,9 +366,11 @@ class BonnRouteGlobal
   // pair i if it is a pin-clique edge, else -1.
   // Without need_usage (the congestion-free pilot reads only the tree and
   // its objective) the demand list and hash stay empty.
+  // tree_edges is the canonical edge list (TreeKey::edges);
+  // scratch.tree_vertices holds the cells of its vertices, sorted by key.
   bool buildCandidate(const NetState& state,
-                      const std::vector<std::array<int, 3>>& tree_edges,
-                      const std::vector<int>& edge_pins,
+                      const std::vector<std::array<uint32_t, 3>>& tree_edges,
+                      Scratch& scratch,
                       bool need_usage,
                       Candidate& candidate) const;
   // Congestion-free oracle pass: objective bound and reuse certificate;
@@ -379,6 +385,25 @@ class BonnRouteGlobal
                        int y,
                        double pad,
                        double factor) const;
+  // The pad lengths a via move puts on layer L: the lower pad of a via
+  // from L, the upper pad of a via from L - 1, and the column increments
+  // when the column entered L from below / from above.
+  enum class PadKind : uint8_t
+  {
+    kLower = 0,
+    kUpper = 1,
+    kColumnFromBelow = 2,
+    kColumnFromAbove = 3
+  };
+  static constexpr int kPadKinds = 4;
+  // pad / flank sum of that pad at (x, y) on L, 0 where no demand arises.
+  double padQuotient(int layer, PadKind kind, int x, int y) const;
+  // padCostFactor with the quotient taken from padQuotient().
+  double padCostQuotient(int layer,
+                         int x,
+                         int y,
+                         double quotient,
+                         double factor) const;
   std::shared_ptr<GRTreeNode> buildTree(const Candidate& candidate) const;
   // Price of a candidate: objective weight * objective + prices * usage.
   double linearCost(double objective,
@@ -454,6 +479,7 @@ class BonnRouteGlobal
   std::array<std::vector<double>, 2> wire_objective_;  // [direction][index]
   std::array<std::vector<double>, 2> edge_length_;     // DBU, [dir][index]
   std::vector<std::vector<PadFlank>> pad_flank_;       // [layer][index]
+  std::vector<std::vector<double>> pad_quotient_;  // [layer][index * kinds]
   // Resources whose log price changed in the current batch.
   std::vector<uint32_t> touched_;
   std::vector<uint32_t> touched_stamp_;

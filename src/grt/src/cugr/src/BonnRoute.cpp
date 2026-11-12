@@ -192,6 +192,38 @@ struct alignas(kCacheLine) BonnRouteGlobal::Scratch
   int64_t settled = 0;
   // Wall seconds spent in buildCandidate by this thread.
   double build_seconds = 0.0;
+  // buildCandidate's forest: tree vertices sorted by edgeIndex() key, and
+  // per vertex its links (CSR), forest degree and state.
+  struct TreeVertex
+  {
+    uint32_t key;
+    int16_t layer;
+    int16_t x;
+    int16_t y;
+  };
+  struct TreeLink
+  {
+    int32_t neighbor;  // vertex id
+    int32_t pin;       // GRNet pin of a pin link, -1 for a wire or via
+  };
+  std::vector<TreeVertex> tree_vertices;
+  std::vector<std::array<uint32_t, 3>> tree_edges;  // calls without a key
+  std::vector<std::array<int32_t, 2>> edge_ends;
+  std::vector<int32_t> link_begin;
+  std::vector<int32_t> link_fill;
+  std::vector<TreeLink> links;
+  std::vector<int32_t> degree;
+  std::vector<uint8_t> alive;
+  std::vector<uint8_t> visited;
+  std::vector<uint8_t> pinned;
+  std::vector<int32_t> cell_begin;   // per terminal, into cell_vertex
+  std::vector<int32_t> cell_vertex;  // vertex of each terminal cell, or -1
+  std::vector<int32_t> terminal_begin;
+  std::vector<int32_t> terminal_ids;
+  std::vector<int32_t> present;
+  std::vector<int32_t> leaves;
+  std::vector<int32_t> representative;
+  std::vector<std::pair<int32_t, int32_t>> dfs_stack;
 
   // n vertices; dist / parent / stamp are per (vertex, via state) node.
   void prepare(size_t n)
@@ -261,6 +293,33 @@ BonnRouteGlobal::BonnRouteGlobal(GridGraph* grid_graph,
           = c < size - 1 ? grid_graph_->getEdgeLength(direction, c) : 0;
       pad_flank_[l][c]
           = {lower_len + higher_len, lower_len > 0, higher_len > 0};
+    }
+  }
+  // pad / flank sum per layer, pad kind and index: the same quotient
+  // padCostFactor() divides out per call.
+  pad_quotient_.resize(num_layers_);
+  for (int l = 0; l < num_layers_; l++) {
+    const double lower = via_pad_lower_[l];
+    const double upper = l > 0 ? via_pad_upper_[l - 1] : 0.0;
+    std::array<double, kPadKinds> pads{};
+    pads[static_cast<int>(PadKind::kLower)] = lower;
+    if (l > 0) {
+      pads[static_cast<int>(PadKind::kUpper)] = upper;
+      pads[static_cast<int>(PadKind::kColumnFromBelow)]
+          = std::max(upper, lower) - upper;
+      pads[static_cast<int>(PadKind::kColumnFromAbove)]
+          = std::max(upper, lower) - lower;
+    }
+    const std::vector<PadFlank>& flanks = pad_flank_[l];
+    pad_quotient_[l].assign(flanks.size() * kPadKinds, 0.0);
+    for (size_t c = 0; c < flanks.size(); c++) {
+      for (int k = 0; k < kPadKinds; k++) {
+        const double pad = pads[k];
+        if (!via_demand_ || pad <= 0.0 || flanks[c].sum == 0) {
+          continue;
+        }
+        pad_quotient_[l][c * kPadKinds + k] = pad / flanks[c].sum;
+      }
     }
   }
   buildViaSteps();
@@ -351,6 +410,40 @@ double BonnRouteGlobal::padCostFactor(const int layer,
     return 0.0;
   }
   const double demand = pad / flank.sum * factor;
+  double cost = 0.0;
+  if (flank.lower) {
+    const int lx = direction == MetalLayer::H ? x - 1 : x;
+    const int ly = direction == MetalLayer::H ? y : y - 1;
+    cost += price(edgeIndex(layer, lx, ly)) * demand;
+  }
+  if (flank.higher) {
+    cost += price(edgeIndex(layer, x, y)) * demand;
+  }
+  return cost;
+}
+
+double BonnRouteGlobal::padQuotient(const int layer,
+                                    const PadKind kind,
+                                    const int x,
+                                    const int y) const
+{
+  const int direction = layer_direction_[layer];
+  const int c = direction == MetalLayer::H ? x : y;
+  return pad_quotient_[layer][c * kPadKinds + static_cast<int>(kind)];
+}
+
+double BonnRouteGlobal::padCostQuotient(const int layer,
+                                        const int x,
+                                        const int y,
+                                        const double quotient,
+                                        const double factor) const
+{
+  if (quotient == 0.0) {
+    return 0.0;
+  }
+  const int direction = layer_direction_[layer];
+  const PadFlank& flank = pad_flank_[layer][direction == MetalLayer::H ? x : y];
+  const double demand = quotient * factor;
   double cost = 0.0;
   if (flank.lower) {
     const int lx = direction == MetalLayer::H ? x - 1 : x;
@@ -519,8 +612,8 @@ BonnRouteGlobal::OracleResult BonnRouteGlobal::oracleImpl(
   };
   auto greater = [](const std::pair<double, int64_t>& a,
                     const std::pair<double, int64_t>& b) { return a > b; };
-  // Goal orientation: heap entries carry dist + h and the target-set
-  // version their h was computed for.
+  // Goal orientation: heap entries carry dist + h, the target-set version
+  // their h was computed for, and the node's cell (no decode on a pop).
   [[maybe_unused]] GoalContext goal;
   if constexpr (kGoal) {
     initGoal(goal, state, objective_only, x0, y0, x1, y1, num_layers);
@@ -535,20 +628,23 @@ BonnRouteGlobal::OracleResult BonnRouteGlobal::oracleImpl(
           }
           return a.node > b.node;
         };
-  [[maybe_unused]] auto vertex_of = [&](int64_t v) {
+  auto vertex_of = [&](int64_t v) {
     const int l = static_cast<int>(v / plane);
     const int64_t rem = v % plane;
     return std::array<int, 3>{l,
                               x0 + static_cast<int>(rem / height),
                               y0 + static_cast<int>(rem % height)};
   };
-  [[maybe_unused]] auto bound = [&](int64_t node) {
-    const auto [l, x, y] = vertex_of(node / 3);
-    return goalBound(goal, l, x, y);
-  };
-  auto push = [&](double d, int64_t node) {
+  // (l, x, y) is the cell of `node`; callers know it from the move.
+  auto push = [&](double d, int64_t node, int l, int x, int y) {
     if constexpr (kGoal) {
-      scratch.goal_heap.push_back({d + bound(node), d, node, goal.version});
+      scratch.goal_heap.push_back({d + goalBound(goal, l, x, y),
+                                   d,
+                                   static_cast<int32_t>(node),
+                                   goal.version,
+                                   static_cast<int16_t>(l),
+                                   static_cast<int16_t>(x),
+                                   static_cast<int16_t>(y)});
       std::push_heap(
           scratch.goal_heap.begin(), scratch.goal_heap.end(), goal_greater);
     } else {
@@ -556,12 +652,12 @@ BonnRouteGlobal::OracleResult BonnRouteGlobal::oracleImpl(
       std::push_heap(scratch.heap.begin(), scratch.heap.end(), greater);
     }
   };
-  auto relax = [&](int64_t from, int64_t to, double d) {
+  auto relax = [&](int64_t from, int64_t to, double d, int l, int x, int y) {
     if (scratch.stamp[to] != scratch.epoch || d < scratch.dist[to]) {
       scratch.stamp[to] = scratch.epoch;
       scratch.dist[to] = d;
       scratch.parent[to] = static_cast<int32_t>(from);
-      push(d, to);
+      push(d, to, l, x, y);
     }
   };
 
@@ -587,13 +683,13 @@ BonnRouteGlobal::OracleResult BonnRouteGlobal::oracleImpl(
   int remaining = num_terminals;
   std::vector<std::array<int64_t, 2>> edges;  // vertex pairs
   std::vector<int> edge_pins;                 // pin of a clique edge, or -1
-  auto add_source = [&](int64_t v) {
+  auto add_source = [&](int64_t v, int l, int x, int y) {
     scratch.tree_stamp[v] = scratch.epoch;
     const int64_t node = v * 3;
     scratch.stamp[node] = scratch.epoch;
     scratch.dist[node] = 0.0;
     scratch.parent[node] = -1;
-    push(0.0, node);
+    push(0.0, node, l, x, y);
   };
   // Sec. 2.2: "To find T*, we can add the edges of the clique K(V_p) for
   // each pin p in n with zero cost, and use an approximation algorithm for
@@ -623,7 +719,7 @@ BonnRouteGlobal::OracleResult BonnRouteGlobal::oracleImpl(
           if (scratch.tree_stamp[w] != scratch.epoch) {
             edges.push_back({v, w});
             edge_pins.push_back(state.terminals[t].pin_index);
-            add_source(w);
+            add_source(w, c[0], c[1], c[2]);
             pending.push_back(w);
           }
         }
@@ -639,7 +735,7 @@ BonnRouteGlobal::OracleResult BonnRouteGlobal::oracleImpl(
   {
     const auto& c = state.terminals[0].cells.front();
     const int64_t root = index(c[0], c[1], c[2]);
-    add_source(root);
+    add_source(root, c[0], c[1], c[2]);
     connect_at(root);
     refresh_targets();
   }
@@ -656,6 +752,9 @@ BonnRouteGlobal::OracleResult BonnRouteGlobal::oracleImpl(
   while (!heap_empty() && remaining > 0) {
     double d;
     int64_t node;
+    int l;
+    int x;
+    int y;
     if constexpr (kGoal) {
       std::pop_heap(
           scratch.goal_heap.begin(), scratch.goal_heap.end(), goal_greater);
@@ -667,14 +766,19 @@ BonnRouteGlobal::OracleResult BonnRouteGlobal::oracleImpl(
       if (d > scratch.dist[node]) {
         continue;
       }
+      l = entry.layer;
+      x = entry.x;
+      y = entry.y;
       if (entry.version != goal.version) {
         // Fewer targets since the push: h can only have grown. Re-key the
         // entry if it is no longer the minimum.
-        const double key = d + bound(node);
+        const double key = d + goalBound(goal, l, x, y);
+        GoalEntry rekeyed = entry;
+        rekeyed.key = key;
+        rekeyed.version = goal.version;
         if (key > entry.key && !scratch.goal_heap.empty()
-            && goal_greater(GoalEntry{key, d, node, goal.version},
-                            scratch.goal_heap.front())) {
-          scratch.goal_heap.push_back({key, d, node, goal.version});
+            && goal_greater(rekeyed, scratch.goal_heap.front())) {
+          scratch.goal_heap.push_back(rekeyed);
           std::push_heap(
               scratch.goal_heap.begin(), scratch.goal_heap.end(), goal_greater);
           continue;
@@ -689,6 +793,10 @@ BonnRouteGlobal::OracleResult BonnRouteGlobal::oracleImpl(
       if (d > scratch.dist[node]) {
         continue;
       }
+      const auto cell = vertex_of(node / 3);
+      l = cell[0];
+      x = cell[1];
+      y = cell[2];
     }
     scratch.settled++;
     const int64_t u = node / 3;
@@ -718,7 +826,8 @@ BonnRouteGlobal::OracleResult BonnRouteGlobal::oracleImpl(
         segments->push_back({d, key});
       }
       for (const int64_t v : added) {
-        add_source(v);
+        const auto [vl, vx, vy] = vertex_of(v);
+        add_source(v, vl, vx, vy);
       }
       for (const int64_t v : added) {
         connect_at(v);
@@ -726,10 +835,6 @@ BonnRouteGlobal::OracleResult BonnRouteGlobal::oracleImpl(
       refresh_targets();
       continue;
     }
-    const int l = static_cast<int>(u / plane);
-    const int64_t rem = u % plane;
-    const int x = x0 + static_cast<int>(rem / height);
-    const int y = y0 + static_cast<int>(rem % height);
     if (l >= range.min_layer && l <= range.max_layer) {
       const double factor = net->getNdrCost(l);
       auto wire = [&](int ex, int ey) {
@@ -745,17 +850,17 @@ BonnRouteGlobal::OracleResult BonnRouteGlobal::oracleImpl(
       };
       if (layer_direction_[l] == MetalLayer::H) {
         if (x > x0) {
-          relax(node, (u - height) * 3, d + wire(x - 1, y));
+          relax(node, (u - height) * 3, d + wire(x - 1, y), l, x - 1, y);
         }
         if (x < x1) {
-          relax(node, (u + height) * 3, d + wire(x, y));
+          relax(node, (u + height) * 3, d + wire(x, y), l, x + 1, y);
         }
       } else {
         if (y > y0) {
-          relax(node, (u - 1) * 3, d + wire(x, y - 1));
+          relax(node, (u - 1) * 3, d + wire(x, y - 1), l, x, y - 1);
         }
         if (y < y1) {
-          relax(node, (u + 1) * 3, d + wire(x, y));
+          relax(node, (u + 1) * 3, d + wire(x, y), l, x, y + 1);
         }
       }
     }
@@ -764,82 +869,98 @@ BonnRouteGlobal::OracleResult BonnRouteGlobal::oracleImpl(
       if (!objective_only) {
         // Pad on l: lower pad of this via, or the column increment when the
         // column already came up into l.
-        const double lower = via_pad_lower_[l];
-        const double pad_l = (s == 1 && l > 0)
-                                 ? std::max(via_pad_upper_[l - 1], lower)
-                                       - via_pad_upper_[l - 1]
-                                 : lower;
-        c = obj * params_.via_weight + padCost(l, x, y, pad_l, net)
-            + padCost(l + 1, x, y, via_pad_upper_[l], net);
+        const PadKind kind_l = (s == 1 && l > 0) ? PadKind::kColumnFromBelow
+                                                 : PadKind::kLower;
+        const double factor_l = net->getNdrCost(l);
+        const double factor_up = net->getNdrCost(l + 1);
+        c = obj * params_.via_weight
+            + padCostQuotient(l, x, y, padQuotient(l, kind_l, x, y), factor_l)
+            + padCostQuotient(l + 1,
+                              x,
+                              y,
+                              padQuotient(l + 1, PadKind::kUpper, x, y),
+                              factor_up);
       }
-      relax(node, (u + plane) * 3 + 1, d + c);
+      relax(node, (u + plane) * 3 + 1, d + c, l + 1, x, y);
     }
     if (l > 0) {
       double c = params_.via_weight;
       if (!objective_only) {
-        const double upper = via_pad_upper_[l - 1];
-        const double pad_l
-            = (s == 2) ? std::max(upper, via_pad_lower_[l]) - via_pad_lower_[l]
-                       : upper;
-        c = obj * params_.via_weight + padCost(l, x, y, pad_l, net)
-            + padCost(l - 1, x, y, via_pad_lower_[l - 1], net);
+        const PadKind kind_l
+            = (s == 2) ? PadKind::kColumnFromAbove : PadKind::kUpper;
+        const double factor_l = net->getNdrCost(l);
+        const double factor_down = net->getNdrCost(l - 1);
+        c = obj * params_.via_weight
+            + padCostQuotient(l, x, y, padQuotient(l, kind_l, x, y), factor_l)
+            + padCostQuotient(l - 1,
+                              x,
+                              y,
+                              padQuotient(l - 1, PadKind::kLower, x, y),
+                              factor_down);
       }
-      relax(node, (u - plane) * 3 + 2, d + c);
+      relax(node, (u - plane) * 3 + 2, d + c, l - 1, x, y);
     }
   }
   if (remaining > 0) {
     return result;
   }
   result.search_cost = last_connection_cost;
-  auto cell = [&](int64_t v) -> std::array<int, 3> {
-    const int l = static_cast<int>(v / plane);
-    const int64_t rem = v % plane;
-    return {l,
-            x0 + static_cast<int>(rem / height),
-            y0 + static_cast<int>(rem % height)};
-  };
+  // Canonical tree (TreeKey): unit edges in edgeIndex() numbering, and the
+  // cells of their ends for buildCandidate.
+  const bool keyed = !objective_only && !params_.extra_space;
+  std::vector<std::array<uint32_t, 3>>& tree_edges
+      = keyed ? result.key.edges : scratch.tree_edges;
+  tree_edges.clear();
+  scratch.tree_vertices.clear();
+  for (size_t i = 0; i < edges.size(); i++) {
+    const auto a = vertex_of(edges[i][0]);
+    const auto b = vertex_of(edges[i][1]);
+    uint32_t ka = edgeIndex(a[0], a[1], a[2]);
+    uint32_t kb = edgeIndex(b[0], b[1], b[2]);
+    if (ka == kb) {
+      continue;
+    }
+    scratch.tree_vertices.push_back({ka,
+                                     static_cast<int16_t>(a[0]),
+                                     static_cast<int16_t>(a[1]),
+                                     static_cast<int16_t>(a[2])});
+    scratch.tree_vertices.push_back({kb,
+                                     static_cast<int16_t>(b[0]),
+                                     static_cast<int16_t>(b[1]),
+                                     static_cast<int16_t>(b[2])});
+    if (ka > kb) {
+      std::swap(ka, kb);
+    }
+    tree_edges.push_back({ka, kb, static_cast<uint32_t>(edge_pins[i] + 1)});
+  }
+  std::ranges::sort(tree_edges);
+  // One entry per vertex pair, the smallest pin first (a wire or via before
+  // a pin link between the same cells).
+  {
+    size_t kept = 0;
+    for (size_t i = 0; i < tree_edges.size(); i++) {
+      if (kept > 0 && tree_edges[kept - 1][0] == tree_edges[i][0]
+          && tree_edges[kept - 1][1] == tree_edges[i][1]) {
+        continue;
+      }
+      tree_edges[kept++] = tree_edges[i];
+    }
+    tree_edges.resize(kept);
+  }
   // A tree the net's oracle returned before maps to the stored candidate;
   // buildCandidate would rebuild it unchanged. With extra space the demand
   // depends on the prices, so those calls always build.
-  if (!objective_only && !params_.extra_space) {
+  if (keyed) {
     result.keyed = true;
-    TreeKey& key = result.key;
-    key.edges.clear();
-    key.edges.reserve(edges.size());
-    for (size_t i = 0; i < edges.size(); i++) {
-      const auto a = cell(edges[i][0]);
-      const auto b = cell(edges[i][1]);
-      uint32_t ka = edgeIndex(a[0], a[1], a[2]);
-      uint32_t kb = edgeIndex(b[0], b[1], b[2]);
-      if (ka == kb) {
-        continue;
-      }
-      if (ka > kb) {
-        std::swap(ka, kb);
-      }
-      key.edges.push_back({ka, kb, static_cast<uint32_t>(edge_pins[i] + 1)});
-    }
-    std::ranges::sort(key.edges);
-    // One entry per vertex pair, the smallest pin first (as buildCandidate's
-    // adjacency keeps it).
-    size_t kept = 0;
-    for (size_t i = 0; i < key.edges.size(); i++) {
-      if (kept > 0 && key.edges[kept - 1][0] == key.edges[i][0]
-          && key.edges[kept - 1][1] == key.edges[i][1]) {
-        continue;
-      }
-      key.edges[kept++] = key.edges[i];
-    }
-    key.edges.resize(kept);
     uint64_t hash = 1469598103934665603ULL;
-    for (const auto& e : key.edges) {
+    for (const auto& e : tree_edges) {
       for (const uint32_t v : e) {
         hash = (hash ^ v) * 1099511628211ULL;
       }
     }
-    key.hash = hash;
+    result.key.hash = hash;
     for (const TreeKey& known : state.tree_keys) {
-      if (known.hash == key.hash && known.edges == key.edges) {
+      if (known.hash == hash && known.edges == tree_edges) {
         result.known = known.candidate;
         result.candidate.objective = known.objective;
         result.ok = true;
@@ -847,15 +968,23 @@ BonnRouteGlobal::OracleResult BonnRouteGlobal::oracleImpl(
       }
     }
   }
-  std::vector<std::array<int, 3>> tree_edges;  // (layer, x, y) pairs packed
-  tree_edges.reserve(edges.size() * 2);
-  for (const auto& [a, b] : edges) {
-    tree_edges.push_back(cell(a));
-    tree_edges.push_back(cell(b));
+  std::ranges::sort(scratch.tree_vertices,
+                    [](const Scratch::TreeVertex& a,
+                       const Scratch::TreeVertex& b) { return a.key < b.key; });
+  {
+    auto& vertices = scratch.tree_vertices;
+    size_t kept = 0;
+    for (size_t i = 0; i < vertices.size(); i++) {
+      if (kept > 0 && vertices[kept - 1].key == vertices[i].key) {
+        continue;
+      }
+      vertices[kept++] = vertices[i];
+    }
+    vertices.resize(kept);
   }
   const SteadyClock::time_point build_start = SteadyClock::now();
   const bool built = buildCandidate(
-      state, tree_edges, edge_pins, !objective_only, result.candidate);
+      state, tree_edges, scratch, !objective_only, result.candidate);
   scratch.build_seconds += secondsBetween(build_start, SteadyClock::now());
   if (!built) {
     return result;
@@ -1061,6 +1190,27 @@ double BonnRouteGlobal::goalBound(const GoalContext& goal,
     return 0.0;
   }
   const int L = num_layers_;
+  if (goal.alt == nullptr) {
+    // Without landmarks only the full l1 bound is used.
+    if (goal.exact) {
+      double full = std::numeric_limits<double>::infinity();
+      for (const GoalTarget& t : goal.targets) {
+        const int dx = std::abs(x - t.x);
+        const int dy = std::abs(y - t.y);
+        const int mask = (dx != 0 ? 1 : 0) | (dy != 0 ? 2 : 0);
+        const int vias = goal.via_steps[(mask * L + l) * L + t.l];
+        full = std::min(full, goal.cx * dx + goal.cy * dy + goal.cv * vias);
+      }
+      return full;
+    }
+    auto gap = [](int v, int lo, int hi) {
+      return v < lo ? lo - v : (v > hi ? v - hi : 0);
+    };
+    const int dx = gap(x, goal.lx, goal.hx);
+    const int dy = gap(y, goal.ly, goal.hy);
+    const int dl = gap(l, goal.ll, goal.hl);
+    return goal.cx * dx + goal.cy * dy + goal.cv * dl;
+  }
   double full;
   double objective;
   if (goal.exact) {
@@ -1315,121 +1465,188 @@ void BonnRouteGlobal::checkGoal(const NetState& state,
 
 bool BonnRouteGlobal::buildCandidate(
     const NetState& state,
-    const std::vector<std::array<int, 3>>& tree_edges,
-    const std::vector<int>& edge_pins,
+    const std::vector<std::array<uint32_t, 3>>& tree_edges,
+    Scratch& scratch,
     const bool need_usage,
     Candidate& candidate) const
 {
-  auto key = [&](int l, int x, int y) -> uint64_t {
-    return (static_cast<uint64_t>(l) * x_size_ + x) * y_size_ + y;
+  // The forest: vertices (sorted by key, scratch.tree_vertices), adjacency
+  // lists sorted by neighbor key (vertex ids follow the key order). A vertex
+  // leaves the forest when it is pruned or loses its last link; the links of
+  // a vertex in the forest are those to neighbors in the forest.
+  const auto& vertices = scratch.tree_vertices;
+  const int num_vertices = static_cast<int>(vertices.size());
+  auto vertex_id = [&](uint32_t key) {
+    const auto it = std::ranges::lower_bound(
+        vertices, key, {}, &Scratch::TreeVertex::key);
+    return it != vertices.end() && it->key == key
+               ? static_cast<int32_t>(it - vertices.begin())
+               : -1;
   };
-  auto decode = [&](uint64_t k) -> std::array<int, 3> {
-    const int y = static_cast<int>(k % y_size_);
-    k /= y_size_;
-    const int x = static_cast<int>(k % x_size_);
-    return {static_cast<int>(k / x_size_), x, y};
-  };
-  // Neighbor and the GRNet pin of the edge (-1 = wire or via).
-  using Link = std::pair<uint64_t, int>;
-  std::unordered_map<uint64_t, std::vector<Link>> adjacency;
-  for (size_t i = 0; i + 1 < tree_edges.size(); i += 2) {
-    const auto& a = tree_edges[i];
-    const auto& b = tree_edges[i + 1];
-    const uint64_t ka = key(a[0], a[1], a[2]);
-    const uint64_t kb = key(b[0], b[1], b[2]);
-    if (ka == kb) {
-      continue;
+  auto& link_begin = scratch.link_begin;
+  auto& links = scratch.links;
+  auto& degree = scratch.degree;
+  auto& alive = scratch.alive;
+  link_begin.assign(num_vertices + 1, 0);
+  degree.assign(num_vertices, 0);
+  alive.assign(num_vertices, 1);
+  auto& edge_ends = scratch.edge_ends;
+  edge_ends.clear();
+  for (const auto& e : tree_edges) {
+    const int32_t a = vertex_id(e[0]);
+    const int32_t b = vertex_id(e[1]);
+    edge_ends.push_back({a, b});
+    degree[a]++;
+    degree[b]++;
+  }
+  for (int v = 0; v < num_vertices; v++) {
+    link_begin[v + 1] = link_begin[v] + degree[v];
+  }
+  links.resize(link_begin[num_vertices]);
+  {
+    auto& fill = scratch.link_fill;
+    fill.assign(link_begin.begin(), link_begin.end() - 1);
+    for (size_t i = 0; i < tree_edges.size(); i++) {
+      const auto [a, b] = edge_ends[i];
+      const int32_t pin = static_cast<int32_t>(tree_edges[i][2]) - 1;
+      links[fill[a]++] = {b, pin};
+      links[fill[b]++] = {a, pin};
     }
-    const int pin = edge_pins[i / 2];
-    adjacency[ka].emplace_back(kb, pin);
-    adjacency[kb].emplace_back(ka, pin);
+    for (int v = 0; v < num_vertices; v++) {
+      std::sort(links.begin() + link_begin[v],
+                links.begin() + link_begin[v + 1],
+                [](const Scratch::TreeLink& p, const Scratch::TreeLink& q) {
+                  return p.neighbor < q.neighbor;
+                });
+    }
   }
-  for (auto& [k, list] : adjacency) {
-    // A wire or via (-1) sorts before a pin link between the same cells.
-    std::ranges::sort(list);
-    list.erase(std::ranges::unique(list, {}, &Link::first).begin(), list.end());
-  }
+  int num_alive = num_vertices;
+  // Calls fn(link) for the links of v in the forest, in neighbor order.
+  auto for_links = [&](int32_t v, auto&& fn) {
+    for (int32_t i = link_begin[v]; i < link_begin[v + 1]; i++) {
+      if (alive[links[i].neighbor]) {
+        fn(links[i]);
+      }
+    }
+  };
+  auto in_forest = [&](int32_t v) { return v >= 0 && alive[v]; };
+
+  // Terminal cells and their vertices; the terminals at each vertex.
   const int num_terminals = static_cast<int>(state.terminals.size());
-  std::vector<std::vector<uint64_t>> terminal_cells(num_terminals);
-  std::unordered_map<uint64_t, std::vector<int>> terminals_at;
+  auto& cell_begin = scratch.cell_begin;
+  auto& cell_vertex = scratch.cell_vertex;
+  cell_begin.assign(num_terminals + 1, 0);
+  cell_vertex.clear();
+  auto& terminal_begin = scratch.terminal_begin;
+  auto& terminal_ids = scratch.terminal_ids;
+  terminal_begin.assign(num_vertices + 1, 0);
   for (int t = 0; t < num_terminals; t++) {
     for (const auto& c : state.terminals[t].cells) {
-      const uint64_t k = key(c[0], c[1], c[2]);
-      terminal_cells[t].push_back(k);
-      terminals_at[k].push_back(t);
+      const int32_t v = vertex_id(edgeIndex(c[0], c[1], c[2]));
+      cell_vertex.push_back(v);
+      if (v >= 0) {
+        terminal_begin[v + 1]++;
+      }
+    }
+    cell_begin[t + 1] = static_cast<int32_t>(cell_vertex.size());
+  }
+  for (int v = 0; v < num_vertices; v++) {
+    terminal_begin[v + 1] += terminal_begin[v];
+  }
+  terminal_ids.resize(terminal_begin[num_vertices]);
+  {
+    auto& fill = scratch.link_fill;
+    fill.assign(terminal_begin.begin(), terminal_begin.end() - 1);
+    for (int t = 0; t < num_terminals; t++) {
+      for (int32_t i = cell_begin[t]; i < cell_begin[t + 1]; i++) {
+        if (cell_vertex[i] >= 0) {
+          terminal_ids[fill[cell_vertex[i]]++] = t;
+        }
+      }
     }
   }
-  auto in_forest = [&](uint64_t k) { return adjacency.contains(k); };
   // Prune clique edges that end in a cell no branch uses, unless that cell
   // is the only one of some pin in the forest.
-  std::vector<int> present(num_terminals, 0);
+  auto& present = scratch.present;
+  present.assign(num_terminals, 0);
   for (int t = 0; t < num_terminals; t++) {
-    for (const uint64_t k : terminal_cells[t]) {
-      present[t] += in_forest(k);
+    for (int32_t i = cell_begin[t]; i < cell_begin[t + 1]; i++) {
+      present[t] += in_forest(cell_vertex[i]) ? 1 : 0;
     }
   }
-  auto prunable = [&](uint64_t v) {
-    auto it = adjacency.find(v);
-    if (it == adjacency.end() || it->second.size() != 1
-        || it->second.front().second < 0) {
+  // The only link of v in the forest (degree 1).
+  auto only_link = [&](int32_t v) {
+    for (int32_t i = link_begin[v];; i++) {
+      if (alive[links[i].neighbor]) {
+        return links[i];
+      }
+    }
+  };
+  auto prunable = [&](int32_t v) {
+    if (!alive[v] || degree[v] != 1 || only_link(v).pin < 0) {
       return false;
     }
-    auto at = terminals_at.find(v);
-    if (at != terminals_at.end()) {
-      for (const int t : at->second) {
-        if (present[t] <= 1) {
-          return false;
-        }
+    for (int32_t i = terminal_begin[v]; i < terminal_begin[v + 1]; i++) {
+      if (present[terminal_ids[i]] <= 1) {
+        return false;
       }
     }
     return true;
   };
   // Without any edge left, every pin contains this one cell.
   const auto& start = state.terminals[0].cells.front();
-  uint64_t sole = key(start[0], start[1], start[2]);
-  std::vector<uint64_t> leaves;
-  for (const auto& [v, list] : adjacency) {
+  uint32_t sole = edgeIndex(start[0], start[1], start[2]);
+  auto& leaves = scratch.leaves;
+  leaves.clear();
+  for (int32_t v = 0; v < num_vertices; v++) {
     if (prunable(v)) {
-      leaves.push_back(v);
+      leaves.push_back(v);  // key order
     }
   }
-  std::ranges::sort(leaves);  // deterministic order
   for (size_t i = 0; i < leaves.size(); i++) {
-    const uint64_t v = leaves[i];
+    const int32_t v = leaves[i];
     if (!prunable(v)) {
       continue;
     }
-    const uint64_t w = adjacency[v].front().first;
-    std::erase_if(adjacency[w],
-                  [&](const Link& link) { return link.first == v; });
-    adjacency.erase(v);
-    if (auto at = terminals_at.find(v); at != terminals_at.end()) {
-      for (const int t : at->second) {
-        present[t]--;
-      }
+    const int32_t w = only_link(v).neighbor;
+    degree[w]--;
+    alive[v] = 0;
+    num_alive--;
+    for (int32_t k = terminal_begin[v]; k < terminal_begin[v + 1]; k++) {
+      present[terminal_ids[k]]--;
     }
-    if (adjacency[w].empty()) {
-      adjacency.erase(w);
-      sole = w;
+    if (degree[w] == 0) {
+      alive[w] = 0;
+      num_alive--;
+      sole = vertices[w].key;
     } else if (prunable(w)) {
       leaves.push_back(w);
     }
   }
   // Representative cell of each pin: one in the forest, preferably with a
   // wire or via.
-  std::vector<uint64_t> representative(num_terminals);
-  const bool single_cell = adjacency.empty();
+  const bool single_cell = num_alive == 0;
+  auto& representative = scratch.representative;  // terminal cell index
+  representative.assign(num_terminals, -1);
+  auto& pinned = scratch.pinned;
+  pinned.assign(num_vertices, 0);
+  candidate.pin_cells.clear();
   for (int t = 0; t < num_terminals; t++) {
+    const auto& cells = state.terminals[t].cells;
     int best = -1;
-    for (size_t i = 0; i < terminal_cells[t].size(); i++) {
-      const uint64_t k = terminal_cells[t][i];
-      if (single_cell ? k != sole : !in_forest(k)) {
+    for (size_t i = 0; i < cells.size(); i++) {
+      const int32_t v = cell_vertex[cell_begin[t] + i];
+      if (single_cell
+              ? edgeIndex(cells[i][0], cells[i][1], cells[i][2]) != sole
+              : !in_forest(v)) {
         continue;
       }
-      const bool physical
-          = !single_cell
-            && std::ranges::any_of(adjacency.at(k),
-                                   [](const Link& l) { return l.second < 0; });
+      bool physical = false;
+      if (!single_cell) {
+        for_links(v, [&](const Scratch::TreeLink& link) {
+          physical = physical || link.pin < 0;
+        });
+      }
       if (best < 0 || physical) {
         best = static_cast<int>(i);
         if (physical) {
@@ -1440,99 +1657,100 @@ bool BonnRouteGlobal::buildCandidate(
     if (best < 0) {
       return false;
     }
-    representative[t] = terminal_cells[t][best];
-  }
-  std::unordered_map<uint64_t, char> pinned;
-  candidate.pin_cells.clear();
-  for (const uint64_t k : representative) {
-    pinned[k] = 1;
-    const auto c = decode(k);
+    representative[t] = best;
+    const int32_t v = cell_vertex[cell_begin[t] + best];
+    if (v >= 0) {
+      pinned[v] = 1;
+    }
+    const auto& c = cells[best];
     candidate.pin_cells.push_back({static_cast<int16_t>(c[0]),
                                    static_cast<int16_t>(c[1]),
                                    static_cast<int16_t>(c[2])});
   }
   // Axis of a unit edge: 0 = x, 1 = y, 2 = via.
-  auto axis = [&](uint64_t a, uint64_t b) {
-    const auto pa = decode(a);
-    const auto pb = decode(b);
-    if (pa[0] != pb[0]) {
+  auto axis = [&](int32_t a, int32_t b) {
+    const Scratch::TreeVertex& pa = vertices[a];
+    const Scratch::TreeVertex& pb = vertices[b];
+    if (pa.layer != pb.layer) {
       return 2;
     }
-    return pa[1] != pb[1] ? 0 : 1;
+    return pa.x != pb.x ? 0 : 1;
   };
 
-  const uint64_t root = representative[0];
   candidate.nodes.clear();
   candidate.objective = 0.0;
-  std::unordered_map<uint64_t, char> visited;
-  {
-    const auto p = decode(root);
-    candidate.nodes.push_back({static_cast<int16_t>(p[0]),
-                               static_cast<int16_t>(p[1]),
-                               static_cast<int16_t>(p[2]),
-                               -1});
-  }
-  visited[root] = 1;
-  // (node index, vertex) whose unexplored neighbours are pending.
-  std::vector<std::pair<int32_t, uint64_t>> stack{{0, root}};
+  candidate.nodes.push_back({candidate.pin_cells[0][0],
+                             candidate.pin_cells[0][1],
+                             candidate.pin_cells[0][2],
+                             -1});
   int num_vias = 0;
-  while (!stack.empty()) {
-    const auto [node_index, vertex] = stack.back();
-    stack.pop_back();
-    auto it = adjacency.find(vertex);
-    if (it == adjacency.end()) {
-      continue;
-    }
-    const std::vector<Link> links = it->second;
-    for (const auto& [next, pin] : links) {
-      if (visited.contains(next)) {
-        continue;
-      }
-      if (pin >= 0) {
-        // Pin link: the pin's own metal, no wire or via.
-        visited[next] = 1;
-        const auto pc = decode(next);
-        candidate.nodes.push_back({static_cast<int16_t>(pc[0]),
-                                   static_cast<int16_t>(pc[1]),
-                                   static_cast<int16_t>(pc[2]),
-                                   node_index,
-                                   pin});
+  if (!single_cell) {
+    const int32_t root = cell_vertex[cell_begin[0] + representative[0]];
+    auto& visited = scratch.visited;
+    visited.assign(num_vertices, 0);
+    visited[root] = 1;
+    // (node index, vertex) whose unexplored neighbours are pending.
+    auto& stack = scratch.dfs_stack;
+    stack.assign(1, {0, root});
+    while (!stack.empty()) {
+      const auto [node_index, vertex] = stack.back();
+      stack.pop_back();
+      for (int32_t li = link_begin[vertex]; li < link_begin[vertex + 1];
+           li++) {
+        const Scratch::TreeLink link = links[li];
+        if (!alive[link.neighbor] || visited[link.neighbor]) {
+          continue;
+        }
+        const int32_t next = link.neighbor;
+        if (link.pin >= 0) {
+          // Pin link: the pin's own metal, no wire or via.
+          visited[next] = 1;
+          const Scratch::TreeVertex& pc = vertices[next];
+          candidate.nodes.push_back({pc.layer, pc.x, pc.y, node_index, link.pin});
+          stack.emplace_back(static_cast<int32_t>(candidate.nodes.size() - 1),
+                             next);
+          continue;
+        }
+        // Walk a straight run of wire or via unit edges.
+        const int run_axis = axis(vertex, next);
+        int32_t prev = vertex;
+        int32_t cur = next;
+        while (true) {
+          visited[cur] = 1;
+          const Scratch::TreeVertex& pp = vertices[prev];
+          if (run_axis == 2) {
+            num_vias++;
+          } else {
+            const Scratch::TreeVertex& pc = vertices[cur];
+            candidate.objective += wireObjective(
+                pp.layer, std::min(pp.x, pc.x), std::min(pp.y, pc.y));
+          }
+          if (pinned[cur] || degree[cur] != 2) {
+            break;
+          }
+          // The two links of cur in the forest, in neighbor order.
+          Scratch::TreeLink pair[2];
+          int found = 0;
+          for_links(cur, [&](const Scratch::TreeLink& l) {
+            if (found < 2) {
+              pair[found] = l;
+            }
+            found++;
+          });
+          const Scratch::TreeLink& after
+              = pair[0].neighbor == prev ? pair[1] : pair[0];
+          if (after.pin >= 0 || visited[after.neighbor]
+              || axis(cur, after.neighbor) != run_axis) {
+            break;
+          }
+          prev = cur;
+          cur = after.neighbor;
+        }
+        const Scratch::TreeVertex& pc = vertices[cur];
+        candidate.nodes.push_back({pc.layer, pc.x, pc.y, node_index});
         stack.emplace_back(static_cast<int32_t>(candidate.nodes.size() - 1),
-                           next);
-        continue;
+                           cur);
       }
-      // Walk a straight run of wire or via unit edges.
-      const int run_axis = axis(vertex, next);
-      uint64_t prev = vertex;
-      uint64_t cur = next;
-      while (true) {
-        visited[cur] = 1;
-        const auto pp = decode(prev);
-        if (run_axis == 2) {
-          num_vias++;
-        } else {
-          const auto pc = decode(cur);
-          candidate.objective += wireObjective(
-              pp[0], std::min(pp[1], pc[1]), std::min(pp[2], pc[2]));
-        }
-        const auto& list = adjacency[cur];
-        if (pinned.contains(cur) || list.size() != 2) {
-          break;
-        }
-        const Link& after = list[0].first == prev ? list[1] : list[0];
-        if (after.second >= 0 || visited.contains(after.first)
-            || axis(cur, after.first) != run_axis) {
-          break;
-        }
-        prev = cur;
-        cur = after.first;
-      }
-      const auto pc = decode(cur);
-      candidate.nodes.push_back({static_cast<int16_t>(pc[0]),
-                                 static_cast<int16_t>(pc[1]),
-                                 static_cast<int16_t>(pc[2]),
-                                 node_index});
-      stack.emplace_back(static_cast<int32_t>(candidate.nodes.size() - 1), cur);
     }
   }
   candidate.objective += params_.via_weight * num_vias;
