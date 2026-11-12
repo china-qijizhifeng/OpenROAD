@@ -18,6 +18,7 @@
 #include <utility>
 #include <vector>
 
+#include "br/BrAccessFootprint.h"
 #include "br/BrCore.h"
 #include "br/BrDistanceRules.h"
 #include "br/BrFastGrid.h"
@@ -266,6 +267,12 @@ struct BonnRouteDRParams
   // (with FlexGC's patches) and writes back the same result without
   // building the maze grid graph.
   bool cleanup_check_only_workers = false;
+  // Debug (Sec. 5.1): record the global routing tiles that the search and
+  // the commit of every net read and write in the shape grid and the fast
+  // grid, compare them with the net's tile box and its partition region, and
+  // report how far beyond the net's core tile box each step reaches. The
+  // routing is unchanged.
+  bool partition_check = false;
   bool verbose = true;
   // Algorithm profile: 0 = 2013-improved (default), 1 = 2013-reimpl,
   // 2 = 2021 (2013-reimpl plus Ahrens et al., arXiv:2111.06169).
@@ -399,10 +406,50 @@ class BonnRouteDR
     int wire_type = 0;
   };
 
+  // partition_check (Sec. 5.1): the steps of a net's unit of work, the
+  // phases they run in, and per (phase, step, read / write) the number of
+  // units by the tiles their accesses reach beyond the net's core tile box.
+  enum FootprintStep
+  {
+    kStepAccess = 0,   // own-shape overlay, access option legality
+    kStepRegenerate,   // dynamic generation of access paths
+    kStepSearch,       // connections in the guide area
+    kStepRetrySearch,  // the net again in the area dilated by retry_dilation
+    kStepCommit,       // conflict check and insertion of the routed shapes
+    kStepRelease,      // release of the reservations
+    kNumFootprintSteps
+  };
+  enum FootprintPhase
+  {
+    kPhaseRegion = 0,  // a net of a partition region
+    kPhaseTailSearch,  // speculative search of a tail attempt
+    kPhaseTailCommit,  // decision and commit of a tail attempt
+    kNumFootprintPhases
+  };
+  struct FootprintStats
+  {
+    static constexpr int kReachBins = 10;  // 0 .. 8 tiles, 9 or more
+    using Histogram = std::array<int64_t, kReachBins>;
+    std::array<int64_t, kNumFootprintPhases> units{};
+    std::array<int64_t, kNumFootprintPhases> outside_box_units{};
+    std::array<int64_t, kNumFootprintPhases> outside_region_units{};
+    // [phase][step][0 reads, 1 writes]
+    std::array<std::array<std::array<Histogram, 2>, kNumFootprintSteps>,
+               kNumFootprintPhases>
+        reach{};
+    // The first units whose accesses left their partition region.
+    std::vector<std::string> region_examples;
+  };
+
   // Per-thread search state (Sec. 5.1: nets in disjoint areas are routed
   // in parallel).
   struct Worker
   {
+    // partition_check: the accesses of the net being routed, its phase, and
+    // the statistics of the units finished on this worker.
+    br::AccessFootprint footprint;
+    FootprintPhase footprint_phase = kPhaseRegion;
+    FootprintStats footprint_stats;
     // Searching in a speculative batch: read-only on shared routing space.
     bool speculative = false;
     // Settled-vertex budget of the current connect (0: none), the settled
@@ -698,12 +745,27 @@ class BonnRouteDR
                        const std::vector<size_t>& tree,
                        const std::vector<std::vector<char>>& valid,
                        Worker& worker);
+  // Tile box of the net's guides, access options and pins.
+  br::TileBox netCoreTileBox(const NetData& net) const;
   // Tile box of everything the net's searches may touch, with halo.
   void netTileBox(const NetData& net,
                   int& xlo,
                   int& ylo,
                   int& xhi,
                   int& yhi) const;
+  // netTileBox clipped to the tile grid.
+  br::TileBox netClippedTileBox(const NetData& net) const;
+  // partition_check: starts / ends recording the accesses of `net`'s unit
+  // of work on `worker` (whose footprint the caller installed); `region`
+  // is the partition region of the unit, if any.
+  void beginFootprint(Worker& worker,
+                      const NetData& net,
+                      FootprintPhase phase,
+                      const br::TileBox& box);
+  void endFootprint(Worker& worker,
+                    const NetData& net,
+                    const br::TileBox* region);
+  void reportFootprints();
   void routeParallel(const std::vector<int>& order, std::vector<int>& failed);
   // settled_budget: stop starting sequences once the serial worker settled
   // this many vertices in the phase (0: unlimited).

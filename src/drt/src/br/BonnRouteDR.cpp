@@ -267,6 +267,8 @@ bool BonnRouteDRParams::set(const std::string& name, const double value)
     cleanup_incremental_iterations = std::clamp(v, 0, 2);
   } else if (name == "cleanup_check_only_workers") {
     cleanup_check_only_workers = v != 0;
+  } else if (name == "partition_check") {
+    partition_check = v != 0;
   } else if (name == "verbose") {
     verbose = v != 0;
   } else {
@@ -4074,6 +4076,7 @@ bool BonnRouteDR::connect(NetData& net,
   // searches read the fast grid through an exact overlay with the net's
   // shapes removed, and every checker query of the connection ignores them
   // (see DataStructures.md); the routing space itself is not changed.
+  worker.footprint.setStep(kStepAccess);
   ownShapes(net, worker.own_shapes);
   fast_builder_.buildOverlay(net.id, worker.own_shapes, worker.overlay);
   worker.reader.reset(&grid_, &worker.overlay);
@@ -4149,7 +4152,10 @@ bool BonnRouteDR::connectWithoutOwnShapes(NetData& net,
     if (!ripup && params_.offtrack_access && !worker.speculative
         && feasible < params_.offtrack_regenerate) {
       const size_t before = net.terms[t].options.size();
-      if (regenerateAccess(net, t, worker)) {
+      worker.footprint.setStep(kStepRegenerate);
+      const bool regenerated = regenerateAccess(net, t, worker);
+      worker.footprint.setStep(kStepAccess);
+      if (regenerated) {
         const Term& grown = net.terms[t];
         valid[t].resize(grown.options.size(), 0);
         for (size_t o = before; o < grown.options.size(); o++) {
@@ -4163,12 +4169,18 @@ bool BonnRouteDR::connectWithoutOwnShapes(NetData& net,
     }
   }
   const int retry = params_.retry_dilation + extra_dilation;
+  worker.footprint.setStep(kStepSearch);
   if (ripup) {
     return connectInRegion(net, retry, true, valid, worker);
   }
-  return connectInRegion(net, extra_dilation, false, valid, worker)
-         || (retry != extra_dilation
-             && connectInRegion(net, retry, false, valid, worker));
+  if (connectInRegion(net, extra_dilation, false, valid, worker)) {
+    return true;
+  }
+  if (retry == extra_dilation) {
+    return false;
+  }
+  worker.footprint.setStep(kStepRetrySearch);
+  return connectInRegion(net, retry, false, valid, worker);
 }
 
 bool BonnRouteDR::connectInRegion(NetData& net,
@@ -4810,20 +4822,16 @@ void BonnRouteDR::collectVictims(const NetData& net,
   std::ranges::sort(victims);
 }
 
-void BonnRouteDR::netTileBox(const NetData& net,
-                             int& xlo,
-                             int& ylo,
-                             int& xhi,
-                             int& yhi) const
+br::TileBox BonnRouteDR::netCoreTileBox(const NetData& net) const
 {
   frBlock* block = design_->getTopBlock();
-  xlo = ylo = std::numeric_limits<int>::max();
-  xhi = yhi = -1;
-  auto add = [&](int x, int y) {
-    xlo = std::min(xlo, x);
-    ylo = std::min(ylo, y);
-    xhi = std::max(xhi, x);
-    yhi = std::max(yhi, y);
+  br::TileBox box;
+  box.xhi = box.yhi = -1;
+  auto add = [&box](int x, int y) {
+    box.xlo = std::min(box.xlo, x);
+    box.ylo = std::min(box.ylo, y);
+    box.xhi = std::max(box.xhi, x);
+    box.yhi = std::max(box.yhi, y);
   };
   for (const auto& guide : net.net->getGuides()) {
     const odb::Point a = block->getGCellIdx(guide->getBeginPoint());
@@ -4842,12 +4850,203 @@ void BonnRouteDR::netTileBox(const NetData& net,
     add(tileX(pin.rect.xMin()), tileY(pin.rect.yMin()));
     add(tileX(pin.rect.xMax()), tileY(pin.rect.yMax()));
   }
+  return box;
+}
+
+void BonnRouteDR::netTileBox(const NetData& net,
+                             int& xlo,
+                             int& ylo,
+                             int& xhi,
+                             int& yhi) const
+{
+  const br::TileBox core = netCoreTileBox(net);
   // Retry dilation plus the routing-space interaction halo (Sec. 5.1).
   const int halo = params_.retry_dilation + halo_tiles_;
-  xlo -= halo;
-  ylo -= halo;
-  xhi += halo;
-  yhi += halo;
+  xlo = core.xlo - halo;
+  ylo = core.ylo - halo;
+  xhi = core.xhi + halo;
+  yhi = core.yhi + halo;
+}
+
+br::TileBox BonnRouteDR::netClippedTileBox(const NetData& net) const
+{
+  br::TileBox box;
+  netTileBox(net, box.xlo, box.ylo, box.xhi, box.yhi);
+  box.xlo = std::max(box.xlo, 0);
+  box.ylo = std::max(box.ylo, 0);
+  box.xhi = std::min(box.xhi, tiles_x_ - 1);
+  box.yhi = std::min(box.yhi, tiles_y_ - 1);
+  return box;
+}
+
+void BonnRouteDR::beginFootprint(Worker& worker,
+                                 const NetData& net,
+                                 const FootprintPhase phase,
+                                 const br::TileBox& box)
+{
+  worker.footprint_phase = phase;
+  worker.footprint.begin(net.id, box);
+}
+
+void BonnRouteDR::endFootprint(Worker& worker,
+                               const NetData& net,
+                               const br::TileBox* region)
+{
+  const br::AccessFootprint& footprint = worker.footprint;
+  FootprintStats& stats = worker.footprint_stats;
+  const int phase = worker.footprint_phase;
+  stats.units[phase]++;
+  if (footprint.unitViolations() > 0) {
+    stats.outside_box_units[phase]++;
+  }
+  const br::TileBox accessed = footprint.accessed();
+  if (region != nullptr && !region->contains(accessed)) {
+    stats.outside_region_units[phase]++;
+    if (stats.region_examples.size() < 8) {
+      stats.region_examples.push_back(fmt::format(
+          "net {} ({}): tiles [{}, {}] - [{}, {}], region [{}, {}] - [{}, {}]",
+          net.id,
+          net.net->getName(),
+          accessed.xlo,
+          accessed.ylo,
+          accessed.xhi,
+          accessed.yhi,
+          region->xlo,
+          region->ylo,
+          region->xhi,
+          region->yhi));
+    }
+  }
+  // Reach beyond the core box, per step: reads and writes.
+  const br::TileBox core = netCoreTileBox(net);
+  for (int step = 0; step < kNumFootprintSteps; step++) {
+    for (int write = 0; write < 2; write++) {
+      const br::TileBox& box
+          = write != 0 ? footprint.writes(step) : footprint.reads(step);
+      if (!box.empty()) {
+        const int reach
+            = std::min(core.reachOf(box), FootprintStats::kReachBins - 1);
+        stats.reach[phase][step][write][reach]++;
+      }
+    }
+  }
+}
+
+void BonnRouteDR::reportFootprints()
+{
+  static constexpr std::array<const char*, kNumFootprintPhases> kPhaseNames{
+      "region", "tail search", "tail commit"};
+  static constexpr std::array<const char*, kNumFootprintSteps> kStepNames{
+      "access", "regenerate", "search", "retry search", "commit", "release"};
+  FootprintStats total;
+  int64_t records = 0;
+  int64_t violations = 0;
+  std::vector<br::AccessFootprint::Violation> examples;
+  for (const Worker& w : workers_) {
+    const FootprintStats& s = w.footprint_stats;
+    for (int phase = 0; phase < kNumFootprintPhases; phase++) {
+      total.units[phase] += s.units[phase];
+      total.outside_box_units[phase] += s.outside_box_units[phase];
+      total.outside_region_units[phase] += s.outside_region_units[phase];
+      for (int step = 0; step < kNumFootprintSteps; step++) {
+        for (int write = 0; write < 2; write++) {
+          for (int bin = 0; bin < FootprintStats::kReachBins; bin++) {
+            total.reach[phase][step][write][bin]
+                += s.reach[phase][step][write][bin];
+          }
+        }
+      }
+    }
+    total.region_examples.insert(total.region_examples.end(),
+                                 s.region_examples.begin(),
+                                 s.region_examples.end());
+    records += w.footprint.records();
+    violations += w.footprint.violationCount();
+    examples.insert(examples.end(),
+                    w.footprint.violations().begin(),
+                    w.footprint.violations().end());
+  }
+  int64_t outside_box = 0;
+  int64_t outside_region = 0;
+  for (int phase = 0; phase < kNumFootprintPhases; phase++) {
+    outside_box += total.outside_box_units[phase];
+    outside_region += total.outside_region_units[phase];
+  }
+  logger_->report(
+      "BonnRoute DR access footprint check: {} region units, {} tail search "
+      "units, {} tail commit units, {} recorded accesses; box margin {} "
+      "tiles (retry dilation {} + halo {}); {} accesses outside the net box "
+      "in {} units, {} units outside their region.",
+      total.units[kPhaseRegion],
+      total.units[kPhaseTailSearch],
+      total.units[kPhaseTailCommit],
+      records,
+      params_.retry_dilation + halo_tiles_,
+      params_.retry_dilation,
+      halo_tiles_,
+      violations,
+      outside_box,
+      outside_region);
+  for (int phase = 0; phase < kNumFootprintPhases; phase++) {
+    for (int step = 0; step < kNumFootprintSteps; step++) {
+      for (int write = 0; write < 2; write++) {
+        const FootprintStats::Histogram& h = total.reach[phase][step][write];
+        int64_t units = 0;
+        std::string bins;
+        for (int bin = 0; bin < FootprintStats::kReachBins; bin++) {
+          units += h[bin];
+          bins += fmt::format(" {}:{}", bin, h[bin]);
+        }
+        if (units == 0) {
+          continue;
+        }
+        logger_->report(
+            "BonnRoute DR access footprint reach: phase {} step {} {} units "
+            "{} tiles beyond the core box{}.",
+            kPhaseNames[phase],
+            kStepNames[step],
+            write != 0 ? "writes" : "reads",
+            units,
+            bins);
+      }
+    }
+  }
+  if (violations == 0 && outside_region == 0) {
+    return;
+  }
+  std::string detail;
+  for (size_t k = 0; k < examples.size() && k < 8; k++) {
+    const br::AccessFootprint::Violation& v = examples[k];
+    detail += fmt::format(
+        "\n  net {} ({}) step {} {} layer {}: tiles [{}, {}] - [{}, {}], "
+        "box [{}, {}] - [{}, {}]",
+        v.unit,
+        v.unit >= 0 && v.unit < static_cast<int>(nets_.size())
+            ? nets_[v.unit].net->getName()
+            : std::string("-"),
+        kStepNames[std::clamp(v.step, 0, kNumFootprintSteps - 1)],
+        br::accessKindName(v.kind),
+        v.layer,
+        v.tiles.xlo,
+        v.tiles.ylo,
+        v.tiles.xhi,
+        v.tiles.yhi,
+        v.allowed.xlo,
+        v.allowed.ylo,
+        v.allowed.xhi,
+        v.allowed.yhi);
+  }
+  for (size_t k = 0; k < total.region_examples.size() && k < 8; k++) {
+    detail += "\n  " + total.region_examples[k];
+  }
+  logger_->warn(utl::DRT,
+                9130,
+                "BonnRoute access footprint check failed: {} accesses outside "
+                "the net box in {} units, {} units outside their region.{}",
+                violations,
+                outside_box,
+                outside_region,
+                detail);
 }
 
 void BonnRouteDR::routeParallel(const std::vector<int>& order,
@@ -5084,6 +5283,14 @@ void BonnRouteDR::routeSpeculativeBatches(const std::vector<int>& order,
       Worker& w = workers_[omp_get_thread_num()];
       const double start = omp_get_wtime();
       const int64_t settled_before = w.settled;
+      const br::AccessFootprintScope footprint_scope(
+          params_.partition_check ? &w.footprint : nullptr);
+      if (params_.partition_check) {
+        beginFootprint(w,
+                       nets_[batch[k]],
+                       kPhaseTailSearch,
+                       netClippedTileBox(nets_[batch[k]]));
+      }
       w.speculative = true;
       w.effort_budget = budget;
       w.effort_start = w.settled;
@@ -5094,6 +5301,9 @@ void BonnRouteDR::routeSpeculativeBatches(const std::vector<int>& order,
       w.effort_exceeded = false;
       w.speculative = false;
       settled[k] = w.settled - settled_before;
+      if (params_.partition_check) {
+        endFootprint(w, nets_[batch[k]], nullptr);
+      }
       busy[k] = omp_get_wtime() - start;
     }
     const double wall = omp_get_wtime() - wall_start;
@@ -5141,6 +5351,17 @@ void BonnRouteDR::routeSpeculativeBatches(const std::vector<int>& order,
       // the effort budget); exact check run.
       int outcome = 0;
       bool exact = false;
+      // partition_check: the decision and commit of the net, recorded on
+      // the first worker (no search runs during the commits).
+      Worker& commit_worker = workers_.front();
+      const br::AccessFootprintScope footprint_scope(
+          params_.partition_check && ok[k] ? &commit_worker.footprint
+                                           : nullptr);
+      if (params_.partition_check && ok[k]) {
+        beginFootprint(
+            commit_worker, net, kPhaseTailCommit, netClippedTileBox(net));
+        commit_worker.footprint.setStep(kStepCommit);
+      }
       if (!ok[k]) {
         net.wires.clear();
         net.vias.clear();
@@ -5184,6 +5405,7 @@ void BonnRouteDR::routeSpeculativeBatches(const std::vector<int>& order,
           outcome = 2;
         } else {
           commitNet(net, nullptr);
+          commit_worker.footprint.setStep(kStepRelease);
           setReservations(net, false, nullptr, &released);
           odb::Rect box;
           box.mergeInit();
@@ -5196,6 +5418,9 @@ void BonnRouteDR::routeSpeculativeBatches(const std::vector<int>& order,
           }
           nets++;
           outcome = 1;
+        }
+        if (params_.partition_check) {
+          endFootprint(commit_worker, net, nullptr);
         }
       }
       if (logger_->debugCheck(utl::DRT, "bonnroute_tail", 1)) {
@@ -5369,6 +5594,13 @@ void BonnRouteDR::routeSpeculativePipeline(const std::vector<int>& order,
     Worker& w = workers_[t];
     const double start = omp_get_wtime();
     const int64_t before = w.settled;
+    const br::AccessFootprintScope footprint_scope(
+        params_.partition_check ? &w.footprint : nullptr);
+    if (params_.partition_check) {
+      const auto& b = boxes[id];
+      beginFootprint(
+          w, nets_[id], kPhaseTailSearch, {b[0], b[1], b[2], b[3]});
+    }
     w.speculative = true;
     w.effort_budget = budget;
     w.effort_start = w.settled;
@@ -5379,6 +5611,9 @@ void BonnRouteDR::routeSpeculativePipeline(const std::vector<int>& order,
     w.effort_exceeded = false;
     w.speculative = false;
     settled[id] = w.settled - before;
+    if (params_.partition_check) {
+      endFootprint(w, nets_[id], nullptr);
+    }
     search_seconds[id] = omp_get_wtime() - start;
     times[t].push_back(search_seconds[id]);
     return found;
@@ -5392,6 +5627,13 @@ void BonnRouteDR::routeSpeculativePipeline(const std::vector<int>& order,
     NetData& net = nets_[id];
     Decision decision = Decision::kCommitted;
     bool exact = false;
+    const br::AccessFootprintScope footprint_scope(
+        params_.partition_check && found ? &w.footprint : nullptr);
+    if (params_.partition_check && found) {
+      const auto& b = boxes[id];
+      beginFootprint(w, net, kPhaseTailCommit, {b[0], b[1], b[2], b[3]});
+      w.footprint.setStep(kStepCommit);
+    }
     if (!found) {
       net.wires.clear();
       net.vias.clear();
@@ -5430,6 +5672,7 @@ void BonnRouteDR::routeSpeculativePipeline(const std::vector<int>& order,
       } else {
         commitNet(net, &w);
         // Released and recomputed exactly inside the net's box.
+        w.footprint.setStep(kStepRelease);
         setReservations(net, false, &w);
         odb::Rect box;
         box.mergeInit();
@@ -5440,6 +5683,9 @@ void BonnRouteDR::routeSpeculativePipeline(const std::vector<int>& order,
           box.bloat(static_cast<int>(interaction_reach_), box);
           committed_box[id] = box;
         }
+      }
+      if (params_.partition_check) {
+        endFootprint(w, net, nullptr);
       }
     }
     if (trace) {
@@ -5609,15 +5855,28 @@ void BonnRouteDR::routePartitions(const std::vector<int>& order,
     for (int r = 0; r < static_cast<int>(regions.size()); r++) {
       Worker& w = workers_[omp_get_thread_num()];
       const double region_start = omp_get_wtime();
+      const br::AccessFootprintScope footprint_scope(
+          params_.partition_check ? &w.footprint : nullptr);
+      const br::TileBox region{
+          regions[r][0], regions[r][1], regions[r][2], regions[r][3]};
       for (const int id : members[r]) {
         NetData& net = nets_[id];
+        if (params_.partition_check) {
+          const auto& b = boxes[id];
+          beginFootprint(w, net, kPhaseRegion, {b[0], b[1], b[2], b[3]});
+        }
         if (connect(net, false, w)) {
+          w.footprint.setStep(kStepCommit);
           commitNet(net, &w);
+          w.footprint.setStep(kStepRelease);
           setReservations(net, false, &w);
         } else {
           net.wires.clear();
           net.vias.clear();
           region_failed[r].push_back(id);
+        }
+        if (params_.partition_check) {
+          endFootprint(w, net, &region);
         }
       }
       busy[r] = omp_get_wtime() - region_start;
@@ -6357,6 +6616,9 @@ void BonnRouteDR::main()
     routeParallel(regular, failed_first);
   }
   const double parallel_time = timer.elapsed();
+  if (params_.partition_check) {
+    reportFootprints();
+  }
   // Unresolved nets get the serial rip-up sequences of Sec. 4.4 (ripup,
   // or final_ripup for the nets the parallel phases left). A net left to
   // FlexDR is routed by its iteration 0 over the fixed BonnRoute routing,

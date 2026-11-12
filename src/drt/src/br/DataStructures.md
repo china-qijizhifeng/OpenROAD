@@ -280,6 +280,21 @@ segment, so constant point levels on an edge imply its level.
   the halo does not depend on the classes interned later.
   `BonnRoutePartitionTest` checks equality with a serial run; run it with
   `-fsanitize=thread` as well.
+* Access footprint check (`BrAccessFootprint.h`, `partition_check 1`): the
+  shape grid records the tile chunks of every block it reads (`collect`,
+  the presence test of a removal) or writes (`insert`, `remove`) and of the
+  wide-shape lists, the fast grid the tile of every word or run it reads or
+  writes, into the footprint installed on the calling thread. BonnRouteDR
+  starts a unit per net and phase (partition region, speculative tail
+  search, tail commit) with the net's tile box as the allowed area,
+  compares the accessed tiles with that box and with the partition region,
+  and reports per step (access checks, dynamic access generation, searches,
+  retry search, commit, reservation release) how many tiles beyond the
+  net's core box (guides, access options, pins) the reads and writes
+  reach. Reads of the wide-shape lists are locked and may reach beyond the
+  box; they are recorded apart. `bonnroute_access_footprint_test` compares
+  the recorded tiles with an enumeration of the cells and vertices of each
+  call; `bonnroute_partition_test` runs its region threads with footprints.
 * Speculative tail pipeline (`BrTailPipeline.h`, `tail_pipeline 1`): the
   same tile-box argument lets the tail batches overlap. An attempt of batch
   b reads the commits of the earlier batches and nothing else inside its
@@ -363,7 +378,8 @@ segment, so constant point levels on an edge imply its level.
 
 `src/drt/test`: `bonnroute_wire_model_test`, `bonnroute_shape_grid_test`,
 `bonnroute_distance_rules_test`, `bonnroute_fast_grid_test`,
-`bonnroute_partition_test`, `bonnroute_core_test`; all randomized against
+`bonnroute_partition_test`, `bonnroute_access_footprint_test`,
+`bonnroute_core_test`; all randomized against
 brute-force references that keep every shape in a vector and apply
 `shapesViolate` pairwise with the same classes. `bonnroute_routing_space_bench
 [seed] [extent] [searches]` prints shape-grid and fast-grid statistics,

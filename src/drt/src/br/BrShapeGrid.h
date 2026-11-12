@@ -50,6 +50,7 @@
 #include <utility>
 #include <vector>
 
+#include "br/BrAccessFootprint.h"
 #include "br/BrGeometry.h"
 #include "br/BrWireModel.h"
 

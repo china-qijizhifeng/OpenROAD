@@ -48,6 +48,7 @@
 #include <utility>
 #include <vector>
 
+#include "br/BrAccessFootprint.h"
 #include "br/BrDistanceRules.h"
 #include "br/BrGeometry.h"
 #include "br/BrShapeGrid.h"
@@ -257,6 +258,20 @@ class FastGrid
                      uint64_t word,
                      uint64_t mask);
   static size_t bytes(const std::vector<std::unique_ptr<TileRuns>>& tiles);
+  // AccessFootprint records: the tiles of positions [j0, j1] / via
+  // positions [c0, c1] of track i.
+  void recordWiring(AccessFootprint& footprint,
+                    AccessKind kind,
+                    int z,
+                    int i,
+                    int j0,
+                    int j1) const;
+  void recordVia(AccessFootprint& footprint,
+                 AccessKind kind,
+                 int z,
+                 int i,
+                 int c0,
+                 int c1) const;
   static void assignWords(std::unique_ptr<TileRuns>& tile,
                           int tracks,
                           int track,

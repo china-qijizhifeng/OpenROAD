@@ -91,6 +91,21 @@ size_t ShapeGridWriteCache::Hash::operator()(const Key& k) const
 
 ShapeGrid::~ShapeGrid() = default;
 
+namespace {
+
+// Global routing tiles of the along chunks [k0, k1] and cross chunks
+// [q0, q1] of a layer (AccessFootprint records).
+TileBox chunkTiles(const bool horizontal,
+                   const int k0,
+                   const int k1,
+                   const int q0,
+                   const int q1)
+{
+  return horizontal ? TileBox{k0, q0, k1, q1} : TileBox{q0, k0, q1, k1};
+}
+
+}  // namespace
+
 void ShapeGrid::init(const ShapeClassTable* classes,
                      std::vector<ShapeGridLayerGeometry> layers,
                      const ChunkAxis x_chunks,
@@ -595,6 +610,16 @@ bool ShapeGrid::apply(const int layer_index,
   const int c1 = static_cast<int>(std::min<int64_t>(c1_raw, g.along_cells - 1));
   const int r0 = static_cast<int>(std::max<int64_t>(r0_raw, 0));
   const int r1 = static_cast<int>(std::min<int64_t>(r1_raw, g.cross_cells - 1));
+  if (AccessFootprint* footprint = AccessFootprint::current()) [[unlikely]] {
+    footprint->record(dry_run ? AccessKind::kShapeGridRead
+                              : AccessKind::kShapeGridWrite,
+                      layer_index,
+                      chunkTiles(g.horizontal,
+                                 layer.cell_chunk[c0],
+                                 layer.cell_chunk[c1],
+                                 layer.row_chunk[r0],
+                                 layer.row_chunk[r1]));
+  }
   const bool line_end = classes_->get(cls).line_end;
   const bool low_end = line_end && (line_end_ends & 1) && c0 == c0_raw;
   const bool high_end = line_end && (line_end_ends & 2) && c1 == c1_raw;
@@ -736,6 +761,15 @@ bool ShapeGrid::updateWide(const int layer_index,
   w.cell_chunk_hi = layer.cell_chunk[cell1];
   w.row_chunk_lo = layer.row_chunk[row0];
   w.row_chunk_hi = layer.row_chunk[row1];
+  if (AccessFootprint* footprint = AccessFootprint::current()) [[unlikely]] {
+    footprint->record(AccessKind::kWideShapeWrite,
+                      layer_index,
+                      chunkTiles(g.horizontal,
+                                 w.cell_chunk_lo,
+                                 w.cell_chunk_hi,
+                                 w.row_chunk_lo,
+                                 w.row_chunk_hi));
+  }
   auto list = [&](int q, int k) -> WideList& {
     return layer.wide[static_cast<size_t>(q) * layer.along_chunks + k];
   };
@@ -909,6 +943,13 @@ void ShapeGrid::collect(const int layer_index,
       = std::max(c0 - kKnownHorizon, layer.chunk_first_cell[k0]);
   const int horizon_hi
       = std::min(c1 + kKnownHorizon, layer.chunk_first_cell[k1 + 1] - 1);
+  if (AccessFootprint* footprint = AccessFootprint::current()) [[unlikely]] {
+    footprint->record(
+        AccessKind::kShapeGridRead,
+        layer_index,
+        chunkTiles(
+            g.horizontal, k0, k1, layer.row_chunk[r0], layer.row_chunk[r1]));
+  }
   for (int r = r0; r <= r1; r++) {
     const int row_chunk = layer.row_chunk[r];
     int known_lo = horizon_lo;
@@ -1041,6 +1082,11 @@ void ShapeGrid::collectWide(const Layer& layer,
   const int k1 = layer.cell_chunk[cellOf(area.xhi)];
   const int q0 = layer.row_chunk[rowOf(area.ylo - 1)];
   const int q1 = layer.row_chunk[rowOf(area.yhi)];
+  if (AccessFootprint* footprint = AccessFootprint::current()) [[unlikely]] {
+    footprint->record(AccessKind::kWideShapeRead,
+                      out.layer,
+                      chunkTiles(g.horizontal, k0, k1, q0, q1));
+  }
   for (int q = q0; q <= q1; q++) {
     for (int k = k0; k <= k1; k++) {
       const WideList& l

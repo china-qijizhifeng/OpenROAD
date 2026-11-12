@@ -90,6 +90,16 @@ cc_test(
 )
 
 cc_test(
+    name = "bonnroute_access_footprint_test",
+    size = "small",
+    srcs = [
+        "BonnRouteAccessFootprintTest.cpp",
+        "BonnRouteRoutingSpaceTestUtil.h",
+    ],
+    deps = ["//src/drt:bonnroute_core"],
+)
+
+cc_test(
     name = "bonnroute_partition_test",
     size = "small",
     srcs = [
