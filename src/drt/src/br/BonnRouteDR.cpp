@@ -93,6 +93,10 @@ void BonnRouteDRParams::applyProfile(const int which)
   }
   partitions = true;
   critical_nets = true;
+  // Sec. 3.2 / 5.1: NDR nets with their wire types in every profile. Left
+  // to FlexDR, they are its largest clean-up (ibex: 17 clock nets) and, in
+  // incremental calls, need track assignment.
+  route_ndr_nets = true;
   component_regions = true;
   exact_future_cost = true;
   offtrack_access = true;
@@ -169,6 +173,12 @@ bool BonnRouteDRParams::set(const std::string& name, const double value)
     potential_detour_tiles = std::max(0, v);
   } else if (name == "critical_nets") {
     critical_nets = v != 0;
+  } else if (name == "route_ndr_nets") {
+    route_ndr_nets = v != 0;
+  } else if (name == "fast_ndr_permille") {
+    fast_ndr_permille = std::clamp(v, 0, 1000);
+  } else if (name == "fast_wire_types") {
+    fast_wire_types = std::clamp(v, 1, br::FastGrid::kMaxWireTypes);
   } else if (name == "tail_batch") {
     tail_batch = std::max(0, v);
   } else if (name == "tail_threads") {
@@ -620,6 +630,33 @@ void BonnRouteDR::buildRoutingSpace()
     }
     rules.push_back(via);
   }
+  // Wire types (Sec. 3.2): the default rule, then the NDRs by their number
+  // of nets; the most frequent ones become fast wire types (Sec. 3.6).
+  std::vector<frNonDefaultRule*> ndrs;
+  std::unordered_map<const frNonDefaultRule*, int> ndr_nets;
+  for (const auto& ndr : tech->getNondefaultRules()) {
+    ndrs.push_back(ndr.get());
+    ndr_nets[ndr.get()] = 0;
+  }
+  int64_t all_nets = 0;
+  for (const auto& net : design_->getTopBlock()->getNets()) {
+    all_nets++;
+    if (net->getNondefaultRule() != nullptr) {
+      ndr_nets[net->getNondefaultRule()]++;
+    }
+  }
+  std::ranges::stable_sort(ndrs, [&](const auto* a, const auto* b) {
+    return ndr_nets[a] > ndr_nets[b];
+  });
+  // Shape classes carry the NDR index in 8 bits; spacing of later NDRs is
+  // not modelled (their nets are not routed, see buildNets).
+  constexpr size_t kMaxNdrs = 255;
+  for (int z = 0; z < num_z; z++) {
+    std::vector<br::Coord>& spacing = rules[br::wiringGridLayer(z)].ndr_spacing;
+    for (size_t k = 0; k < ndrs.size() && k < kMaxNdrs; k++) {
+      spacing.push_back(ndrs[k]->getSpacing(layers_[z].fr / 2 - 1));
+    }
+  }
   track_grid_layers_ = static_cast<int>(rules.size());
   const int num_fr = static_cast<int>(tech->getLayers().size());
   grid_of_fr_.assign(num_fr, -1);
@@ -664,35 +701,63 @@ void BonnRouteDR::buildRoutingSpace()
   class_generation_ = ++generations;
   shape_classes_.setLayers(rules);
   // Wire types (Sec. 3.2): default widths and vias, then the NDRs.
-  auto geometry = [&](const std::string& name, frNonDefaultRule* ndr) {
-    br::WireTypeGeometry g;
-    g.name = name;
-    for (int z = 0; z < num_z; z++) {
-      frCoord w = layers_[z].width;
-      if (ndr != nullptr) {
-        w = std::max(w, ndr->getWidth(layers_[z].fr / 2 - 1));
-      }
-      g.width.push_back(w);
-    }
-    for (int z = 0; z + 1 < num_z; z++) {
-      const frViaDef* def = layers_[z].up_via;
-      if (ndr != nullptr && ndr->getPrefVia(layers_[z].fr / 2 - 1) != nullptr) {
-        def = ndr->getPrefVia(layers_[z].fr / 2 - 1);
-      }
-      const frVia via(def);
-      g.via.push_back({true,
-                       brRect(via.getLayer1BBox()),
-                       brRect(via.getCutBBox()),
-                       brRect(via.getLayer2BBox())});
-    }
-    return g;
-  };
+  auto geometry
+      = [&](const std::string& name, frNonDefaultRule* ndr, const int index) {
+          br::WireTypeGeometry g;
+          g.name = name;
+          g.ndr = index;
+          std::vector<frCoord> widths;
+          std::vector<const frViaDef*> vias;
+          for (int z = 0; z < num_z; z++) {
+            frCoord w = layers_[z].width;
+            if (ndr != nullptr) {
+              w = std::max(w, ndr->getWidth(layers_[z].fr / 2 - 1));
+            }
+            g.width.push_back(w);
+            widths.push_back(w);
+          }
+          for (int z = 0; z + 1 < num_z; z++) {
+            const frViaDef* def = layers_[z].up_via;
+            if (ndr != nullptr
+                && ndr->getPrefVia(layers_[z].fr / 2 - 1) != nullptr) {
+              def = ndr->getPrefVia(layers_[z].fr / 2 - 1);
+            }
+            vias.push_back(def);
+            const frVia via(def);
+            g.via.push_back({true,
+                             brRect(via.getLayer1BBox()),
+                             brRect(via.getCutBBox()),
+                             brRect(via.getLayer2BBox())});
+          }
+          type_widths_.push_back(std::move(widths));
+          type_vias_.push_back(std::move(vias));
+          return g;
+        };
   wire_types_.clear();
+  type_widths_.clear();
+  type_vias_.clear();
+  type_nets_.clear();
+  ndr_type_.clear();
   wire_types_.push_back(
-      br::makeWireType(geometry("default", nullptr), shape_classes_));
-  for (const auto& ndr : tech->getNondefaultRules()) {
-    wire_types_.push_back(
-        br::makeWireType(geometry(ndr->getName(), ndr.get()), shape_classes_));
+      br::makeWireType(geometry("default", nullptr, 0), shape_classes_));
+  type_nets_.push_back(0);
+  for (size_t k = 0; k < ndrs.size() && k < kMaxNdrs; k++) {
+    const int index = static_cast<int>(k) + 1;
+    wire_types_.push_back(br::makeWireType(
+        geometry(ndrs[k]->getName(), ndrs[k], index), shape_classes_));
+    type_nets_.push_back(ndr_nets[ndrs[k]]);
+    ndr_type_[ndrs[k]] = index;
+  }
+  // Fast wire types: the default rule and the NDRs with at least
+  // fast_ndr_permille / 1000 of the nets, most frequent first, up to
+  // fast_wire_types.
+  fast_types_ = 1;
+  while (fast_types_ < static_cast<int>(wire_types_.size())
+         && fast_types_ < params_.fast_wire_types && type_nets_[fast_types_] > 0
+         && int64_t{type_nets_[fast_types_]} * 1000
+                >= int64_t{params_.fast_ndr_permille} * all_nets
+         && params_.route_ndr_nets) {
+    fast_types_++;
   }
   // Shape grid cells (Sec. 3.3): the largest edge whose diagonal stays
   // below the smallest diff-net spacing, reduced to a divisor of the track
@@ -759,7 +824,6 @@ void BonnRouteDR::buildRoutingSpace()
     // Largest distance from a location at which an update or query of this
     // layer can read or write (model, interaction distance, one cell).
     br::Coord model = 0;
-    const br::WireType& w = wire_types_.front();
     auto extent = [&](const br::WireModel& m) {
       if (m.valid) {
         model = std::max({model,
@@ -769,18 +833,20 @@ void BonnRouteDR::buildRoutingSpace()
                           std::abs(m.rect.yhi)});
       }
     };
-    if (low) {
-      model = std::max(model, layers_[0].pitch);
-    } else if (!via_layer) {
-      extent(w.preferred[z]);
-      if (z + 1 < num_z) {
-        extent(w.via[z].bottom);
+    for (const br::WireType& w : wire_types_) {
+      if (low) {
+        model = std::max(model, layers_[0].pitch);
+      } else if (!via_layer) {
+        extent(w.preferred[z]);
+        if (z + 1 < num_z) {
+          extent(w.via[z].bottom);
+        }
+        if (z > 0) {
+          extent(w.via[z - 1].top);
+        }
+      } else {
+        extent(w.via[z].cut);
       }
-      if (z > 0) {
-        extent(w.via[z - 1].top);
-      }
-    } else {
-      extent(w.via[z].cut);
     }
     need = std::max<int64_t>(need,
                              shape_classes_.ruleReach(g) + model
@@ -791,9 +857,9 @@ void BonnRouteDR::buildRoutingSpace()
                    br::ChunkAxis{tile_x0_, tile_dx_, tiles_x_},
                    br::ChunkAxis{tile_y0_, tile_dy_, tiles_y_});
   checker_.init(&shape_grid_);
-  // Sec. 3.6: the fast grid holds the most frequent wire type.
-  grid_.init(&graph_, 1);
-  fast_builder_.init(&graph_, &wire_types_, 1, &checker_, &grid_);
+  // Sec. 3.6: the fast grid holds the most frequent wire types.
+  grid_.init(&graph_, fast_types_);
+  fast_builder_.init(&graph_, &wire_types_, fast_types_, &checker_, &grid_);
   // Removal recomputations of a batch (flush) run their tile groups on the
   // router's threads; inside a parallel region (partition workers) serially.
   const int flush_threads = std::max(1, router_cfg_->MAX_THREADS);
@@ -875,8 +941,8 @@ br::ClassId BonnRouteDR::shapeClass(const RShape& shape,
       && role != br::ShapeRole::kCutProjection) {
     role = br::ShapeRole::kCut;
   }
-  const br::ShapeClass c
-      = shape_classes_.describe(grid_layer, brRect(shape.rect), role);
+  const br::ShapeClass c = shape_classes_.describe(
+      grid_layer, brRect(shape.rect), role, shape.ndr);
   // Per-thread cache; class ids belong to one routing-space build.
   struct Cache
   {
@@ -901,12 +967,14 @@ bool BonnRouteDR::usable(const size_t v,
                          const br::Kind kind,
                          const int net) const
 {
-  if (grid_.level(v, kind) == br::kLegal) {
+  // The net's wire type (Sec. 3.2); its own shapes are ignored.
+  const int type = net >= 0 ? nets_[net].wire_type : 0;
+  if (type < fast_types_ && grid_.level(v, kind, type) == br::kLegal) {
     return true;
   }
   int z, i, j;
   graph_.decode(v, z, i, j);
-  return fast_builder_.exactLevel(z, i, j, 0, kind, net) == br::kLegal;
+  return fast_builder_.exactLevel(z, i, j, type, kind, net) == br::kLegal;
 }
 
 namespace {
@@ -1024,8 +1092,15 @@ void BonnRouteDR::buildNets()
     const auto type = net->getType();
     const size_t num_terms
         = net->getInstTerms().size() + net->getBTerms().size();
+    // NDR nets: with their wire type (Sec. 3.2) if route_ndr_nets and the
+    // NDR has a wire type.
+    const auto ndr = ndr_type_.find(net->getNondefaultRule());
+    const bool ndr_routable = params_.route_ndr_nets && ndr != ndr_type_.end();
+    if (net->hasNDR() && ndr_routable) {
+      data.wire_type = ndr->second;
+    }
     data.skip = net->isSpecial() || net->isFake() || net->isFixed()
-                || net->hasInitialRouting() || net->hasNDR()
+                || net->hasInitialRouting() || (net->hasNDR() && !ndr_routable)
                 || type == odb::dbSigType::POWER
                 || type == odb::dbSigType::GROUND || num_terms < 2
                 || !net->hasGuides();
@@ -1238,7 +1313,7 @@ BonnRouteDR::RShape BonnRouteDR::wireShape(const OutWire& wire) const
   }
   const bool preferred
       = wire.begin == wire.end || horizontal == layers_[z].horizontal;
-  const br::WireType& type = wire_types_.front();
+  const br::WireType& type = wire_types_[wire.wire_type];
   const br::Rect& m
       = (preferred ? type.preferred[z] : type.non_preferred[z]).rect;
   odb::Rect r(std::min(wire.begin.x(), wire.end.x()) + m.xlo,
@@ -1248,19 +1323,24 @@ BonnRouteDR::RShape BonnRouteDR::wireShape(const OutWire& wire) const
   return {wire.layer,
           r,
           preferred ? br::ShapeRole::kPreferredWire
-                    : br::ShapeRole::kNonPreferredWire};
+                    : br::ShapeRole::kNonPreferredWire,
+          wire.wire_type};
 }
 
 void BonnRouteDR::viaShapes(const OutVia& via,
                             std::vector<RShape>& shapes) const
 {
   frVia v(via.def, via.point);
-  shapes.push_back(
-      {via.def->getLayer1Num(), v.getLayer1BBox(), br::ShapeRole::kViaPad});
+  shapes.push_back({via.def->getLayer1Num(),
+                    v.getLayer1BBox(),
+                    br::ShapeRole::kViaPad,
+                    via.wire_type});
   shapes.push_back(
       {via.def->getCutLayerNum(), v.getCutBBox(), br::ShapeRole::kCut});
-  shapes.push_back(
-      {via.def->getLayer2Num(), v.getLayer2BBox(), br::ShapeRole::kViaPad});
+  shapes.push_back({via.def->getLayer2Num(),
+                    v.getLayer2BBox(),
+                    br::ShapeRole::kViaPad,
+                    via.wire_type});
 }
 
 void BonnRouteDR::shapesOf(const NetData& net,
@@ -3688,7 +3768,9 @@ void BonnRouteDR::pathToGeometry(const std::vector<size_t>& path,
     if (za != zb) {
       const size_t lower = za < zb ? path[k] : path[k + 1];
       const auto [x, y] = graph_.point(lower);
-      net.vias.push_back({layers_[std::min(za, zb)].up_via, odb::Point(x, y)});
+      net.vias.push_back({type_vias_[net.wire_type][std::min(za, zb)],
+                          odb::Point(x, y),
+                          net.wire_type});
       k++;
       continue;
     }
@@ -3708,8 +3790,11 @@ void BonnRouteDR::pathToGeometry(const std::vector<size_t>& path,
     }
     const auto [x0, y0] = graph_.point(path[k]);
     const auto [x1, y1] = graph_.point(path[e]);
-    net.wires.push_back(
-        {layers_[za].fr, odb::Point(x0, y0), odb::Point(x1, y1)});
+    net.wires.push_back({layers_[za].fr,
+                         odb::Point(x0, y0),
+                         odb::Point(x1, y1),
+                         false,
+                         net.wire_type});
     k = e;
   }
 }
@@ -3747,7 +3832,8 @@ bool BonnRouteDR::connectWithoutOwnShapes(NetData& net,
   // the guide dilation. Check them once for both clean windows.
   std::vector<std::vector<char>> valid(num_terms);
   auto option_valid = [&](const AccessOption& opt) {
-    const br::RipupLevel level = worker.reader.level(opt.vertex, br::kWire, 0);
+    const br::RipupLevel level
+        = worker.reader.level(opt.vertex, br::kWire, net.wire_type);
     bool ok = level == br::kLegal || (ripup && level <= br::kMaxRemovableLevel);
     if (ok && !ripup && opt.offtrack) {
       // Blockage-grid paths: every shape against earlier routed nets
@@ -3769,7 +3855,7 @@ bool BonnRouteDR::connectWithoutOwnShapes(NetData& net,
         continue;
       }
       const br::RipupLevel level
-          = worker.reader.level(opt.vertex, br::kWire, 0);
+          = worker.reader.level(opt.vertex, br::kWire, net.wire_type);
       bool ok
           = level == br::kLegal || (ripup && level <= br::kMaxRemovableLevel);
       if (ok && !ripup) {
@@ -3855,7 +3941,7 @@ bool BonnRouteDR::connectInRegion(NetData& net,
   req.ripup_cost
       = static_cast<Cost>(params_.ripup_cost) * layers_[0].pitch * unit();
   req.discounts = net.discount_runs;
-  req.wire_type = 0;
+  req.wire_type = net.wire_type;
   req.label_limit = label_limit_;
   req.overlay = &worker.overlay;
   // Clears the net's spreading mask when the connection ends.
@@ -4095,7 +4181,10 @@ bool BonnRouteDR::connectInRegion(NetData& net,
       }
       sources.clear();
     }
-    if (!params_.postprocess) {
+    // NDR nets: on-track paths with the wire type, access paths of the
+    // default rule (tapered at the pins, as drt does); the same-net
+    // post-processing models the default rule only.
+    if (!params_.postprocess || net.wire_type != 0) {
       pathToGeometry(res.path, net);
       for (const size_t v : res.path) {
         if (in_tree.insert(v).second) {
@@ -4182,7 +4271,7 @@ bool BonnRouteDR::connectInRegion(NetData& net,
   // History for rip-up (Sec. 4.2): vertices whose use forces a rip-up.
   if (ripup) {
     for (const size_t v : in_tree) {
-      if (worker.reader.level(v, br::kWire, 0) != br::kLegal) {
+      if (worker.reader.level(v, br::kWire, net.wire_type) != br::kLegal) {
         grid_.bumpHistory(v);
       }
     }
@@ -5255,7 +5344,7 @@ void BonnRouteDR::writeNets()
         return std::make_pair(a.x(), a.y()) < std::make_pair(b.x(), b.y());
       });
       for (size_t k = 0; k + 1 < cuts.size(); k++) {
-        wires.push_back({w.layer, cuts[k], cuts[k + 1]});
+        wires.push_back({w.layer, cuts[k], cuts[k + 1], w.patch, w.wire_type});
       }
     }
     // Contact guard: FlexDR's clean-up needs every pin contact at one of the
@@ -5294,6 +5383,17 @@ void BonnRouteDR::writeNets()
       seg->setPoints(b, e);
       seg->setLayerNum(w.layer);
       frSegStyle style = tech->getLayer(w.layer)->getDefaultSegStyle();
+      // NDR wires (Sec. 3.2): the wire type's width, extended by half of
+      // it, as FlexDR writes them.
+      const int wz = z_of_fr_[w.layer];
+      if (w.wire_type > 0 && wz >= 0
+          && type_widths_[w.wire_type][wz]
+                 > static_cast<int>(style.getWidth())) {
+        const frCoord width = type_widths_[w.wire_type][wz];
+        style.setWidth(width);
+        style.setBeginExt(width / 2);
+        style.setEndExt(width / 2);
+      }
       // A wire ending on a pin is truncated there, which is how FlexDR
       // recognises planar pin connections.
       for (const auto& [layer, p] : data.pin_points) {
@@ -5308,6 +5408,9 @@ void BonnRouteDR::writeNets()
         }
       }
       seg->setStyle(style);
+      // Access paths of an NDR net keep the default rule: tapered, as
+      // FlexDR marks them, so that its checks apply no NDR spacing.
+      seg->setTapered(data.wire_type != 0 && w.wire_type == 0);
       net->addShape(std::move(seg));
     }
     // Min-area extensions as patch wires anchored at their via (FlexDR's
@@ -5335,6 +5438,7 @@ void BonnRouteDR::writeNets()
         via->setTopConnected(true);
         connected_vias_++;
       }
+      via->setTapered(data.wire_type != 0 && v.wire_type == 0);
       net->addVia(std::move(via));
     }
     net->setHasInitialRouting(true);
@@ -5570,12 +5674,17 @@ void BonnRouteDR::main()
   std::ranges::stable_sort(
       order, [&](int a, int b) { return nets_[a].hpwl < nets_[b].hpwl; });
   std::vector<int> failed_first;
-  // Sec. 5.1: critical nets (here: clock nets) first, on the whole chip.
+  // Sec. 5.1: critical nets (clock nets and NDR nets) first, on the whole
+  // chip.
   std::vector<int> regular;
   std::vector<int> critical;
   for (const int id : order) {
-    (params_.critical_nets && nets_[id].net->isClock() ? critical : regular)
-        .push_back(id);
+    // Sec. 5.1: also nets "that use wide wires that would be hard to route
+    // when the majority of nets has already been routed" (NDR nets).
+    const bool is_critical
+        = params_.critical_nets
+          && (nets_[id].net->isClock() || nets_[id].wire_type != 0);
+    (is_critical ? critical : regular).push_back(id);
   }
   if (!critical.empty()) {
     routePartitions(critical, failed_first, 1, "critical-net partition");
@@ -5709,6 +5818,29 @@ void BonnRouteDR::main()
         "fast-grid overlay.",
         connects,
         connects > 0 ? static_cast<double>(own_shape_count) / connects : 0.0);
+    if (wire_types_.size() > 1) {
+      // Sec. 3.2 / 3.6: wire types, nets routed with each, fast ones.
+      std::vector<int> routed_by_type(wire_types_.size(), 0);
+      std::vector<int> nets_by_type(wire_types_.size(), 0);
+      int ndr_skipped = 0;
+      for (const NetData& net : nets_) {
+        nets_by_type[net.wire_type] += !net.skip;
+        routed_by_type[net.wire_type] += net.routed;
+        ndr_skipped += net.skip && net.net->hasNDR();
+      }
+      std::string types;
+      for (size_t t = 0; t < wire_types_.size(); t++) {
+        types += (t == 0 ? "" : ", ") + wire_types_[t].name + " "
+                 + std::to_string(routed_by_type[t]) + "/"
+                 + std::to_string(nets_by_type[t]) + " routed"
+                 + (static_cast<int>(t) < fast_types_ ? " (fast)" : "");
+      }
+      logger_->report(
+          "BonnRoute DR wire types: {}; {} fast; {} NDR nets skipped.",
+          types,
+          fast_types_,
+          ndr_skipped);
+    }
     logger_->report(
         "BonnRoute DR: {} threads, parallel phase until {:.2f}s, {} nets "
         "to {}.",

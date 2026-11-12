@@ -54,15 +54,6 @@ namespace drt {
 namespace gtl = boost::polygon;
 
 const int beginDebugIter = std::numeric_limits<int>::max();
-static frSquaredDistance pt2boxDistSquare(const odb::Point& pt,
-                                          const odb::Rect& box)
-
-{
-  frCoord dx = std::max({box.xMin() - pt.x(), pt.x() - box.xMax(), 0});
-  frCoord dy = std::max({box.yMin() - pt.y(), pt.y() - box.yMax(), 0});
-  return (frSquaredDistance) dx * dx + (frSquaredDistance) dy * dy;
-}
-
 // prlx = -dx, prly = -dy
 // dx > 0 : disjoint in x; dx = 0 : touching in x; dx < 0 : overlap in x
 static frSquaredDistance box2boxDistSquareNew(const odb::Rect& box1,
@@ -321,6 +312,70 @@ void FlexDRWorker::modMinSpacingCostPlanar(const odb::Rect& box,
   }
 }
 
+namespace {
+
+// Per-thread scratch of the separable spacing-cost kernels below. Each
+// FlexDRWorker runs on one thread at a time, so a thread-local buffer is
+// private to the worker that uses it; it only grows.
+struct SpacingCostScratch
+{
+  std::vector<frSquaredDistance> row_dist_square;
+  std::vector<frSquaredDistance> row_req_dist_square;
+  std::vector<frCoord> row_prl;
+  std::vector<uint8_t> row_eol_up;
+  std::vector<uint8_t> row_eol_down;
+  std::vector<uint8_t> row_eol_side;
+  std::vector<uint8_t> hit_count;
+
+  void resize(const int rows)
+  {
+    if (static_cast<int>(hit_count.size()) < rows) {
+      row_dist_square.resize(rows);
+      row_req_dist_square.resize(rows);
+      row_prl.resize(rows);
+      row_eol_up.resize(rows);
+      row_eol_down.resize(rows);
+      row_eol_side.resize(rows);
+      hit_count.resize(rows);
+    }
+  }
+};
+
+SpacingCostScratch& spacingCostScratch()
+{
+  thread_local SpacingCostScratch scratch;
+  return scratch;
+}
+
+// Squared distance along one axis from coordinate c to [lo, hi]: the x (or y)
+// term of the point-to-box squared distance.
+frSquaredDistance axisDistSquare(const frCoord c,
+                                 const frCoord lo,
+                                 const frCoord hi)
+{
+  const frCoord d = std::max({lo - c, c - hi, 0});
+  return (frSquaredDistance) d * d;
+}
+
+// True when the interval spanned by a and b (in either order, as
+// odb::Rect::init normalizes it) overlaps the open interior of [lo, hi] the way
+// odb::Rect::overlaps tests one axis.
+bool axisOverlaps(const frCoord lo,
+                  const frCoord hi,
+                  const frCoord a,
+                  const frCoord b)
+{
+  const auto [l, h] = std::minmax(a, b);
+  return hi > l && lo < h;
+}
+
+}  // namespace
+
+// The spacing test of a grid point is separable: the four corners of the
+// width2 square around (x, y) give min over x offsets plus min over y offsets
+// of the per-axis squared distances to box, so one row of squared distances
+// per y index and one value per x index decide every point. The row compare
+// is a plain array loop the compiler vectorizes.
 void FlexDRWorker::modMinSpacingCostPlanarHelper(const odb::Rect& box,
                                                  frMIdx z,
                                                  ModCostType type,
@@ -332,6 +387,11 @@ void FlexDRWorker::modMinSpacingCostPlanarHelper(const odb::Rect& box,
                                                  bool resetVert,
                                                  bool ndr)
 {
+  // NDR costs carry no blocked edges: the per-point loop returned at its first
+  // hit, before it had changed any node.
+  if (ndr && (type == resetBlocked || type == setBlocked)) {
+    return;
+  }
   auto lNum = gridGraph_.getLayerNum(z);
   frCoord width1 = box.minDXDY();
   // layer default width
@@ -359,96 +419,108 @@ void FlexDRWorker::modMinSpacingCostPlanarHelper(const odb::Rect& box,
                    box.yMax() - width2 / 2);
     gridGraph_.getIdxBox(mPinLL, mPinUR, sBox);
   }
-  odb::Point pt, pt1, pt2, pt3, pt4;
-  frSquaredDistance distSquare = 0;
+  const frMIdx yLo = mIdx1.y();
+  const int rows = mIdx2.y() - yLo + 1;
+  if (mIdx2.x() < mIdx1.x() || rows <= 0) {
+    return;
+  }
+  SpacingCostScratch& scratch = spacingCostScratch();
+  scratch.resize(rows);
+  frSquaredDistance* rowDistSquare = scratch.row_dist_square.data();
+  uint8_t* hit = scratch.hit_count.data();
+  for (int k = 0; k < rows; k++) {
+    const frCoord y = gridGraph_.yCoord(yLo + k);
+    rowDistSquare[k]
+        = std::min(axisDistSquare(y - halfwidth2, box.yMin(), box.yMax()),
+                   axisDistSquare(y + halfwidth2, box.yMin(), box.yMax()));
+  }
   for (int i = mIdx1.x(); i <= mIdx2.x(); i++) {
-    for (int j = mIdx1.y(); j <= mIdx2.y(); j++) {
-      gridGraph_.getPoint(pt, i, j);
-      pt1 = {pt.x() + halfwidth2, pt.y() - halfwidth2};
-      pt2 = {pt.x() + halfwidth2, pt.y() + halfwidth2};
-      pt3 = {pt.x() - halfwidth2, pt.y() - halfwidth2};
-      pt4 = {pt.x() - halfwidth2, pt.y() + halfwidth2};
-      distSquare
-          = std::min(pt2boxDistSquare(pt1, box), pt2boxDistSquare(pt2, box));
-      distSquare = std::min(pt2boxDistSquare(pt3, box), distSquare);
-      distSquare = std::min(pt2boxDistSquare(pt4, box), distSquare);
-      if (distSquare < bloatDistSquare) {
-        switch (type) {
-          case subRouteShape:
-            gridGraph_.subRouteShapeCostPlanar(gridGraph_.getIdx(i, j, z),
-                                               ndr);  // safe access
-            break;
-          case addRouteShape:
-            gridGraph_.addRouteShapeCostPlanar(gridGraph_.getIdx(i, j, z),
-                                               ndr);  // safe access
-            break;
-          case subFixedShape:
-            gridGraph_.subFixedShapeCostPlanar(gridGraph_.getIdx(i, j, z),
-                                               ndr);  // safe access
-            break;
-          case addFixedShape:
-            gridGraph_.addFixedShapeCostPlanar(gridGraph_.getIdx(i, j, z),
-                                               ndr);  // safe access
-            break;
-          case resetFixedShape:
-            if (resetHorz) {
-              gridGraph_.setFixedShapeCostPlanarHorz(
-                  gridGraph_.getIdx(i, j, z), 0, ndr);  // safe access
-            }
-            if (resetVert) {
-              gridGraph_.setFixedShapeCostPlanarVert(
-                  gridGraph_.getIdx(i, j, z), 0, ndr);  // safe access
-            }
-            break;
-          case setFixedShape: {
-            frMIdx idx = gridGraph_.getIdx(i, j, z);
-            gridGraph_.setFixedShapeCostPlanarHorz(idx, 1, ndr);  // safe access
-            gridGraph_.setFixedShapeCostPlanarVert(idx, 1, ndr);  // safe access
-            break;
+    const frCoord x = gridGraph_.xCoord(i);
+    const frSquaredDistance colDistSquare
+        = std::min(axisDistSquare(x + halfwidth2, box.xMin(), box.xMax()),
+                   axisDistSquare(x - halfwidth2, box.xMin(), box.xMax()));
+    if (colDistSquare >= bloatDistSquare) {
+      continue;
+    }
+    // colDistSquare + rowDistSquare < bloatDistSquare
+    const frSquaredDistance rowLimit = bloatDistSquare - colDistSquare;
+    for (int k = 0; k < rows; k++) {
+      hit[k] = rowDistSquare[k] < rowLimit;
+    }
+    for (int k = 0; k < rows; k++) {
+      if (!hit[k]) {
+        continue;
+      }
+      const frMIdx j = yLo + k;
+      switch (type) {
+        case subRouteShape:
+          gridGraph_.subRouteShapeCostPlanar(gridGraph_.getIdx(i, j, z),
+                                             ndr);  // safe access
+          break;
+        case addRouteShape:
+          gridGraph_.addRouteShapeCostPlanar(gridGraph_.getIdx(i, j, z),
+                                             ndr);  // safe access
+          break;
+        case subFixedShape:
+          gridGraph_.subFixedShapeCostPlanar(gridGraph_.getIdx(i, j, z),
+                                             ndr);  // safe access
+          break;
+        case addFixedShape:
+          gridGraph_.addFixedShapeCostPlanar(gridGraph_.getIdx(i, j, z),
+                                             ndr);  // safe access
+          break;
+        case resetFixedShape:
+          if (resetHorz) {
+            gridGraph_.setFixedShapeCostPlanarHorz(
+                gridGraph_.getIdx(i, j, z), 0, ndr);  // safe access
           }
-          case resetBlocked:
-            if (ndr) {
-              return;
-            }
-            if (isMacroPin) {
-              if (j >= mPinLL.y() && j <= mPinUR.y()) {
-                gridGraph_.resetBlocked(i, j, z, frDirEnum::E);
-                if (i == 0) {
-                  gridGraph_.resetBlocked(i, j, z, frDirEnum::W);
-                }
-              }
-              if (i >= mPinLL.x() && i <= mPinUR.x()) {
-                gridGraph_.resetBlocked(i, j, z, frDirEnum::N);
-                if (j == 0) {
-                  gridGraph_.resetBlocked(i, j, z, frDirEnum::S);
-                }
-              }
-            } else {
+          if (resetVert) {
+            gridGraph_.setFixedShapeCostPlanarVert(
+                gridGraph_.getIdx(i, j, z), 0, ndr);  // safe access
+          }
+          break;
+        case setFixedShape: {
+          frMIdx idx = gridGraph_.getIdx(i, j, z);
+          gridGraph_.setFixedShapeCostPlanarHorz(idx, 1, ndr);  // safe access
+          gridGraph_.setFixedShapeCostPlanarVert(idx, 1, ndr);  // safe access
+          break;
+        }
+        case resetBlocked:
+          if (isMacroPin) {
+            if (j >= mPinLL.y() && j <= mPinUR.y()) {
               gridGraph_.resetBlocked(i, j, z, frDirEnum::E);
-              gridGraph_.resetBlocked(i, j, z, frDirEnum::N);
               if (i == 0) {
                 gridGraph_.resetBlocked(i, j, z, frDirEnum::W);
               }
+            }
+            if (i >= mPinLL.x() && i <= mPinUR.x()) {
+              gridGraph_.resetBlocked(i, j, z, frDirEnum::N);
               if (j == 0) {
                 gridGraph_.resetBlocked(i, j, z, frDirEnum::S);
               }
             }
-            break;
-          case setBlocked:  // set blocked
-            if (ndr) {
-              return;
-            }
-            gridGraph_.setBlocked(i, j, z, frDirEnum::E);
-            gridGraph_.setBlocked(i, j, z, frDirEnum::N);
+          } else {
+            gridGraph_.resetBlocked(i, j, z, frDirEnum::E);
+            gridGraph_.resetBlocked(i, j, z, frDirEnum::N);
             if (i == 0) {
-              gridGraph_.setBlocked(i, j, z, frDirEnum::W);
+              gridGraph_.resetBlocked(i, j, z, frDirEnum::W);
             }
             if (j == 0) {
-              gridGraph_.setBlocked(i, j, z, frDirEnum::S);
+              gridGraph_.resetBlocked(i, j, z, frDirEnum::S);
             }
-            break;
-          default:;
-        }
+          }
+          break;
+        case setBlocked:  // set blocked
+          gridGraph_.setBlocked(i, j, z, frDirEnum::E);
+          gridGraph_.setBlocked(i, j, z, frDirEnum::N);
+          if (i == 0) {
+            gridGraph_.setBlocked(i, j, z, frDirEnum::W);
+          }
+          if (j == 0) {
+            gridGraph_.setBlocked(i, j, z, frDirEnum::S);
+          }
+          break;
+        default:;
       }
     }
   }
@@ -717,6 +789,14 @@ void FlexDRWorker::modMinSpacingCostVia(const odb::Rect& box,
   }
 }
 
+// For grid points without a special access via the via box is the default
+// via box moved to the point, so the box-to-box gaps dx, dy depend on the x
+// and the y index only. The required distance depends on the point only
+// through prl = max(-dx, -dy): it is the row's value when -dy >= -dx and the
+// column's value otherwise, so the spacing table is read once per row and
+// once per column instead of once per point. Each end-of-line test box
+// overlaps box exactly when its x and its y extents both do. Points with a
+// special access via keep the per-point evaluation.
 void FlexDRWorker::modMinSpacingCostViaHelper(const odb::Rect& box,
                                               frMIdx z,
                                               ModCostType type,
@@ -732,6 +812,12 @@ void FlexDRWorker::modMinSpacingCostViaHelper(const odb::Rect& box,
   if (viaDef == nullptr) {
     return;
   }
+  // Only these four cost types change via costs (here and in
+  // modMinSpacingCostVia_eol_helper).
+  if (type != subRouteShape && type != addRouteShape && type != subFixedShape
+      && type != addFixedShape) {
+    return;
+  }
   frVia via(viaDef);
   odb::Rect viaBox(0, 0, 0, 0);
   if (isUpperVia) {
@@ -744,13 +830,14 @@ void FlexDRWorker::modMinSpacingCostViaHelper(const odb::Rect& box,
 
   // via prl should check min area patch metal if not fat via
   auto lNum = gridGraph_.getLayerNum(z);
-  bool isH = getTech()->getLayer(lNum)->isHorizontal();
+  frLayer* layer = getTech()->getLayer(lNum);
+  bool isH = layer->isHorizontal();
   bool isFatVia = (isH) ? (viaBox.dy() > width) : (viaBox.dx() > width);
 
   frCoord length2_mar = length2;
   frCoord patchLength = 0;
   if (!isFatVia) {
-    auto minAreaConstraint = getTech()->getLayer(lNum)->getAreaConstraint();
+    auto minAreaConstraint = layer->getAreaConstraint();
     auto minArea = minAreaConstraint ? minAreaConstraint->getMinArea() : 0;
     patchLength = frCoord(ceil(1.0 * minArea / width
                                / getTech()->getManufacturingGrid()))
@@ -764,13 +851,13 @@ void FlexDRWorker::modMinSpacingCostViaHelper(const odb::Rect& box,
   frCoord prl = isCurrPs ? (length2_mar) : std::min(length1, length2_mar);
   bool use_min_spacing
       = isBlockage && router_cfg_->USEMINSPACING_OBS && !isFatVia;
-  frCoord bloatDist = getTech()->getLayer(lNum)->getMinSpacingValue(
-      width1, width2, prl, use_min_spacing);
+  frCoord bloatDist
+      = layer->getMinSpacingValue(width1, width2, prl, use_min_spacing);
   bloatDist = std::max(minSpacing, bloatDist);
   frCoord bloatDistEolX = 0;
   frCoord bloatDistEolY = 0;
   if (drCon.eolWidth == 0) {
-    drCon = getTech()->getLayer(lNum)->getDrEolSpacingConstraint();
+    drCon = layer->getDrEolSpacingConstraint();
   }
   if (viaBox.dx() <= drCon.eolWidth) {
     bloatDistEolY = std::max(bloatDistEolY, drCon.eolSpace);
@@ -790,68 +877,157 @@ void FlexDRWorker::modMinSpacingCostViaHelper(const odb::Rect& box,
       box.yMax() + std::max(bloatDist, bloatDistEolY) + (0 - viaBox.yMin())
           - 1);
   gridGraph_.getIdxBox(mIdx1, mIdx2, bx);
-  odb::Point pt;
-  odb::Rect tmpBx;
-  frSquaredDistance distSquare = 0;
-  frCoord dx, dy;
-  frVia sVia;
+  const frMIdx yLo = mIdx1.y();
+  const int rows = mIdx2.y() - yLo + 1;
+  if (mIdx2.x() < mIdx1.x() || rows <= 0) {
+    return;
+  }
+
+  auto applyCost = [&](const frMIdx idx) {
+    switch (type) {
+      case subRouteShape:
+        gridGraph_.subRouteShapeCostVia(idx, ndr);  // safe access
+        break;
+      case addRouteShape:
+        gridGraph_.addRouteShapeCostVia(idx, ndr);  // safe access
+        break;
+      case subFixedShape:
+        gridGraph_.subFixedShapeCostVia(idx, ndr);  // safe access
+        break;
+      case addFixedShape:
+        gridGraph_.addFixedShapeCostVia(idx, ndr);  // safe access
+        break;
+      default:;
+    }
+  };
+  // Squared required distance for a prl value.
+  auto reqDistSquare = [&](const frCoord prlValue) {
+    frCoord reqDist
+        = layer->getMinSpacingValue(width1, width2, prlValue, use_min_spacing);
+    reqDist = std::max(reqDist, minSpacing);
+    return (frSquaredDistance) reqDist * reqDist;
+  };
+  // prl of a point whose via is parallel to box along y (isCurrPs, -dy >= 0
+  // and -dy >= -dx), resp. along x.
+  frCoord psPrlY = viaBox.dy();
+  if (!isH && !isFatVia) {
+    psPrlY = std::max(psPrlY, patchLength);
+  }
+  frCoord psPrlX = viaBox.dx();
+  if (isH && !isFatVia) {
+    psPrlX = std::max(psPrlX, patchLength);
+  }
+  const frSquaredDistance psReqY = isCurrPs ? reqDistSquare(psPrlY) : 0;
+  const frSquaredDistance psReqX = isCurrPs ? reqDistSquare(psPrlX) : 0;
+
+  // End-of-line test boxes of modMinSpacingCostVia_eol around the default via
+  // box: up/down boxes when viaBox.dx() <= eolWidth, left/right boxes when
+  // viaBox.dy() <= eolWidth.
+  const bool eolUpDown = drCon.eolSpace != 0 && viaBox.dx() <= drCon.eolWidth;
+  const bool eolSides = drCon.eolSpace != 0 && viaBox.dy() <= drCon.eolWidth;
+  const frCoord eolSpace = drCon.eolSpace;
+  const frCoord eolWithin = drCon.eolWithin;
+
+  SpacingCostScratch& scratch = spacingCostScratch();
+  scratch.resize(rows);
+  frSquaredDistance* rowDistSquare = scratch.row_dist_square.data();
+  frSquaredDistance* rowReq = scratch.row_req_dist_square.data();
+  frCoord* rowPrl = scratch.row_prl.data();
+  uint8_t* rowEolUp = scratch.row_eol_up.data();
+  uint8_t* rowEolDown = scratch.row_eol_down.data();
+  uint8_t* rowEolSide = scratch.row_eol_side.data();
+  uint8_t* hitCount = scratch.hit_count.data();
+  for (int k = 0; k < rows; k++) {
+    const frCoord y = gridGraph_.yCoord(yLo + k);
+    const frCoord yMin = viaBox.yMin() + y;
+    const frCoord yMax = viaBox.yMax() + y;
+    const frCoord dy = std::max(box.yMin(), yMin) - std::min(box.yMax(), yMax);
+    rowDistSquare[k] = (frSquaredDistance) std::max(dy, 0) * std::max(dy, 0);
+    rowPrl[k] = -dy;
+    rowReq[k] = (isCurrPs && -dy >= 0) ? psReqY : reqDistSquare(-dy);
+    rowEolUp[k]
+        = eolUpDown
+          && axisOverlaps(box.yMin(), box.yMax(), yMax, yMax + eolSpace);
+    rowEolDown[k]
+        = eolUpDown
+          && axisOverlaps(box.yMin(), box.yMax(), yMin - eolSpace, yMin);
+    rowEolSide[k]
+        = eolSides
+          && axisOverlaps(
+              box.yMin(), box.yMax(), yMin - eolWithin, yMax + eolWithin);
+  }
+
   frMIdx zIdx = isUpperVia ? z : z - 1;
+  frVia sVia;
   for (int i = mIdx1.x(); i <= mIdx2.x(); i++) {
-    for (int j = mIdx1.y(); j <= mIdx2.y(); j++) {
+    const frCoord x = gridGraph_.xCoord(i);
+    const frCoord xMin = viaBox.xMin() + x;
+    const frCoord xMax = viaBox.xMax() + x;
+    const frCoord dx = std::max(box.xMin(), xMin) - std::min(box.xMax(), xMax);
+    const frSquaredDistance colDistSquare
+        = (frSquaredDistance) std::max(dx, 0) * std::max(dx, 0);
+    const frCoord colPrl = -dx;
+    const frSquaredDistance colReq
+        = (isCurrPs && -dx >= 0) ? psReqX : reqDistSquare(-dx);
+    const int colEolUpDown
+        = eolUpDown
+          && axisOverlaps(
+              box.xMin(), box.xMax(), xMin - eolWithin, xMax + eolWithin);
+    const int colEolSides
+        = (eolSides
+           && axisOverlaps(box.xMin(), box.xMax(), xMax, xMax + eolSpace))
+          + (eolSides
+             && axisOverlaps(box.xMin(), box.xMax(), xMin - eolSpace, xMin));
+    // Number of cost updates per point: the spacing test plus the end-of-line
+    // boxes that overlap box.
+    for (int k = 0; k < rows; k++) {
+      const frSquaredDistance req = rowPrl[k] >= colPrl ? rowReq[k] : colReq;
+      hitCount[k] = (colDistSquare + rowDistSquare[k] < req)
+                    + colEolUpDown * (rowEolUp[k] + rowEolDown[k])
+                    + rowEolSide[k] * colEolSides;
+    }
+    for (int k = 0; k < rows; k++) {
+      const frMIdx j = yLo + k;
+      frMIdx idx = gridGraph_.getIdx(i, j, zIdx);
+      if (!gridGraph_.isSVia(idx)) {
+        for (int c = 0; c < hitCount[k]; c++) {
+          applyCost(idx);
+        }
+        continue;
+      }
+      odb::Point pt;
       gridGraph_.getPoint(pt, i, j);
       odb::dbTransform xform(pt);
-      tmpBx = viaBox;
-      frMIdx idx = gridGraph_.getIdx(i, j, zIdx);
-      if (gridGraph_.isSVia(idx)) {
-        auto sViaDef = apSVia_[FlexMazeIdx(i, j, zIdx)]->getAccessViaDef();
-        sVia.setViaDef(sViaDef);
-        odb::Rect sViaBox;
-        if (isUpperVia) {
-          sViaBox = sVia.getLayer1BBox();
-        } else {
-          sViaBox = sVia.getLayer2BBox();
-        }
-        tmpBx = sViaBox;
+      odb::Rect tmpBx;
+      auto sViaDef = apSVia_[FlexMazeIdx(i, j, zIdx)]->getAccessViaDef();
+      sVia.setViaDef(sViaDef);
+      if (isUpperVia) {
+        tmpBx = sVia.getLayer1BBox();
+      } else {
+        tmpBx = sVia.getLayer2BBox();
       }
       xform.apply(tmpBx);
-      distSquare = box2boxDistSquareNew(box, tmpBx, dx, dy);
-      prl = std::max(-dx, -dy);
+      frCoord sdx = 0;
+      frCoord sdy = 0;
+      frSquaredDistance distSquare = box2boxDistSquareNew(box, tmpBx, sdx, sdy);
+      frCoord pointPrl = std::max(-sdx, -sdy);
       // curr is ps
       if (isCurrPs) {
-        if (-dy >= 0 && prl == -dy) {
-          prl = viaBox.dy();
+        if (-sdy >= 0 && pointPrl == -sdy) {
+          pointPrl = viaBox.dy();
           // ignore svia effect here...
           if (!isH && !isFatVia) {
-            prl = std::max(prl, patchLength);
+            pointPrl = std::max(pointPrl, patchLength);
           }
-        } else if (-dx >= 0 && prl == -dx) {
-          prl = viaBox.dx();
+        } else if (-sdx >= 0 && pointPrl == -sdx) {
+          pointPrl = viaBox.dx();
           if (isH && !isFatVia) {
-            prl = std::max(prl, patchLength);
+            pointPrl = std::max(pointPrl, patchLength);
           }
         }
       }
-      bool use_min_spacing
-          = isBlockage && router_cfg_->USEMINSPACING_OBS && !isFatVia;
-      frCoord reqDist = getTech()->getLayer(lNum)->getMinSpacingValue(
-          width1, width2, prl, use_min_spacing);
-      reqDist = std::max(reqDist, minSpacing);
-      if (distSquare < (frSquaredDistance) reqDist * reqDist) {
-        switch (type) {
-          case subRouteShape:
-            gridGraph_.subRouteShapeCostVia(idx, ndr);  // safe access
-            break;
-          case addRouteShape:
-            gridGraph_.addRouteShapeCostVia(idx, ndr);  // safe access
-            break;
-          case subFixedShape:
-            gridGraph_.subFixedShapeCostVia(idx, ndr);  // safe access
-            break;
-          case addFixedShape:
-            gridGraph_.addFixedShapeCostVia(idx, ndr);  // safe access
-            break;
-          default:;
-        }
+      if (distSquare < reqDistSquare(pointPrl)) {
+        applyCost(idx);
       }
       // eol, other obj to curr obj
       modMinSpacingCostVia_eol(box, tmpBx, type, drCon, idx, ndr);
