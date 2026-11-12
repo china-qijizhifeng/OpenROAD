@@ -206,6 +206,9 @@ void BonnRouteDR::routingShapes(const frNet* net,
                                 std::vector<RShape>& shapes) const
 {
   shapes.clear();
+  // Existing routing of an NDR net keeps the NDR spacing on its metal
+  // (drt's checker applies it), except pieces tapered at pins.
+  const int ndr = ndrType(net);
   const int num_fr = static_cast<int>(z_of_fr_.size());
   auto wire_role
       = [&](const frLayerNum layer, const odb::Rect& r, const bool horizontal) {
@@ -232,18 +235,27 @@ void BonnRouteDR::routingShapes(const frNet* net,
         horizontal = z >= 0 ? layers_[z].horizontal : horizontal;
       }
     }
+    const bool tapered
+        = shape->typeId() == frcPathSeg
+          && static_cast<const frPathSeg*>(shape.get())->isTapered();
     shapes.push_back({shape->getLayerNum(),
                       r,
-                      wire_role(shape->getLayerNum(), r, horizontal)});
+                      wire_role(shape->getLayerNum(), r, horizontal),
+                      tapered ? 0 : ndr});
   }
   for (const auto& via : net->getVias()) {
     const frViaDef* def = via->getViaDef();
-    shapes.push_back(
-        {def->getLayer1Num(), via->getLayer1BBox(), br::ShapeRole::kViaPad});
+    const int pad_ndr = via->isTapered() ? 0 : ndr;
+    shapes.push_back({def->getLayer1Num(),
+                      via->getLayer1BBox(),
+                      br::ShapeRole::kViaPad,
+                      pad_ndr});
     shapes.push_back(
         {def->getCutLayerNum(), via->getCutBBox(), br::ShapeRole::kCut});
-    shapes.push_back(
-        {def->getLayer2Num(), via->getLayer2BBox(), br::ShapeRole::kViaPad});
+    shapes.push_back({def->getLayer2Num(),
+                      via->getLayer2BBox(),
+                      br::ShapeRole::kViaPad,
+                      pad_ndr});
   }
   for (const auto& patch : net->getPatchWires()) {
     const odb::Rect r = patch->getBBox();
@@ -289,12 +301,24 @@ void BonnRouteDR::setInputShapes(NetData& net,
   net.input_present = false;
 }
 
+int BonnRouteDR::ndrType(const frNet* net) const
+{
+  if (!net->hasNDR()) {
+    return 0;
+  }
+  const auto it = ndr_type_.find(net->getNondefaultRule());
+  return it != ndr_type_.end() ? it->second : 0;
+}
+
 int BonnRouteDR::addNetData(frNet* net)
 {
   NetData data;
   data.net = net;
   data.id = static_cast<int>(nets_.size());
   data.skip = true;
+  if (params_.route_ndr_nets) {
+    data.wire_type = ndrType(net);
+  }
   odb::Rect box;
   box.mergeInit();
   for (const auto* it : net->getInstTerms()) {
@@ -320,9 +344,12 @@ bool BonnRouteDR::routableType(const NetData& data) const
   const frNet* net = data.net;
   const auto type = net->getType();
   const size_t num_terms = net->getInstTerms().size() + net->getBTerms().size();
-  return !(net->isSpecial() || net->isFake() || net->isFixed() || net->hasNDR()
-           || type == odb::dbSigType::POWER || type == odb::dbSigType::GROUND
-           || num_terms < 2 || (!net->hasGuides() && !data.input_present));
+  // NDR nets with their wire type (route_ndr_nets), as in the first call.
+  const bool ndr_routable = params_.route_ndr_nets && ndrType(net) > 0;
+  return !(net->isSpecial() || net->isFake() || net->isFixed()
+           || (net->hasNDR() && !ndr_routable) || type == odb::dbSigType::POWER
+           || type == odb::dbSigType::GROUND || num_terms < 2
+           || (!net->hasGuides() && !data.input_present));
 }
 
 void BonnRouteDR::recordFixedShape(const frBlockObject* obj,

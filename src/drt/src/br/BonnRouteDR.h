@@ -860,6 +860,8 @@ class BonnRouteDR
   static uint64_t routingFingerprint(const frNet* net);
   static uint64_t termsFingerprint(const frNet* net);
   int addNetData(frNet* net);
+  // Wire type of the net's nondefault rule, 0 for the default rule.
+  int ndrType(const frNet* net) const;
   void setInputShapes(NetData& net,
                       bool present,
                       br::FastGridBuilder::PendingRemovals* pending = nullptr);
