@@ -828,6 +828,7 @@ static int pitchCases(const int cases, const bool extras = false)
       TestVias vias;
       vias.g = &g;
       vias.reach = 120;
+      vias.layers.assign(Z, 1);
       q.same_net_vias = &vias;
       const SearchResult open = ps.run(q);
       ok &= open.found == r[2].found && (!open.found || open.cost == r[2].cost);

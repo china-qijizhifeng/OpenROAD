@@ -265,23 +265,34 @@ void PathSearch::settle(const int z, const int i, const int j, const Cost g)
       relax(z, i2, j, g + c, di > 0 ? kFromTrackBelow : kFromTrackAbove, 0);
     }
   }
-  // Same-net via rules: the via that entered this layer.
+  // Same-net via rules (Lef58Rules.md) on the via layers that have them;
+  // the via that entered this layer is looked up once, when needed.
   const SameNetVias* same_net = req_->same_net_vias;
   At entered{-1, 0, 0};
-  if (same_net != nullptr && !is_source) {
-    enteringVia(z, i, j, same_net->reach, entered);
-  }
+  bool walked = false;
+  auto via_ok = [&](const int zv, const int vi, const int vj) {
+    if (same_net == nullptr || !same_net->active(zv)) {
+      return true;
+    }
+    if (!same_net->allowed(zv, vi, vj)) {
+      return false;
+    }
+    if (!walked) {
+      walked = true;
+      if (!is_source) {
+        enteringVia(z, i, j, same_net->reach, entered);
+      }
+    }
+    return entered.z != zv
+           || same_net->pairAllowed(zv, vi, vj, entered.i, entered.j, z);
+  };
   // Via up.
   if (z + 1 < graph_.numLayers()) {
     const int i2 = layer.up_track[j];
     const int j2 = layer.up_pos[i];
     if (i2 >= 0 && j2 >= 0
         && region.contains(graph_.layers[z + 1], z + 1, i2, j2)
-        && (same_net == nullptr
-            || (same_net->allowed(z, i, j)
-                && (entered.z != z
-                    || same_net->pairAllowed(
-                        z, i, j, entered.i, entered.j, z))))) {
+        && via_ok(z, i, j)) {
       const At aw{z + 1, i2, j2};
       const RipupLevel pad = level(av, kViaUpPad);
       if (usable(pad)) {
@@ -303,11 +314,7 @@ void PathSearch::settle(const int z, const int i, const int j, const Cost g)
     const int j2 = layer.down_pos[i];
     if (i2 >= 0 && j2 >= 0
         && region.contains(graph_.layers[z - 1], z - 1, i2, j2)
-        && (same_net == nullptr
-            || (same_net->allowed(z - 1, i2, j2)
-                && (entered.z != z - 1
-                    || same_net->pairAllowed(
-                        z - 1, i2, j2, entered.i, entered.j, z))))) {
+        && via_ok(z - 1, i2, j2)) {
       const At aw{z - 1, i2, j2};
       const RipupLevel pad = level(aw, kViaUpPad);
       if (usable(pad)) {

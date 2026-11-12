@@ -36,8 +36,8 @@ square on asap7 (`LayerRules::wire_ends_covered`, checked per layer for
 every wire type's pads), so the wire's ends are no polygon sides and its
 flanks only are real: the pad carries the end-of-line side and the corners,
 as in the merged polygon drt checks. Without such pads, wires keep their
-ends. Via pads, jogs, patches (role via pad on such layers), pins and
-obstructions are rectangles with real sides; a pin or obstruction narrower
+ends. Via pads, jogs, patches and off-track pieces (role `kRealWire` on such
+layers), pins and obstructions are rectangles with real sides; a pin or obstruction narrower
 than the EOL width has end-of-line sides in both directions. A stored piece
 of a shape (shape-grid cell) marks its sides that are cell or clip borders
 (`PlacedShape::line_end_ends` bits 2-5, kept on side-rule layers only), so
@@ -76,6 +76,10 @@ neighbouring via positions violate the 136 DBU cut spacing, and the two
 pads on the layer the path left (not connected there) violate the M4
 keep-out (VIA34 pads 96 apart) or the M3 spacing / keep-out (VIA23 pads 32
 apart).
+
+Scope: only via layers whose cut layer has a LEF58 cut spacing table or
+whose pad layers have side rules (`SameNetVias::layers`); elsewhere the
+search is unchanged (other technologies route as before).
 
 Choice: the vertex search checks a via when it relaxes it. It walks back
 from the settled vertex along its layer (parent pointers, at most

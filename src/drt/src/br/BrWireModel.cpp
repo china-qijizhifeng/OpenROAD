@@ -266,11 +266,13 @@ ShapeClass ShapeClassTable::describe(const int layer,
   c.width_row = static_cast<uint8_t>(table.widthRow(rect.width()));
   c.run_column_x = static_cast<uint8_t>(table.prlColumn(rect.dx()));
   c.run_column_y = static_cast<uint8_t>(table.prlColumn(rect.dy()));
-  if (c.kind == ShapeClassKind::kMetal && role == ShapeRole::kPreferredWire) {
+  const bool wire
+      = role == ShapeRole::kPreferredWire || role == ShapeRole::kRealWire;
+  if (c.kind == ShapeClassKind::kMetal && wire) {
     (rules.horizontal ? c.run_column_x : c.run_column_y) = kUnboundedRun;
   }
   if (c.kind == ShapeClassKind::kMetal && rules.line_end.active()
-      && (role == ShapeRole::kPreferredWire || role == ShapeRole::kViaPad)) {
+      && (wire || role == ShapeRole::kViaPad)) {
     // The line-end edge runs across the preferred direction.
     const Coord edge = rules.horizontal ? rect.dy() : rect.dx();
     c.line_end = edge < rules.line_end.max_edge;
@@ -284,16 +286,16 @@ ShapeClass ShapeClassTable::describe(const int layer,
   if (c.kind == ShapeClassKind::kMetal && rules.sideRules()) {
     // Lef58Rules.md: sides along the preferred direction run across it.
     const uint8_t ends = rules.horizontal ? 0x3 : 0xc;
-    const bool wire = role == ShapeRole::kPreferredWire;
-    c.sides_real = wire && rules.wire_ends_covered
+    c.sides_real = role == ShapeRole::kPreferredWire && rules.wire_ends_covered
                        ? static_cast<uint8_t>(0xf & ~ends)
                        : uint8_t{0xf};
     for (size_t k = 0; k < rules.eol_widths.size(); k++) {
       const Coord w = rules.eol_widths[k];
       // x sides (xlo, xhi) are dy long, y sides dx.
       uint16_t bits = (rect.dy() < w ? 0x3 : 0) | (rect.dx() < w ? 0xc : 0);
-      if (wire) {
-        // A preferred wire's flanks are as long as the wire.
+      if (role == ShapeRole::kPreferredWire) {
+        // A routed wire's flanks are as long as the wire (its model is the
+        // stick figure's square); kRealWire shapes are actual rectangles.
         bits &= ends;
       }
       bits &= c.sides_real;

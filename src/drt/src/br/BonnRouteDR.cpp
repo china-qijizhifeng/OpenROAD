@@ -985,6 +985,7 @@ br::ShapeType routedType(const br::ShapeRole role)
 {
   return role == br::ShapeRole::kPreferredWire
                  || role == br::ShapeRole::kNonPreferredWire
+                 || role == br::ShapeRole::kRealWire
              ? br::ShapeType::kWire
              : br::ShapeType::kVia;
 }
@@ -1311,9 +1312,9 @@ BonnRouteDR::RShape BonnRouteDR::wireShape(const OutWire& wire) const
                                  : br::ShapeRole::kNonPreferredWire;
   if (wire.patch && preferred
       && shape_classes_.layer(br::wiringGridLayer(z)).sideRules()) {
-    // Side rules: a patch ends where no via pad covers its end; its sides
-    // and corners are real (Lef58Rules.md), as those of a via pad.
-    role = br::ShapeRole::kViaPad;
+    // Side rules: a patch ends where no via pad covers its end; its ends
+    // and corners are real (Lef58Rules.md).
+    role = br::ShapeRole::kRealWire;
   }
   return {wire.layer, r, role, wire.wire_type};
 }
@@ -1615,6 +1616,12 @@ class BonnRouteDR::Legality final : public br::DiffNetLegality
                     || along_x == dr_.layers_[z].horizontal)
                        ? br::ShapeRole::kPreferredWire
                        : br::ShapeRole::kNonPreferredWire;
+      if (shape.role == br::ShapeRole::kPreferredWire
+          && dr_.shape_classes_.layer(br::wiringGridLayer(z)).sideRules()) {
+        // Side rules: an off-track piece or patch ends where no via pad
+        // covers its end (Lef58Rules.md).
+        shape.role = br::ShapeRole::kRealWire;
+      }
     } else if (dr_.design_->getTech()->getLayer(layer)->getType()
                == odb::dbTechLayerType::CUT) {
       shape.role = br::ShapeRole::kCut;
@@ -3835,14 +3842,25 @@ class NetViaRules final : public br::SameNetVias
               const br::WireType& type)
       : classes_(classes), graph_(graph), type_(type)
   {
-    const int num_vias = graph.numLayers() - 1;
-    cuts_.resize(std::max(num_vias, 0));
+    const int num_vias = std::max(graph.numLayers() - 1, 0);
+    cuts_.resize(num_vias);
+    sorted_.assign(num_vias, 1);
+    max_dx_.assign(num_vias, 0);
+    layers.assign(num_vias, 0);
+    cut_rule_.assign(num_vias, 0);
     for (int zv = 0; zv < num_vias && zv < static_cast<int>(type.via.size());
          zv++) {
       const br::ViaModel& m = type.via[zv];
       if (!m.valid) {
         continue;
       }
+      // Rules in scope (Lef58Rules.md): the LEF58 cut spacing table of the
+      // cut layer, the side rules of the pad layers.
+      cut_rule_[zv] = !classes.layer(br::viaGridLayer(zv)).cut_classes.empty();
+      const bool pads
+          = classes.layer(br::wiringGridLayer(zv)).sideRules()
+            || classes.layer(br::wiringGridLayer(zv + 1)).sideRules();
+      layers[zv] = cut_rule_[zv] || pads;
       br::Coord extent = 0;
       for (const br::WireModel* w : {&m.bottom, &m.cut, &m.top}) {
         extent = std::max({extent, w->rect.dx(), w->rect.dy()});
@@ -3856,21 +3874,46 @@ class NetViaRules final : public br::SameNetVias
     }
   }
 
+  bool any() const { return std::ranges::find(layers, 1) != layers.end(); }
+
   void addCut(const int zv, const br::Rect& rect, const br::ClassId cls)
   {
-    if (zv >= 0 && zv < static_cast<int>(cuts_.size())) {
+    if (zv >= 0 && zv < static_cast<int>(cuts_.size()) && cut_rule_[zv]) {
       cuts_[zv].emplace_back(rect, cls);
+      sorted_[zv] = 0;
+      max_dx_[zv] = std::max(max_dx_[zv], rect.dx());
+    }
+  }
+
+  // Before a search: the cuts of each layer sorted by xlo.
+  void sort()
+  {
+    for (size_t zv = 0; zv < cuts_.size(); zv++) {
+      if (!sorted_[zv]) {
+        std::ranges::sort(cuts_[zv], {}, [](const auto& c) {
+          return std::pair(c.first.xlo, c.first.ylo);
+        });
+        sorted_[zv] = 1;
+      }
     }
   }
 
   bool allowed(const int zv, const int i, const int j) const override
   {
     const br::ViaModel* m = model(zv);
-    if (m == nullptr || cuts_[zv].empty()) {
+    if (m == nullptr || !cut_rule_[zv] || cuts_[zv].empty()) {
       return true;
     }
     const br::Rect cut = m->cut.rect.translated(at(zv, i, j));
-    for (const auto& [rect, cls] : cuts_[zv]) {
+    const br::Coord d = classes_.ruleReach(br::viaGridLayer(zv));
+    const std::vector<std::pair<br::Rect, br::ClassId>>& cuts = cuts_[zv];
+    // Cuts whose xlo is within reach (cut extents bound the rest).
+    auto it = std::ranges::lower_bound(
+        cuts, cut.xlo - d - max_dx_[zv], {}, [](const auto& c) {
+          return c.first.xlo;
+        });
+    for (; it != cuts.end() && it->first.xlo <= cut.xhi + d; ++it) {
+      const auto& [rect, cls] = *it;
       if (rect == cut) {
         continue;  // the same via
       }
@@ -3899,7 +3942,8 @@ class NetViaRules final : public br::SameNetVias
     if (a == b) {
       return true;
     }
-    if (br::shapesViolate(
+    if (cut_rule_[zv]
+        && br::shapesViolate(
             classes_,
             br::PlacedShape{m->cut.rect.translated(a), m->cut.cls, 3},
             br::PlacedShape{m->cut.rect.translated(b), m->cut.cls, 3})) {
@@ -3907,6 +3951,10 @@ class NetViaRules final : public br::SameNetVias
     }
     // The pads on the layer the path does not turn on belong to different
     // polygons unless they touch.
+    const int far_layer = turn_layer == zv ? zv + 1 : zv;
+    if (!classes_.layer(br::wiringGridLayer(far_layer)).sideRules()) {
+      return true;
+    }
     const br::WireModel& far = turn_layer == zv ? m->top : m->bottom;
     const br::Rect pa = far.rect.translated(a);
     const br::Rect pb = far.rect.translated(b);
@@ -3938,6 +3986,11 @@ class NetViaRules final : public br::SameNetVias
   const br::TrackGraph& graph_;
   const br::WireType& type_;
   std::vector<std::vector<std::pair<br::Rect, br::ClassId>>> cuts_;
+  std::vector<uint8_t> sorted_;
+  std::vector<uint8_t> cut_rule_;
+  // Largest x extent of the cuts per layer: the window of allowed() starts
+  // this much before the reach.
+  std::vector<br::Coord> max_dx_;
 };
 
 }  // namespace
@@ -4133,7 +4186,11 @@ bool BonnRouteDR::connectInRegion(NetData& net,
   std::vector<char> synced_terms(net.terms.size(), 0);
   if (params_.same_net_vias && !params_.use_intervals) {
     net_vias.emplace(shape_classes_, graph_, wire_types_[net.wire_type]);
-    req.same_net_vias = &*net_vias;
+    if (net_vias->any()) {
+      req.same_net_vias = &*net_vias;
+    } else {
+      net_vias.reset();
+    }
   }
   auto add_cut = [&](const OutVia& v) {
     const frVia via(v.def, v.point);
@@ -4164,6 +4221,7 @@ bool BonnRouteDR::connectInRegion(NetData& net,
         add_cut(v);
       }
     }
+    net_vias->sort();
   };
   std::unordered_set<size_t> in_tree;
   std::vector<size_t> tree;

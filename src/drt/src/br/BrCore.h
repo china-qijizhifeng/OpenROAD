@@ -127,6 +127,12 @@ class SameNetVias
   virtual bool allowed(int zv, int i, int j) const = 0;
   virtual bool pairAllowed(int zv, int i, int j, int i0, int j0, int turn_layer)
       const = 0;
+  // Via layers with rules (the search checks only their vias).
+  bool active(const int zv) const
+  {
+    return zv >= 0 && zv < static_cast<int>(layers.size()) && layers[zv] != 0;
+  }
+  std::vector<uint8_t> layers;
   // The search looks for the entering via within this distance (DBU, in x
   // and y) of the vertex.
   Coord reach = 0;

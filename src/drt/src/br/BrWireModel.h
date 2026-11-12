@@ -280,6 +280,10 @@ enum class ShapeRole : uint8_t
   kCut,
   kCutProjection,
   kFixed,  // blockages and pins: actual geometry, no line-end
+  // A preferred-direction wire whose ends are polygon sides even where
+  // routed wires end in via pads (side rules: patches and off-track
+  // pieces, Lef58Rules.md); otherwise as kPreferredWire.
+  kRealWire,
 };
 
 // Minimum distance requirement between two shape classes (Sec. 3.1): the
