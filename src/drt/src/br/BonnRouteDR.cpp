@@ -147,6 +147,8 @@ bool BonnRouteDRParams::set(const std::string& name, const double value)
     layer_dilation = v;
   } else if (name == "retry_dilation") {
     retry_dilation = v;
+  } else if (name == "guide_dilation") {
+    guide_dilation = std::max(0, v);
   } else if (name == "use_intervals") {
     use_intervals = v != 0;
   } else if (name == "ripup") {
@@ -3728,10 +3730,11 @@ void BonnRouteDR::buildRegion(const NetData& net,
                               br::Region& region)
 {
   region.reset();
+  const int around = dilation + params_.guide_dilation;
   auto allow = [&](int z, int tx, int ty) {
     for (int dz = -params_.layer_dilation; dz <= params_.layer_dilation; dz++) {
-      for (int dx = -dilation; dx <= dilation; dx++) {
-        for (int dy = -dilation; dy <= dilation; dy++) {
+      for (int dx = -around; dx <= around; dx++) {
+        for (int dy = -around; dy <= around; dy++) {
           region.allow(z + dz, tx + dx, ty + dy);
         }
       }
@@ -3889,8 +3892,13 @@ bool BonnRouteDR::buildPathRegion(const NetData& net,
     }
     last_x = x;
     last_y = y;
+    const int around = params_.guide_dilation;
     for (int dz = -params_.layer_dilation; dz <= params_.layer_dilation; dz++) {
-      region.allow(z + dz, x, y);
+      for (int dx = -around; dx <= around; dx++) {
+        for (int dy = -around; dy <= around; dy++) {
+          region.allow(z + dz, x + dx, y + dy);
+        }
+      }
     }
   }
   worker.path_detour
@@ -4972,8 +4980,10 @@ void BonnRouteDR::netTileBox(const NetData& net,
                              int& yhi) const
 {
   const br::TileBox core = netCoreTileBox(net);
-  // Retry dilation plus the routing-space interaction halo (Sec. 5.1).
-  const int halo = params_.retry_dilation + netHaloTiles(net);
+  // Corridor width, retry dilation and the routing-space interaction halo
+  // (Sec. 5.1).
+  const int halo
+      = params_.guide_dilation + params_.retry_dilation + netHaloTiles(net);
   xlo = core.xlo - halo;
   ylo = core.ylo - halo;
   xhi = core.xhi + halo;
@@ -4984,7 +4994,7 @@ br::TileBox BonnRouteDR::netAreaTileBox(const NetData& net,
                                         const int dilation) const
 {
   br::TileBox box = netCoreTileBox(net);
-  const int margin = dilation + netHaloTiles(net);
+  const int margin = params_.guide_dilation + dilation + netHaloTiles(net);
   box.xlo = std::max(box.xlo - margin, 0);
   box.ylo = std::max(box.ylo - margin, 0);
   box.xhi = std::min(box.xhi + margin, tiles_x_ - 1);
@@ -5105,8 +5115,8 @@ void BonnRouteDR::reportFootprints()
       total.units[kPhaseTailSearch],
       total.units[kPhaseTailCommit],
       records,
-      params_.retry_dilation + halo_tiles_,
-      params_.retry_dilation,
+      params_.guide_dilation + params_.retry_dilation + halo_tiles_,
+      params_.guide_dilation + params_.retry_dilation,
       halo_tiles_,
       violations,
       outside_box,

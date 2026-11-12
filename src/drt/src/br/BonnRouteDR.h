@@ -74,6 +74,11 @@ struct BonnRouteDRParams
   // Routing area: guide tiles plus this many adjacent layers / tiles.
   int layer_dilation = 1;
   int retry_dilation = 2;
+  // Width of the corridor: the guide area (path regions and the net's whole
+  // area) includes this many tiles around the guide tiles. 0 keeps the
+  // global routing corridor; the dilated area of a retry adds
+  // retry_dilation on top.
+  int guide_dilation = 0;
   bool use_intervals = false;
   bool ripup = false;
   // Sec. 4.4: search area of a connection = GR tiles of a shortest path
