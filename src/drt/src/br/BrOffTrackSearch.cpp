@@ -16,7 +16,9 @@ namespace drt::br {
 namespace {
 
 constexpr int kFresh = 4;
-constexpr uint32_t kStates = 5;
+// States per grid vertex: four incoming directions and "no incoming
+// direction"; one where the incoming direction restricts no arc.
+constexpr uint32_t kDirectionStates = 5;
 constexpr uint32_t kNoParent = std::numeric_limits<uint32_t>::max();
 constexpr int64_t kInf = std::numeric_limits<int64_t>::max() / 4;
 
@@ -84,6 +86,17 @@ int64_t nearest(const std::vector<GeoCoord>& v, const GeoCoord c)
     d = std::min(d, int64_t{c} - *(it - 1));
   }
   return d;
+}
+
+// True if consecutive values of the sorted v are at least tau apart.
+bool gapsAtLeast(const std::vector<GeoCoord>& v, const GeoCoord tau)
+{
+  for (size_t i = 1; i < v.size(); i++) {
+    if (int64_t{v[i]} - v[i - 1] < tau) {
+      return false;
+    }
+  }
+  return true;
 }
 
 // Index of each line of `from` in `to` (both sorted), or -1.
@@ -226,9 +239,24 @@ OffTrackResult OffTrackSearch::run(const OffTrackRequest& req)
     l.base = static_cast<uint32_t>(std::min<uint64_t>(total, kNoParent));
     total += static_cast<uint64_t>(l.nx) * l.ny;
   }
+  // One state per grid vertex when every planar arc between neighbouring
+  // grid lines is a tau-feasible segment and no arc filter reads the
+  // incoming direction: a path of that graph is a tau-feasible path of the
+  // grid and a path of G is one of that graph, so both have the same
+  // distances.
+  bool single_state = req.merge_direction_states && !req.arc_filter;
+  for (int z = 0; z < num_layers && single_state; z++) {
+    const LayerIndex& l = index_[z];
+    single_state = !req.layers[z].wires
+                   || (gapsAtLeast(l.xs, req.layers[z].grid.tau)
+                       && gapsAtLeast(l.ys, req.layers[z].grid.tau));
+  }
+  const uint32_t stride = single_state ? 1 : kDirectionStates;
+  // The "no incoming direction" state of a grid vertex.
+  const uint32_t fresh = single_state ? 0 : kFresh;
   res.grid_vertices = static_cast<int64_t>(total);
-  res.states = static_cast<int64_t>(total) * kStates;
-  if (total * kStates >= kNoParent) {
+  res.states = static_cast<int64_t>(total) * stride;
+  if (total * stride >= kNoParent) {
     return res;
   }
   for (int z = 0; z < num_layers; z++) {
@@ -272,7 +300,7 @@ OffTrackResult OffTrackSearch::run(const OffTrackRequest& req)
       }
     }
   }
-  const size_t states = static_cast<size_t>(total) * kStates;
+  const size_t states = static_cast<size_t>(total) * stride;
   if (labels_.size() < states) {
     labels_.resize(states, Label{0, kNoParent, 0});
   }
@@ -403,7 +431,7 @@ OffTrackResult OffTrackSearch::run(const OffTrackRequest& req)
     for (int ix = x0; ix < l.nx && l.xs[ix] <= s.region.xhi; ix++) {
       for (int iy = y0; iy < l.ny && l.ys[iy] <= s.region.yhi; iy++) {
         const uint32_t v = l.base + static_cast<uint32_t>(ix) * l.ny + iy;
-        const uint32_t st = v * kStates + kFresh;
+        const uint32_t st = v * stride + fresh;
         if (dist(st) > s.cost) {
           labels[st] = {s.cost, kNoParent, epoch};
           push(s.cost + future(s.layer, ix, iy), st);
@@ -460,8 +488,8 @@ OffTrackResult OffTrackSearch::run(const OffTrackRequest& req)
     std::pop_heap(heap_.begin(), heap_.end(), heap_less);
     heap_.pop_back();
     const uint32_t st = top.state;
-    const uint32_t v = st / kStates;
-    const int d = static_cast<int>(st % kStates);
+    const uint32_t v = st / stride;
+    const int d = single_state ? kFresh : static_cast<int>(st % stride);
     const int z = layer_of(v);
     LayerIndex& l = index_[z];
     const uint32_t local = v - l.base;
@@ -504,7 +532,8 @@ OffTrackResult OffTrackSearch::run(const OffTrackRequest& req)
     };
     const uint32_t row0 = l.base;
     auto state = [&](const int jx, const int jy, const int dir) {
-      return (row0 + static_cast<uint32_t>(jx) * l.ny + jy) * kStates + dir;
+      return (row0 + static_cast<uint32_t>(jx) * l.ny + jy) * stride
+             + (single_state ? 0 : dir);
     };
     auto planar = [&](const int jx, const int jy, const int dir) {
       const GridPoint q{l.xs[jx], l.ys[jy]};
@@ -543,8 +572,23 @@ OffTrackResult OffTrackSearch::run(const OffTrackRequest& req)
         }
       }
       // Turn arcs to the nearest vertices at distance >= tau.
-      const bool turn_x = d == kFresh || d == 2 || d == 3;
-      const bool turn_y = d == kFresh || d == 0 || d == 1;
+      const bool turn_x = !single_state && (d == kFresh || d == 2 || d == 3);
+      const bool turn_y = !single_state && (d == kFresh || d == 0 || d == 1);
+      if (single_state) {
+        // Arcs to the four neighbours.
+        if (ix + 1 < l.nx && freeH(l, iy, ix, ix + 1) && arcs_x) {
+          planar(ix + 1, iy, 0);
+        }
+        if (ix > 0 && freeH(l, iy, ix - 1, ix) && arcs_x) {
+          planar(ix - 1, iy, 1);
+        }
+        if (iy + 1 < l.ny && freeV(l, ix, iy, iy + 1) && arcs_y) {
+          planar(ix, iy + 1, 2);
+        }
+        if (iy > 0 && freeV(l, ix, iy - 1, iy) && arcs_y) {
+          planar(ix, iy - 1, 3);
+        }
+      }
       if (turn_x) {
         const int kp = l.turn_x_plus[ix];
         if (kp < l.nx && freeH(l, iy, ix, kp) && arcs_x) {
@@ -580,7 +624,7 @@ OffTrackResult OffTrackSearch::run(const OffTrackRequest& req)
       const uint32_t w = n.base + static_cast<uint32_t>(jx) * n.ny + jy;
       const bool ok = nz > z ? via_ok(z, v, p) : via_ok(nz, w, p);
       if (ok) {
-        relax(w * kStates + kFresh, cost + req.via_cost, nz, jx, jy);
+        relax(w * stride + fresh, cost + req.via_cost, nz, jx, jy);
       }
     }
   }
@@ -596,7 +640,7 @@ OffTrackResult OffTrackSearch::run(const OffTrackRequest& req)
     std::vector<RouteNode> full;
     for (uint32_t s = static_cast<uint32_t>(reached[k]); s != kNoParent;
          s = labels[s].parent) {
-      const uint32_t v = s / kStates;
+      const uint32_t v = s / stride;
       const int z = layer_of(v);
       const LayerIndex& l = index_[z];
       const uint32_t local = v - l.base;

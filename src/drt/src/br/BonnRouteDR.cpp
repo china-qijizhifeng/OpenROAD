@@ -241,6 +241,8 @@ bool BonnRouteDRParams::set(const std::string& name, const double value)
     offtrack_tau = std::max(0, v);
   } else if (name == "offtrack_notch_tau") {
     offtrack_notch_tau = v != 0;
+  } else if (name == "offtrack_hanan_grid") {
+    offtrack_hanan_grid = v != 0;
   } else if (name == "access_classes") {
     access_classes = v != 0;
   } else if (name == "access_class_margin") {
@@ -2465,6 +2467,29 @@ void BonnRouteDR::offTrackCatalogue(const int net,
     }
   }
   grid_in.borders.push_back(window);
+  // Every line is on the manufacturing grid (see snap_out); with tau at most
+  // the grid unit the Hanan lines suffice (D9). A layer whose wires stay on
+  // tracks needs its tracks inside the window as lines: a path may run
+  // along a track that holds no target.
+  grid_in.grid_unit = params_.offtrack_hanan_grid ? mfg : 0;
+  if (params_.offtrack_hanan_grid) {
+    for (const frLayerNum fr : frs) {
+      const int z = z_of_fr_[fr];
+      if (z < 0 || !onTracksOnly(fr)) {
+        continue;
+      }
+      const br::TrackLayer& l = graph_.layers[z];
+      const br::GeoCoord lo = l.horizontal ? window.ylo : window.xlo;
+      const br::GeoCoord hi = l.horizontal ? window.yhi : window.xhi;
+      for (auto it = std::ranges::lower_bound(l.tracks, lo);
+           it != l.tracks.end() && *it <= hi;
+           ++it) {
+        grid_in.borders.push_back(
+            l.horizontal ? br::Box{window.xlo, *it, window.xhi, *it}
+                         : br::Box{*it, window.ylo, *it, window.yhi});
+      }
+    }
+  }
   stats.blockage_seconds += step_timer.elapsed();
   step_timer.reset();
   const std::vector<br::BlockageGridLayer> grid
@@ -2501,6 +2526,7 @@ void BonnRouteDR::offTrackCatalogue(const int net,
   req.via_cost = layers_[z_of_fr_[frs.back()]].width;
   // The nearest on-track points; some may fail the exact checks below.
   req.max_targets = 2 * params_.max_access_options;
+  req.merge_direction_states = params_.offtrack_hanan_grid;
   // On layers whose wires must stay on tracks in the preferred direction
   // (Sec. 3.8: "removing edges that induce a violation"), only planar arcs
   // along a track remain.

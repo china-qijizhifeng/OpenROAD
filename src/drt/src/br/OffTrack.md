@@ -67,6 +67,37 @@ with a line-by-line transcription on 4000 random inputs.
 - Per axis at most 4 m^2 + m coordinates for m distinct Hanan lines; the test
   asserts this bound and reports the growth (`vertex growth` table).
 
+## Hanan grid when tau is at most the manufacturing grid (D9)
+
+Algorithm 3 adds lines at multiples of tau so that some shortest path has
+every segment at least tau long (Theorem 3.2). With `offtrack_hanan_grid 1`
+(default) `BlockageGridInput::grid_unit` is the manufacturing grid, and
+`blockageGridCoordinates` returns the sorted, unique Hanan lines when tau is
+at most the grid unit and every Hanan line is on the grid; otherwise it runs
+Algorithm 3.
+
+- Why it suffices: obstacles are rounded outward to the grid, and access
+  points, targets and the window are on it, so two distinct lines are at
+  least one grid unit, hence at least tau, apart. Every path of the Hanan
+  grid is tau-feasible, and the Hanan grid contains a shortest
+  obstacle-avoiding path for positive axis weights; that path is a shortest
+  tau-feasible path.
+- One state per vertex: `OffTrackRequest::merge_direction_states` lets the
+  search use one state per grid vertex with arcs to the four neighbours
+  when there is no arc filter and, on every layer with wires, consecutive
+  grid lines inside the window are at least tau apart. A path of that graph
+  is a tau-feasible grid path, and every path of G is one of its paths, so
+  the distances are those of G. The incoming-direction states serve only
+  the tau constraint (the cost model has no bend cost).
+- Same costs, other paths: among paths of equal cost the returned one may
+  differ; with a target limit, the target vertex settled at a tied limit
+  cost may differ. `testHananGrid` compares the Hanan grid with one state
+  against the brute force and against Algorithm 3 with five states (cost of
+  every target), on lattices of unit 1-3 with tau up to the unit, and with
+  tau above it (Algorithm 3 kept); `testSearchMatchesReference` compares the
+  merged search with the five-state reference on its 6000 requests.
+- `offtrack_hanan_grid 0` restores Algorithm 3 and five states.
+
 ## Multi-layer blockage grid
 
 Section 3.8: "we have a blockage grid for each wiring and via layer.

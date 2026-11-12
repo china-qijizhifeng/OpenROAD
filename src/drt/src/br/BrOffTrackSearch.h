@@ -112,6 +112,15 @@ struct OffTrackRequest
   int max_targets = 0;
   // Use the admissible future cost (A*); false = plain Dijkstra.
   bool future_cost = true;
+  // One state per grid vertex instead of five where that keeps every
+  // distance: no arc_filter, and on every layer with wires consecutive grid
+  // lines inside the window are at least tau apart (e.g. a Hanan grid on
+  // the manufacturing grid with tau the grid unit). Then every arc between
+  // neighbouring grid vertices is a tau-feasible segment, the incoming
+  // direction restricts no arc, and the search relaxes the four neighbours
+  // of each vertex. Distances are those of G; among paths of equal cost the
+  // returned one may differ.
+  bool merge_direction_states = true;
 };
 
 struct OffTrackPath
@@ -127,7 +136,8 @@ struct OffTrackResult
   // At most one (shortest) path per reached target, in increasing cost.
   std::vector<OffTrackPath> paths;
   int64_t grid_vertices = 0;  // blockage-grid vertices inside the window
-  int64_t states = 0;         // vertices of G (5 per grid vertex)
+  // Vertices of G: 5 per grid vertex, 1 with merged direction states.
+  int64_t states = 0;
   int64_t settled = 0;
   int64_t arcs = 0;
 };
@@ -155,6 +165,8 @@ struct OffTrackResult
 // (BonnRouteOffTrackTest keeps that formulation and compares results on
 // random requests). A window with 2^32 / 5 or more grid vertices is not
 // searched (no paths; grid_vertices reports its size).
+// With `merge_direction_states` and a grid that allows it, G has one state
+// per grid vertex with arcs to the four neighbours (see the request).
 class OffTrackSearch
 {
  public:

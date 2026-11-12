@@ -197,6 +197,12 @@ struct BonnRouteDRParams
   // rules (Sec. 3.7). `offtrack_notch_tau` adds notch spacing + width.
   int offtrack_tau = 0;
   bool offtrack_notch_tau = false;
+  // Blockage grid of a catalogue search: the Hanan lines alone, and one
+  // search state per grid vertex, where tau is at most the manufacturing
+  // grid (every coordinate is on that grid, so any two lines are at least
+  // tau apart and every Hanan-grid path is tau-feasible). 0 keeps
+  // Algorithm 3's lines at multiples of tau and the five direction states.
+  bool offtrack_hanan_grid = true;
   // Reuse a circuit class's catalogues and conflict-free solution for all
   // its instances; 0 solves every instance separately.
   bool access_classes = true;
