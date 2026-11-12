@@ -105,6 +105,14 @@ struct BonnRouteDRParams
   // order, tail_batch and tail_retry_delay only.
   bool tail_pipeline = false;
   int tail_retry_delay = 1;
+  // Tail lookahead (BrTailPipeline.h, TailLookahead): the batches of the
+  // barrier version (tail_batch nets, conflicting nets first in the next
+  // batch), decided as soon as the searches and decisions of interacting
+  // nets of the batch are done; idle threads search nets that certainly
+  // belong to the next batch and whose boxes no undecided net of the
+  // current batch can still write. Results equal the barrier version for
+  // every thread count. Takes precedence over tail_pipeline.
+  bool tail_lookahead = false;
   // Settled vertices a net may use in its speculative tail attempt; a net
   // that needs more (almost always one without a route, left to FlexDR) is
   // deferred to a final pass of the stage without a budget, so it does not
@@ -768,7 +776,8 @@ class BonnRouteDR
                         std::vector<int>& failed,
                         const char* stage);
   // One pass of routeSpeculative: nets over the settled budget (0: none)
-  // go to `deferred`, in net order.
+  // go to `deferred`, in net order. routeSpeculativePipeline schedules the
+  // pass with TailLookahead (tail_lookahead) or TailPipeline.
   void routeSpeculativeBatches(const std::vector<int>& order,
                                std::vector<int>& failed,
                                std::vector<int>& deferred,

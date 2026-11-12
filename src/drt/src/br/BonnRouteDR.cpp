@@ -89,6 +89,7 @@ void BonnRouteDRParams::applyProfile(const int which)
     tail_batch = 32;
     tail_order = true;
     tail_pipeline = false;
+    tail_lookahead = false;
     tail_retry_delay = 1;
     tail_defer_settled = 300000;
     potential = 0;
@@ -199,6 +200,8 @@ bool BonnRouteDRParams::set(const std::string& name, const double value)
     tail_order = v != 0;
   } else if (name == "tail_pipeline") {
     tail_pipeline = v != 0;
+  } else if (name == "tail_lookahead") {
+    tail_lookahead = v != 0;
   } else if (name == "tail_retry_delay") {
     tail_retry_delay = std::max(1, v);
   } else if (name == "tail_defer_settled") {
@@ -5005,7 +5008,8 @@ void BonnRouteDR::routeSpeculative(const std::vector<int>& order,
   std::vector<int> deferred;
   std::vector<int> none;
   const int64_t budget = params_.tail_defer_settled;
-  if (params_.tail_pipeline) {
+  const bool scheduled = params_.tail_lookahead || params_.tail_pipeline;
+  if (scheduled) {
     routeSpeculativePipeline(order, failed, deferred, stage, threads, budget);
   } else {
     routeSpeculativeBatches(order, failed, deferred, stage, threads, budget);
@@ -5014,7 +5018,7 @@ void BonnRouteDR::routeSpeculative(const std::vector<int>& order,
     return;
   }
   const std::string late = std::string(stage) + " deferred";
-  if (params_.tail_pipeline) {
+  if (scheduled) {
     routeSpeculativePipeline(deferred, failed, none, late, threads, 0);
   } else {
     routeSpeculativeBatches(deferred, failed, none, late, threads, 0);
@@ -5469,10 +5473,15 @@ void BonnRouteDR::routeSpeculativePipeline(const std::vector<int>& order,
   if (params_.tail_order) {
     hooks.cost = [&](const int id) { return tailSearchEstimate(nets_[id]); };
   }
-  br::TailPipeline pipeline(params_.tail_batch, params_.tail_retry_delay);
   std::vector<int> unrouted;
-  const br::TailPipeline::Stats stats
-      = pipeline.run(order, boxes, threads, hooks, unrouted);
+  br::TailPipeline::Stats stats;
+  if (params_.tail_lookahead) {
+    br::TailLookahead lookahead(params_.tail_batch);
+    stats = lookahead.run(order, boxes, threads, hooks, unrouted);
+  } else {
+    br::TailPipeline pipeline(params_.tail_batch, params_.tail_retry_delay);
+    stats = pipeline.run(order, boxes, threads, hooks, unrouted);
+  }
   int64_t deferred_count = 0;
   for (const int id : unrouted) {
     if (over[id]) {
@@ -5505,6 +5514,44 @@ void BonnRouteDR::routeSpeculativePipeline(const std::vector<int>& order,
       return 1e3 * all[i];
     };
     const double capacity = stats.wall * threads;
+    if (params_.tail_lookahead) {
+      logger_->info(
+          utl::DRT,
+          9140,
+          "BonnRoute {} speculative lookahead: {} batches of up to {} nets, "
+          "{} nets committed, {} searched again after a conflict, {} "
+          "without a route; {:.2f}s on {} threads, thread utilization "
+          "{:.0f}% (searches {:.2f}s, decisions {:.2f}s incl. {} exact "
+          "checks {:.2f}s, idle {:.2f}s); {} searches started before their "
+          "batch; search time p50 {:.1f} ms, p90 {:.1f} ms, p99 {:.1f} ms, "
+          "max {:.1f} ms; {} nets deferred over an effort of {} settled "
+          "vertices; routing digest {:016x}.",
+          stage,
+          stats.batches,
+          params_.tail_batch,
+          stats.committed,
+          stats.conflicts,
+          stats.failed - deferred_count,
+          stats.wall,
+          threads,
+          capacity > 0
+              ? 100.0 * (stats.search_busy + stats.decide_busy) / capacity
+              : 0.0,
+          stats.search_busy,
+          stats.decide_busy,
+          checked_total,
+          check_total,
+          stats.idle,
+          stats.overlapped_searches,
+          quantile_ms(0.5),
+          quantile_ms(0.9),
+          quantile_ms(0.99),
+          all.empty() ? 0.0 : 1e3 * all.back(),
+          deferred_count,
+          budget,
+          tailRoutingDigest());
+      return;
+    }
     logger_->info(
         utl::DRT,
         9127,
