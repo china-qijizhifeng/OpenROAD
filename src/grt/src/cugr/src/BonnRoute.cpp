@@ -798,6 +798,55 @@ BonnRouteGlobal::OracleResult BonnRouteGlobal::oracleImpl(
             x0 + static_cast<int>(rem / height),
             y0 + static_cast<int>(rem % height)};
   };
+  // A tree the net's oracle returned before maps to the stored candidate;
+  // buildCandidate would rebuild it unchanged. With extra space the demand
+  // depends on the prices, so those calls always build.
+  if (!objective_only && !params_.extra_space) {
+    result.keyed = true;
+    TreeKey& key = result.key;
+    key.edges.clear();
+    key.edges.reserve(edges.size());
+    for (size_t i = 0; i < edges.size(); i++) {
+      const auto a = cell(edges[i][0]);
+      const auto b = cell(edges[i][1]);
+      uint32_t ka = edgeIndex(a[0], a[1], a[2]);
+      uint32_t kb = edgeIndex(b[0], b[1], b[2]);
+      if (ka == kb) {
+        continue;
+      }
+      if (ka > kb) {
+        std::swap(ka, kb);
+      }
+      key.edges.push_back({ka, kb, static_cast<uint32_t>(edge_pins[i] + 1)});
+    }
+    std::ranges::sort(key.edges);
+    // One entry per vertex pair, the smallest pin first (as buildCandidate's
+    // adjacency keeps it).
+    size_t kept = 0;
+    for (size_t i = 0; i < key.edges.size(); i++) {
+      if (kept > 0 && key.edges[kept - 1][0] == key.edges[i][0]
+          && key.edges[kept - 1][1] == key.edges[i][1]) {
+        continue;
+      }
+      key.edges[kept++] = key.edges[i];
+    }
+    key.edges.resize(kept);
+    uint64_t hash = 1469598103934665603ULL;
+    for (const auto& e : key.edges) {
+      for (const uint32_t v : e) {
+        hash = (hash ^ v) * 1099511628211ULL;
+      }
+    }
+    key.hash = hash;
+    for (const TreeKey& known : state.tree_keys) {
+      if (known.hash == key.hash && known.edges == key.edges) {
+        result.known = known.candidate;
+        result.candidate.objective = known.objective;
+        result.ok = true;
+        return result;
+      }
+    }
+  }
   std::vector<std::array<int, 3>> tree_edges;  // (layer, x, y) pairs packed
   tree_edges.reserve(edges.size() * 2);
   for (const auto& [a, b] : edges) {
@@ -1868,22 +1917,48 @@ void BonnRouteGlobal::trimAndExportSpace()
   }
 }
 
-double BonnRouteGlobal::linearCost(const Candidate& candidate) const
+double BonnRouteGlobal::linearCost(
+    const double objective,
+    const std::vector<std::pair<uint32_t, double>>& usage) const
 {
-  double cost = objectiveWeight() * candidate.objective;
-  for (const auto& [r, d] : candidate.usage) {
+  double cost = objectiveWeight() * objective;
+  for (const auto& [r, d] : usage) {
     cost += price(r) * d;
   }
   return cost;
 }
 
+double BonnRouteGlobal::linearCost(const Candidate& candidate) const
+{
+  return linearCost(candidate.objective, candidate.usage);
+}
+
 double BonnRouteGlobal::logCost(const Candidate& candidate) const
 {
-  double cost = objectiveWeight() * candidate.objective;
-  for (const auto& [r, d] : candidate.usage) {
-    cost += price(r) * d;
+  return std::log(std::max(linearCost(candidate), 1e-300)) + shift_;
+}
+
+const std::vector<std::pair<uint32_t, double>>& BonnRouteGlobal::resultUsage(
+    const NetState& state,
+    const OracleResult& result) const
+{
+  return result.known >= 0 ? state.candidates[result.known].usage
+                           : result.candidate.usage;
+}
+
+int BonnRouteGlobal::storeResult(NetState& state, OracleResult&& result)
+{
+  if (result.known >= 0) {
+    return result.known;
   }
-  return std::log(std::max(cost, 1e-300)) + shift_;
+  const double objective = result.candidate.objective;
+  const int index = insertCandidate(state, std::move(result.candidate));
+  if (result.keyed) {
+    result.key.candidate = index;
+    result.key.objective = objective;
+    state.tree_keys.push_back(std::move(result.key));
+  }
+  return index;
 }
 
 void BonnRouteGlobal::applyPrices(const Candidate& candidate)
@@ -2388,13 +2463,17 @@ void BonnRouteGlobal::resourceSharing()
                     segments);
         }
         if (r.ok) {
-          r.log_cost = logCost(r.candidate);
+          const auto& usage = resultUsage(state, r);
+          r.log_cost
+              = std::log(std::max(linearCost(r.candidate.objective, usage),
+                                  1e-300))
+                + shift_;
           // Differential check of the oracle's edge costs against the
           // committed demand: exact for a single path between single cells.
           if (state.terminals.size() == 2
               && state.terminals[0].cells.size() == 1
               && state.terminals[1].cells.size() == 1) {
-            const double exact = linearCost(r.candidate);
+            const double exact = linearCost(r.candidate.objective, usage);
             r.checked = true;
             r.mismatch = std::abs(exact - r.search_cost)
                          > 1e-9 * std::max(1.0, std::abs(exact));
@@ -2436,7 +2515,9 @@ void BonnRouteGlobal::resourceSharing()
           cost_checks_ += results[slot].checked;
           cost_mismatches_ += results[slot].mismatch;
           if (results[slot].mismatch && cost_mismatches_ <= 5) {
-            const Candidate& c = results[slot].candidate;
+            const Candidate& c = results[slot].known >= 0
+                                     ? state.candidates[results[slot].known]
+                                     : results[slot].candidate;
             std::string nodes;
             for (const NodeRec& n : c.nodes) {
               nodes
@@ -2453,8 +2534,7 @@ void BonnRouteGlobal::resourceSharing()
                 nodes);
           }
           const double log_cost = results[slot].log_cost;
-          state.last
-              = insertCandidate(state, std::move(results[slot].candidate));
+          state.last = storeResult(state, std::move(results[slot]));
           state.last_log_cost = log_cost;
         } else {
           reuses_++;
@@ -2633,8 +2713,12 @@ void BonnRouteGlobal::resourceSharingConcurrent(
         if (r.ok) {
           // No exact cost check: other threads change the prices between
           // the search and any recomputation.
-          const double log_cost = logCost(r.candidate);
-          state.last = insertCandidate(state, std::move(r.candidate));
+          const double log_cost
+              = std::log(std::max(
+                    linearCost(r.candidate.objective, resultUsage(state, r)),
+                    1e-300))
+                + shift_;
+          state.last = storeResult(state, std::move(r));
           state.last_log_cost = log_cost;
           phase_calls++;
         } else if (state.last < 0) {

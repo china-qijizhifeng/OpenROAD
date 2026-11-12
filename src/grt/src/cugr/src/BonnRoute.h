@@ -197,12 +197,29 @@ class BonnRouteGlobal
     // with a wire or via.
     std::vector<std::array<int16_t, 3>> pin_cells;
   };
+  // Canonical form of an oracle tree: its unit edges as (lower vertex,
+  // higher vertex, pin + 1) in edgeIndex() numbering, sorted, one entry per
+  // vertex pair with the smallest pin (a wire or via sorts before a pin
+  // link). buildCandidate reads exactly this set besides the net, so a tree
+  // with a known key builds the candidate stored under it.
+  struct TreeKey
+  {
+    uint64_t hash = 0;
+    std::vector<std::array<uint32_t, 3>> edges;
+    // The candidate index insertCandidate returned for this tree, and the
+    // tree's own objective (equal usage does not imply equal objective).
+    int candidate = -1;
+    double objective = 0.0;
+  };
   struct NetState
   {
     GRNet* net = nullptr;
     std::vector<Terminal> terminals;
     BoxT region;
     std::vector<Candidate> candidates;
+    // Every tree the oracle returned during resource sharing, with the
+    // candidate it maps to (written only when the net's result is applied).
+    std::vector<TreeKey> tree_keys;
     int last = -1;
     double last_log_cost = 0.0;  // log of the oracle value (absolute prices)
     int chosen = -1;
@@ -267,6 +284,14 @@ class BonnRouteGlobal
   struct OracleResult
   {
     bool ok = false;
+    // >= 0: the tree has a known key; the candidate is state.candidates[known]
+    // and `candidate` holds only the tree's objective.
+    int known = -1;
+    // The call computed `key` (resource sharing without extra space).
+    bool keyed = false;
+    // Key of a new tree (keyed oracle calls only), to be stored with the
+    // candidate index once the result is applied.
+    TreeKey key;
     Candidate candidate;
     double log_cost = 0.0;
     double search_cost = 0.0;  // Dijkstra length of the last connection
@@ -355,8 +380,17 @@ class BonnRouteGlobal
                        double pad,
                        double factor) const;
   std::shared_ptr<GRTreeNode> buildTree(const Candidate& candidate) const;
+  // Price of a candidate: objective weight * objective + prices * usage.
+  double linearCost(double objective,
+                    const std::vector<std::pair<uint32_t, double>>& usage) const;
   double logCost(const Candidate& candidate) const;
   double linearCost(const Candidate& candidate) const;
+  // The usage of an oracle result: its own or that of the known candidate.
+  const std::vector<std::pair<uint32_t, double>>& resultUsage(
+      const NetState& state,
+      const OracleResult& result) const;
+  // Stores the result of a successful oracle call; returns the candidate.
+  int storeResult(NetState& state, OracleResult&& result);
   // Adds the candidate's usage to the log prices; the weights of the touched
   // resources are refreshed once per batch by refreshWeights().
   void applyPrices(const Candidate& candidate);
