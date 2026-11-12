@@ -108,6 +108,18 @@ struct BonnRouteDRParams
   // Sec. 5.1: a critical net routing step before the partitions; clock
   // nets are routed first, serially, on the whole chip.
   bool critical_nets = true;
+  // Sec. 3.2 / 5.1: route nets with nondefault rules with their wire type
+  // (NDR width, vias and spacing) in the critical-net step; 0 leaves them
+  // to FlexDR as before.
+  bool route_ndr_nets = false;
+  // Sec. 3.6: wire types held by the fast grid ("a restricted set of
+  // frequent wire types"): the default rule and the NDRs used by the most
+  // nets, at most 5 (FastGrid::kMaxWireTypes), each by at least
+  // fast_ndr_permille / 1000 of the nets; the others are answered by the
+  // distance rule checker. Every fast wire type adds its fields to every
+  // fast-grid build and update over the whole chip.
+  int fast_wire_types = 5;
+  int fast_ndr_permille = 10;
   // Interval property (ii) also for vias (Sec. 4.1); 0 relaxes vias per
   // vertex and lets intervals ignore via availability.
   bool interval_via_property = true;
@@ -260,6 +272,9 @@ class BonnRouteDR
     frCoord eol_space = 0;
   };
   // Routed geometry of one net, as written to frNet.
+  // Routed geometry; wire_type selects the width (wires) and the NDR
+  // spacing of the shapes (Sec. 3.2); access paths keep the default rule,
+  // as drt tapers NDR wires at pins.
   struct OutWire
   {
     frLayerNum layer;
@@ -268,18 +283,22 @@ class BonnRouteDR
     // A min-area extension beyond a via at `begin`: written as a patch wire
     // (FlexDR's form; its connectivity check removes dangling segments).
     bool patch = false;
+    int wire_type = 0;
   };
   struct OutVia
   {
     const frViaDef* def;
     odb::Point point;
+    int wire_type = 0;
   };
-  // A shape on a drt layer; role selects its shape class (Sec. 3.1).
+  // A shape on a drt layer; role selects its shape class (Sec. 3.1), ndr
+  // the nondefault rule of a routed shape of an NDR net.
   struct RShape
   {
     frLayerNum layer;
     odb::Rect rect;
     br::ShapeRole role = br::ShapeRole::kFixed;
+    int ndr = 0;
   };
   struct AccessOption
   {
@@ -336,6 +355,8 @@ class BonnRouteDR
     bool failed = false;
     bool skip = false;
     int64_t hpwl = 0;
+    // Wire type (Sec. 3.2): 0 = default rule, else the net's NDR.
+    int wire_type = 0;
   };
 
   // Per-thread search state (Sec. 5.1: nets in disjoint areas are routed
@@ -752,6 +773,14 @@ class BonnRouteDR
   // Wire type 0: default widths and vias (the fast-grid wire type); then
   // one wire type per non-default rule (Sec. 3.2).
   std::vector<br::WireType> wire_types_;
+  // Per wire type and track layer: wire width and via definition; nets per
+  // wire type; wire type of each NDR. Wire types 1.. are the NDRs, ordered
+  // by their number of nets (the first ones are fast, Sec. 3.6).
+  std::vector<std::vector<frCoord>> type_widths_;
+  std::vector<std::vector<const frViaDef*>> type_vias_;
+  std::vector<int> type_nets_;
+  std::unordered_map<const frNonDefaultRule*, int> ndr_type_;
+  int fast_types_ = 1;
   br::ShapeGrid shape_grid_;
   br::DistanceRuleChecker checker_;
   br::FastGrid grid_;

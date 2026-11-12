@@ -138,6 +138,17 @@ struct LayerRules
   // cuts and projections of cuts of the next lower via layer onto it; 0
   // means no rule (and no projections are stored).
   Coord projection_spacing = 0;
+  // Wiring layer: minimum spacing of the nondefault rules (Sec. 3.2 wire
+  // types); a metal class with ndr = k > 0 keeps at least ndr_spacing[k - 1]
+  // to every other metal shape, as drt applies NDR spacing to the routed
+  // shapes of NDR nets (max with the table value). 0: no NDR spacing.
+  std::vector<Coord> ndr_spacing;
+  Coord ndrSpacing(const int ndr) const
+  {
+    return ndr > 0 && ndr <= static_cast<int>(ndr_spacing.size())
+               ? ndr_spacing[ndr - 1]
+               : 0;
+  }
   // Largest distance at which two shapes of this layer can violate a rule.
   Coord reach() const;
   // Smallest distance required between any two shapes of different nets on
@@ -172,6 +183,9 @@ struct ShapeClass
   uint8_t run_column_y = 0;
   // Sec. 3.1: wires are assumed to have line-ends in preferred direction.
   bool line_end = false;
+  // Nondefault rule of a routed metal shape (LayerRules::ndr_spacing); 0
+  // for the default rule, pins, blockages and cuts.
+  uint8_t ndr = 0;
   friend bool operator==(const ShapeClass&, const ShapeClass&) = default;
 };
 
@@ -220,10 +234,15 @@ class ShapeClassTable
   const LayerRules& layer(const int l) const { return layers_[l]; }
   ClassId intern(const ShapeClass& c);
   // The class of a shape (Sec. 3.1 modelling); classify() also interns it.
-  ShapeClass describe(int layer, const Rect& rect, ShapeRole role) const;
-  ClassId classify(int layer, const Rect& rect, ShapeRole role)
+  // `ndr`: the nondefault rule of a routed shape of an NDR net (metal
+  // only; 0 = default rule).
+  ShapeClass describe(int layer,
+                      const Rect& rect,
+                      ShapeRole role,
+                      int ndr = 0) const;
+  ClassId classify(int layer, const Rect& rect, ShapeRole role, int ndr = 0)
   {
-    return intern(describe(layer, rect, role));
+    return intern(describe(layer, rect, role, ndr));
   }
   const ShapeClass& get(const ClassId id) const { return classes_[id]; }
   size_t size() const { return classes_.size(); }
@@ -252,15 +271,18 @@ class ShapeClassTable
   {
     return narrow_reach_[layer].load(std::memory_order_relaxed);
   }
-  // Wide classes: shapes whose width row needs at least wideRatioPercent()
-  // of the narrowest row's largest spacing (macro blockages, power
-  // straps). The shape grid keeps their shapes in a separate index, so
+  // Wide classes: shapes whose width row, or whose nondefault rule's
+  // spacing, needs at least wideRatioPercent() of the narrowest row's
+  // largest spacing (macro blockages, power straps, NDR wires with wide
+  // spacing). The shape grid keeps their shapes in a separate index, so
   // that they do not widen every window of their layer.
   bool wide(const ClassId id) const
   {
     const ShapeClass& c = get(id);
     return c.kind != ShapeClassKind::kCutProjection
-           && c.width_row >= wide_row_[c.layer];
+           && (c.width_row >= wide_row_[c.layer]
+               || (c.ndr > 0 && c.ndr <= wide_ndr_[c.layer].size()
+                   && wide_ndr_[c.layer][c.ndr - 1]));
   }
   Coord reachOf(const ClassId id) const
   {
@@ -278,6 +300,7 @@ class ShapeClassTable
   std::vector<LayerRules> layers_;
   std::vector<Coord> rule_reach_;
   std::vector<int> wide_row_;
+  std::vector<std::vector<bool>> wide_ndr_;  // per layer, per NDR
   std::unique_ptr<std::atomic<Coord>[]> class_reach_;
   std::unique_ptr<std::atomic<Coord>[]> narrow_reach_;
   // Interned classes per layer (guarded by mutex_).
@@ -351,6 +374,9 @@ struct WireType
 struct WireTypeGeometry
 {
   std::string name;
+  // Nondefault rule index of the wire type's metal models
+  // (LayerRules::ndr_spacing); 0 for the default rule.
+  int ndr = 0;
   std::vector<Coord> width;  // per wiring layer; square stick-figure model
   struct Via
   {

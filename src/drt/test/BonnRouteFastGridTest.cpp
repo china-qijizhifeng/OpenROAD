@@ -120,11 +120,14 @@ void runCase(std::mt19937& rng, const int c, Totals& t)
   for (int n = 0; n < nets; n++) {
     grid.setNetRipupLevel(n, static_cast<RipupLevel>(randomInt(rng, 1, 6)));
   }
-  // Wire types: fast ones plus one answered by the checker only.
+  // Wire types: fast ones (up to kMaxWireTypes) plus one answered by the
+  // checker only; types after the first carry a nondefault rule.
   std::vector<WireType> types;
-  const int fast = randomInt(rng, 1, 2);
+  const int fast
+      = rng() % 4 == 0 ? FastGrid::kMaxWireTypes : randomInt(rng, 1, 2);
   for (int k = 0; k < fast + 1; k++) {
     WireTypeGeometry g;
+    g.ndr = k == 0 ? 0 : randomInt(rng, 0, 2);
     for (int z = 0; z < num_z; z++) {
       g.width.push_back(randomInt(rng, 6, 16));
     }

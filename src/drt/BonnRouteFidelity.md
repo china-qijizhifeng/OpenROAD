@@ -37,12 +37,12 @@ speed-ups is checked by the differential tests in `src/drt/test` and
 | 4.2 rip-up mode, history | Rip-up penalties growing with history at a vertex. |
 | 4.3 off-track pin access | Catalogues per circuit class, conflict-free primary paths by destructive bounding, reservations, dynamic regeneration. Paths start at OpenROAD access points, which FlexDR clean-up requires (`offtrack_from_access_points 0` starts anywhere on the pin); macro pins keep access stubs. |
 | 4.4 connecting nets | Guide-path connection regions, temporary removal of own shapes, same-net post-processing, rip-up sequences with rollback, later passes with larger areas. |
-| 5.1 parallelization | Balanced partition sequence with fewer regions later; critical (clock) nets first. Wide-wire (NDR) nets: [TODO](#2013-todo). |
+| 5.1 parallelization | Balanced partition sequence with fewer regions later; critical nets first: clock nets and, with `route_ndr_nets 1`, NDR (wide-wire) nets. |
 | 5.2 external clean-up | FlexDR cleans up; logs report the nets and violations it receives. |
 
 ## 2013 TODO
 
-- **Wire types in DR (Sec. 3.2, 5.1):** NDR spacing, routing NDR nets (currently skipped), wide-wire nets in the critical step.
+- **Wire types in DR (Sec. 3.2, 3.6):** NDR wire extensions and minimum cut counts of NDR vias are not modelled (`route_ndr_nets 1` routes NDR nets with one wire type per NDR).
 - **Tile size (Sec. 2.1):** tiles for 50–100 wires per layer; `gcell_scale` is an experiment, and DR on coarse guides is slow.
 - **Track optimization (Sec. 3.5, Müller 2009):** maximal usable track length.
 
