@@ -1530,11 +1530,13 @@ void FlexDR::optimizationFlow(const SearchRepairArgs& args,
     ProfileTask profile("DR:checkerboard");
     for (auto& workersInBatch : workerBatch) {
       if (skip_unaffected) {
-        const int num_unaffected = std::erase_if(
-            workersInBatch,
-            [this, markers_only](const std::unique_ptr<FlexDRWorker>& worker) {
-              return !isAffectedByChanges(*worker, markers_only);
-            });
+        const int num_unaffected
+            = std::erase_if(workersInBatch,
+                            [this, markers_only, marker_cleanup](
+                                const std::unique_ptr<FlexDRWorker>& worker) {
+                              return !isAffectedByChanges(
+                                  *worker, markers_only, marker_cleanup);
+                            });
         num_unaffected_workers += num_unaffected;
         iter_prog.total_num_workers -= num_unaffected;
       }
@@ -1586,17 +1588,25 @@ void FlexDR::optimizationFlow(const SearchRepairArgs& args,
 }
 
 bool FlexDR::isAffectedByChanges(const FlexDRWorker& worker,
-                                 const bool markers_only) const
+                                 const bool markers_only,
+                                 const bool shape_regions) const
 {
-  // Guides are stored between gcell centers; keep one gcell of margin on top
-  // of the region the worker reads.
-  const auto& gcell_patterns = getDesign()->getTopBlock()->getGCellPatterns();
-  const int margin
-      = router_cfg_->MTSAFEDIST
-        + static_cast<int>(std::max(gcell_patterns[0].getSpacing(),
-                                    gcell_patterns[1].getSpacing()));
   odb::Rect affected_box;
-  worker.getExtBox().bloat(margin, affected_box);
+  if (shape_regions) {
+    // A changed shape can only cause markers within MTSAFEDIST of it, and
+    // the worker reports the markers in its DRC box. Unrouted nets' regions
+    // are whole gcell boxes, so the workers routing them intersect them.
+    worker.getDrcBox().bloat(router_cfg_->MTSAFEDIST, affected_box);
+  } else {
+    // Guides are stored between gcell centers; keep one gcell of margin on
+    // top of the region the worker reads.
+    const auto& gcell_patterns = getDesign()->getTopBlock()->getGCellPatterns();
+    const int margin
+        = router_cfg_->MTSAFEDIST
+          + static_cast<int>(std::max(gcell_patterns[0].getSpacing(),
+                                      gcell_patterns[1].getSpacing()));
+    worker.getExtBox().bloat(margin, affected_box);
+  }
   if (!markers_only
       && std::ranges::any_of(*incremental_changed_regions_,
                              [&affected_box](const odb::Rect& region) {
