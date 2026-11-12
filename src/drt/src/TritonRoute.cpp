@@ -850,10 +850,11 @@ void TritonRoute::prep()
   rp.main();
 }
 
-void TritonRoute::ta()
+void TritonRoute::ta(bool unrouted_nets_only)
 {
   std::unique_ptr<FlexTA> ta = std::make_unique<FlexTA>(
       getDesign(), logger_, router_cfg_.get(), distributed_);
+  ta->setUnroutedNetsOnly(unrouted_nets_only);
   if (debug_->debugTA) {
     ta->setDebug(graphics_factory_->makeUniqueTAGraphics());
   }
@@ -885,7 +886,9 @@ void TritonRoute::prepareBonnRouteFallbacks(std::vector<odb::Rect>& regions)
   if (needs_ta) {
     // FlexDR creates the boundary pins of unrouted nets from TA guide routes.
     // Without them, separate workers can leave disconnected pin components.
-    ta();
+    // Nets with routing do not read guide routes, so only the unrouted nets'
+    // guides are assigned.
+    ta(/*unrouted_nets_only=*/true);
   }
 }
 

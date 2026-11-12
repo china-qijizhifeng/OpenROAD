@@ -222,8 +222,11 @@ class FlexDR
       std::vector<odb::Rect>* changed_regions = nullptr);
   // markers_only: only markers in the worker's DRC box count (repair
   // iterations after BonnRoute's incremental routing).
+  // shape_regions: the changed regions are shapes, instance boxes and gcell
+  // boxes (BonnRoute's incremental routing) rather than guides.
   bool isAffectedByChanges(const FlexDRWorker& worker,
-                           bool markers_only = false) const;
+                           bool markers_only = false,
+                           bool shape_regions = false) const;
   void processWorkersBatch(
       std::vector<std::unique_ptr<FlexDRWorker>>& workers_batch,
       IterationProgress& iter_prog);
