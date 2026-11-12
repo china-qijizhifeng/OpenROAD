@@ -57,6 +57,11 @@ struct BonnRouteDRParams
   int via_cost = 4;
   // Jog cost factor (beta of Sec. 4.1).
   int jog_factor = 4;
+  // Vertex search: jogs cost jog_factor_low (0: off) in GCells whose global
+  // routing usage of the layer is at most jog_low_utilization percent of
+  // its capacity; jog_factor elsewhere.
+  int jog_factor_low = 0;
+  int jog_low_utilization = 50;
   // Rip-up penalty per vertex, in pitches of the bottom layer.
   int ripup_cost = 40;
   int max_ripups = 3;
@@ -160,7 +165,17 @@ struct BonnRouteDRParams
   // vertex beside an occupied track, in GCells whose global routing
   // utilization (dbGCellGrid usage / capacity) is at most
   // spread_utilization percent. Selects the vertex search.
-  bool spreading = false;
+  bool spreading = true;
+  // After routing, replace "via up, a wire on the layer above, via down"
+  // (nothing else of the net on that wire) by a wrong-way wire on the lower
+  // layer when it is legal against other nets: two vias fewer.
+  bool collapse_bridges = true;
+  // Also the reverse: a wire on the lower layer between two vias up (nothing
+  // else of the net on it) becomes a wrong-way wire on the upper layer.
+  bool collapse_lower_bridges = true;
+  // Also spread on layers whose wires must stay on tracks in the preferred
+  // direction (unidirectional, LEF58 right-way-on-grid-only).
+  bool spread_unidirectional = false;
   int spread_cost = 1;
   int spread_utilization = 70;
   // Sec. 2.1 / 4.2: spread where global routing assigned the net extra
@@ -274,6 +289,8 @@ class BonnRouteDR
               const BonnRouteDRParams& params,
               odb::dbBlock* block = nullptr);
   ~BonnRouteDR();
+  bool spreadLayer(int z) const;
+  void buildJogTiles();
 
   void main();
 
@@ -793,6 +810,20 @@ class BonnRouteDR
   void fillNotches(frNet* net,
                    int id,
                    std::vector<std::pair<frLayerNum, odb::Rect>>& fills);
+  // collapse_bridges: replace via up, one wire, via down by a wrong-way
+  // wire on the lower layer where that wire is legal. Returns the count.
+  int64_t collapseBridges();
+  struct BridgeStats
+  {
+    int64_t candidates = 0;
+    int64_t other_wire = 0;
+    int64_t patch = 0;
+    int64_t other_via_or_pin = 0;
+    int64_t illegal = 0;
+    int64_t illegal_routed = 0;
+    int64_t illegal_fixed = 0;
+    int64_t collapsed = 0;
+  } bridge_stats_, lower_bridge_stats_;
 
   int tileX(frCoord x) const;
   int tileY(frCoord y) const;
@@ -846,6 +877,8 @@ class BonnRouteDR
   odb::Rect die_;
   odb::dbBlock* block_ = nullptr;
   std::vector<std::vector<uint8_t>> spread_tiles_;
+  std::vector<std::vector<uint8_t>> jog_low_tiles_;
+  int64_t jog_low_tile_count_ = 0;
   // Global routing extra space (Sec. 2.1) per net, read from odb.
   void loadExtraSpace();
   int64_t extra_space_nets_ = 0;

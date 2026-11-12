@@ -79,7 +79,9 @@ void BonnRouteDRParams::applyProfile(const int which)
     spreading = true;
   } else {
     // 2013-improved: measured optimizations (vertex search, speculative
-    // tail batches, unresolved nets to FlexDR).
+    // tail batches, unresolved nets to FlexDR), and wire spreading (Sec.
+    // 4.2): without it neighbours pack densely, and signal coupling
+    // capacitance (+1.4..+4.0% against FlexDR) costs setup slack.
     use_intervals = false;
     interval_via_property = true;
     interval_nearest_first = false;
@@ -90,7 +92,7 @@ void BonnRouteDRParams::applyProfile(const int which)
     tail_retry_delay = 1;
     tail_defer_settled = 300000;
     potential = 0;
-    spreading = false;
+    spreading = true;
   }
   partitions = true;
   critical_nets = true;
@@ -209,6 +211,16 @@ bool BonnRouteDRParams::set(const std::string& name, const double value)
     spread_from_extra_space = v != 0;
   } else if (name == "spreading") {
     spreading = v != 0;
+  } else if (name == "jog_factor_low") {
+    jog_factor_low = std::max(0, v);
+  } else if (name == "jog_low_utilization") {
+    jog_low_utilization = std::clamp(v, 0, 100);
+  } else if (name == "collapse_bridges") {
+    collapse_bridges = v != 0;
+  } else if (name == "collapse_lower_bridges") {
+    collapse_lower_bridges = v != 0;
+  } else if (name == "spread_unidirectional") {
+    spread_unidirectional = v != 0;
   } else if (name == "spread_cost") {
     spread_cost = std::max(0, v);
   } else if (name == "spread_utilization") {
@@ -321,6 +333,9 @@ void BonnRouteDR::loadExtraSpace()
         continue;
       }
       const int z = z_of_fr_[fr];
+      if (!spreadLayer(z)) {
+        continue;
+      }
       // Both gcells of the edge, mapped through their centres.
       const bool horizontal
           = layer->getDirection() == odb::dbTechLayerDir::HORIZONTAL;
@@ -368,6 +383,9 @@ void BonnRouteDR::buildSpreadTiles()
       graph_.numLayers(),
       std::vector<uint8_t>(static_cast<size_t>(tiles_x_) * tiles_y_, 0));
   for (int z = 0; z < graph_.numLayers(); z++) {
+    if (!spreadLayer(z)) {
+      continue;
+    }
     odb::dbTechLayer* layer = layers_[z].layer->getDbLayer();
     for (int tx = 0; tx < tiles_x_; tx++) {
       for (int ty = 0; ty < tiles_y_; ty++) {
@@ -388,6 +406,50 @@ void BonnRouteDR::buildSpreadTiles()
 }
 
 BonnRouteDR::~BonnRouteDR() = default;
+
+void BonnRouteDR::buildJogTiles()
+{
+  jog_low_tiles_.clear();
+  jog_low_tile_count_ = 0;
+  odb::dbGCellGrid* gcells
+      = block_ != nullptr ? block_->getGCellGrid() : nullptr;
+  if (gcells == nullptr) {
+    return;
+  }
+  jog_low_tiles_.assign(
+      graph_.numLayers(),
+      std::vector<uint8_t>(static_cast<size_t>(tiles_x_) * tiles_y_, 0));
+  for (int z = 0; z < graph_.numLayers(); z++) {
+    if (!graph_.layers[z].jogs) {
+      continue;
+    }
+    odb::dbTechLayer* layer = layers_[z].layer->getDbLayer();
+    for (int tx = 0; tx < tiles_x_; tx++) {
+      for (int ty = 0; ty < tiles_y_; ty++) {
+        const int cx = tile_x0_ + tx * tile_dx_ + tile_dx_ / 2;
+        const int cy = tile_y0_ + ty * tile_dy_ + tile_dy_ / 2;
+        const uint32_t gx = gcells->getXIdx(cx);
+        const uint32_t gy = gcells->getYIdx(cy);
+        const float capacity = gcells->getCapacity(layer, gx, gy);
+        const float usage = gcells->getUsage(layer, gx, gy);
+        if (capacity > 0
+            && usage * 100 <= capacity * params_.jog_low_utilization) {
+          jog_low_tiles_[z][static_cast<size_t>(tx) * tiles_y_ + ty] = 1;
+          jog_low_tile_count_++;
+        }
+      }
+    }
+  }
+}
+
+bool BonnRouteDR::spreadLayer(const int z) const
+{
+  // Layers whose wires stay on tracks in the preferred direction have no
+  // jogs to leave a free track beside a wire; spreading there only moved
+  // wires to other layers (aes_asap7: +7% vias, worse slack, more nets left
+  // to FlexDR, no coupling gain).
+  return params_.spread_unidirectional || !onTracksOnly(layers_[z].fr);
+}
 
 int BonnRouteDR::tileX(const frCoord x) const
 {
@@ -472,6 +534,11 @@ void BonnRouteDR::buildTrackGraph()
                                        : tl.tracks[1] - tl.tracks[0];
     tl.jogs = !layer->isUnidirectional();
     tl.jog_factor = static_cast<Cost>(params_.jog_factor) * graph_.wire_unit;
+    tl.jog_factor_low = params_.jog_factor_low > 0
+                            ? static_cast<Cost>(std::min(params_.jog_factor_low,
+                                                         params_.jog_factor))
+                                  * graph_.wire_unit
+                            : tl.jog_factor;
     if (!layers_.empty() && layers_.back().horizontal == info.horizontal) {
       logger_->warn(utl::DRT,
                     9100,
@@ -4174,6 +4241,7 @@ bool BonnRouteDR::connectInRegion(NetData& net,
   }
   req.discount_rate = static_cast<Cost>(params_.discount_numerator) * unit()
                       / params_.discount_denominator;
+  req.jog_low_tiles = jog_low_tiles_.empty() ? nullptr : &jog_low_tiles_;
   req.use_intervals = params_.use_intervals;
   req.interval_via_property = params_.interval_via_property;
   req.interval_nearest_first = params_.interval_nearest_first;
@@ -4528,6 +4596,168 @@ void BonnRouteDR::commitNet(NetData& net, Worker* local)
     changeShape(s, routedType(s.role), net.id, true, local);
   }
   net.routed = true;
+}
+
+int64_t BonnRouteDR::collapseBridges()
+{
+  // A bridge: vias a, b between the same layers L (below) and U (above) at
+  // points A != B on one line, joined by exactly one wire of the net on U
+  // from A to B, with nothing else of the net on U touching that wire (no
+  // other wire, via, patch or pin point). The vias and the U wire are
+  // replaced by a wire on L from A to B in L's non-preferred direction,
+  // when that wire is legal against all other nets (the distance rule
+  // checker, own shapes excluded) and L allows wrong-way wires.
+  auto on_segment
+      = [](const odb::Point& p, const odb::Point& a, const odb::Point& b) {
+          return p.x() >= std::min(a.x(), b.x())
+                 && p.x() <= std::max(a.x(), b.x())
+                 && p.y() >= std::min(a.y(), b.y())
+                 && p.y() <= std::max(a.y(), b.y())
+                 && (a.x() == b.x() ? p.x() == a.x() : p.y() == a.y());
+        };
+  auto segments_touch
+      = [&](const OutWire& w, const odb::Point& a, const odb::Point& b) {
+          // Axis-parallel segments: their bounding boxes intersect.
+          const odb::Rect s(w.begin, w.end);
+          const odb::Rect t(a, b);
+          return s.intersects(t);
+        };
+  int64_t collapsed = 0;
+  for (NetData& net : nets_) {
+    if (!net.routed || net.vias.size() < 2) {
+      continue;
+    }
+    bool changed = true;
+    while (changed) {
+      changed = false;
+      for (size_t ia = 0; ia < net.vias.size() && !changed; ia++) {
+        for (size_t ib = ia + 1; ib < net.vias.size() && !changed; ib++) {
+          const OutVia va = net.vias[ia];
+          const OutVia vb = net.vias[ib];
+          const frLayerNum lower = va.def->getLayer1Num();
+          const frLayerNum upper = va.def->getLayer2Num();
+          if (vb.def->getLayer1Num() != lower || vb.def->getLayer2Num() != upper
+              || va.point == vb.point
+              || (va.point.x() != vb.point.x()
+                  && va.point.y() != vb.point.y())) {
+            continue;
+          }
+          for (int mode = 0; mode < 2 && !changed; mode++) {
+            // mode 0: the bridge wire is on the upper layer and the jog on the
+            // lower one; mode 1 (collapse_lower_bridges): a wire on the lower
+            // layer between two vias up becomes a wrong-way wire on the upper
+            // layer, when the lower piece only joins two pieces of the upper
+            // layer (sky130: most up-bridges cross met1 power rails and
+            // cannot become met1 jogs).
+            if (mode == 1 && !params_.collapse_lower_bridges) {
+              continue;
+            }
+            const frLayerNum span = mode == 0 ? upper : lower;
+            const frLayerNum jogl = mode == 0 ? lower : upper;
+            BridgeStats& stats
+                = mode == 0 ? bridge_stats_ : lower_bridge_stats_;
+            const int zl = jogl >= 0 && jogl < static_cast<int>(z_of_fr_.size())
+                               ? z_of_fr_[jogl]
+                               : -1;
+            if (zl < 0 || onTracksOnly(jogl)) {
+              continue;
+            }
+            const odb::Point A = va.point;
+            const odb::Point B = vb.point;
+            int bridge = -1;
+            int other_wires = 0;
+            int patches = 0;
+            for (size_t k = 0; k < net.wires.size(); k++) {
+              const OutWire& w = net.wires[k];
+              if (w.layer != span || !segments_touch(w, A, B)) {
+                continue;
+              }
+              const bool same = !w.patch
+                                && ((w.begin == A && w.end == B)
+                                    || (w.begin == B && w.end == A));
+              if (same && bridge < 0) {
+                bridge = static_cast<int>(k);
+              } else if (w.patch) {
+                patches++;
+              } else {
+                other_wires++;
+              }
+            }
+            if (bridge < 0) {
+              continue;
+            }
+            stats.candidates++;
+            if (other_wires > 0 || patches > 0) {
+              (patches > 0 && other_wires == 0 ? stats.patch
+                                               : stats.other_wire)++;
+              continue;
+            }
+            bool clean = true;
+            for (size_t k = 0; k < net.vias.size() && clean; k++) {
+              if (k == ia || k == ib) {
+                continue;
+              }
+              const OutVia& v = net.vias[k];
+              if ((v.def->getLayer1Num() == span
+                   || v.def->getLayer2Num() == span)
+                  && on_segment(v.point, A, B)) {
+                clean = false;
+              }
+            }
+            for (const auto& [layer, p] : net.pin_points) {
+              if (layer == span && on_segment(p, A, B)) {
+                clean = false;
+              }
+            }
+            if (!clean) {
+              stats.other_via_or_pin++;
+              continue;
+            }
+            const OutWire jog{jogl, A, B, false, net.wire_type};
+            const RShape jog_shape = wireShape(jog);
+            if (shapeConflicts(jog_shape, net.id, nullptr)) {
+              stats.illegal++;
+              // Blocked only by routed shapes (rip-up could free the jog) or
+              // by fixed shapes (pins, blockages, power).
+              const int g = gridLayer(jogl);
+              const br::RipupLevel level
+                  = g < 0 ? br::kNotRemovable
+                          : checker_.shapeLevel(g,
+                                                brRect(jog_shape.rect),
+                                                shapeClass(jog_shape, g),
+                                                3,
+                                                net.id);
+              (level == br::kNotRemovable ? stats.illegal_fixed
+                                          : stats.illegal_routed)++;
+              continue;
+            }
+            // Remove the bridge from the routing space, insert the jog.
+            std::vector<RShape> old;
+            old.push_back(wireShape(net.wires[bridge]));
+            viaShapes(va, old);
+            viaShapes(vb, old);
+            br::FastGridBuilder::PendingRemovals pending;
+            for (const RShape& s : old) {
+              changeShape(
+                  s, routedType(s.role), net.id, false, nullptr, &pending);
+            }
+            fast_builder_.flush(pending);
+            changeShape(
+                jog_shape, routedType(jog_shape.role), net.id, true, nullptr);
+            net.wires.erase(net.wires.begin() + bridge);
+            net.wires.push_back(jog);
+            net.vias.erase(net.vias.begin() + ib);
+            net.vias.erase(net.vias.begin() + ia);
+            shapesOf(net, net.shapes);
+            collapsed++;
+            stats.collapsed++;
+            changed = true;
+          }
+        }
+      }
+    }
+  }
+  return collapsed;
 }
 
 void BonnRouteDR::ripupNet(NetData& net)
@@ -5998,6 +6228,19 @@ void BonnRouteDR::main()
   if (params_.spreading) {
     buildSpreadTiles();
   }
+  if (params_.jog_factor_low > 0
+      && params_.jog_factor_low < params_.jog_factor) {
+    buildJogTiles();
+    if (params_.verbose) {
+      logger_->report(
+          "BonnRoute DR jogs: factor {} in {} layer GCells at most {}% used, "
+          "{} elsewhere.",
+          params_.jog_factor_low,
+          jog_low_tile_count_,
+          params_.jog_low_utilization,
+          params_.jog_factor);
+    }
+  }
   phases.spreading = lap();
   workers_.resize(std::max(1, router_cfg_->MAX_THREADS));
   for (Worker& w : workers_) {
@@ -6171,6 +6414,48 @@ void BonnRouteDR::main()
           ripup_plain_seconds_,
           ripup_mode_connects_,
           ripup_mode_seconds_);
+    }
+  }
+  if (params_.collapse_bridges) {
+    const double start = timer.elapsed();
+    const int64_t collapsed = collapseBridges();
+    if (params_.verbose) {
+      logger_->report(
+          "BonnRoute DR bridges: {} collapsed into wrong-way wires ({} vias "
+          "fewer); kept: {} with other wires on the bridge, {} with "
+          "patches, {} with other vias or pin points, {} illegal against "
+          "other nets ({} only routed shapes, {} fixed shapes) (of {} "
+          "candidate checks).",
+          bridge_stats_.collapsed,
+          2 * bridge_stats_.collapsed,
+          bridge_stats_.other_wire,
+          bridge_stats_.patch,
+          bridge_stats_.other_via_or_pin,
+          bridge_stats_.illegal,
+          bridge_stats_.illegal_routed,
+          bridge_stats_.illegal_fixed,
+          bridge_stats_.candidates);
+      if (params_.collapse_lower_bridges) {
+        logger_->report(
+            "BonnRoute DR lower bridges: {} collapsed into wrong-way wires ({} "
+            "vias "
+            "fewer); kept: {} with other wires on the bridge, {} with "
+            "patches, {} with other vias or pin points, {} illegal against "
+            "other nets ({} only routed shapes, {} fixed shapes) (of {} "
+            "candidate checks).",
+            lower_bridge_stats_.collapsed,
+            2 * lower_bridge_stats_.collapsed,
+            lower_bridge_stats_.other_wire,
+            lower_bridge_stats_.patch,
+            lower_bridge_stats_.other_via_or_pin,
+            lower_bridge_stats_.illegal,
+            lower_bridge_stats_.illegal_routed,
+            lower_bridge_stats_.illegal_fixed,
+            lower_bridge_stats_.candidates);
+      }
+      logger_->report("BonnRoute DR bridge collapse: {} bridges, {:.2f}s.",
+                      collapsed,
+                      timer.elapsed() - start);
     }
   }
   if (params_.verbose) {

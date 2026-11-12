@@ -205,6 +205,11 @@ struct SearchRequest
   Cost spread_cost = 0;
   // Same-net via rules (vertex search only; nullptr: none).
   const SameNetVias* same_net_vias = nullptr;
+  // Vertex search: in tiles where global routing left most tracks of the
+  // layer free ([z][tx * tiles_y + ty] != 0), jogs cost the layer's
+  // jog_factor_low instead of jog_factor (a wrong-way wire blocks the
+  // crossing tracks it uses, which matters where they are in demand).
+  const std::vector<std::vector<uint8_t>>* jog_low_tiles = nullptr;
 };
 
 struct SearchResult
@@ -453,6 +458,7 @@ class PathSearch
   // including the wire spreading cost of entering j2.
   Cost wireCost(int z, int i, int j, int j2) const;
   Cost spreadCost(int z, int i, int j) const;
+  Cost jogFactor(int z, int i, int j) const;
   void settle(int z, int i, int j, Cost g);
   // The via by which the path to the settled vertex (z, i, j) entered layer
   // z, as via layer and lower vertex; false if the path starts on the layer

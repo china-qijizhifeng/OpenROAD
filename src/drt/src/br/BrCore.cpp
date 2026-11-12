@@ -57,6 +57,23 @@ Cost PathSearch::futureCost(const int z, const Coord x, const Coord y) const
   return boxes_.at(z, x, y, min_wire_rate_);
 }
 
+Cost PathSearch::jogFactor(const int z, const int i, const int j) const
+{
+  const TrackLayer& layer = graph_.layers[z];
+  if (req_->jog_low_tiles == nullptr) {
+    return layer.jog_factor;
+  }
+  const int t = layer.track_tile[i];
+  const int p = layer.pos_tile[j];
+  const int tx = layer.horizontal ? p : t;
+  const int ty = layer.horizontal ? t : p;
+  return (*req_->jog_low_tiles)[z]
+                               [static_cast<size_t>(tx) * graph_.tiles_y + ty]
+                 != 0
+             ? layer.jog_factor_low
+             : layer.jog_factor;
+}
+
 Cost PathSearch::spreadCost(const int z, const int i, const int j) const
 {
   if (req_->spread_cost == 0 || req_->spread_tiles == nullptr) {
@@ -260,7 +277,7 @@ void PathSearch::settle(const int z, const int i, const int j, const Cost g)
         continue;
       }
       const Cost c
-          = layer.jog_factor * std::abs(layer.tracks[i2] - layer.tracks[i])
+          = jogFactor(z, i, j) * std::abs(layer.tracks[i2] - layer.tracks[i])
             + penalty(aw, lw) + penalty(edge, le) + own;
       relax(z, i2, j, g + c, di > 0 ? kFromTrackBelow : kFromTrackAbove, 0);
     }

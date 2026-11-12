@@ -136,7 +136,10 @@ set_bonnroute_dr_param name value
 | Name | Default | Meaning |
 | ----- | ----- | ----- |
 | `via_cost` | `4` | Via cost in pitches of the lower routing layer. |
+| `collapse_bridges` | `1` | After routing, replace a via up, one wire on the layer above and a via down (nothing else of the net on that wire) by a wrong-way wire on the lower layer when it is legal against other nets and the layer allows wrong-way wires: two vias fewer. |
+| `collapse_lower_bridges` | `1` | With `collapse_bridges`, also the reverse: a wire on the lower layer between two vias up (nothing else of the net on it) becomes a wrong-way wire on the upper layer when that is legal. |
 | `jog_factor` | `4` | Non-preferred direction wire cost multiplier. |
+| `jog_factor_low` / `jog_low_utilization` | `0` / `50` | Vertex search: jogs cost `jog_factor_low` (0: off) in GCells whose global routing usage of the layer is at most `jog_low_utilization` percent of its capacity, `jog_factor` elsewhere (a wrong-way wire blocks the crossing tracks it uses). |
 | `ripup_cost` | `40` | Base rip-up penalty in pitches of the bottom routing layer. |
 | `max_ripups` | `3` | Maximum rip-ups per net. |
 | `max_access_jog` | `2` | Maximum pin-to-track jog in pitches (access stubs, `offtrack_access 0`). |
@@ -189,7 +192,7 @@ set_bonnroute_dr_param name value
 | `final_ripup_max_share` | `2` | Skip that phase when more than this percentage of the routed nets failed in the parallel phases (failures then come from rules the routing space does not model, which FlexDR cleans up anyway). |
 | `potential_check` | `0` | Debug: repeat each search that used a potential with the l1 bound and report how many shortest path costs differ (expected 0). |
 | `potential_detour_tiles` | `2` | Detour, in GCells beyond the tile distance of its ends, from which `potential 4` uses the general model. |
-| `spreading` | `0` | Wire spreading (Section 4.2): in GCells whose global routing utilization is at most `spread_utilization` percent, a wire vertex beside an occupied track costs `spread_cost` pitches more. Reads the congestion that `global_route` stores in the database. Selects the vertex search. |
+| `spreading` | `1` | Wire spreading (Section 4.2): in GCells whose global routing utilization is at most `spread_utilization` percent, a wire vertex beside an occupied track costs `spread_cost` pitches more. Reads the congestion that `global_route` stores in the database. Selects the vertex search. Not on layers whose wires stay on tracks in the preferred direction unless `spread_unidirectional 1`. Without spreading, routes had 1.4–4.0% more signal coupling capacitance than FlexDR's and worse setup slack. |
 | `spread_from_extra_space` | `1` | With `spreading 1`, spread a net where BonnRoute global routing assigned it extra space (`set_bonnroute_param extra_space 1`, Section 2.1); designs without that information use the GCell congestion tiles. |
 | `spread_cost` / `spread_utilization` | `1` / `70` | Spreading cost in pitches of the bottom layer; utilization threshold in percent. |
 | `cleanup_incremental_iterations` | `2` | FlexDR clean-up: how many of FlexDR's incremental iterations 1 and 2 follow iteration 0 (which routes the nets BonnRoute left and checks every tile). Incremental iterations reroute only nets without BonnRoute routing and keep every BonnRoute net fixed; iteration 3, the first that rips up nets at violations, follows the last one. Range `0`–`2`. Fewer incremental iterations pay off when few nets are left to FlexDR; designs with many left nets clean up faster with both. |
