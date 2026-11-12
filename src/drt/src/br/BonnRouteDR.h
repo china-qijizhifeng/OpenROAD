@@ -121,6 +121,11 @@ struct BonnRouteDRParams
   // deferred to a final pass of the stage without a budget, so it does not
   // hold up the batches. 0 disables the budget.
   int tail_defer_settled = 300000;
+  // The final pass of the stage for the deferred nets. 0 hands them to the
+  // rip-up phase instead (final_ripup), whose rip-up mode search finds a
+  // legal path at no penalty when one exists and does not exhaust the area
+  // when none exists.
+  bool tail_deferred_pass = true;
   // Sec. 5.1: a critical net routing step before the partitions; clock
   // nets are routed first, serially, on the whole chip.
   bool critical_nets = true;
