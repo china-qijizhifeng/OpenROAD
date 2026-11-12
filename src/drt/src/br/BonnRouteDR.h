@@ -160,7 +160,10 @@ struct BonnRouteDRParams
   // vertex beside an occupied track, in GCells whose global routing
   // utilization (dbGCellGrid usage / capacity) is at most
   // spread_utilization percent. Selects the vertex search.
-  bool spreading = false;
+  bool spreading = true;
+  // Also spread on layers whose wires must stay on tracks in the preferred
+  // direction (unidirectional, LEF58 right-way-on-grid-only).
+  bool spread_unidirectional = false;
   int spread_cost = 1;
   int spread_utilization = 70;
   // Sec. 2.1 / 4.2: spread where global routing assigned the net extra
@@ -251,6 +254,7 @@ class BonnRouteDR
               const BonnRouteDRParams& params,
               odb::dbBlock* block = nullptr);
   ~BonnRouteDR();
+  bool spreadLayer(int z) const;
 
   void main();
 

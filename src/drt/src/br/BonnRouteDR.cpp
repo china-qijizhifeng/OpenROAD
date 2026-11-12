@@ -78,7 +78,9 @@ void BonnRouteDRParams::applyProfile(const int which)
     spreading = true;
   } else {
     // 2013-improved: measured optimizations (vertex search, speculative
-    // tail batches, unresolved nets to FlexDR).
+    // tail batches, unresolved nets to FlexDR), and wire spreading (Sec.
+    // 4.2): without it neighbours pack densely, and signal coupling
+    // capacitance (+1.4..+4.0% against FlexDR) costs setup slack.
     use_intervals = false;
     interval_via_property = true;
     interval_nearest_first = false;
@@ -89,7 +91,7 @@ void BonnRouteDRParams::applyProfile(const int which)
     tail_retry_delay = 1;
     tail_defer_settled = 300000;
     potential = 0;
-    spreading = false;
+    spreading = true;
   }
   partitions = true;
   critical_nets = true;
@@ -196,6 +198,8 @@ bool BonnRouteDRParams::set(const std::string& name, const double value)
     spread_from_extra_space = v != 0;
   } else if (name == "spreading") {
     spreading = v != 0;
+  } else if (name == "spread_unidirectional") {
+    spread_unidirectional = v != 0;
   } else if (name == "spread_cost") {
     spread_cost = std::max(0, v);
   } else if (name == "spread_utilization") {
@@ -308,6 +312,9 @@ void BonnRouteDR::loadExtraSpace()
         continue;
       }
       const int z = z_of_fr_[fr];
+      if (!spreadLayer(z)) {
+        continue;
+      }
       // Both gcells of the edge, mapped through their centres.
       const bool horizontal
           = layer->getDirection() == odb::dbTechLayerDir::HORIZONTAL;
@@ -355,6 +362,9 @@ void BonnRouteDR::buildSpreadTiles()
       graph_.numLayers(),
       std::vector<uint8_t>(static_cast<size_t>(tiles_x_) * tiles_y_, 0));
   for (int z = 0; z < graph_.numLayers(); z++) {
+    if (!spreadLayer(z)) {
+      continue;
+    }
     odb::dbTechLayer* layer = layers_[z].layer->getDbLayer();
     for (int tx = 0; tx < tiles_x_; tx++) {
       for (int ty = 0; ty < tiles_y_; ty++) {
@@ -375,6 +385,15 @@ void BonnRouteDR::buildSpreadTiles()
 }
 
 BonnRouteDR::~BonnRouteDR() = default;
+
+bool BonnRouteDR::spreadLayer(const int z) const
+{
+  // Layers whose wires stay on tracks in the preferred direction have no
+  // jogs to leave a free track beside a wire; spreading there only moved
+  // wires to other layers (aes_asap7: +7% vias, worse slack, more nets left
+  // to FlexDR, no coupling gain).
+  return params_.spread_unidirectional || !onTracksOnly(layers_[z].fr);
+}
 
 int BonnRouteDR::tileX(const frCoord x) const
 {
