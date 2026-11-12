@@ -4429,6 +4429,18 @@ int64_t BonnRouteDR::collapseBridges()
           const RShape jog_shape = wireShape(jog);
           if (shapeConflicts(jog_shape, net.id, nullptr)) {
             bridge_stats_.illegal++;
+            // Blocked only by routed shapes (rip-up could free the jog) or
+            // by fixed shapes (pins, blockages, power).
+            const int g = gridLayer(lower);
+            const br::RipupLevel level
+                = g < 0 ? br::kNotRemovable
+                        : checker_.shapeLevel(g,
+                                              brRect(jog_shape.rect),
+                                              shapeClass(jog_shape, g),
+                                              3,
+                                              net.id);
+            (level == br::kNotRemovable ? bridge_stats_.illegal_fixed
+                                        : bridge_stats_.illegal_routed)++;
             continue;
           }
           // Remove the bridge from the routing space, insert the jog.
@@ -5881,13 +5893,16 @@ void BonnRouteDR::main()
           "BonnRoute DR bridges: {} collapsed into wrong-way wires ({} vias "
           "fewer); kept: {} with other wires on the bridge, {} with patches, "
           "{} with other vias or pin points, {} illegal against other nets "
-          "(of {} candidate checks); {:.2f}s.",
+          "({} only routed shapes, {} fixed shapes) (of {} candidate checks); "
+          "{:.2f}s.",
           collapsed,
           2 * collapsed,
           bridge_stats_.other_wire,
           bridge_stats_.patch,
           bridge_stats_.other_via_or_pin,
           bridge_stats_.illegal,
+          bridge_stats_.illegal_routed,
+          bridge_stats_.illegal_fixed,
           bridge_stats_.candidates,
           timer.elapsed() - start);
     }

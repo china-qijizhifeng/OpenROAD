@@ -781,6 +781,8 @@ class BonnRouteDR
     int64_t patch = 0;
     int64_t other_via_or_pin = 0;
     int64_t illegal = 0;
+    int64_t illegal_routed = 0;
+    int64_t illegal_fixed = 0;
   } bridge_stats_;
 
   int tileX(frCoord x) const;
