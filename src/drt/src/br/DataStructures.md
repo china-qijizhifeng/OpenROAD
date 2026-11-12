@@ -30,7 +30,8 @@ Shape-grid layer numbering: wiring layer `z` of the track graph is layer
   `WireType` = per wiring layer (preferred, non-preferred) wire model and per
   via layer a via model. `BonnRouteDR::buildRoutingSpace` builds wire type 0
   from the default widths and default vias and one wire type per NDR (NDR
-  width, NDR preferred via).
+  width, NDR preferred via, NDR spacing), the NDRs ordered by their number
+  of nets.
 * `ShapeClass` = (layer, kind {metal, cut, cut projection}, width row, run
   column in x, run column in y, line-end flag). Two shapes of one class have
   the same requirements to every other class.
@@ -71,7 +72,7 @@ Shape-grid layer numbering: wiring layer `z` of the track graph is layer
 | End-of-line (drt's `drEolSpacingConstraint`: width, space, within) | Line-end extension rectangles (Fig. 2) at both ends of every preferred-direction wire and via pad whose end edge is shorter than the EOL width: pessimistic as in the paper ("always assume wires to have line-ends in preferred direction"). Jogs carry no extension (optimistic, as in the paper). Pins and blockages carry none (optimistic). Parallel-edge and LEF58 EOL variants are not modelled. |
 | Cut spacing | Largest cut spacing of the layer, edge to edge (a centre-to-centre rule is thereby modelled conservatively). Adjacent-cuts, parallel-overlap, cut-area and LEF58 cut spacing tables are not modelled. |
 | Inter-layer cut spacing (`SPACING ... LAYER`) | Projection of the cut onto the next higher via layer (Sec. 3.2); spacing = larger of the rules in both directions between the two cut layers; projections do not interact with each other. |
-| NDR spacing | Not modelled (NDR wire types carry widths and vias only); NDR nets remain skipped by BonnRouteDR as before. |
+| NDR spacing | `ShapeClass::ndr` names the NDR of a routed metal shape of an NDR net (wires and via pads of its wire type); the requirement to every other metal class is the maximum of the table value and the NDR spacing of either class, Euclidean, as drt's `checkMetalSpacing_prl` with NDRs. Pins, blockages, cuts and access paths (drt tapers NDR wires at pins) carry none. A class whose NDR spacing is at least `wideRatioPercent` of the narrowest spacing is wide (A2). NDR wire extensions and minimum cut counts are not modelled. |
 | Same-net rules (notch, short edge, min area, min step) | Not in the shape grid (diff-net only); Workstream B. |
 | Corner spacing, spacing-table influence, width tables, LEF58 metal spacing tables | Not modelled; left to the FlexDR clean-up (the paper also cleans up with an external router, Sec. 5.3). |
 
@@ -163,8 +164,16 @@ segment, so constant point levels on an edge imply its level.
 ## A4 Fast grid (Sec. 3.6)
 
 * Wiring-layer word: 12 bits per fast wire type (4 kinds × 3-bit level),
-  five wire types in bits 0–59; BonnRouteDR keeps wire type 0 (the default
-  rule) in it. Via-layer word (intervals along the lower layer's tracks over
+  five wire types in bits 0–59. *Choice of the fast wire types* (Sec. 3.6
+  "a restricted set of frequent wire types"): BonnRouteDR keeps the default
+  rule and, with `route_ndr_nets 1`, the NDRs used by the most nets, up to
+  `fast_wire_types` (at most 5), each by at least `fast_ndr_permille` (10)
+  per mille of the nets; other NDRs are answered by the distance rule
+  checker (`LegalityOracle`). A fast wire type costs its fields in every
+  fast-grid build and update over the whole chip: CTS's clock NDR on
+  2-12 nets of aes/tinyRocket_nangate45 as a second fast type added 3-15 s
+  to BonnRoute DR (E2E, `e2e/ndr/REPORT.md`), so such NDRs stay with the
+  checker. Via-layer word (intervals along the lower layer's tracks over
   its via positions): 6 bits per wire type (cut, projection).
 * *Choice for the edge bit*: bit 60 marks the preferred-direction edge to the
   next position and bit 61 the jog edge to the next track, both at the lower
@@ -337,8 +346,8 @@ segment, so constant point levels on an edge imply its level.
 * Two edge bits instead of one: they fit into the four spare bits and name
   the edge, so a set bit costs one checker query instead of one per incident
   edge.
-* Fast-grid wire types: only the default rule is fast; NDR nets are not routed
-  by BonnRouteDR (unchanged from before).
+* Fast-grid wire types: the default rule and the most frequent NDRs (A4);
+  NDR nets are routed only with `route_ndr_nets 1`.
 * Interval knowledge horizon of 128 cells and chunk borders bound interval
   lengths; queries stay O(window) instead of following empty rows arbitrarily
   far.
