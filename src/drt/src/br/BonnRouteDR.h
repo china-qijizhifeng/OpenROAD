@@ -161,6 +161,10 @@ struct BonnRouteDRParams
   // utilization (dbGCellGrid usage / capacity) is at most
   // spread_utilization percent. Selects the vertex search.
   bool spreading = true;
+  // After routing, replace "via up, a wire on the layer above, via down"
+  // (nothing else of the net on that wire) by a wrong-way wire on the lower
+  // layer when it is legal against other nets: two vias fewer.
+  bool collapse_bridges = true;
   // Also spread on layers whose wires must stay on tracks in the preferred
   // direction (unidirectional, LEF58 right-way-on-grid-only).
   bool spread_unidirectional = false;
@@ -761,6 +765,9 @@ class BonnRouteDR
   bool routedConflicts(const RShape& shape, int net) const;
   frCoord spacing(int z, frCoord width1, frCoord width2, frCoord prl) const;
   void writeNets();
+  // collapse_bridges: replace via up, one wire, via down by a wrong-way
+  // wire on the lower layer where that wire is legal. Returns the count.
+  int64_t collapseBridges();
 
   int tileX(frCoord x) const;
   int tileY(frCoord y) const;

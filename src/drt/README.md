@@ -136,6 +136,7 @@ set_bonnroute_dr_param name value
 | Name | Default | Meaning |
 | ----- | ----- | ----- |
 | `via_cost` | `4` | Via cost in pitches of the lower routing layer. |
+| `collapse_bridges` | `1` | After routing, replace a via up, one wire on the layer above and a via down (nothing else of the net on that wire) by a wrong-way wire on the lower layer when it is legal against other nets and the layer allows wrong-way wires: two vias fewer. |
 | `jog_factor` | `4` | Non-preferred direction wire cost multiplier. |
 | `ripup_cost` | `40` | Base rip-up penalty in pitches of the bottom routing layer. |
 | `max_ripups` | `3` | Maximum rip-ups per net. |

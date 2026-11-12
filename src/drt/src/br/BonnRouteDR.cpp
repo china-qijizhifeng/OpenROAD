@@ -198,6 +198,8 @@ bool BonnRouteDRParams::set(const std::string& name, const double value)
     spread_from_extra_space = v != 0;
   } else if (name == "spreading") {
     spreading = v != 0;
+  } else if (name == "collapse_bridges") {
+    collapse_bridges = v != 0;
   } else if (name == "spread_unidirectional") {
     spread_unidirectional = v != 0;
   } else if (name == "spread_cost") {
@@ -4277,6 +4279,128 @@ void BonnRouteDR::commitNet(NetData& net, Worker* local)
   net.routed = true;
 }
 
+int64_t BonnRouteDR::collapseBridges()
+{
+  // A bridge: vias a, b between the same layers L (below) and U (above) at
+  // points A != B on one line, joined by exactly one wire of the net on U
+  // from A to B, with nothing else of the net on U touching that wire (no
+  // other wire, via, patch or pin point). The vias and the U wire are
+  // replaced by a wire on L from A to B in L's non-preferred direction,
+  // when that wire is legal against all other nets (the distance rule
+  // checker, own shapes excluded) and L allows wrong-way wires.
+  auto on_segment
+      = [](const odb::Point& p, const odb::Point& a, const odb::Point& b) {
+          return p.x() >= std::min(a.x(), b.x())
+                 && p.x() <= std::max(a.x(), b.x())
+                 && p.y() >= std::min(a.y(), b.y())
+                 && p.y() <= std::max(a.y(), b.y())
+                 && (a.x() == b.x() ? p.x() == a.x() : p.y() == a.y());
+        };
+  auto segments_touch
+      = [&](const OutWire& w, const odb::Point& a, const odb::Point& b) {
+          // Axis-parallel segments: their bounding boxes intersect.
+          const odb::Rect s(w.begin, w.end);
+          const odb::Rect t(a, b);
+          return s.intersects(t);
+        };
+  int64_t collapsed = 0;
+  for (NetData& net : nets_) {
+    if (!net.routed || net.vias.size() < 2) {
+      continue;
+    }
+    bool changed = true;
+    while (changed) {
+      changed = false;
+      for (size_t ia = 0; ia < net.vias.size() && !changed; ia++) {
+        for (size_t ib = ia + 1; ib < net.vias.size() && !changed; ib++) {
+          const OutVia va = net.vias[ia];
+          const OutVia vb = net.vias[ib];
+          const frLayerNum lower = va.def->getLayer1Num();
+          const frLayerNum upper = va.def->getLayer2Num();
+          if (vb.def->getLayer1Num() != lower || vb.def->getLayer2Num() != upper
+              || va.point == vb.point
+              || (va.point.x() != vb.point.x()
+                  && va.point.y() != vb.point.y())) {
+            continue;
+          }
+          const int zl = lower >= 0 && lower < static_cast<int>(z_of_fr_.size())
+                             ? z_of_fr_[lower]
+                             : -1;
+          if (zl < 0 || onTracksOnly(lower)) {
+            continue;
+          }
+          const odb::Point A = va.point;
+          const odb::Point B = vb.point;
+          int bridge = -1;
+          bool clean = true;
+          for (size_t k = 0; k < net.wires.size() && clean; k++) {
+            const OutWire& w = net.wires[k];
+            if (w.layer != upper || !segments_touch(w, A, B)) {
+              continue;
+            }
+            const bool same = !w.patch
+                              && ((w.begin == A && w.end == B)
+                                  || (w.begin == B && w.end == A));
+            if (same && bridge < 0) {
+              bridge = static_cast<int>(k);
+            } else {
+              clean = false;
+            }
+          }
+          if (!clean || bridge < 0) {
+            continue;
+          }
+          for (size_t k = 0; k < net.vias.size() && clean; k++) {
+            if (k == ia || k == ib) {
+              continue;
+            }
+            const OutVia& v = net.vias[k];
+            if ((v.def->getLayer1Num() == upper
+                 || v.def->getLayer2Num() == upper)
+                && on_segment(v.point, A, B)) {
+              clean = false;
+            }
+          }
+          for (const auto& [layer, p] : net.pin_points) {
+            if (layer == upper && on_segment(p, A, B)) {
+              clean = false;
+            }
+          }
+          if (!clean) {
+            continue;
+          }
+          const OutWire jog{lower, A, B, false, net.wire_type};
+          const RShape jog_shape = wireShape(jog);
+          if (shapeConflicts(jog_shape, net.id, nullptr)) {
+            continue;
+          }
+          // Remove the bridge from the routing space, insert the jog.
+          std::vector<RShape> old;
+          old.push_back(wireShape(net.wires[bridge]));
+          viaShapes(va, old);
+          viaShapes(vb, old);
+          br::FastGridBuilder::PendingRemovals pending;
+          for (const RShape& s : old) {
+            changeShape(
+                s, routedType(s.role), net.id, false, nullptr, &pending);
+          }
+          fast_builder_.flush(pending);
+          changeShape(
+              jog_shape, routedType(jog_shape.role), net.id, true, nullptr);
+          net.wires.erase(net.wires.begin() + bridge);
+          net.wires.push_back(jog);
+          net.vias.erase(net.vias.begin() + ib);
+          net.vias.erase(net.vias.begin() + ia);
+          shapesOf(net, net.shapes);
+          collapsed++;
+          changed = true;
+        }
+      }
+    }
+  }
+  return collapsed;
+}
+
 void BonnRouteDR::ripupNet(NetData& net)
 {
   // One exact fast-grid recomputation for all shapes of the net.
@@ -5678,6 +5802,18 @@ void BonnRouteDR::main()
   // FlexDR handles unresolved nets unless serial rip-up is requested.
   if (params_.ripup) {
     routeRipupQueue(failed_first);
+  }
+  if (params_.collapse_bridges) {
+    const double start = timer.elapsed();
+    const int64_t collapsed = collapseBridges();
+    if (params_.verbose) {
+      logger_->report(
+          "BonnRoute DR bridges: {} collapsed into wrong-way wires ({} vias "
+          "fewer); {:.2f}s.",
+          collapsed,
+          2 * collapsed,
+          timer.elapsed() - start);
+    }
   }
   if (params_.verbose) {
     logger_->report("BonnRoute DR routing digest {:016x}.", routingDigest());
