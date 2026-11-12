@@ -93,8 +93,10 @@ void BonnRouteDRParams::applyProfile(const int which)
   }
   partitions = true;
   critical_nets = true;
-  // Sec. 3.2 / 5.1: NDR nets with their wire types (2013-reimpl, 2021).
-  route_ndr_nets = profile >= 1;
+  // Sec. 3.2 / 5.1: NDR nets with their wire types in every profile. Left
+  // to FlexDR, they are its largest clean-up (ibex: 17 clock nets) and, in
+  // incremental calls, need track assignment.
+  route_ndr_nets = true;
   component_regions = true;
   exact_future_cost = true;
   offtrack_access = true;
