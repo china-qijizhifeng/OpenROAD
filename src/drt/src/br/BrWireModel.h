@@ -336,6 +336,18 @@ bool shapesViolate(const ShapeClassTable& classes,
                    const PlacedShape& a,
                    const PlacedShape& b);
 
+// Which rule families two shapes violate (tests and reports): bit 0
+// spacing / overlap (requirement), bit 1 line-end extensions.
+// shapesViolate() == (mask != 0).
+enum ViolationBits : uint32_t
+{
+  kViolSpacing = 1u << 0,
+  kViolLineEnd = 1u << 1,
+};
+uint32_t violationMask(const ShapeClassTable& classes,
+                       const PlacedShape& a,
+                       const PlacedShape& b);
+
 // Sec. 3.2: "Wire and via models map one-dimensional abstractions of
 // wires, called stick figures, to the metal shapes induced by them [...]
 // encoded by an axis-parallel rectangle and a shape class." The metal of a

@@ -703,7 +703,6 @@ class BonnRouteDR
   // Distance rules, shape classes and wire types from the drt tech (Sec.
   // 3.1, 3.2), the shape grid (Sec. 3.3), checker (3.4) and fast grid (3.6).
   void buildRoutingSpace();
-  br::SpacingTable spacingTable(frLayer* layer) const;
   void rebuildFastGrid();
   // Shape-grid layer of a drt layer, or -1: track layers, their cuts, and
   // the pin layer and cut directly below the lowest track layer.

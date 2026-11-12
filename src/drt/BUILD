@@ -83,6 +83,7 @@ cc_library(
         "src/DesignCallBack.h",
         "src/br/BonnRouteDR.cpp",
         "src/br/BonnRouteDR.h",
+        "src/br/BrDrtRules.cpp",
         "src/TritonRoute.cpp",
         "src/db/drObj/drAccessPattern.cpp",
         "src/db/drObj/drNet.cpp",
@@ -158,6 +159,7 @@ cc_library(
     hdrs = [
         "include/drt/TritonRoute.h",
         "src/AbstractGraphicsFactory.h",
+        "src/br/BrDrtRules.h",
         "src/db/drObj/drAccessPattern.h",
         "src/db/drObj/drBlockObject.h",
         "src/db/drObj/drFig.h",

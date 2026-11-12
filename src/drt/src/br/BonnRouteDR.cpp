@@ -25,6 +25,7 @@
 
 #include "br/BrBlockageGrid.h"
 #include "br/BrCore.h"
+#include "br/BrDrtRules.h"
 #include "br/BrFixedShapes.h"
 #include "br/BrGeometry.h"
 #include "br/BrOffTrackSearch.h"
@@ -536,55 +537,6 @@ void BonnRouteDR::buildTrackGraph()
                   [this](br::Coord y) { return tileY(y); });
 }
 
-br::SpacingTable BonnRouteDR::spacingTable(frLayer* layer) const
-{
-  // Sec. 3.1: distances are nondecreasing functions of the widths and the
-  // common run-length. Sample drt's spacing lookup at every threshold t and
-  // t + 1 of its PRL table, two-widths table and range rules, so buckets
-  // agree with the lookup for strict and non-strict thresholds.
-  std::vector<br::Coord> widths;
-  std::vector<br::Coord> prls;
-  auto add = [](std::vector<br::Coord>& v, const frCoord t) {
-    if (t >= 0) {
-      v.push_back(t);
-      v.push_back(t + 1);
-    }
-  };
-  frConstraint* con = layer->getMinSpacing();
-  if (con != nullptr
-      && con->typeId() == frConstraintTypeEnum::frcSpacingTablePrlConstraint) {
-    auto table = static_cast<frSpacingTablePrlConstraint*>(con)->getLookupTbl();
-    for (const frCoord w : table.getRows()) {
-      add(widths, w);
-    }
-    for (const frCoord p : table.getCols()) {
-      add(prls, p);
-    }
-  }
-  odb::dbTechLayer* db_layer = layer->getDbLayer();
-  if (db_layer != nullptr && db_layer->hasTwoWidthsSpacingRules()) {
-    const uint32_t rows = db_layer->getTwoWidthsSpacingTableNumWidths();
-    for (uint32_t row = 0; row < rows; row++) {
-      add(widths,
-          static_cast<frCoord>(db_layer->getTwoWidthsSpacingTableWidth(row)));
-      if (db_layer->getTwoWidthsSpacingTableHasPRL(row)) {
-        add(prls,
-            static_cast<frCoord>(db_layer->getTwoWidthsSpacingTablePRL(row)));
-      }
-    }
-  }
-  if (layer->hasSpacingRangeConstraints()) {
-    for (const auto* range : layer->getSpacingRangeConstraints()) {
-      add(widths, range->getMinWidth());
-      add(widths, range->getMaxWidth());
-    }
-  }
-  return br::SpacingTable::sample(
-      widths, prls, [layer](br::Coord a, br::Coord b, br::Coord prl) {
-        return layer->getMinSpacingValue(a, b, prl, false);
-      });
-}
-
 void BonnRouteDR::buildRoutingSpace()
 {
   frTechObject* tech = design_->getTech();
@@ -593,35 +545,18 @@ void BonnRouteDR::buildRoutingSpace()
   std::vector<br::LayerRules> rules;
   for (int z = 0; z < num_z; z++) {
     const LayerInfo& info = layers_[z];
-    br::LayerRules wiring;
-    wiring.horizontal = info.horizontal;
-    wiring.spacing = spacingTable(info.layer);
-    // Line-end rule (Sec. 3.1), from drt's summary of the EOL rules.
-    const drEolSpacingConstraint& eol = info.layer->getDrEolSpacingConstraint();
-    wiring.line_end = {eol.eolWidth, eol.eolSpace, eol.eolWithin};
-    rules.push_back(wiring);
+    // Spacing and line-end rules (Sec. 3.1) from the drt tech (BrDrtRules).
+    rules.push_back(br::drtWiringRules(info.layer));
     if (z + 1 == num_z) {
       continue;
     }
-    br::LayerRules via;
-    via.via_layer = true;
-    via.horizontal = info.horizontal;
-    via.spacing = br::SpacingTable::constant(info.cut_spacing);
-    if (z > 0) {
-      // Inter-layer via rule with the cut layer below (Sec. 3.1, 3.2).
-      frLayer* cut = tech->getLayer(info.fr + 1);
-      frLayer* below = tech->getLayer(layers_[z - 1].fr + 1);
-      auto inter = [](frLayer* a, frLayer* b) -> frCoord {
-        const auto& cons = a->getInterLayerCutSpacingConstraint(false);
-        const frLayerNum n = b->getLayerNum();
-        if (n < 0 || n >= static_cast<int>(cons.size()) || cons[n] == nullptr) {
-          return 0;
-        }
-        return cons[n]->getCutSpacing();
-      };
-      via.projection_spacing = std::max(inter(cut, below), inter(below, cut));
-    }
-    rules.push_back(via);
+    // Cut spacing and the inter-layer via rule with the cut layer below
+    // (Sec. 3.1, 3.2).
+    rules.push_back(
+        br::drtViaRules(tech->getLayer(info.fr + 1),
+                        z > 0 ? tech->getLayer(layers_[z - 1].fr + 1) : nullptr,
+                        info.cut_spacing,
+                        info.horizontal));
   }
   // Wire types (Sec. 3.2): the default rule, then the NDRs by their number
   // of nets; the most frequent ones become fast wire types (Sec. 3.6).
@@ -670,20 +605,15 @@ void BonnRouteDR::buildRoutingSpace()
     frLayer* layer = tech->getLayer(fr);
     br::LayerRules low;
     if (fr == bottom - 2 && layer->getType() == odb::dbTechLayerType::ROUTING) {
-      low.horizontal = layer->isHorizontal();
-      low.spacing = spacingTable(layer);
-      const drEolSpacingConstraint& eol = layer->getDrEolSpacingConstraint();
-      low.line_end = {eol.eolWidth, eol.eolSpace, eol.eolWithin};
+      low = br::drtWiringRules(layer);
     } else if (fr == bottom - 1
                && layer->getType() == odb::dbTechLayerType::CUT) {
-      low.via_layer = true;
-      low.horizontal = layers_.front().horizontal;
       frCoord s = layer->hasCutSpacing() ? layer->getCutSpacingValue() : 0;
       if (s <= 0 && layer->getDefaultViaDef() != nullptr) {
         const frVia via(layer->getDefaultViaDef());
         s = via.getCutBBox().minDXDY();
       }
-      low.spacing = br::SpacingTable::constant(s);
+      low = br::drtViaRules(layer, nullptr, s, layers_.front().horizontal);
     } else {
       continue;
     }

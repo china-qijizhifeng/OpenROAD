@@ -378,6 +378,59 @@ bool shapesViolate(const ShapeClassTable& classes,
   return false;
 }
 
+uint32_t violationMask(const ShapeClassTable& classes,
+                       const PlacedShape& a,
+                       const PlacedShape& b)
+{
+  uint32_t mask = 0;
+  const Requirement req = classes.requirement(a.cls, b.cls);
+  Requirement spacing = req;
+  spacing.line_end = false;
+  // Spacing alone: the pairwise rule with the line-end rule switched off.
+  {
+    const Rect& r = a.rect;
+    const Rect& o = b.rect;
+    const int64_t ox
+        = static_cast<int64_t>(std::min(r.xhi, o.xhi)) - std::max(r.xlo, o.xlo);
+    const int64_t oy
+        = static_cast<int64_t>(std::min(r.yhi, o.yhi)) - std::max(r.ylo, o.ylo);
+    const int64_t gx = std::max<int64_t>({0,
+                                          static_cast<int64_t>(o.xlo) - r.xhi,
+                                          static_cast<int64_t>(r.xlo) - o.xhi});
+    const int64_t gy = std::max<int64_t>({0,
+                                          static_cast<int64_t>(o.ylo) - r.yhi,
+                                          static_cast<int64_t>(r.ylo) - o.yhi});
+    bool v = false;
+    if (ox > 0 && oy > 0) {
+      v = spacing.overlap;
+    } else if (ox > 0) {
+      v = gy < spacing.facing_y;
+    } else if (oy > 0) {
+      v = gx < spacing.facing_x;
+    } else {
+      v = gx * gx + gy * gy
+          < static_cast<int64_t>(spacing.diagonal) * spacing.diagonal;
+    }
+    if (v) {
+      mask |= kViolSpacing;
+    }
+  }
+  if (req.line_end) {
+    Rect ext[2];
+    bool v = false;
+    for (int k = lineEndExtensions(classes, a, ext) - 1; k >= 0; k--) {
+      v = v || ext[k].overlaps(b.rect);
+    }
+    for (int k = lineEndExtensions(classes, b, ext) - 1; k >= 0; k--) {
+      v = v || ext[k].overlaps(a.rect);
+    }
+    if (v) {
+      mask |= kViolLineEnd;
+    }
+  }
+  return mask;
+}
+
 WireType makeWireType(const WireTypeGeometry& geometry,
                       ShapeClassTable& classes)
 {

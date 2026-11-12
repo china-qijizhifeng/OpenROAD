@@ -279,6 +279,28 @@ py_library(
     for test_name in PY_TESTS
 ]
 
+cc_test(
+    name = "bonnroute_lef58_diff_test",
+    size = "medium",
+    srcs = [
+        "BonnRouteLef58DiffTest.cpp",
+        "fixture.cpp",
+        "fixture.h",
+    ],
+    includes = [
+        "../src",
+    ],
+    deps = [
+        "//src/drt:base_types",
+        "//src/drt:bonnroute_core",
+        "//src/drt:drt_impl",
+        "//src/odb/src/db",
+        "//src/utl",
+        "@googletest//:gtest",
+        "@googletest//:gtest_main",
+    ],
+)
+
 test_suite(
     name = "gc_test",
     tests = [":gc_unittest"],
