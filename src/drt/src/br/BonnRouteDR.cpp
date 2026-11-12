@@ -845,6 +845,7 @@ void BonnRouteDR::buildRoutingSpace()
   }
   int64_t need = 0;
   need_by_grid_layer_.assign(shape_classes_.numLayers(), 0);
+  narrow_need_by_grid_layer_.assign(shape_classes_.numLayers(), 0);
   for (int g = 0; g < shape_classes_.numLayers(); g++) {
     const bool low = g >= track_grid_layers_;
     const int z = low ? 0 : g / 2;
@@ -924,6 +925,9 @@ void BonnRouteDR::buildRoutingSpace()
     }
     need_by_grid_layer_[g] = int64_t{shape_classes_.ruleReach(g)} + model
                              + std::max(geom.cross_cell, geom.along_cell);
+    narrow_need_by_grid_layer_[g]
+        = int64_t{shape_classes_.narrowRuleReach(g)} + model
+          + std::max(geom.cross_cell, geom.along_cell);
     need = std::max(need, need_by_grid_layer_[g]);
   }
   shape_grid_.init(&shape_classes_,
@@ -962,6 +966,8 @@ void BonnRouteDR::buildRoutingSpace()
   // Per net halos follow in buildPartitionHalos(), once tau is known.
   area_halo_tiles_.assign(num_z, halo_tiles_);
   access_halo_tiles_.assign(num_z, halo_tiles_);
+  narrow_area_halo_tiles_.assign(num_z, halo_tiles_);
+  narrow_access_halo_tiles_.assign(num_z, halo_tiles_);
   // Search label budget: a label count, search_label_mb MiB of 32-byte
   // labels (the vertex-search label size when the budget was introduced;
   // the count is kept so that searches stop at the same label).
@@ -983,6 +989,7 @@ void BonnRouteDR::buildPartitionHalos()
   const int64_t radius
       = std::max(params_.offtrack_radius, params_.max_access_jog);
   int64_t reach = 0;
+  int64_t narrow_reach = 0;
   frCoord pitch = 0;
   int64_t tau = 0;
   for (int z = 0; z < num_z; z++) {
@@ -992,6 +999,13 @@ void BonnRouteDR::buildPartitionHalos()
     for (int g = 0; g < shape_classes_.numLayers(); g++) {
       if (g >= track_grid_layers_ || g <= 2 * z + 1) {
         reach = std::max(reach, need_by_grid_layer_[g]);
+        // The narrow distance holds where the fast grid's models are narrow
+        // (FastGridBuilder::modelReach); the low layers have no models.
+        const bool narrow_models
+            = g >= track_grid_layers_ || !fast_builder_.wideModels(g);
+        narrow_reach = std::max(narrow_reach,
+                                narrow_models ? narrow_need_by_grid_layer_[g]
+                                              : need_by_grid_layer_[g]);
       }
     }
     // Pitches of the jog pairs and edges the updates recompute: layer z and
@@ -1002,10 +1016,63 @@ void BonnRouteDR::buildPartitionHalos()
     // A shape change writes up to reach + one pitch beyond the shape and
     // reads up to 2 * reach + one pitch; a query reads up to reach.
     area_halo_tiles_[z] = tiles(2 * reach + pitch);
-    // Around a pin: its access paths lie within (radius + 1) pitches + 2 tau
-    // and are released like any shape; dynamic generation reads up to
-    // (radius + 3) pitches + 2 tau + reach.
-    access_halo_tiles_[z] = tiles((radius + 3) * pitch + 2 * tau + 2 * reach);
+    narrow_area_halo_tiles_[z] = tiles(2 * narrow_reach + pitch);
+    // Around a pin. Its access paths, also the dynamically generated ones,
+    // lie within (radius + 3) pitches + 2 tau of it (targets up to radius +
+    // 2 pitches, paths inside the window one pitch + 2 tau beyond them) and
+    // are committed and released like any shape: 2 * distance + pitch
+    // beyond them. Dynamic generation collects obstacles up to the layer's
+    // whole rule distance beyond that window (Legality::blockages).
+    const int64_t paths = (radius + 3) * pitch + 2 * tau;
+    access_halo_tiles_[z] = tiles(paths + 2 * reach + pitch);
+    narrow_access_halo_tiles_[z]
+        = tiles(std::max(paths + 2 * narrow_reach + pitch, paths + reach));
+  }
+}
+
+void BonnRouteDR::markWideNets()
+{
+  // Nets whose own shapes can be wide: nondefault wire types; pins and
+  // reservations (the overlay of the net's own shapes reads up to
+  // classReach() around a wide one); access path shapes, which a partition
+  // thread commits and releases.
+  const int threads = static_cast<int>(workers_.size());
+#pragma omp parallel for num_threads(threads) schedule(dynamic, 256)
+  for (int k = 0; k < static_cast<int>(nets_.size()); k++) {
+    NetData& net = nets_[k];
+    bool wide = net.wire_type != 0;
+    auto check = [&](const RShape& shape) {
+      const int g = gridLayer(shape.layer);
+      if (g < 0) {
+        return;
+      }
+      wide = wide || shape_classes_.wide(shapeClass(shape, g));
+      const int above = projectionLayer(g);
+      if (above >= 0) {
+        RShape projection = shape;
+        projection.role = br::ShapeRole::kCutProjection;
+        wide = wide || shape_classes_.wide(shapeClass(projection, above));
+      }
+    };
+    for (const RShape& pin : net.pins) {
+      check(pin);
+    }
+    for (const RShape& shape : net.input_reservation) {
+      check(shape);
+    }
+    std::vector<RShape> shapes;
+    for (const Term& term : net.terms) {
+      for (const RShape& shape : term.reservation) {
+        check(shape);
+      }
+      for (size_t o = 0; o < term.options.size() && !wide; o++) {
+        accessShapes(term.options[o], shapes);
+        for (const RShape& shape : shapes) {
+          check(shape);
+        }
+      }
+    }
+    net.wide_shapes = wide;
   }
 }
 
@@ -1127,6 +1194,11 @@ void BonnRouteDR::changeShape(const RShape& shape,
                         : shape_grid_.remove(layer, r, cls, type, owner, cache);
     if (!ok) {
       inconsistent_updates_++;
+    }
+    // Sec. 5.1: the halo of a net without wide shapes covers narrow classes.
+    if (local != nullptr && owner >= 0 && !nets_[owner].wide_shapes
+        && shape_classes_.wide(cls)) {
+      unexpected_wide_updates_++;
     }
     // Sec. 3.6: the fast grid follows every change of the shape grid of
     // the track layers and their cuts, incrementally.
@@ -4969,8 +5041,12 @@ int BonnRouteDR::netAccessTopLayer(const NetData& net) const
 
 int BonnRouteDR::netHaloTiles(const NetData& net) const
 {
-  return std::max(area_halo_tiles_[netTopLayer(net)],
-                  access_halo_tiles_[netAccessTopLayer(net)]);
+  const int top = netTopLayer(net);
+  const int access_top = netAccessTopLayer(net);
+  return net.wide_shapes ? std::max(area_halo_tiles_[top],
+                                    access_halo_tiles_[access_top])
+                         : std::max(narrow_area_halo_tiles_[top],
+                                    narrow_access_halo_tiles_[access_top]);
 }
 
 void BonnRouteDR::netTileBox(const NetData& net,
@@ -6729,6 +6805,7 @@ void BonnRouteDR::main()
   if (params_.reservations) {
     reserveInputWires();
   }
+  markWideNets();
   phases.input_wires = lap();
   const double setup_time = timer.elapsed();
   if (params_.verbose) {
@@ -6989,14 +7066,21 @@ void BonnRouteDR::main()
       nets_by_halo[halo]++;
     }
     std::string by_layer;
+    int64_t wide_nets = 0;
+    for (const NetData& net : nets_) {
+      wide_nets += !net.skip && net.wide_shapes;
+    }
     for (int z = 0; z < graph_.numLayers(); z++) {
       by_layer += fmt::format(
-          "{}{} area {} tiles ({} nets) access {} tiles ({} nets)",
+          "{}{} area {} (narrow {}) tiles ({} nets) access {} (narrow {}) "
+          "tiles ({} nets)",
           z == 0 ? "" : ", ",
           layers_[z].layer->getName(),
           area_halo_tiles_[z],
+          narrow_area_halo_tiles_[z],
           nets_by_top[z],
           access_halo_tiles_[z],
+          narrow_access_halo_tiles_[z],
           nets_by_access[z]);
     }
     std::string by_halo;
@@ -7005,10 +7089,23 @@ void BonnRouteDR::main()
         by_halo += fmt::format(" {}:{}", h, nets_by_halo[h]);
       }
     }
+    // narrowReach() grows with the classes interned during routing; the
+    // halos assume it stays within narrowRuleReach().
+    int reach_layers = 0;
+    for (int g = 0; g < shape_classes_.numLayers(); g++) {
+      reach_layers += shape_classes_.narrowReach(g)
+                      > shape_classes_.narrowRuleReach(g);
+    }
     logger_->report(
-        "BonnRoute DR partition halo by top layer: {}; nets by halo tiles{}.",
+        "BonnRoute DR partition halo by top layer: {}; nets by halo tiles{}; "
+        "{} nets with wide shapes use the rule distance; {} wide shape "
+        "updates for other nets by partition threads, {} layers whose "
+        "narrow class distance exceeds its rule bound.",
         by_layer,
-        by_halo);
+        by_halo,
+        wide_nets,
+        unexpected_wide_updates_.load(),
+        reach_layers);
     // Sec. 4.4 / 5.1: nets that left their guide area.
     int64_t dilated = 0;
     int64_t dilated_routed = 0;

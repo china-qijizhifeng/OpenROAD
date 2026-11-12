@@ -282,9 +282,18 @@ segment, so constant point levels on an edge imply its level.
   net can touch, those up to the cut layer above the top layer of its
   routing area (guides and access options plus `layer_dilation`) and the
   low layers, so the large distances of the upper layers enter only for
-  nets routed there; a second term covers the access paths around the pins
-  (reservation release, dynamic generation: `(radius + 3)` pitches
-  `+ 2 τ + 2 ·` distance of the layers up to the one above the pin).
+  nets routed there; a second term covers the access paths around the pins:
+  they lie within `(radius + 3)` pitches `+ 2 τ` of the pin and are
+  committed and released like any shape, and dynamic generation collects
+  obstacles up to the whole rule distance beyond that window.
+  For a net whose own shapes are narrow (default wire type; pins,
+  reservations and access path shapes of narrow classes, `markWideNets`)
+  the distance of a layer is taken from `narrowRuleReach`, the
+  largest rule distance between narrow classes, where the fast grid has no
+  wide model on the layer: its block and tile accesses extend by
+  `narrowReach`, and wide shapes (power straps, macro blockages) are read
+  from the locked wide-shape lists. `ruleReach`, which also covers the
+  spacing rows of wide shapes, remains the distance of the other nets.
   A net enters a region that contains the box of its guide area
   (`netAreaTileBox(net, 0)`: guides, access options and pins plus the
   halo). The larger areas are admitted at run time: before a thread

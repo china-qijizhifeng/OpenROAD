@@ -161,6 +161,22 @@ void shapeGridCases(std::mt19937& rng, const int cases)
       }
       expect(footprint.unitViolations() == 0, "no violation", c, k);
     }
+    // The halo derivation relies on the order of the three reaches for
+    // every set of interned classes.
+    for (int layer = 0; layer < classes.numLayers(); layer++) {
+      expect(classes.narrowReach(layer) <= classes.narrowRuleReach(layer),
+             "narrowReach <= narrowRuleReach",
+             c,
+             layer);
+      expect(classes.narrowRuleReach(layer) <= classes.ruleReach(layer),
+             "narrowRuleReach <= ruleReach",
+             c,
+             layer);
+      expect(classes.classReach(layer) <= classes.ruleReach(layer),
+             "classReach <= ruleReach",
+             c,
+             layer);
+    }
   }
 }
 
@@ -434,11 +450,41 @@ void violationCases(std::mt19937& rng)
   expect(footprint.records() == before, "no footprint: no record", 0, 8);
 }
 
+// The cut-to-projection rule of a via layer is a rule between narrow
+// classes: it enters narrowReach() once both classes exist, and
+// narrowRuleReach() from the start.
+void projectionReachCase()
+{
+  std::vector<LayerRules> rules(5);
+  for (int l = 0; l < 5; l++) {
+    rules[l].via_layer = (l % 2) == 1;
+    rules[l].horizontal = (l / 2) % 2 == 0;
+    rules[l].spacing = SpacingTable::constant(6);
+  }
+  rules[3].projection_spacing = 14;
+  ShapeClassTable classes;
+  classes.setLayers(rules);
+  expect(classes.narrowRuleReach(3) == 14 && classes.ruleReach(3) == 14,
+         "projection spacing in the rule reaches",
+         0,
+         0);
+  expect(classes.narrowRuleReach(1) == 6, "plain via layer", 0, 1);
+  classes.classify(3, {0, 0, 6, 6}, ShapeRole::kCut, 0);
+  expect(classes.narrowReach(3) == 6, "cuts alone", 0, 2);
+  classes.classify(3, {0, 0, 6, 6}, ShapeRole::kCutProjection, 0);
+  expect(classes.narrowReach(3) == 14, "cut and projection", 0, 3);
+  expect(classes.narrowReach(3) <= classes.narrowRuleReach(3),
+         "narrowReach <= narrowRuleReach",
+         0,
+         4);
+}
+
 }  // namespace
 
 int main()
 {
   std::mt19937 rng(20261113);
+  projectionReachCase();
   shapeGridCases(rng, 60);
   fastGridCases(rng, 60);
   violationCases(rng);

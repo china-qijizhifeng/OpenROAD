@@ -409,6 +409,10 @@ class BonnRouteDR
     // Sec. 4.4 / 5.1: the net's connections failed in the guide area; its
     // next attempt starts in the area dilated by retry_dilation.
     bool dilated_area = false;
+    // Sec. 5.1: the net has a nondefault wire type, or a pin, reservation
+    // or access path shape of a wide class; its updates and queries reach
+    // the layer's whole rule distance (buildPartitionHalos, markWideNets).
+    bool wide_shapes = false;
     int64_t hpwl = 0;
     // Wire type (Sec. 3.2): 0 = default rule, else the net's NDR.
     int wire_type = 0;
@@ -951,8 +955,13 @@ class BonnRouteDR
   // value for a routing area on all layers.
   int halo_tiles_ = 1;
   // Largest distance at which an update or query of a shape-grid layer
-  // reads or writes (rule reach, model, one cell), per layer.
+  // reads or writes (rule reach, model, one cell), per layer; and the same
+  // with the rule reach of the narrow classes, which holds for nets whose
+  // own shapes are all narrow on a layer without wide fast-grid models:
+  // their block and tile accesses use narrowReach(), wide shapes come from
+  // the locked wide-shape lists.
   std::vector<int64_t> need_by_grid_layer_;
+  std::vector<int64_t> narrow_need_by_grid_layer_;
   // The halo per net (buildPartitionHalos). area_halo_tiles_[z]: routing
   // area up to track layer z; such a net reads and writes the grid layers
   // up to the cut layer above z and the low layers, so the interaction
@@ -962,7 +971,16 @@ class BonnRouteDR
   // pins).
   std::vector<int> area_halo_tiles_;
   std::vector<int> access_halo_tiles_;
+  // The same tables for nets without wide shapes (NetData::wide_shapes).
+  std::vector<int> narrow_area_halo_tiles_;
+  std::vector<int> narrow_access_halo_tiles_;
+  // Routed shapes of a wide class inserted or removed by a partition thread
+  // for a net that was not marked wide_shapes (expected: none).
+  std::atomic<int64_t> unexpected_wide_updates_{0};
   void buildPartitionHalos();
+  // Sets NetData::wide_shapes from the net's wire type, pins, reservations
+  // and the shapes of its access options (end of setup).
+  void markWideNets();
   // Largest distance at which two shapes of the routing space interact
   // (any layer, incl. via-layer rules), plus one pitch.
   int64_t interaction_reach_ = 0;

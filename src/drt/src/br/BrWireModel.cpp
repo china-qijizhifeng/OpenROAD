@@ -158,6 +158,7 @@ void ShapeClassTable::setLayers(std::vector<LayerRules> layers)
   layers_ = std::move(layers);
   const size_t n = layers_.size();
   rule_reach_.clear();
+  narrow_rule_reach_.clear();
   wide_row_.clear();
   wide_ndr_.assign(n, {});
   class_reach_ = std::make_unique<std::atomic<Coord>[]>(n);
@@ -190,6 +191,29 @@ void ShapeClassTable::setLayers(std::vector<LayerRules> layers)
       }
     }
     wide_row_.push_back(row);
+    // Narrow classes: width rows below `row` (the largest value of row
+    // row - 1 bounds every pair of them), nondefault rules that are not
+    // wide, cuts and cut projections; line-end, cut class and side rules
+    // apply to them as to all classes.
+    Coord narrow = rules.projection_spacing;
+    if (t.numRows() > 0 && t.numColumns() > 0) {
+      narrow = std::max(narrow, t.at(row - 1, row - 1, last));
+    } else {
+      narrow = std::max(narrow, t.maxValue());
+    }
+    for (size_t k = 0; k < rules.ndr_spacing.size(); k++) {
+      if (!wide_ndr_[l][k]) {
+        narrow = std::max(narrow, rules.ndr_spacing[k]);
+      }
+    }
+    if (!rules.via_layer && rules.line_end.active()) {
+      narrow = std::max({narrow, rules.line_end.space, rules.line_end.within});
+    }
+    for (const Coord s : rules.cut_class_spacing) {
+      narrow = std::max(narrow, s);
+    }
+    narrow_rule_reach_.push_back(
+        std::max<Coord>(std::max(narrow, rules.sideReach()), 1));
   }
   index_.clear();
   classes_.clear();

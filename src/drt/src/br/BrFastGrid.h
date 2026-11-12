@@ -576,6 +576,14 @@ class FastGridBuilder final : public LegalityOracle
                         Kind kind,
                         int32_t ignored_owner) const;
 
+  // A fast wire type has a wide model class on this shape-grid layer: the
+  // updates and windows of the layer then reach classReach() instead of
+  // narrowReach().
+  bool wideModels(const int grid_layer) const
+  {
+    return wide_models_[grid_layer];
+  }
+
   struct UpdateStatistics
   {
     int64_t inserts = 0;
