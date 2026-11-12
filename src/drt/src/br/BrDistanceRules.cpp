@@ -194,8 +194,8 @@ void appendViolationSpans(const ShapeClassTable& classes,
                           std::vector<LineSpan>& out)
 {
   const Requirement req = classes.requirement(cls, piece.cls);
-  if (!req.overlap && !req.line_end && req.facing_x == 0 && req.facing_y == 0
-      && req.diagonal == 0) {
+  if (!req.overlap && !req.line_end && !req.sides && req.facing_x == 0
+      && req.facing_y == 0 && req.diagonal == 0) {
     return;
   }
   thread_local std::vector<Span> spans;
@@ -231,6 +231,22 @@ void appendViolationSpans(const ShapeClassTable& classes,
     const int piece_exts = lineEndExtensions(classes, piece, ext);
     for (int e = 0; e < piece_exts; e++) {
       appendOverlapSpan(m, x_line ? ext[e] : ext[e].transposed(), tmpl, spans);
+    }
+  }
+  if (req.sides) {
+    // Side and corner rules (Lef58Rules.md): the model's rectangles move
+    // with it, the piece's stay.
+    thread_local std::vector<SideTest> tests;
+    tests.clear();
+    appendSideTests(classes, placed, piece, tests);
+    for (const SideTest& t : tests) {
+      const Rect& r = t.from_a;
+      appendOverlapSpan(
+          x_line ? Rect{r.xlo - at.x, r.ylo, r.xhi - at.x, r.yhi}
+                 : Rect{r.xlo, r.ylo - at.y, r.xhi, r.yhi - at.y}.transposed(),
+          x_line ? t.from_b : t.from_b.transposed(),
+          tmpl,
+          spans);
     }
   }
   for (const Span& s : spans) {
@@ -437,7 +453,7 @@ void DistanceRuleChecker::check(const Point l,
         cached = {req_stamp, classes.requirement(m.cls, p.cls)};
       }
       const Requirement& req = cached.second;
-      if (!req.overlap && !req.line_end && req.facing_x == 0
+      if (!req.overlap && !req.line_end && !req.sides && req.facing_x == 0
           && req.facing_y == 0 && req.diagonal == 0) {
         continue;
       }
@@ -496,6 +512,31 @@ void DistanceRuleChecker::check(const Point l,
           }
           if (want_y) {
             appendOverlapSpan(my, r.transposed(), tmpl, scratch.ys);
+          }
+        }
+      }
+      if (req.sides) {
+        // Side and corner rules (Lef58Rules.md).
+        thread_local std::vector<SideTest> tests;
+        tests.clear();
+        appendSideTests(classes,
+                        placed,
+                        PlacedShape{p.rect, p.cls, p.line_end_ends},
+                        tests);
+        for (const SideTest& t : tests) {
+          const Rect& r = t.from_a;
+          if (want_x) {
+            appendOverlapSpan({r.xlo - l.x, r.ylo, r.xhi - l.x, r.yhi},
+                              t.from_b,
+                              tmpl,
+                              scratch.xs);
+          }
+          if (want_y) {
+            appendOverlapSpan(
+                Rect{r.xlo, r.ylo - l.y, r.xhi, r.yhi - l.y}.transposed(),
+                t.from_b.transposed(),
+                tmpl,
+                scratch.ys);
           }
         }
       }

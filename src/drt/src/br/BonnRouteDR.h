@@ -200,6 +200,15 @@ struct BonnRouteDRParams
   int access_track_weight = 1;
   int access_direction_weight = 1;
   int access_spread_weight = 1;
+  // LEF58 end-of-line spacing (ENDTOEND), EOLKEEPOUT, CORNERSPACING and
+  // cut class spacing tables in the routing space (Lef58Rules.md); 0 keeps
+  // drt's EOL summary as the line-end rule and the plain cut spacing.
+  bool lef58_rules = true;
+  // Same-net cut spacing and via pad rules between the vias of a net: the
+  // vertex search refuses a via whose cut or far pad violates them against
+  // the via that entered the layer, or whose cut violates them against the
+  // net's earlier cuts (Lef58Rules.md).
+  bool same_net_vias = true;
   // Same-net post-processing of each connection (Sec. 4.4).
   bool postprocess = true;
   // Fill the gap between two separated pieces of one net's metal (wires,

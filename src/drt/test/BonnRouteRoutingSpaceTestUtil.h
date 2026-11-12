@@ -25,8 +25,35 @@ inline int randomInt(std::mt19937& rng, int lo, int hi)
   return lo + static_cast<int>(rng() % static_cast<unsigned>(hi - lo + 1));
 }
 
+// Side rules (Lef58Rules.md): EOL widths, keep-out regions (whole and
+// corner form), facing and end-to-end rules, convex corner spacing.
+inline void randomSideRules(std::mt19937& rng, LayerRules& r, const Coord base)
+{
+  for (int k = randomInt(rng, 1, 3); k > 0; k--) {
+    r.eol_widths.push_back(randomInt(rng, 6, 36));
+  }
+  const int n = static_cast<int>(r.eol_widths.size());
+  for (int k = randomInt(rng, 0, 4); k > 0; k--) {
+    SideRule rule;
+    rule.kind = static_cast<SideRuleKind>(rng() % 4);
+    rule.eol = static_cast<uint8_t>(randomInt(rng, 0, n - 1));
+    rule.forward = randomInt(rng, 1, 2 * base);
+    if (rule.kind == SideRuleKind::kRegionOverlap
+        || rule.kind == SideRuleKind::kRegionCorner) {
+      rule.backward = rng() % 3 == 0 ? 0 : randomInt(rng, 1, 2 * base);
+    }
+    rule.side = rng() % 4 == 0 ? 0 : randomInt(rng, 1, base);
+    r.side_rules.push_back(rule);
+  }
+  if (rng() % 2 == 0) {
+    r.corner_spacing = randomInt(rng, 2, 2 * base);
+  }
+  r.wire_ends_covered = rng() % 2 == 0;
+}
+
 // Spacing rules with run-length and width dependent steps, thresholds of
-// both strict and non-strict kind, line-end rules and inter-layer via rules.
+// both strict and non-strict kind, line-end rules, inter-layer via rules,
+// side rules and cut class spacing tables (Lef58Rules.md).
 inline std::vector<LayerRules> randomRules(std::mt19937& rng,
                                            const int num_wiring_layers,
                                            const bool first_horizontal)
@@ -41,6 +68,24 @@ inline std::vector<LayerRules> randomRules(std::mt19937& rng,
       r.spacing = SpacingTable::constant(randomInt(rng, 6, 16));
       if (l >= 3 && rng() % 2 == 0) {
         r.projection_spacing = randomInt(rng, 4, 14);
+      }
+      if (rng() % 2 == 0) {
+        // Cut classes among the cut sizes of randomShape (4..12) and a
+        // symmetric spacing table; index 0 = no class (the DEFAULT).
+        for (int k = randomInt(rng, 1, 3); k > 0; k--) {
+          const Coord a = randomInt(rng, 4, 12);
+          const Coord b = randomInt(rng, 4, 12);
+          r.cut_classes.push_back({std::min(a, b), std::max(a, b)});
+        }
+        const size_t n = r.cut_classes.size() + 1;
+        r.cut_class_spacing.assign(n * n, 0);
+        for (size_t a = 0; a < n; a++) {
+          for (size_t b = a; b < n; b++) {
+            const Coord v = randomInt(rng, 0, 24);
+            r.cut_class_spacing[a * n + b] = v;
+            r.cut_class_spacing[b * n + a] = v;
+          }
+        }
       }
     } else {
       const Coord base = randomInt(rng, 6, 14);
@@ -68,6 +113,9 @@ inline std::vector<LayerRules> randomRules(std::mt19937& rng,
       for (int k = rng() % 3; k > 0; k--) {
         r.ndr_spacing.push_back(
             rng() % 4 == 0 ? 0 : randomInt(rng, base, 3 * base));
+      }
+      if (rng() % 2 == 0) {
+        randomSideRules(rng, r, base);
       }
     }
     rules.push_back(r);

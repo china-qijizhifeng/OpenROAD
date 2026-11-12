@@ -85,13 +85,22 @@ int64_t insertFixedShapes(
     for (const int k : band.items) {
       const FixedShapeInsert& in = inserts[band.layer][k];
       Rect r = in.rect;
+      // Sides clipped to the band are no sides of the shape (side rules,
+      // PlacedShape).
+      uint8_t ends = 3;
       if (!classes.wide(in.cls)) {
         Coord& lo = horizontal ? r.ylo : r.xlo;
         Coord& hi = horizontal ? r.yhi : r.xhi;
-        lo = std::max(lo, band.lo);
-        hi = std::min(hi, band.hi);
+        if (lo < band.lo) {
+          lo = band.lo;
+          ends |= cutSideBit(horizontal ? kSideYlo : kSideXlo);
+        }
+        if (hi > band.hi) {
+          hi = band.hi;
+          ends |= cutSideBit(horizontal ? kSideYhi : kSideXhi);
+        }
       }
-      if (!grid.insert(band.layer, r, in.cls, in.type, in.owner, cache)) {
+      if (!grid.insert(band.layer, r, in.cls, in.type, in.owner, cache, ends)) {
         failed[b].push_back(k);
       }
     }

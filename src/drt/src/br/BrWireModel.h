@@ -124,6 +124,47 @@ struct LineEndRule
   bool active() const { return max_edge > 0 && space > 0; }
 };
 
+// LEF58 rules that relate the sides and corners of two shapes
+// (Lef58Rules.md). Each is evaluated from one shape's end-of-line sides:
+// sides shorter than LayerRules::eol_widths[eol] (drt: an edge between two
+// convex corners shorter than the rule's EOL width).
+enum class SideRuleKind : uint8_t
+{
+  // EOLKEEPOUT: the other shape overlaps the keep-out region of the side
+  // (`forward` beyond it, `backward` behind it, `side` beyond its ends).
+  kRegionOverlap,
+  // EOLKEEPOUT CORNERONLY: a corner of the other shape lies strictly
+  // inside the keep-out region.
+  kRegionCorner,
+  // ENDOFLINE spacing: a side of the other shape facing the end-of-line
+  // side is closer than `forward` (and not touching it) and overlaps it
+  // laterally within `side`.
+  kFacing,
+  // ENDTOEND: as kFacing, but the facing side is an end-of-line side of the
+  // other shape (same EOL width); `side` = 2 * the ENDTOEND extension.
+  kFacingEol,
+};
+
+struct SideRule
+{
+  SideRuleKind kind = SideRuleKind::kRegionOverlap;
+  uint8_t eol = 0;  // index into LayerRules::eol_widths
+  Coord forward = 0;
+  Coord backward = 0;
+  Coord side = 0;
+  friend bool operator==(const SideRule&, const SideRule&) = default;
+};
+
+// LEF58 cut class of a via layer (width = the smaller cut extent).
+struct CutClassDims
+{
+  Coord width = 0;
+  Coord length = 0;
+  friend bool operator==(const CutClassDims&, const CutClassDims&) = default;
+};
+
+constexpr int kMaxEolWidths = 4;
+
 // Rules of one shape-grid layer.
 struct LayerRules
 {
@@ -149,6 +190,30 @@ struct LayerRules
                ? ndr_spacing[ndr - 1]
                : 0;
   }
+  // Wiring layer: side rules (LEF58 EOL spacing, ENDTOEND, EOLKEEPOUT) with
+  // their EOL widths (at most kMaxEolWidths), and the convex corner
+  // spacing of LEF58_CORNERSPACING (largest x / y gap of two facing convex
+  // corners, Chebyshev; 0: none). See Lef58Rules.md.
+  std::vector<Coord> eol_widths;
+  std::vector<SideRule> side_rules;
+  Coord corner_spacing = 0;
+  // Every routed preferred-direction wire ends inside a via pad of its wire
+  // type (the pads cover the wire's end square), so its ends are no polygon
+  // sides and its corners no polygon corners: the pads carry the side
+  // rules. Otherwise preferred wires carry them at their ends.
+  bool wire_ends_covered = false;
+  // Via layer: LEF58 cut classes and the cut spacing table between them
+  // ((n + 1)^2 entries, index 0 = no class, i.e. the table's DEFAULT),
+  // edge to edge (a centre-to-centre entry is modelled edge to edge,
+  // conservatively); the requirement is the max with `spacing`.
+  std::vector<CutClassDims> cut_classes;
+  std::vector<Coord> cut_class_spacing;
+  bool sideRules() const { return !side_rules.empty() || corner_spacing > 0; }
+  // 1 + index of the cut class of a dx x dy cut, 0 if none matches.
+  int cutClassOf(Coord dx, Coord dy) const;
+  Coord cutClassSpacing(int a, int b) const;
+  // Largest distance at which side or corner rules relate two shapes.
+  Coord sideReach() const;
   // Largest distance at which two shapes of this layer can violate a rule.
   Coord reach() const;
   // Smallest distance required between any two shapes of different nets on
@@ -186,6 +251,16 @@ struct ShapeClass
   // Nondefault rule of a routed metal shape (LayerRules::ndr_spacing); 0
   // for the default rule, pins, blockages and cuts.
   uint8_t ndr = 0;
+  // Cut: 1 + LEF58 cut class (LayerRules::cut_classes), 0 = none.
+  uint8_t cut_class = 0;
+  // Side rules: its sides (bit per kSide*) that are polygon sides; its
+  // rectangle corners between two such sides are polygon corners. A
+  // preferred wire whose ends lie inside via pads keeps its flanks only
+  // (LayerRules::wire_ends_covered).
+  uint8_t sides_real = 0;
+  // Side rules: per EOL width k, bits 4k..4k+3 = its sides (xlo, xhi, ylo,
+  // yhi) that are end-of-line sides (shorter than the width).
+  uint16_t eol_sides = 0;
   friend bool operator==(const ShapeClass&, const ShapeClass&) = default;
 };
 
@@ -219,6 +294,7 @@ struct Requirement
   Coord diagonal = 0;
   bool overlap = false;
   bool line_end = false;  // line-end rules apply between the two classes
+  bool sides = false;     // side or corner rules apply (sideViolation)
 };
 
 // Interned shape classes (thread-safe interning, lock-free reads).
@@ -316,12 +392,48 @@ class ShapeClassTable
 // ends along the preferred direction are real line-ends (bit 0: low end,
 // bit 1: high end); only meaningful for line-end classes. A shape stored in
 // pieces (shape grid cells) marks only the pieces at the shape's ends.
+// Bits 2-5 (cutSideBit) mark sides of the rectangle that are no sides of
+// the shape (a cell or clip border of a stored piece); they are kept on
+// layers with side rules only, where they tell which sides and corners
+// are real.
 struct PlacedShape
 {
   Rect rect;
   ClassId cls = 0;
   uint8_t line_end_ends = 3;
 };
+
+// Sides in the order of ShapeClass::eol_sides.
+constexpr int kSideXlo = 0;
+constexpr int kSideXhi = 1;
+constexpr int kSideYlo = 2;
+constexpr int kSideYhi = 3;
+constexpr uint8_t kCutSides = 0x3c;
+inline uint8_t cutSideBit(const int side)
+{
+  return static_cast<uint8_t>(4u << side);
+}
+
+// Side and corner rules of two shapes (Lef58Rules.md) as rectangle tests:
+// a and b violate them iff some pair (from_a, from_b) overlaps strictly
+// (Rect::overlaps; degenerate rectangles are points or segments). Each
+// rectangle depends on its own shape only, so the pairs also give the
+// placements of a moving shape that violate (BrDistanceRules). `rule` is
+// the ViolationBits bit of the rule.
+struct SideTest
+{
+  Rect from_a;
+  Rect from_b;
+  uint32_t rule = 0;
+};
+void appendSideTests(const ShapeClassTable& classes,
+                     const PlacedShape& a,
+                     const PlacedShape& b,
+                     std::vector<SideTest>& out);
+// Any side or corner rule violated.
+bool sideViolation(const ShapeClassTable& classes,
+                   const PlacedShape& a,
+                   const PlacedShape& b);
 
 // Line-end extension rectangles of a placed shape (Fig. 2, hatched): beyond
 // each marked end in preferred direction, `space` deep and `within` wider
@@ -336,13 +448,18 @@ bool shapesViolate(const ShapeClassTable& classes,
                    const PlacedShape& a,
                    const PlacedShape& b);
 
-// Which rule families two shapes violate (tests and reports): bit 0
-// spacing / overlap (requirement), bit 1 line-end extensions.
-// shapesViolate() == (mask != 0).
+// Which rule families two shapes violate (tests and reports): spacing /
+// overlap (requirement), line-end extensions, the side rule kinds and the
+// corner spacing. shapesViolate() == (mask != 0).
 enum ViolationBits : uint32_t
 {
   kViolSpacing = 1u << 0,
   kViolLineEnd = 1u << 1,
+  kViolRegionOverlap = 1u << 2,
+  kViolRegionCorner = 1u << 3,
+  kViolFacing = 1u << 4,
+  kViolFacingEol = 1u << 5,
+  kViolCorner = 1u << 6,
 };
 uint32_t violationMask(const ShapeClassTable& classes,
                        const PlacedShape& a,

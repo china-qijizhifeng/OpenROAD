@@ -378,6 +378,10 @@ class ShapeGrid
     std::vector<std::unique_ptr<Block>> blocks;
     // Wide shapes per tile chunk (row chunk * along_chunks + cell chunk).
     std::unique_ptr<WideList[]> wide;
+    // Pieces of full cells whose run may be reported as one rectangle:
+    // (line_end_ends & along_cut_mask) == along_cut_mask (side rules: both
+    // along sides are cell borders; otherwise no flags at all).
+    uint8_t along_cut_mask = 0;
   };
   // State of a run of cells (an interval, or a gap with value 0 and no
   // owner).

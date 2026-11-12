@@ -68,6 +68,20 @@ void addPieces(const ShapeGrid& grid,
             (a_lo >= cell_lo && a_lo < cell_lo + g.along_cell ? 1 : 0)
             | (a_hi > cell_lo && a_hi <= cell_lo + g.along_cell ? 2 : 0));
       }
+      if (grid.classes().layer(s.layer).sideRules()) {
+        // Sides at cell borders (or the grid border) are no shape sides.
+        const bool h = g.horizontal;
+        uint8_t cut = 0;
+        cut |= a_lo < cell_lo ? cutSideBit(h ? kSideXlo : kSideYlo) : 0;
+        cut |= a_hi > cell_lo + g.along_cell
+                   ? cutSideBit(h ? kSideXhi : kSideYhi)
+                   : 0;
+        cut |= c_lo < row_lo ? cutSideBit(h ? kSideYlo : kSideXlo) : 0;
+        cut |= c_hi > row_lo + g.cross_cell
+                   ? cutSideBit(h ? kSideYhi : kSideXhi)
+                   : 0;
+        p.line_end_ends |= cut;
+      }
       cells[{s.layer, r, c}].emplace_back(isOwned(s.type) ? s.owner : kNoNet,
                                           p);
     }
@@ -124,6 +138,15 @@ bool widePiece(const ShapeGrid& grid, const StoredShape& s, GridPiece& out)
   if (grid.classes().get(s.cls).line_end) {
     out.line_end_ends = static_cast<uint8_t>((a_lo >= ga_lo ? 1 : 0)
                                              | (a_hi <= ga_hi ? 2 : 0));
+  }
+  if (grid.classes().layer(s.layer).sideRules()) {
+    const bool h = g.horizontal;
+    uint8_t cut = 0;
+    cut |= a_lo < ga_lo ? cutSideBit(h ? kSideXlo : kSideYlo) : 0;
+    cut |= a_hi > ga_hi ? cutSideBit(h ? kSideXhi : kSideYhi) : 0;
+    cut |= c_lo < gc_lo ? cutSideBit(h ? kSideYlo : kSideXlo) : 0;
+    cut |= c_hi > gc_hi ? cutSideBit(h ? kSideYhi : kSideXhi) : 0;
+    out.line_end_ends |= cut;
   }
   return true;
 }

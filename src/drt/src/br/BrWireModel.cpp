@@ -82,6 +82,40 @@ Coord SpacingTable::minValue() const
   return values_.empty() ? 0 : *std::ranges::min_element(values_);
 }
 
+int LayerRules::cutClassOf(const Coord dx, const Coord dy) const
+{
+  const Coord w = std::min(dx, dy);
+  const Coord l = std::max(dx, dy);
+  // drt's frLayer::getCutClassIdx: the last class with these dimensions.
+  int found = 0;
+  for (size_t k = 0; k < cut_classes.size(); k++) {
+    if (cut_classes[k].width == w && cut_classes[k].length == l) {
+      found = static_cast<int>(k) + 1;
+    }
+  }
+  return found;
+}
+
+Coord LayerRules::cutClassSpacing(const int a, const int b) const
+{
+  const size_t n = cut_classes.size() + 1;
+  if (cut_class_spacing.size() != n * n) {
+    return 0;
+  }
+  return cut_class_spacing[static_cast<size_t>(a) * n + b];
+}
+
+Coord LayerRules::sideReach() const
+{
+  Coord r = corner_spacing;
+  for (const SideRule& rule : side_rules) {
+    r = std::max({r, rule.forward, rule.backward, rule.side});
+  }
+  // Regions of stored pieces reach one unit beyond a cut border (see
+  // appendSideTests).
+  return sideRules() ? r + 1 : 0;
+}
+
 Coord LayerRules::reach() const
 {
   Coord r = std::max(spacing.maxValue(), projection_spacing);
@@ -91,7 +125,10 @@ Coord LayerRules::reach() const
   if (!via_layer && line_end.active()) {
     r = std::max({r, line_end.space, line_end.within});
   }
-  return r;
+  for (const Coord s : cut_class_spacing) {
+    r = std::max(r, s);
+  }
+  return std::max(r, sideReach());
 }
 
 Coord LayerRules::minimumSpacing() const
@@ -108,6 +145,9 @@ size_t ShapeClassHash::operator()(const ShapeClass& c) const
   h = h * 257 + c.run_column_y;
   h = h * 2 + (c.line_end ? 1 : 0);
   h = h * 257 + c.ndr;
+  h = h * 257 + c.cut_class;
+  h = h * 17 + c.sides_real;
+  h = h * 65537 + c.eol_sides;
   return std::hash<uint64_t>()(h);
 }
 
@@ -165,6 +205,9 @@ Coord ShapeClassTable::distance(const ClassId a, const ClassId b) const
   }
   if (r.overlap) {
     d = std::max<Coord>(d, 1);
+  }
+  if (r.sides) {
+    d = std::max(d, layers_[get(a).layer].sideReach());
   }
   return d;
 }
@@ -235,6 +278,28 @@ ShapeClass ShapeClassTable::describe(const int layer,
   if (c.kind == ShapeClassKind::kMetal && rules.ndrSpacing(ndr) > 0) {
     c.ndr = static_cast<uint8_t>(ndr);
   }
+  if (c.kind == ShapeClassKind::kCut && !rules.cut_classes.empty()) {
+    c.cut_class = static_cast<uint8_t>(rules.cutClassOf(rect.dx(), rect.dy()));
+  }
+  if (c.kind == ShapeClassKind::kMetal && rules.sideRules()) {
+    // Lef58Rules.md: sides along the preferred direction run across it.
+    const uint8_t ends = rules.horizontal ? 0x3 : 0xc;
+    const bool wire = role == ShapeRole::kPreferredWire;
+    c.sides_real = wire && rules.wire_ends_covered
+                       ? static_cast<uint8_t>(0xf & ~ends)
+                       : uint8_t{0xf};
+    for (size_t k = 0; k < rules.eol_widths.size(); k++) {
+      const Coord w = rules.eol_widths[k];
+      // x sides (xlo, xhi) are dy long, y sides dx.
+      uint16_t bits = (rect.dy() < w ? 0x3 : 0) | (rect.dx() < w ? 0xc : 0);
+      if (wire) {
+        // A preferred wire's flanks are as long as the wire.
+        bits &= ends;
+      }
+      bits &= c.sides_real;
+      c.eol_sides |= static_cast<uint16_t>(bits << (4 * k));
+    }
+  }
   return c;
 }
 
@@ -269,6 +334,7 @@ Requirement ShapeClassTable::requirement(const ClassId a, const ClassId b) const
     r.diagonal = std::max(r.diagonal, ndr);
     r.overlap = true;
     r.line_end = rules.line_end.active();
+    r.sides = rules.sideRules() && (ca.sides_real != 0 || cb.sides_real != 0);
     return r;
   }
   if (metal_a || metal_b) {
@@ -277,7 +343,8 @@ Requirement ShapeClassTable::requirement(const ClassId a, const ClassId b) const
   const bool cut_a = ca.kind == ShapeClassKind::kCut;
   const bool cut_b = cb.kind == ShapeClassKind::kCut;
   if (cut_a && cut_b) {
-    const Coord s = t.at(ca.width_row, cb.width_row, 0);
+    const Coord s = std::max(t.at(ca.width_row, cb.width_row, 0),
+                             rules.cutClassSpacing(ca.cut_class, cb.cut_class));
     r.facing_x = r.facing_y = r.diagonal = s;
     r.overlap = true;
     return r;
@@ -328,11 +395,232 @@ int lineEndExtensions(const ShapeClassTable& classes,
   return n;
 }
 
+namespace {
+
+bool realSide(const ShapeClass& c, const PlacedShape& s, const int side)
+{
+  return ((c.sides_real >> side) & 1) != 0
+         && (s.line_end_ends & cutSideBit(side)) == 0;
+}
+
+Rect pointRect(const Coord x, const Coord y)
+{
+  return {x, y, x, y};
+}
+
+// Side `side` of r: position on the normal axis, outward direction and
+// lateral range.
+struct SideGeometry
+{
+  bool normal_x;
+  Coord pos;
+  int dir;
+  Coord lo;
+  Coord hi;
+};
+
+SideGeometry sideGeometry(const Rect& r, const int side)
+{
+  switch (side) {
+    case kSideXlo:
+      return {true, r.xlo, -1, r.ylo, r.yhi};
+    case kSideXhi:
+      return {true, r.xhi, 1, r.ylo, r.yhi};
+    case kSideYlo:
+      return {false, r.ylo, -1, r.xlo, r.xhi};
+    default:
+      return {false, r.yhi, 1, r.xlo, r.xhi};
+  }
+}
+
+Rect fromAxes(const bool normal_x,
+              const Coord n_lo,
+              const Coord n_hi,
+              const Coord l_lo,
+              const Coord l_hi)
+{
+  return normal_x ? Rect{n_lo, l_lo, n_hi, l_hi} : Rect{l_lo, n_lo, l_hi, n_hi};
+}
+
+}  // namespace
+
+void appendSideTests(const ShapeClassTable& classes,
+                     const PlacedShape& a,
+                     const PlacedShape& b,
+                     std::vector<SideTest>& out)
+{
+  const ShapeClass& ca = classes.get(a.cls);
+  const ShapeClass& cb = classes.get(b.cls);
+  if (ca.layer != cb.layer) {
+    return;
+  }
+  const LayerRules& rules = classes.layer(ca.layer);
+  for (int pass = 0; pass < 2; pass++) {
+    const PlacedShape& x = pass == 0 ? a : b;
+    const PlacedShape& y = pass == 0 ? b : a;
+    const ShapeClass& cx = pass == 0 ? ca : cb;
+    const ShapeClass& cy = pass == 0 ? cb : ca;
+    auto push
+        = [&](const Rect& from_x, const Rect& from_y, const uint32_t bit) {
+            if (pass == 0) {
+              out.push_back({from_x, from_y, bit});
+            } else {
+              out.push_back({from_y, from_x, bit});
+            }
+          };
+    for (const SideRule& rule : rules.side_rules) {
+      const int eol = (cx.eol_sides >> (4 * rule.eol)) & 0xf;
+      if (eol == 0) {
+        continue;
+      }
+      for (int s = 0; s < 4; s++) {
+        if (((eol >> s) & 1) == 0 || !realSide(cx, x, s)) {
+          continue;
+        }
+        const SideGeometry e = sideGeometry(x.rect, s);
+        // The lateral ends of a stored piece's side may be cell borders:
+        // the region then reaches one unit across, so that the regions of
+        // the pieces cover the open region of the whole side (a corner on
+        // the border lies strictly inside one of them).
+        const int lat_lo_side = e.normal_x ? kSideYlo : kSideXlo;
+        const int lat_hi_side = e.normal_x ? kSideYhi : kSideXhi;
+        const Coord lat_lo
+            = e.lo - ((x.line_end_ends & cutSideBit(lat_lo_side)) != 0 ? 1 : 0);
+        const Coord lat_hi
+            = e.hi + ((x.line_end_ends & cutSideBit(lat_hi_side)) != 0 ? 1 : 0);
+        switch (rule.kind) {
+          case SideRuleKind::kRegionOverlap:
+          case SideRuleKind::kRegionCorner: {
+            const Coord n_lo
+                = e.dir > 0 ? e.pos - rule.backward : e.pos - rule.forward;
+            const Coord n_hi
+                = e.dir > 0 ? e.pos + rule.forward : e.pos + rule.backward;
+            const Rect q = fromAxes(
+                e.normal_x, n_lo, n_hi, lat_lo - rule.side, lat_hi + rule.side);
+            if (rule.kind == SideRuleKind::kRegionOverlap) {
+              push(q, y.rect, kViolRegionOverlap);
+              break;
+            }
+            for (const int sx : {kSideXlo, kSideXhi}) {
+              for (const int sy : {kSideYlo, kSideYhi}) {
+                if (realSide(cy, y, sx) && realSide(cy, y, sy)) {
+                  push(q,
+                       pointRect(sx == kSideXlo ? y.rect.xlo : y.rect.xhi,
+                                 sy == kSideYlo ? y.rect.ylo : y.rect.yhi),
+                       kViolRegionCorner);
+                }
+              }
+            }
+            break;
+          }
+          case SideRuleKind::kFacing:
+          case SideRuleKind::kFacingEol: {
+            const int opposite = s ^ 1;
+            if (!realSide(cy, y, opposite)) {
+              break;
+            }
+            if (rule.kind == SideRuleKind::kFacingEol
+                && ((cy.eol_sides >> (4 * rule.eol + opposite)) & 1) == 0) {
+              break;
+            }
+            // Strictly in front of the side, closer than `forward`.
+            const Coord n_lo = e.dir > 0 ? e.pos : e.pos - rule.forward;
+            const Coord n_hi = e.dir > 0 ? e.pos + rule.forward : e.pos;
+            const Rect q = fromAxes(
+                e.normal_x, n_lo, n_hi, lat_lo - rule.side, lat_hi + rule.side);
+            const SideGeometry f = sideGeometry(y.rect, opposite);
+            push(q,
+                 fromAxes(f.normal_x, f.pos, f.pos, f.lo, f.hi),
+                 rule.kind == SideRuleKind::kFacing ? kViolFacing
+                                                    : kViolFacingEol);
+            break;
+          }
+        }
+      }
+    }
+  }
+  // LEF58_CORNERSPACING: a convex corner of a and the facing corner of b
+  // beyond it (b in its quadrant), both x and y gaps below the spacing.
+  const Coord cs = rules.corner_spacing;
+  if (cs <= 0) {
+    return;
+  }
+  for (const bool ox : {false, true}) {
+    for (const bool oy : {false, true}) {
+      const int ax = ox ? kSideXhi : kSideXlo;
+      const int ay = oy ? kSideYhi : kSideYlo;
+      if (!realSide(ca, a, ax) || !realSide(ca, a, ay)
+          || !realSide(cb, b, ax ^ 1) || !realSide(cb, b, ay ^ 1)) {
+        continue;
+      }
+      const Coord bx = ox ? b.rect.xlo : b.rect.xhi;
+      const Coord by = oy ? b.rect.ylo : b.rect.yhi;
+      // 0 <= gap < cs on both axes, as strict bounds of a's corner.
+      const Rect box{ox ? bx - cs : bx - 1,
+                     oy ? by - cs : by - 1,
+                     ox ? bx + 1 : bx + cs,
+                     oy ? by + 1 : by + cs};
+      out.push_back({pointRect(ox ? a.rect.xhi : a.rect.xlo,
+                               oy ? a.rect.yhi : a.rect.ylo),
+                     box,
+                     kViolCorner});
+    }
+  }
+}
+
+namespace {
+
+// L-infinity gap of two rectangles.
+int64_t gapOf(const Rect& r, const Rect& o)
+{
+  return std::max<int64_t>({0,
+                            static_cast<int64_t>(o.xlo) - r.xhi,
+                            static_cast<int64_t>(r.xlo) - o.xhi,
+                            static_cast<int64_t>(o.ylo) - r.yhi,
+                            static_cast<int64_t>(r.ylo) - o.yhi});
+}
+
+uint32_t sideMask(const ShapeClassTable& classes,
+                  const PlacedShape& a,
+                  const PlacedShape& b,
+                  const bool first_only)
+{
+  const LayerRules& rules = classes.layer(classes.get(a.cls).layer);
+  if (gapOf(a.rect, b.rect) >= rules.sideReach()) {
+    return 0;
+  }
+  thread_local std::vector<SideTest> tests;
+  tests.clear();
+  appendSideTests(classes, a, b, tests);
+  uint32_t mask = 0;
+  for (const SideTest& t : tests) {
+    if (t.from_a.overlaps(t.from_b)) {
+      mask |= t.rule;
+      if (first_only) {
+        break;
+      }
+    }
+  }
+  return mask;
+}
+
+}  // namespace
+
+bool sideViolation(const ShapeClassTable& classes,
+                   const PlacedShape& a,
+                   const PlacedShape& b)
+{
+  return sideMask(classes, a, b, true) != 0;
+}
+
 bool shapesViolate(const ShapeClassTable& classes,
                    const PlacedShape& a,
                    const PlacedShape& b)
 {
   const Requirement req = classes.requirement(a.cls, b.cls);
+  if (req.sides && sideViolation(classes, a, b)) {
+    return true;
+  }
   const Rect& r = a.rect;
   const Rect& o = b.rect;
   const int64_t ox
@@ -414,6 +702,9 @@ uint32_t violationMask(const ShapeClassTable& classes,
     if (v) {
       mask |= kViolSpacing;
     }
+  }
+  if (req.sides) {
+    mask |= sideMask(classes, a, b, false);
   }
   if (req.line_end) {
     Rect ext[2];

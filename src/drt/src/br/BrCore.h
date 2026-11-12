@@ -112,6 +112,26 @@ class FutureCostOracle
   virtual Cost query(int z, Coord x, Coord y) const = 0;
 };
 
+// Same-net rules between the vias of the searching net (Lef58Rules.md).
+// A via is given by its lower vertex (zv, i, j) on via layer zv (between
+// track layers zv and zv + 1). The vertex search refuses a via that
+// allowed() rejects (against the net's cuts outside the search) or that
+// pairAllowed() rejects together with the via by which the path entered
+// the current layer, when both are on via layer zv: the path turns back on
+// `turn_layer` (zv or zv + 1), and the pads of the two vias on the other
+// layer are not connected by it.
+class SameNetVias
+{
+ public:
+  virtual ~SameNetVias() = default;
+  virtual bool allowed(int zv, int i, int j) const = 0;
+  virtual bool pairAllowed(int zv, int i, int j, int i0, int j0, int turn_layer)
+      const = 0;
+  // The search looks for the entering via within this distance (DBU, in x
+  // and y) of the vertex.
+  Coord reach = 0;
+};
+
 // Preferred-direction edges (j, j + 1) for jlo <= j < jhi on track i of
 // layer z that the searching net may use at a discount (reservations of
 // its input wiring, arXiv:2111.06169 Sec. 5.2).
@@ -177,6 +197,8 @@ struct SearchRequest
   // such vertices are singletons and the cost enters the wire relaxations.
   const std::vector<std::vector<uint8_t>>* spread_tiles = nullptr;
   Cost spread_cost = 0;
+  // Same-net via rules (vertex search only; nullptr: none).
+  const SameNetVias* same_net_vias = nullptr;
 };
 
 struct SearchResult
@@ -426,6 +448,10 @@ class PathSearch
   Cost wireCost(int z, int i, int j, int j2) const;
   Cost spreadCost(int z, int i, int j) const;
   void settle(int z, int i, int j, Cost g);
+  // The via by which the path to the settled vertex (z, i, j) entered layer
+  // z, as via layer and lower vertex; false if the path starts on the layer
+  // or the via is farther than `reach` in x or y.
+  bool enteringVia(int z, int i, int j, Coord reach, At& via) const;
 
   const TrackGraph& graph_;
   const FastGrid& grid_;
@@ -559,7 +585,7 @@ class IntervalSearch
     Cost key;
     Cost max_future;
     int32_t interval;  // -1: sink (target reached), kPendingEvent
-    int32_t aux;  // frontier at enqueue time, target index, pending index
+    int32_t aux;       // frontier at enqueue time, target index, pending index
     bool operator>(const Event& o) const
     {
       if (key != o.key) {
@@ -610,9 +636,9 @@ class IntervalSearch
     kTransJogAbove = 2,
     kTransViaBelow = 4,
     kTransViaAbove = 8,
-    kTransPenalty = 16,  // an existing transition carries a rip-up penalty
-    kInfoWireLegal = 32,  // kWire
-    kInfoJogLegal = 64,   // kJog
+    kTransPenalty = 16,    // an existing transition carries a rip-up penalty
+    kInfoWireLegal = 32,   // kWire
+    kInfoJogLegal = 64,    // kJog
     kInfoEdgeLegal = 128,  // kWireEdge to position j + 1
     kInfoVias = 256,       // the via bits are computed
     kInfoSpread = 512,     // entering the vertex costs the spreading cost

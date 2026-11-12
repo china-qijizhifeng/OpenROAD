@@ -182,6 +182,48 @@ int classesAndRules(std::mt19937& rng)
       if (shapesViolate(classes, pa, PlacedShape{far, b.cls, 3})) {
         fails++;
       }
+      // Pieces (Lef58Rules.md): b cut into random pieces whose borders are
+      // marked as cut sides violates a exactly when some piece does.
+      if (classes.layer(a.layer).sideRules()) {
+        std::vector<Coord> xs{b.rect.xlo, b.rect.xhi};
+        std::vector<Coord> ys{b.rect.ylo, b.rect.yhi};
+        for (int k = randomInt(rng, 0, 3); k > 0; k--) {
+          if (b.rect.dx() > 1) {
+            xs.push_back(randomInt(rng, b.rect.xlo + 1, b.rect.xhi - 1));
+          }
+          if (b.rect.dy() > 1) {
+            ys.push_back(randomInt(rng, b.rect.ylo + 1, b.rect.yhi - 1));
+          }
+        }
+        std::ranges::sort(xs);
+        xs.erase(std::ranges::unique(xs).begin(), xs.end());
+        std::ranges::sort(ys);
+        ys.erase(std::ranges::unique(ys).begin(), ys.end());
+        bool any = false;
+        for (size_t ix = 0; ix + 1 < xs.size(); ix++) {
+          for (size_t iy = 0; iy + 1 < ys.size(); iy++) {
+            uint8_t ends = 3;
+            ends |= ix > 0 ? cutSideBit(kSideXlo) : 0;
+            ends |= ix + 2 < xs.size() ? cutSideBit(kSideXhi) : 0;
+            ends |= iy > 0 ? cutSideBit(kSideYlo) : 0;
+            ends |= iy + 2 < ys.size() ? cutSideBit(kSideYhi) : 0;
+            const PlacedShape piece{
+                {xs[ix], ys[iy], xs[ix + 1], ys[iy + 1]}, b.cls, ends};
+            const bool pv = sideViolation(classes, pa, piece);
+            if (pv != sideViolation(classes, piece, pa)) {
+              fails++;
+            }
+            any = any || pv;
+          }
+        }
+        if (any != sideViolation(classes, pa, pb)) {
+          if (fails++ < 5) {
+            std::printf("side rules: pieces %d whole %d\n",
+                        any,
+                        sideViolation(classes, pa, pb));
+          }
+        }
+      }
     }
     // Wire types.
     WireTypeGeometry g;

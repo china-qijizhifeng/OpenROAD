@@ -544,10 +544,83 @@ static int randomCases(const int cases,
 // coincide on both sides. Blockages and routed shapes are runs along the
 // tracks, so intervals get long, as on real designs.
 // extras: also wire spreading and oracle potentials (simple, general).
+// Same-net via rules (Lef58Rules.md) for the vertex search: random
+// refused vias and refused pairs closer than `block` in x and y.
+struct TestVias : SameNetVias
+{
+  const TrackGraph* g = nullptr;
+  std::set<std::tuple<int, int, int>> banned;
+  Coord block = 0;
+  bool allowed(const int zv, const int i, const int j) const override
+  {
+    return !banned.contains({zv, i, j});
+  }
+  bool pairAllowed(const int zv,
+                   const int i,
+                   const int j,
+                   const int i0,
+                   const int j0,
+                   const int turn_layer) const override
+  {
+    (void) turn_layer;
+    const auto [x, y] = g->layers[zv].point(i, j);
+    const auto [x0, y0] = g->layers[zv].point(i0, j0);
+    return std::abs(x - x0) > block || std::abs(y - y0) > block;
+  }
+};
+
+// A found path keeps the rules: every via allowed, and every via together
+// with the via that entered its layer (within `reach` in x and y of the
+// vertex it leaves from, walking back along the layer) allowed as a pair.
+static bool keepsSameNetVias(const TrackGraph& g,
+                             const SearchResult& r,
+                             const TestVias& vias)
+{
+  std::vector<size_t> p(r.path.rbegin(), r.path.rend());  // source first
+  for (size_t k = 0; k + 1 < p.size(); k++) {
+    int z, i, j, z2, i2, j2;
+    g.decode(p[k], z, i, j);
+    g.decode(p[k + 1], z2, i2, j2);
+    if (z == z2) {
+      continue;
+    }
+    const int zv = std::min(z, z2);
+    const int li = z < z2 ? i : i2;
+    const int lj = z < z2 ? j : j2;
+    if (!vias.allowed(zv, li, lj)) {
+      return false;
+    }
+    // The via that entered layer z.
+    const auto [x0, y0] = g.layers[z].point(i, j);
+    for (size_t b = k; b > 0; b--) {
+      int zb, ib, jb, za, ia, ja;
+      g.decode(p[b], zb, ib, jb);
+      g.decode(p[b - 1], za, ia, ja);
+      if (za != z) {
+        const int ev = std::min(za, zb);
+        if (ev == zv) {
+          const int ei = za < zb ? ia : ib;
+          const int ej = za < zb ? ja : jb;
+          if (!vias.pairAllowed(zv, li, lj, ei, ej, z)) {
+            return false;
+          }
+        }
+        break;
+      }
+      const auto [x, y] = g.layers[z].point(ia, ja);
+      if (std::abs(x - x0) > vias.reach || std::abs(y - y0) > vias.reach) {
+        break;
+      }
+    }
+  }
+  return true;
+}
+
 static int pitchCases(const int cases, const bool extras = false)
 {
   std::mt19937 rng(extras ? 4321 : 9876);
-  int64_t fails = 0, found = 0, pops[5] = {}, settled[5] = {};
+  int64_t fails = 0, found = 0, pops[5] = {}, settled[5] = {},
+          same_net_found = 0;
   for (int c = 0; c < cases; c++) {
     TrackGraph g;
     const int Z = 3 + rng() % 3;
@@ -568,8 +641,9 @@ static int pitchCases(const int cases, const bool extras = false)
       std::vector<Coord> pos;
       for (const int nz : {z - 1, z + 1}) {
         if (nz >= 0 && nz < Z) {
-          pos.insert(
-              pos.end(), g.layers[nz].tracks.begin(), g.layers[nz].tracks.end());
+          pos.insert(pos.end(),
+                     g.layers[nz].tracks.begin(),
+                     g.layers[nz].tracks.end());
         }
       }
       std::sort(pos.begin(), pos.end());
@@ -599,10 +673,11 @@ static int pitchCases(const int cases, const bool extras = false)
           for (int j = 0; j < l.numPositions();) {
             const int len = 1 + rng() % 24;
             const double x = u(rng);
-            const RipupLevel lv = x < p_fixed ? kNotRemovable
-                                  : x < p_fixed + p_routed
-                                      ? RipupLevel(1 + rng() % kMaxRemovableLevel)
-                                      : kLegal;
+            const RipupLevel lv
+                = x < p_fixed ? kNotRemovable
+                  : x < p_fixed + p_routed
+                      ? RipupLevel(1 + rng() % kMaxRemovableLevel)
+                      : kLegal;
             for (int jj = j; jj < std::min(l.numPositions(), j + len); jj++) {
               const size_t v = g.vertex(z, i, jj);
               if (lv != kLegal) {
@@ -611,7 +686,8 @@ static int pitchCases(const int cases, const bool extras = false)
                 }
               } else if (u(rng) < 0.04) {
                 // Isolated via obstructions (cuts of other nets).
-                f.setLevel(v, rng() % 2 ? kCutUp : kViaDownPad, t, kNotRemovable);
+                f.setLevel(
+                    v, rng() % 2 ? kCutUp : kViaDownPad, t, kNotRemovable);
               }
             }
             j += len;
@@ -746,6 +822,30 @@ static int pitchCases(const int cases, const bool extras = false)
       pops[m] += r[m].heap_pops;
       settled[m] += r[m].settled;
     }
+    // Same-net via rules: paths keep them and cost at least the optimum;
+    // with nothing refused the result is unchanged.
+    {
+      TestVias vias;
+      vias.g = &g;
+      vias.reach = 120;
+      q.same_net_vias = &vias;
+      const SearchResult open = ps.run(q);
+      ok &= open.found == r[2].found && (!open.found || open.cost == r[2].cost);
+      vias.block = 20 + rng() % 80;
+      for (int k = rng() % 40; k > 0; k--) {
+        int z, i, j;
+        g.decode(rng() % g.numVertices(), z, i, j);
+        if (z + 1 < Z) {
+          vias.banned.insert({z, i, j});
+        }
+      }
+      const SearchResult rs = ps.run(q);
+      q.same_net_vias = nullptr;
+      ok &= !rs.found
+            || (validPath(rs, q) && ref.pathCost(rs) == rs.cost && rs.cost >= rc
+                && keepsSameNetVias(g, rs, vias));
+      same_net_found += rs.found;
+    }
     found += r[2].found;
     if (!ok && fails++ < 10) {
       printf(
@@ -763,7 +863,8 @@ static int pitchCases(const int cases, const bool extras = false)
   printf(
       "pitch cases%s %d found %lld fails %lld | heap pops interval %lld / "
       "without via property %lld / nearest first %lld / %lld / vertex %lld | "
-      "settled %lld / %lld / %lld / %lld / %lld\n",
+      "settled %lld / %lld / %lld / %lld / %lld | same-net vias found "
+      "%lld\n",
       extras ? " (spreading, potentials)" : "",
       cases,
       (long long) found,
@@ -777,7 +878,8 @@ static int pitchCases(const int cases, const bool extras = false)
       (long long) settled[1],
       (long long) settled[4],
       (long long) settled[3],
-      (long long) settled[2]);
+      (long long) settled[2],
+      (long long) same_net_found);
   return fails != 0;
 }
 
@@ -1103,7 +1205,8 @@ int main()
          || randomCases(400, false, true) || randomCases(400, true, true)
          || randomCases(300, false, true, 1) || randomCases(300, true, true, 2)
          || randomCases(300, false, true, 3) || randomCases(300, true, true, 3)
-         || randomCases(300, false, false, 3) || randomCases(300, true, false, 1)
+         || randomCases(300, false, false, 3)
+         || randomCases(300, true, false, 1)
          || randomCases(300, false, false, 2)
          || randomCases(400, false, false, 0, true)
          || randomCases(400, true, false, 0, true)

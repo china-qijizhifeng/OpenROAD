@@ -7,6 +7,9 @@
 
 #pragma once
 
+#include <vector>
+
+#include "br/BrGeometry.h"
 #include "br/BrWireModel.h"
 #include "db/tech/frLayer.h"
 #include "frBaseTypes.h"
@@ -21,15 +24,25 @@ SpacingTable drtSpacingTable(frLayer* layer);
 
 // Rules of a routing layer: spacing table and the line-end rule from drt's
 // summary of the EOL rules (frLayer::getDrEolSpacingConstraint, filled by
-// FlexRP).
-LayerRules drtWiringRules(frLayer* layer);
+// FlexRP). With `lef58`, a layer with LEF58 end-of-line spacing,
+// EOLKEEPOUT or CORNERSPACING rules gets side rules and the corner spacing
+// instead of the summary line-end rule (Lef58Rules.md);
+// LayerRules::wire_ends_covered is left to the caller.
+LayerRules drtWiringRules(frLayer* layer, bool lef58);
 
 // Rules of a cut layer: `cut_spacing` between its cuts, the inter-layer
 // via rule with the cut layer `below` (nullptr: none), `horizontal` = the
-// direction of the wiring layer below.
+// direction of the wiring layer below. With `lef58`, also the cut classes
+// and the LEF58 cut spacing table between cuts of different nets.
 LayerRules drtViaRules(frLayer* cut,
                        frLayer* below,
                        frCoord cut_spacing,
-                       bool horizontal);
+                       bool horizontal,
+                       bool lef58);
+
+// LayerRules::wire_ends_covered of a wiring layer: the square end of a
+// wire of `width` lies inside every via pad (rectangles relative to the
+// via point) that can end a preferred wire there.
+bool padsCoverWireEnd(Coord width, const std::vector<Rect>& pads);
 
 }  // namespace drt::br

@@ -106,6 +106,13 @@ void ShapeGrid::init(const ShapeClassTable* classes,
     Layer& layer = layers_[l];
     layer.geom = layers[l];
     const ShapeGridLayerGeometry& g = layer.geom;
+    layer.along_cut_mask
+        = static_cast<int>(l) < classes->numLayers()
+                  && classes->layer(static_cast<int>(l)).sideRules()
+              ? static_cast<uint8_t>(
+                    g.horizontal ? cutSideBit(kSideXlo) | cutSideBit(kSideXhi)
+                                 : cutSideBit(kSideYlo) | cutSideBit(kSideYhi))
+              : uint8_t{0};
     const ChunkAxis& along = g.horizontal ? x_chunks : y_chunks;
     const ChunkAxis& cross = g.horizontal ? y_chunks : x_chunks;
     layer.along_chunks = along.count;
@@ -591,12 +598,31 @@ bool ShapeGrid::apply(const int layer_index,
   const bool line_end = classes_->get(cls).line_end;
   const bool low_end = line_end && (line_end_ends & 1) && c0 == c0_raw;
   const bool high_end = line_end && (line_end_ends & 2) && c1 == c1_raw;
+  // Side rules (Lef58Rules.md): pieces mark their sides that are cell or
+  // clip borders, not sides of the shape (PlacedShape); the caller marks
+  // sides that are clip borders of its rectangle.
+  const bool sides = classes_->layer(layer_index).sideRules();
+  const uint8_t clipped = sides ? (line_end_ends & kCutSides) : 0;
+  const int along_lo_side = g.horizontal ? kSideXlo : kSideYlo;
+  const int along_hi_side = g.horizontal ? kSideXhi : kSideYhi;
+  const int cross_lo_side = g.horizontal ? kSideYlo : kSideXlo;
+  const int cross_hi_side = g.horizontal ? kSideYhi : kSideXhi;
   bool ok = true;
   for (int r = r0; r <= r1 && (ok || !dry_run); r++) {
     const Coord row_lo
         = static_cast<Coord>(g.cross_origin + int64_t(r) * g.cross_cell);
     const Coord pc_lo = std::max(c_lo, row_lo) - row_lo;
     const Coord pc_hi = std::min(c_hi, row_lo + g.cross_cell) - row_lo;
+    uint8_t row_cut
+        = clipped & (cutSideBit(along_lo_side) | cutSideBit(along_hi_side));
+    if (sides) {
+      if (r != r0_raw || (clipped & cutSideBit(cross_lo_side)) != 0) {
+        row_cut |= cutSideBit(cross_lo_side);
+      }
+      if (r != r1_raw || (clipped & cutSideBit(cross_hi_side)) != 0) {
+        row_cut |= cutSideBit(cross_hi_side);
+      }
+    }
     auto run = [&](int first, int last) {
       if (first > last) {
         return;
@@ -619,8 +645,16 @@ bool ShapeGrid::apply(const int layer_index,
       }
       piece.cls = cls;
       piece.type = type;
-      piece.line_end_ends = static_cast<uint8_t>(
-          (low_end && first == c0 ? 1 : 0) | (high_end && last == c1 ? 2 : 0));
+      uint8_t cut = row_cut;
+      if (sides && (first != c0 || c0 != c0_raw)) {
+        cut |= cutSideBit(along_lo_side);
+      }
+      if (sides && (last != c1 || c1 != c1_raw)) {
+        cut |= cutSideBit(along_hi_side);
+      }
+      piece.line_end_ends
+          = static_cast<uint8_t>((low_end && first == c0 ? 1 : 0)
+                                 | (high_end && last == c1 ? 2 : 0) | cut);
       for (int begin = first; begin <= last;) {
         const int chunk = layer.cell_chunk[begin];
         const int end = std::min(last, layer.chunk_first_cell[chunk + 1] - 1);
@@ -680,6 +714,19 @@ bool ShapeGrid::updateWide(const int layer_index,
     p.line_end_ends = static_cast<uint8_t>(
         ((line_end_ends & 1) != 0 && a_lo >= ga_lo ? 1 : 0)
         | ((line_end_ends & 2) != 0 && a_hi <= ga_hi ? 2 : 0));
+  }
+  if (classes_->layer(layer_index).sideRules()) {
+    // Sides clipped here or by the caller are no sides of the shape.
+    uint8_t cut = line_end_ends & kCutSides;
+    const int along_lo_side = g.horizontal ? kSideXlo : kSideYlo;
+    const int along_hi_side = g.horizontal ? kSideXhi : kSideYhi;
+    const int cross_lo_side = g.horizontal ? kSideYlo : kSideXlo;
+    const int cross_hi_side = g.horizontal ? kSideYhi : kSideXhi;
+    cut |= a_lo < ga_lo ? cutSideBit(along_lo_side) : 0;
+    cut |= a_hi > ga_hi ? cutSideBit(along_hi_side) : 0;
+    cut |= c_lo < gc_lo ? cutSideBit(cross_lo_side) : 0;
+    cut |= c_hi > gc_hi ? cutSideBit(cross_hi_side) : 0;
+    p.line_end_ends |= cut;
   }
   const auto cell0 = floorDivide(pa_lo - ga_lo, g.along_cell);
   const auto cell1 = floorDivide(pa_hi - 1 - ga_lo, g.along_cell);
@@ -821,7 +868,8 @@ void ShapeGrid::emitPieces(const Layer& layer,
       p.owner = piece_owner;
       out.pieces.push_back(p);
     };
-    if (pa_lo == 0 && pa_hi == g.along_cell && s.line_end_ends == 0) {
+    if (pa_lo == 0 && pa_hi == g.along_cell && (s.line_end_ends & 3) == 0
+        && (s.line_end_ends & layer.along_cut_mask) == layer.along_cut_mask) {
       // The piece spans its cells: one rectangle for the whole run.
       push(cell_lo(cb), cell_lo(ce) + g.along_cell);
       continue;
@@ -987,9 +1035,11 @@ void ShapeGrid::collectWide(const Layer& layer,
         0,
         g.cross_cells - 1));
   };
-  const int k0 = layer.cell_chunk[cellOf(area.xlo)];
+  // A shape is listed in the chunks of its cells (half open): one ending
+  // exactly at area.xlo / area.ylo is listed in the chunk of the cell before.
+  const int k0 = layer.cell_chunk[cellOf(area.xlo - 1)];
   const int k1 = layer.cell_chunk[cellOf(area.xhi)];
-  const int q0 = layer.row_chunk[rowOf(area.ylo)];
+  const int q0 = layer.row_chunk[rowOf(area.ylo - 1)];
   const int q1 = layer.row_chunk[rowOf(area.yhi)];
   for (int q = q0; q <= q1; q++) {
     for (int k = k0; k <= k1; k++) {

@@ -453,22 +453,34 @@ struct Lef58DiffFixture : public Fixture
     }
   }
 
-  // BonnRoute rules of fr layers 2 (m1) .. 12 (m6) at index fr - 2.
+  // BonnRoute rules of fr layers 2 (m1) .. 12 (m6) at index fr - 2, as
+  // BonnRouteDR::buildRoutingSpace builds them (BR_DIFF_LEF58=0: without
+  // the LEF58 model, the routing space before it).
   void buildRoutingSpace()
   {
+    const char* env = std::getenv("BR_DIFF_LEF58");
+    const bool lef58 = env == nullptr || std::atoi(env) != 0;
     std::vector<br::LayerRules> rules;
     for (frLayerNum l = 2; l <= 12; l++) {
       frLayer* fl = layer(l);
       if (fl->getType() == dbTechLayerType::ROUTING) {
-        rules.push_back(br::drtWiringRules(fl));
+        rules.push_back(br::drtWiringRules(fl, lef58));
+        if (rules.back().sideRules() && l > 2) {
+          std::vector<br::Rect> pads;
+          for (const odb::Rect& p : padsOn(l)) {
+            pads.push_back({p.xMin(), p.yMin(), p.xMax(), p.yMax()});
+          }
+          rules.back().wire_ends_covered
+              = br::padsCoverWireEnd(fl->getWidth(), pads);
+        }
       } else {
         const frVia v(vias_[l]);
         frCoord s = fl->hasCutSpacing() ? fl->getCutSpacingValue() : 0;
         if (s <= 0) {
           s = v.getCutBBox().minDXDY();
         }
-        rules.push_back(
-            br::drtViaRules(fl, nullptr, s, layer(l - 1)->isHorizontal()));
+        rules.push_back(br::drtViaRules(
+            fl, nullptr, s, layer(l - 1)->isHorizontal(), lef58));
       }
     }
     classes_.setLayers(rules);

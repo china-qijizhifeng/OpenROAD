@@ -35,16 +35,13 @@ void TargetBoxBound::setup(const SearchRequest& request,
       Cost via = 0;
       const int iz = static_cast<int>(z);
       if (iz < box.zlo) {
-        via = request.exact_future_cost
-                  ? via_prefix[box.zlo] - via_prefix[iz]
-                  : (box.zlo - iz) * min_via_cost;
+        via = request.exact_future_cost ? via_prefix[box.zlo] - via_prefix[iz]
+                                        : (box.zlo - iz) * min_via_cost;
       } else if (iz > box.zhi) {
-        via = request.exact_future_cost
-                  ? via_prefix[iz] - via_prefix[box.zhi]
-                  : (iz - box.zhi) * min_via_cost;
+        via = request.exact_future_cost ? via_prefix[iz] - via_prefix[box.zhi]
+                                        : (iz - box.zhi) * min_via_cost;
       }
-      constant_[z * n + b]
-          = via + (request.exact_future_cost ? box.cost : 0);
+      constant_[z * n + b] = via + (request.exact_future_cost ? box.cost : 0);
     }
   }
 }
@@ -179,14 +176,52 @@ bool PathSearch::relax(const int z,
   label.dist = g;
   label.parent = parent;
   const auto [x, y] = graph_.layers[z].point(i, j);
-  push(Item{g + futureCost(z, x, y),
-            g,
-            i,
-            j,
-            0,
-            static_cast<int8_t>(z),
-            dir});
+  push(Item{g + futureCost(z, x, y), g, i, j, 0, static_cast<int8_t>(z), dir});
   return true;
+}
+
+bool PathSearch::enteringVia(const int z,
+                             const int i,
+                             const int j,
+                             const Coord reach,
+                             At& via) const
+{
+  const TrackLayer& layer = graph_.layers[z];
+  const auto [x0, y0] = layer.point(i, j);
+  int ci = i;
+  int cj = j;
+  while (true) {
+    size_t li = 0;
+    if (!local(z, ci, cj, li)) {
+      return false;
+    }
+    switch (static_cast<Parent>(labels_[li].parent)) {
+      case kSource:
+        return false;
+      case kFromLower:
+        cj--;
+        break;
+      case kFromHigher:
+        cj++;
+        break;
+      case kFromTrackBelow:
+        ci--;
+        break;
+      case kFromTrackAbove:
+        ci++;
+        break;
+      case kFromLayerBelow:
+        via = {z - 1, layer.down_track[cj], layer.down_pos[ci]};
+        return true;
+      case kFromLayerAbove:
+        via = {z, ci, cj};
+        return true;
+    }
+    const auto [x, y] = layer.point(ci, cj);
+    if (std::abs(x - x0) > reach || std::abs(y - y0) > reach) {
+      return false;
+    }
+  }
 }
 
 void PathSearch::settle(const int z, const int i, const int j, const Cost g)
@@ -206,8 +241,7 @@ void PathSearch::settle(const int z, const int i, const int j, const Cost g)
   const At av{z, i, j};
   // Jogs (non-preferred direction, adjacent tracks).
   RipupLevel jog_level = kLegal;
-  if (layer.jogs
-      && (is_source || usable(jog_level = level(av, kJog)))) {
+  if (layer.jogs && (is_source || usable(jog_level = level(av, kJog)))) {
     const Cost own = is_source ? 0 : penalty(av, jog_level);
     for (const int di : {-1, 1}) {
       const int i2 = i + di;
@@ -231,12 +265,23 @@ void PathSearch::settle(const int z, const int i, const int j, const Cost g)
       relax(z, i2, j, g + c, di > 0 ? kFromTrackBelow : kFromTrackAbove, 0);
     }
   }
+  // Same-net via rules: the via that entered this layer.
+  const SameNetVias* same_net = req_->same_net_vias;
+  At entered{-1, 0, 0};
+  if (same_net != nullptr && !is_source) {
+    enteringVia(z, i, j, same_net->reach, entered);
+  }
   // Via up.
   if (z + 1 < graph_.numLayers()) {
     const int i2 = layer.up_track[j];
     const int j2 = layer.up_pos[i];
     if (i2 >= 0 && j2 >= 0
-        && region.contains(graph_.layers[z + 1], z + 1, i2, j2)) {
+        && region.contains(graph_.layers[z + 1], z + 1, i2, j2)
+        && (same_net == nullptr
+            || (same_net->allowed(z, i, j)
+                && (entered.z != z
+                    || same_net->pairAllowed(
+                        z, i, j, entered.i, entered.j, z))))) {
       const At aw{z + 1, i2, j2};
       const RipupLevel pad = level(av, kViaUpPad);
       if (usable(pad)) {
@@ -257,7 +302,12 @@ void PathSearch::settle(const int z, const int i, const int j, const Cost g)
     const int i2 = layer.down_track[j];
     const int j2 = layer.down_pos[i];
     if (i2 >= 0 && j2 >= 0
-        && region.contains(graph_.layers[z - 1], z - 1, i2, j2)) {
+        && region.contains(graph_.layers[z - 1], z - 1, i2, j2)
+        && (same_net == nullptr
+            || (same_net->allowed(z - 1, i2, j2)
+                && (entered.z != z - 1
+                    || same_net->pairAllowed(
+                        z - 1, i2, j2, entered.i, entered.j, z))))) {
       const At aw{z - 1, i2, j2};
       const RipupLevel pad = level(aw, kViaUpPad);
       if (usable(pad)) {
@@ -466,8 +516,8 @@ SearchResult PathSearch::run(const SearchRequest& request)
     if (!usable(le)) {
       continue;
     }
-    const Cost ng = item.g + wireCost(z, i, j, j2) + penalty(aw, lw)
-                    + penalty(edge, le);
+    const Cost ng
+        = item.g + wireCost(z, i, j, j2) + penalty(aw, lw) + penalty(edge, le);
     size_t lw_index = 0;
     if (!local(z, i, j2, lw_index)) {
       continue;
