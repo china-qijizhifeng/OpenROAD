@@ -320,6 +320,12 @@ struct BonnRouteDRParams
   // Sec. 4.1 searches: per-worker label budget in MB (0: unlimited); a
   // search that would exceed it stops without a path (counted).
   int search_label_mb = 512;
+  // Fast grid (Sec. 3.6) in the dense encoding: layers keep one word per
+  // track-graph vertex (and via position) instead of runs, within
+  // fast_grid_memory_mb MB of dense arrays, layers taken bottom-up; the
+  // other layers keep the run encoding. Same words, same results.
+  bool fast_grid_dense = false;
+  int fast_grid_memory_mb = 8192;
   // FlexDR clean-up after BonnRoute. FlexDR's iterations 0-2 run in
   // incremental mode, which reroutes only nets without initial routing
   // (the nets BonnRoute left) and keeps every BonnRoute net fixed; iteration
@@ -672,6 +678,12 @@ class BonnRouteDR
     double potential_seconds = 0;
     int64_t potential_checks = 0;
     int64_t potential_mismatches = 0;
+    // potential_check: pops and settled vertices of the checked searches
+    // with the potential and of their pi_H repetitions (same state).
+    int64_t potential_check_pops = 0;
+    int64_t potential_check_settled = 0;
+    int64_t potential_check_plain_pops = 0;
+    int64_t potential_check_plain_settled = 0;
     // Guide path of the last buildPathRegion: planar tile steps minus the
     // tile distance of its ends.
     int path_detour = 0;
@@ -707,6 +719,7 @@ class BonnRouteDR
     int64_t searches = 0;
     int64_t path_region_searches = 0;
     int64_t heap_pops = 0;
+    int64_t held_pops = 0;
     int64_t settled = 0;
   };
   // Saved routing of a net, for restoring a failed rip-up sequence.

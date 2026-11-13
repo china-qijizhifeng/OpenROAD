@@ -9,6 +9,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -142,6 +143,14 @@ void SimplePotential::prepare(const LayerCostRates& rates,
                               const std::vector<TargetRectangle>& targets)
 {
   counters_.prepares++;
+  // The table depends on the rates only.
+  const bool same_rates = table_valid_ && num_layers_ == rates.numLayers()
+                          && rates_.horizontal == rates.horizontal
+                          && rates_.vertical == rates.vertical
+                          && std::equal(rates.via_up.begin(),
+                                        rates.via_up.end(),
+                                        rates_.via_up.begin(),
+                                        rates_.via_up.end());
   num_layers_ = rates.numLayers();
   assert(num_layers_ <= kMaxPotentialLayers);
   rates_.horizontal.assign(rates.horizontal.begin(), rates.horizontal.end());
@@ -157,11 +166,82 @@ void SimplePotential::prepare(const LayerCostRates& rates,
     min_vertical_ = std::min(min_vertical_, rates_.vertical[z]);
   }
   targets_.assign(targets.begin(), targets.end());
+  if (!same_rates) {
+    buildTable();
+  }
 }
 
 Cost SimplePotential::viaCost(const int z0, const int z1) const
 {
   return viaStack(via_prefix_, via_forbidden_prefix_, z0, z1);
+}
+
+void SimplePotential::buildTable()
+{
+  const int n = num_layers_;
+  functions_.clear();
+  first_.assign(static_cast<size_t>(n) * n + 1, 0);
+  std::vector<LinearCost> all;
+  for (int tz = 0; tz < n; tz++) {
+    for (int z = 0; z < n; z++) {
+      all.clear();
+      for (int order = 0; order < 2; order++) {
+        const std::vector<Cost>& first_rate
+            = order == 0 ? rates_.horizontal : rates_.vertical;
+        const std::vector<Cost>& second_rate
+            = order == 0 ? rates_.vertical : rates_.horizontal;
+        for (int a = 0; a < n; a++) {
+          for (int b = 0; b < n; b++) {
+            const Cost c = addCost(addCost(viaCost(tz, a), viaCost(a, b)),
+                                   viaCost(b, z));
+            if (c >= kInfCost) {
+              continue;
+            }
+            const Cost h = order == 0 ? first_rate[a] : second_rate[b];
+            const Cost v = order == 0 ? second_rate[b] : first_rate[a];
+            all.push_back({c, h, v});
+          }
+        }
+      }
+      // Keep the functions not bounded from below by another one (ties:
+      // the first in a fixed order).
+      std::ranges::sort(all, [](const LinearCost& p, const LinearCost& q) {
+        return std::tie(p.constant, p.horizontal, p.vertical)
+               < std::tie(q.constant, q.horizontal, q.vertical);
+      });
+      const size_t begin = functions_.size();
+      for (const LinearCost& f : all) {
+        bool dominated = false;
+        for (size_t k = begin; k < functions_.size() && !dominated; k++) {
+          const LinearCost& g = functions_[k];
+          dominated = g.constant <= f.constant && g.horizontal <= f.horizontal
+                      && g.vertical <= f.vertical;
+        }
+        if (!dominated) {
+          functions_.push_back(f);
+        }
+      }
+      first_[static_cast<size_t>(tz) * n + z + 1]
+          = static_cast<int>(functions_.size());
+    }
+  }
+  table_valid_ = true;
+}
+
+Cost SimplePotential::pointDistance(const int target_z,
+                                    const int z,
+                                    const Cost dx,
+                                    const Cost dy) const
+{
+  const size_t k = static_cast<size_t>(target_z) * num_layers_ + z;
+  Cost best = kInfCost;
+  for (int f = first_[k]; f < first_[k + 1]; f++) {
+    const LinearCost& c = functions_[f];
+    best = std::min(best,
+                    addCost(addCost(c.constant, scaleCost(c.horizontal, dx)),
+                            scaleCost(c.vertical, dy)));
+  }
+  return best;
 }
 
 // Theorem 3. Paths from r = (target point, target_z) to s = (query, z) of
@@ -171,10 +251,10 @@ Cost SimplePotential::viaCost(const int z0, const int z1) const
 // d[z] = min_a first[a] + via(a, z) is the distance from r to the corner
 // vertex on layer z; two sweeps over the via chain compute it in O(l), and
 // the answer is min_b d[b] + second_rate[b] * second_length + via(b, s_z).
-Cost SimplePotential::pointDistance(const int target_z,
-                                    const int z,
-                                    const Cost dx,
-                                    const Cost dy) const
+Cost SimplePotential::pointDistanceSweep(const int target_z,
+                                         const int z,
+                                         const Cost dx,
+                                         const Cost dy) const
 {
   if (dx == 0 && dy == 0) {
     return viaCost(target_z, z);

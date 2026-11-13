@@ -185,6 +185,16 @@ segment, so constant point levels on an edge imply its level.
 * Storage: per global routing tile the runs of its tracks (`uint16` start and
   64-bit word per run; a track without runs is all legal), allocated on the
   first non-zero word. Tiles are written by one thread at a time.
+* Dense storage (`fast_grid_dense 1`, budget `fast_grid_memory_mb`,
+  default 8192): a layer keeps one 64-bit word per vertex (track-major) and
+  one per via position instead of runs. Layers are taken bottom-up while
+  their arrays fit the budget; the others keep runs. Both encodings hold the
+  same words: lookups read one word, updates write the positions in place,
+  `wiringRun` / `viaRun` report the maximal run inside the tile chunk, and
+  the statistics count the same intervals. The reader keeps a row pointer
+  per track cursor (or the track's overlay runs). Positions of one tile are
+  written by one thread, as for runs. `bonnroute_fast_grid_dense_test`
+  compares a dense and a run-encoded grid word by word after every update.
 * `FastGridBuilder` keeps the fast grid equal to the checker ("continuously
   updated data computed by the distance rule checking module") with exact
   incremental updates. All of them use the checker's own violation spans

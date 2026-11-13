@@ -291,6 +291,10 @@ bool BonnRouteDRParams::set(const std::string& name, const double value)
     offtrack_preferred_access_points = v != 0;
   } else if (name == "search_label_mb") {
     search_label_mb = std::max(0, v);
+  } else if (name == "fast_grid_dense") {
+    fast_grid_dense = v != 0;
+  } else if (name == "fast_grid_memory_mb") {
+    fast_grid_memory_mb = std::max(0, v);
   } else if (name == "cleanup_incremental_iterations") {
     cleanup_incremental_iterations = std::clamp(v, 0, 2);
   } else if (name == "cleanup_check_only_workers") {
@@ -983,6 +987,30 @@ void BonnRouteDR::buildRoutingSpace()
   checker_.init(&shape_grid_);
   // Sec. 3.6: the fast grid holds the most frequent wire types.
   grid_.init(&graph_, fast_types_);
+  if (params_.fast_grid_dense) {
+    // Dense layers bottom-up while their arrays fit the budget.
+    const size_t budget
+        = static_cast<size_t>(params_.fast_grid_memory_mb) * (size_t{1} << 20);
+    size_t used = 0;
+    std::string dense_layers;
+    std::string run_layers;
+    for (int z = 0; z < graph_.numLayers(); z++) {
+      const size_t b = grid_.denseBytes(z);
+      std::string& list = used + b <= budget ? dense_layers : run_layers;
+      if (used + b <= budget) {
+        grid_.setDense(z, true);
+        used += b;
+      }
+      list += (list.empty() ? "" : " ") + std::to_string(z);
+    }
+    logger_->report(
+        "BonnRoute DR fast grid dense: track layers [{}] dense ({:.1f} MB of "
+        "{} MB), layers [{}] in runs.",
+        dense_layers,
+        used / 1e6,
+        params_.fast_grid_memory_mb,
+        run_layers);
+  }
   fast_builder_.init(&graph_, &wire_types_, fast_types_, &checker_, &grid_);
   // Removal recomputations of a batch (flush) run their tile groups on the
   // router's threads; inside a parallel region (partition workers) serially.
@@ -5567,12 +5595,17 @@ bool BonnRouteDR::connectInRegion(NetData& net,
                                          : worker.search->run(req);
       req.future_cost = oracle;
       worker.potential_checks++;
+      worker.potential_check_pops += res.heap_pops;
+      worker.potential_check_settled += res.settled;
+      worker.potential_check_plain_pops += plain.heap_pops;
+      worker.potential_check_plain_settled += plain.settled;
       if (plain.found != res.found || (res.found && plain.cost != res.cost)) {
         worker.potential_mismatches++;
       }
     }
     worker.searches++;
     worker.heap_pops += res.heap_pops;
+    worker.held_pops += res.held_pops;
     worker.settled += res.settled;
     worker.fast_grid_queries += res.fast_grid_queries;
     worker.checker_queries += res.checker_queries;
@@ -8402,6 +8435,7 @@ void BonnRouteDR::main()
   }
   int64_t searches = 0;
   int64_t heap_pops = 0;
+  int64_t held_pops = 0;
   int64_t settled = 0;
   int64_t intervals = 0;
   int64_t labels = 0;
@@ -8426,6 +8460,7 @@ void BonnRouteDR::main()
     searches += w.searches;
     path_region_searches += w.path_region_searches;
     heap_pops += w.heap_pops;
+    held_pops += w.held_pops;
     settled += w.settled;
     if (w.interval_search) {
       intervals += w.interval_search->intervals();
@@ -8635,10 +8670,18 @@ void BonnRouteDR::main()
       int64_t fallbacks = 0;
       int64_t checks = 0;
       int64_t mismatches = 0;
+      int64_t check_pops = 0;
+      int64_t check_settled = 0;
+      int64_t check_plain_pops = 0;
+      int64_t check_plain_settled = 0;
       for (const Worker& w : workers_) {
         fallbacks += w.potential_fallbacks;
         checks += w.potential_checks;
         mismatches += w.potential_mismatches;
+        check_pops += w.potential_check_pops;
+        check_settled += w.potential_check_settled;
+        check_plain_pops += w.potential_check_plain_pops;
+        check_plain_settled += w.potential_check_plain_settled;
         for (int m = 0; m < 3; m++) {
           prepares[m] += w.potential.prepares(
               static_cast<br::PotentialOracle::Model>(m));
@@ -8682,6 +8725,17 @@ void BonnRouteDR::main()
           fallbacks,
           mismatches,
           checks);
+      if (checks > 0) {
+        logger_->report(
+            "BonnRoute DR: potential check: {} searches repeated with pi_H in "
+            "the same state; heap pops {} with the potential, {} with pi_H; "
+            "settled vertices {} with the potential, {} with pi_H.",
+            checks,
+            check_pops,
+            check_plain_pops,
+            check_settled,
+            check_plain_settled);
+      }
     }
     if (params_.spreading && extra_space_nets_ > 0) {
       logger_->report(
@@ -8725,6 +8779,14 @@ void BonnRouteDR::main()
         rollbacks_,
         path_region_searches,
         timer.elapsed());
+    if (!params_.use_intervals) {
+      logger_->report(
+          "BonnRoute DR vertex search queue: {} of {} heap pops answered by "
+          "the last pushed item ({:.1f}%).",
+          held_pops,
+          heap_pops,
+          heap_pops > 0 ? 100.0 * held_pops / heap_pops : 0.0);
+    }
     br::CleanupStats cleanup;
     int64_t regenerations = 0;
     int64_t regenerated_paths = 0;
