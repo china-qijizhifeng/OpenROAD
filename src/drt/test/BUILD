@@ -323,6 +323,7 @@ filegroup(
 # BonnRoute DR end-to-end regressions: pass/fail on the last log line (the
 # log carries timings, so it is not compared with a golden file).
 BONNROUTE_TCL_TESTS = [
+    "bonnroute_access_completion",
     "bonnroute_port_contact",
 ]
 
