@@ -141,6 +141,13 @@ cc_test(
 )
 
 cc_test(
+    name = "bonnroute_worker_cancel_test",
+    size = "small",
+    srcs = ["BonnRouteWorkerCancelTest.cpp"],
+    deps = ["//src/drt:base_types"],
+)
+
+cc_test(
     name = "bonnroute_tail_pipeline_test",
     size = "small",
     srcs = ["BonnRouteTailPipelineTest.cpp"],

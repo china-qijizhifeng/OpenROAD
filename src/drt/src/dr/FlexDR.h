@@ -35,6 +35,7 @@
 #include "db/tech/frTechObject.h"
 #include "db/tech/frViaDef.h"
 #include "dr/AbstractDRGraphics.h"
+#include "dr/FlexDRWorkerCancel.h"
 #include "dr/FlexGridGraph.h"
 #include "dr/FlexMazeTypes.h"
 #include "dr/FlexWavefront.h"
@@ -613,12 +614,36 @@ class FlexDRWorker
   // worker copies.  Two equal fingerprints mean mainRead() builds the same
   // worker from both design states.
   uint64_t getDesignReadFingerprint(const frDesign* design) const;
-  // The worker stops routing at its next route-queue entry once *stop_request
-  // is true; a stopped worker is discarded.
-  void setStopRequest(const std::atomic<bool>* stop_request)
+  // Cancel request of a run that the scheduler may detach from its slot
+  // (FlexDR::runGridWorkersAhead).  The worker polls it before and after
+  // init, before every route-queue entry and pin connection, and after every
+  // WorkerCancelPoll::kPopsPerCheck A* pops; once it observes the request it
+  // stops routing (isCancelled(), isStopped()) and its result is discarded.
+  // The request object outlives the run.
+  void setCancelRequest(WorkerCancelRequest* cancel_request)
   {
-    stop_request_ = stop_request;
+    cancel_poll_.attach(cancel_request);
   }
+  // True once the cancel request is observed; marks the worker stopped.
+  bool pollCancelRequest()
+  {
+    if (cancel_poll_.poll()) {
+      stopped_ = true;
+      return true;
+    }
+    return false;
+  }
+  // Called by FlexGridGraph::search after every pop.
+  bool pollCancelAfterAstarPop()
+  {
+    if (cancel_poll_.afterPop()) {
+      stopped_ = true;
+      return true;
+    }
+    return false;
+  }
+  bool isCancelled() const { return cancel_poll_.isCancelled(); }
+  uint64_t getAstarPops() const { return cancel_poll_.getPops(); }
   void distributedMain(frDesign* design);
   void writeUpdates(const std::string& file_name);
   void updateDesign(frDesign* design);
@@ -718,7 +743,7 @@ class FlexDRWorker
   bool skipRouting_{false};
   const std::atomic<int>* first_clean_{nullptr};
   int creation_index_{0};
-  const std::atomic<bool>* stop_request_{nullptr};
+  WorkerCancelPoll cancel_poll_;
   bool stopped_{false};
   std::chrono::high_resolution_clock::time_point main_start_time_;
   // The routed objects and guides read by mainRead(), until initNets() turns
@@ -1131,7 +1156,9 @@ class FlexDRWorker
 
   void mazeNetInit(drNet* net);
   void mazeNetEnd(drNet* net);
-  bool routeNet(drNet* net, std::vector<FlexMazeIdx>& paths);
+  // kNoPath: a pin connection has no path; kCancelled: the cancel request
+  // was observed (the net is left partly routed; the worker is discarded).
+  MazeSearchStatus routeNet(drNet* net, std::vector<FlexMazeIdx>& paths);
   void routeNet_prep(
       drNet* net,
       frOrderedIdSet<drPin*>& unConnPins,
