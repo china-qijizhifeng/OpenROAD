@@ -48,6 +48,7 @@
 #include "drt-global.h"
 #include "frDesign.h"
 #include "frRegionQuery.h"
+#include "gc/FlexGC.h"
 #include "grt/BonnRouteExtraSpace.h"
 #include "odb/db.h"
 #include "odb/dbTransform.h"
@@ -278,6 +279,8 @@ bool BonnRouteDRParams::set(const std::string& name, const double value)
     cleanup_check_only_workers = v != 0;
   } else if (name == "partition_check") {
     partition_check = v != 0;
+  } else if (name == "start_check") {
+    start_check = std::clamp(v, 0, 1);
   } else if (name == "cleanup_normalize_initial_routing") {
     cleanup_normalize_initial_routing = v != 0;
   } else if (name == "left_net_track_assignment") {
@@ -2168,6 +2171,177 @@ bool BonnRouteDR::atAccessPoint(const NetData& net,
                                    != aps.end();
                   });
   return found;
+}
+
+const frAccessPoint* BonnRouteDR::accessPointAt(const frBlockObject* term,
+                                                const frLayerNum layer,
+                                                const odb::Point& p) const
+{
+  if (term->typeId() == frcInstTerm) {
+    const auto* inst_term = static_cast<const frInstTerm*>(term);
+    frInst* inst = inst_term->getInst();
+    const int pa_idx = inst->getPinAccessIdx();
+    const odb::dbTransform xform = inst->getNoRotationTransform();
+    for (const auto& pin : inst_term->getTerm()->getPins()) {
+      if (!pin->hasPinAccess() || pa_idx < 0
+          || pa_idx >= pin->getNumPinAccess()) {
+        continue;
+      }
+      for (const auto& ap : pin->getPinAccess(pa_idx)->getAccessPoints()) {
+        odb::Point q = ap->getPoint();
+        xform.apply(q);
+        if (q == p && ap->getLayerNum() == layer) {
+          return ap.get();
+        }
+      }
+    }
+  } else if (term->typeId() == frcBTerm) {
+    for (const auto& pin : static_cast<const frBTerm*>(term)->getPins()) {
+      if (!pin->hasPinAccess()) {
+        continue;
+      }
+      for (const auto& ap : pin->getPinAccess(0)->getAccessPoints()) {
+        if (ap->getPoint() == p && ap->getLayerNum() == layer) {
+          return ap.get();
+        }
+      }
+    }
+  }
+  return nullptr;
+}
+
+void BonnRouteDR::checkPathStarts()
+{
+  // Every via whose bottom pad lies on a pin shape of its own net, checked
+  // against the fixed design (pins, obstructions, special nets) as FlexPA
+  // checks an access via (FlexPA::isViaViolationFree): FlexGC with min area,
+  // long-side EOL and corner spacing ignored, ext and DRC box 5 pitches
+  // around the via, the instance (or top-level term) as target.
+  struct StartCheck
+  {
+    const NetData* net;
+    const frViaDef* def;
+    odb::Point point;
+    frBlockObject* term;
+    const frAccessPoint* ap;
+    bool clean = true;
+    int alternatives = 0;
+    const frViaDef* clean_alternative = nullptr;
+  };
+  const double start = omp_get_wtime();
+  std::vector<StartCheck> checks;
+  frRegionQuery* rq = design_->getRegionQuery();
+  for (const NetData& data : nets_) {
+    if (!data.routed) {
+      continue;
+    }
+    for (const OutVia& v : data.vias) {
+      const frLayerNum layer = v.def->getLayer1Num();
+      frBlockObject* term = nullptr;
+      forEachNetPinAt(
+          rq, data.net, layer, v.point, [&](const frBlockObject* obj, const odb::Rect&) {
+            if (term == nullptr) {
+              term = const_cast<frBlockObject*>(obj);
+            }
+          });
+      if (term == nullptr) {
+        continue;
+      }
+      checks.push_back(
+          {&data, v.def, v.point, term, accessPointAt(term, layer, v.point)});
+    }
+  }
+  auto via_clean = [this](const StartCheck& c, const frViaDef* def) {
+    FlexGCWorker gc(design_->getTech(), logger_, router_cfg_);
+    gc.setIgnoreMinArea();
+    gc.setIgnoreLongSideEOL();
+    gc.setIgnoreCornerSpacing();
+    const frCoord pitch
+        = design_->getTech()->getLayer(def->getLayer1Num())->getPitch();
+    odb::Rect ext_box;
+    odb::Rect(c.point, c.point).bloat(5 * pitch, ext_box);
+    gc.setExtBox(ext_box);
+    gc.setDrcBox(ext_box);
+    frNet* net = c.net->net;
+    if (!net->hasNDR()
+        || net->autoTaperEnabled(router_cfg_->AUTO_TAPER_NDR_NETS)) {
+      if (c.term->typeId() == frcInstTerm) {
+        gc.addTargetObj(static_cast<frInstTerm*>(c.term)->getInst());
+      } else {
+        gc.addTargetObj(c.term);
+      }
+    }
+    gc.initPA0(design_);
+    frVia via(def, c.point);
+    gc.addPAObj(&via, net);
+    gc.initPA1();
+    gc.main();
+    return gc.getMarkers().empty();
+  };
+#pragma omp parallel for num_threads(router_cfg_->MAX_THREADS) \
+    schedule(dynamic, 64)
+  for (int i = 0; i < static_cast<int>(checks.size()); i++) {
+    StartCheck& c = checks[i];
+    c.clean = via_clean(c, c.def);
+    if (c.clean || c.ap == nullptr) {
+      continue;
+    }
+    for (int cuts = 1; c.ap->hasViaDef(cuts); cuts++) {
+      for (const frViaDef* def : c.ap->getViaDefs(cuts)) {
+        if (def == c.def) {
+          continue;
+        }
+        c.alternatives++;
+        if (c.clean_alternative == nullptr && via_clean(c, def)) {
+          c.clean_alternative = def;
+        }
+      }
+    }
+  }
+  int64_t at_access_point = 0;
+  int64_t unclean = 0;
+  int64_t unclean_at_access_point = 0;
+  int64_t unclean_first_definition = 0;
+  int64_t with_clean_alternative = 0;
+  int64_t without_alternative = 0;
+  for (const StartCheck& c : checks) {
+    at_access_point += c.ap != nullptr;
+    if (c.clean) {
+      continue;
+    }
+    unclean++;
+    if (c.ap != nullptr) {
+      unclean_at_access_point++;
+      unclean_first_definition
+          += c.ap->hasViaDef() && c.ap->getViaDefs(1).front() == c.def;
+    }
+    with_clean_alternative += c.clean_alternative != nullptr;
+    without_alternative += c.alternatives == 0;
+    logger_->report(
+        "BonnRoute DR start check unclean: net {} via {} at ( {} {} ) access "
+        "point {} alternatives {} clean alternative {}",
+        c.net->net->getName(),
+        c.def->getName(),
+        c.point.x(),
+        c.point.y(),
+        c.ap != nullptr ? 1 : 0,
+        c.alternatives,
+        c.clean_alternative != nullptr ? c.clean_alternative->getName()
+                                       : std::string("-"));
+  }
+  logger_->report(
+      "BonnRoute DR start check: {} vias on own pins checked ({} at access "
+      "points); {} unclean ({} at access points, {} with the access point's "
+      "first one-cut definition); {} with a clean alternative definition, {} "
+      "without an alternative definition; {:.2f}s.",
+      checks.size(),
+      at_access_point,
+      unclean,
+      unclean_at_access_point,
+      unclean_first_definition,
+      with_clean_alternative,
+      without_alternative,
+      omp_get_wtime() - start);
 }
 
 int BonnRouteDR::pinsWithoutContact(const NetData& net,
@@ -7443,6 +7617,9 @@ void BonnRouteDR::main()
     logger_->report("BonnRoute DR routing digest {:016x}.", routingDigest());
   }
   writeNets();
+  if (params_.start_check > 0) {
+    checkPathStarts();
+  }
   if (params_.verbose) {
     // Fingerprint of the routes handed to FlexDR (FNV-1a over nets, wires
     // and vias in net order): equal routes give equal digests across builds.

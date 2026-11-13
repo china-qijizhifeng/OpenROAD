@@ -314,6 +314,12 @@ struct BonnRouteDRParams
   // report how far beyond the net's core tile box each step reaches. The
   // routing is unchanged.
   bool partition_check = false;
+  // C5 step 1 (design lead/cleanup/C5-revised.md): after routing, check
+  // every via whose bottom pad lies on a pin shape of its own net with
+  // FlexPA's via check (FlexGC, as FlexPA::isViaViolationFree), and with
+  // every other via definition of the access point when it fails. Prints
+  // statistics and one line per failing via; the routing is unchanged.
+  int start_check = 0;
   bool verbose = true;
   // Algorithm profile: 0 = 2013-improved (default), 1 = 2013-reimpl,
   // 2 = 2021 (2013-reimpl plus Ahrens et al., arXiv:2111.06169).
@@ -1006,6 +1012,13 @@ class BonnRouteDR
   bool routedConflicts(const RShape& shape, int net) const;
   frCoord spacing(int z, frCoord width1, frCoord width2, frCoord prl) const;
   void writeNets();
+  // start_check: FlexPA's via check on the written vias (statistics only).
+  void checkPathStarts();
+  // The access point of `term` (frInstTerm or frBTerm) at p on layer, or
+  // nullptr.
+  const frAccessPoint* accessPointAt(const frBlockObject* term,
+                                     frLayerNum layer,
+                                     const odb::Point& p) const;
   // notch_fill for one written net; fills of earlier nets are in `fills`.
   void fillNotches(frNet* net,
                    int id,
