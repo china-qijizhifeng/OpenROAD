@@ -523,6 +523,7 @@ class BonnRouteDR
   struct PartialState
   {
     bool valid = false;
+    int net = -1;  // the net whose connect produced it
     int joined = 0;
     std::vector<char> connected;
     std::vector<char> consumed;
@@ -1106,7 +1107,8 @@ class BonnRouteDR
   // committed partial routing (term 0 alone without one).
   static bool progressAdds(const NetData& net, const PartialState& progress)
   {
-    return progress.valid
+    return progress.valid && progress.net == net.id
+           && progress.connected.size() == net.terms.size()
            && progress.joined > (net.partial ? net.partial_state.joined : 1);
   }
   // keep_partial: commits `state` as the net's partial routing.

@@ -4310,6 +4310,9 @@ bool BonnRouteDR::connect(NetData& net,
   // (see DataStructures.md); the routing space itself is not changed.
   net.left_step = kLeftNone;
   net.left_term = -1;
+  // keep_partial: no progress of an earlier net survives into this call.
+  worker.progress.valid = false;
+  worker.progress.net = -1;
   worker.footprint.setStep(kStepAccess);
   ownShapes(net, worker.own_shapes);
   fast_builder_.buildOverlay(net.id, worker.own_shapes, worker.overlay);
@@ -4799,6 +4802,7 @@ bool BonnRouteDR::connectInRegion(NetData& net,
     }
     PartialState& p = worker.progress;
     p.valid = true;
+    p.net = net.id;
     p.joined = static_cast<int>(std::ranges::count(connected, char{1}));
     p.connected = connected;
     p.consumed = consumed;
@@ -5041,6 +5045,10 @@ void BonnRouteDR::commitPartial(NetData& net,
                                 const PartialState& state,
                                 Worker* local)
 {
+  if (state.net != net.id || state.connected.size() != net.terms.size()
+      || state.chosen.size() != net.terms.size()) {
+    throw std::logic_error("BonnRouteDR: partial routing of another net");
+  }
   if (net.partial) {
     uncommitShapes(net, local);
   }
