@@ -326,8 +326,9 @@ jumper wire runs over; the wire charges one track on each of its edges, and
 the pads charge the outer flank edges of that layer and the edges of the two
 layers below. `set_debug_level GRT jumper_rejections 1` logs the search: the
 violations of each check, every candidate segment with the scan of its
-positions and its outcome, every insertion attempt, and the routing resources
-per layer before and after the jumpers.
+positions and its outcome, every insertion attempt, the routing resources per
+layer before and after the jumpers, and every edge whose overflow grows when a
+jumpered route is adopted.
 
 If no `diode_cell` argument is specified the LEF cell with class CORE, ANTENNACELL will be used.
 If any repairs are made the filler instances are remove and must be

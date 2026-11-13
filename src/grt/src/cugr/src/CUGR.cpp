@@ -3443,6 +3443,97 @@ bool CUGR::hasAvailableResources(odb::dbNet* db_net,
   return edge.getResource() >= demand;
 }
 
+std::vector<double> CUGR::edgeOverflows() const
+{
+  const int num_layers = grid_graph_->getNumLayers();
+  const int x_size = grid_graph_->getXSize();
+  const int y_size = grid_graph_->getYSize();
+  std::vector<double> overflows(
+      static_cast<size_t>(num_layers) * x_size * y_size, 0.0);
+  for (int layer = 0; layer < num_layers; layer++) {
+    for (int x = 0; x < x_size; x++) {
+      for (int y = 0; y < y_size; y++) {
+        const GraphEdge& edge = grid_graph_->getEdge(layer, x, y);
+        overflows[grid_graph_->edgeFlatIndex(layer, x, y)]
+            = std::max<double>(0.0, edge.demand - edge.capacity);
+      }
+    }
+  }
+  return overflows;
+}
+
+void CUGR::logOverflowIncrease(const std::vector<double>& before,
+                               odb::dbNet* db_net,
+                               const GRoute& route) const
+{
+  // Cells of the route by kind: pin bridge wires (per layer), pin bridge
+  // vias and jumper ends (any layer).
+  std::set<std::tuple<int, int, int>> bridge_wire_cells;
+  std::set<std::pair<int, int>> bridge_via_cells;
+  std::set<std::pair<int, int>> jumper_end_cells;
+  for (const GSegment& segment : route) {
+    const BoxT cells = grid_graph_->rangeSearchCells(BoxT(
+        segment.init_x, segment.init_y, segment.final_x, segment.final_y));
+    if (segment.is_pin_bridge) {
+      for (int x = cells[0].low(); x <= cells[0].high(); x++) {
+        for (int y = cells[1].low(); y <= cells[1].high(); y++) {
+          if (segment.isVia()) {
+            bridge_via_cells.emplace(x, y);
+          } else {
+            bridge_wire_cells.emplace(segment.init_layer - 1, x, y);
+          }
+        }
+      }
+    }
+    if (segment.isJumper() && !segment.isVia()) {
+      jumper_end_cells.emplace(cells[0].low(), cells[1].low());
+      jumper_end_cells.emplace(cells[0].high(), cells[1].high());
+    }
+  }
+  const int num_layers = grid_graph_->getNumLayers();
+  for (int layer = 0; layer < num_layers; layer++) {
+    const int direction = grid_graph_->getLayerDirection(layer);
+    for (int x = 0; x < grid_graph_->getXSize(); x++) {
+      for (int y = 0; y < grid_graph_->getYSize(); y++) {
+        const GraphEdge& edge = grid_graph_->getEdge(layer, x, y);
+        const double after = std::max<double>(0.0, edge.demand - edge.capacity);
+        const double was = before[grid_graph_->edgeFlatIndex(layer, x, y)];
+        if (after <= was + 1e-9) {
+          continue;
+        }
+        // The two cells the edge joins.
+        const int x1 = direction == 0 ? x + 1 : x;
+        const int y1 = direction == 0 ? y : y + 1;
+        const char* kind = "other";
+        if (bridge_wire_cells.contains({layer, x, y})
+            && bridge_wire_cells.contains({layer, x1, y1})) {
+          kind = "pin_bridge_wire";
+        } else if (bridge_via_cells.contains({x, y})
+                   || bridge_via_cells.contains({x1, y1})) {
+          kind = "pin_bridge_via";
+        } else if (jumper_end_cells.contains({x, y})
+                   || jumper_end_cells.contains({x1, y1})) {
+          kind = "jumper_end";
+        }
+        debugPrint(logger_,
+                   GRT,
+                   "jumper_rejections",
+                   1,
+                   "JR adoption_overflow net={} layer={} x={} y={} "
+                   "before={:.3f} after={:.3f} capacity={:.3f} kind={}",
+                   db_net->getConstName(),
+                   layer + 1,
+                   x,
+                   y,
+                   was,
+                   after,
+                   edge.capacity,
+                   kind);
+      }
+    }
+  }
+}
+
 void CUGR::logJumperLayerResources(const char* phase) const
 {
   if (!grid_graph_ || !logger_->debugCheck(GRT, "jumper_rejections", 1)) {

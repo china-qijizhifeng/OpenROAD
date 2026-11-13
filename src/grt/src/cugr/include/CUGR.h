@@ -199,6 +199,13 @@ class CUGR
   // by capacity class with their use, and the flank demands of a jumper's
   // via stack ending on the layer.
   void logJumperLayerResources(const char* phase) const;
+  // Debug group "jumper_rejections" (log only): the overflow of every edge
+  // (GridGraph::edgeFlatIndex order), and one line per edge whose overflow
+  // grew since `before`, with the kind of the edge in db_net's route.
+  std::vector<double> edgeOverflows() const;
+  void logOverflowIncrease(const std::vector<double>& before,
+                           odb::dbNet* db_net,
+                           const GRoute& route) const;
   // Adopts an externally restored routing (journal restore): rebuilds the
   // net's routing tree from the segments and swaps the grid-graph demand
   // without scheduling a reroute. Returns false if the net must be rerouted.

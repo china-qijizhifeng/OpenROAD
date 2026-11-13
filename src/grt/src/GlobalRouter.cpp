@@ -2776,10 +2776,20 @@ bool GlobalRouter::updateJumperedRoute(const int& init_x,
                                        odb::dbNet* db_net)
 {
   if (use_cugr_) {
+    // Debug group "jumper_rejections" (log only): the overflow this
+    // adoption adds, edge by edge.
+    const bool log_overflow = logger_->debugCheck(GRT, "jumper_rejections", 1);
+    std::vector<double> overflow_before;
+    if (log_overflow) {
+      overflow_before = cugr_->edgeOverflows();
+    }
     // A failed adoption releases the net's old demand; the caller must roll
     // the jumper back and call restoreNetDemand to recommit the route.
     if (!cugr_->restoreNetRoute(db_net, routes_[db_net])) {
       return false;
+    }
+    if (log_overflow) {
+      cugr_->logOverflowIncrease(overflow_before, db_net, routes_[db_net]);
     }
     // The adopted route supersedes any guide restore a prior failure queued.
     if (Net* net = getNet(db_net)) {
