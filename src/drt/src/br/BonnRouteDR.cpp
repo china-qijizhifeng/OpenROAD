@@ -226,6 +226,8 @@ bool BonnRouteDRParams::set(const std::string& name, const double value)
     tail_retry_delay = std::max(1, v);
   } else if (name == "tail_deferred_pass") {
     tail_deferred_pass = v != 0;
+  } else if (name == "tail_deferred_settled") {
+    tail_deferred_settled = std::max(0, v);
   } else if (name == "tail_defer_settled") {
     tail_defer_settled = std::max(0, v);
   } else if (name == "partitions") {
@@ -5766,11 +5768,16 @@ void BonnRouteDR::routeSpeculative(const std::vector<int>& order,
     return;
   }
   const std::string late = std::string(stage) + " deferred";
+  const int64_t late_budget = params_.tail_deferred_settled;
   if (scheduled) {
-    routeSpeculativePipeline(deferred, failed, none, late, threads, 0);
+    routeSpeculativePipeline(
+        deferred, failed, none, late, threads, late_budget);
   } else {
-    routeSpeculativeBatches(deferred, failed, none, late, threads, 0);
+    routeSpeculativeBatches(
+        deferred, failed, none, late, threads, late_budget);
   }
+  // Over the deferred pass's budget: to the rip-up phase.
+  failed.insert(failed.end(), none.begin(), none.end());
 }
 
 br::TailBatchPolicy BonnRouteDR::tailBatchPolicy() const

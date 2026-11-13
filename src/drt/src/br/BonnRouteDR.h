@@ -173,6 +173,10 @@ struct BonnRouteDRParams
   // legal path at no penalty when one exists and does not exhaust the area
   // when none exists.
   bool tail_deferred_pass = true;
+  // Settled vertices a net may use in the deferred pass; nets over it go to
+  // the rip-up phase (most deferred nets have no route: jpeg 37 of 39).
+  // 0: no budget.
+  int tail_deferred_settled = 0;
   // Sec. 5.1: a critical net routing step before the partitions; clock
   // nets are routed first, serially, on the whole chip.
   bool critical_nets = true;
