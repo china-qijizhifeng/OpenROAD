@@ -255,8 +255,8 @@ bool BonnRouteDRParams::set(const std::string& name, const double value)
     offtrack_catalogue_sample = std::max(0, v);
   } else if (name == "offtrack_access_report") {
     offtrack_access_report = std::max(0, v);
-  } else if (name == "offtrack_primary_regenerate") {
-    offtrack_primary_regenerate = v != 0;
+  } else if (name == "offtrack_algorithm3_fallback") {
+    offtrack_algorithm3_fallback = v != 0;
   } else if (name == "access_classes") {
     access_classes = v != 0;
   } else if (name == "access_class_margin") {
@@ -1836,8 +1836,8 @@ void BonnRouteDR::AccessStats::add(const AccessStats& o)
   empty_rejected += o.empty_rejected;
   macro_pins += o.macro_pins;
   member_regenerated += o.member_regenerated;
-  primary_missing += o.primary_missing;
-  primary_recovered += o.primary_recovered;
+  fallback_instances += o.fallback_instances;
+  fallback_improved += o.fallback_improved;
   pin_classes += o.pin_classes;
   mapped_options += o.mapped_options;
   mapped_dropped += o.mapped_dropped;
@@ -2271,7 +2271,8 @@ void BonnRouteDR::offTrackCatalogue(const int net,
                                     const Worker* worker,
                                     std::vector<AccessOption>& out,
                                     AccessStats& stats,
-                                    const int extra_radius) const
+                                    const int extra_radius,
+                                    const bool algorithm3) const
 {
   out.clear();
   stats.pins++;
@@ -2502,8 +2503,10 @@ void BonnRouteDR::offTrackCatalogue(const int net,
   // the grid unit the Hanan lines suffice (D9). A layer whose wires stay on
   // tracks needs its tracks inside the window as lines: a path may run
   // along a track that holds no target.
-  grid_in.grid_unit = params_.offtrack_hanan_grid ? mfg : 0;
-  if (params_.offtrack_hanan_grid) {
+  // `algorithm3`: the grid, states and ties of offtrack_hanan_grid 0.
+  const bool hanan = params_.offtrack_hanan_grid && !algorithm3;
+  grid_in.grid_unit = hanan ? mfg : 0;
+  if (hanan) {
     for (const frLayerNum fr : frs) {
       const int z = z_of_fr_[fr];
       if (z < 0 || !onTracksOnly(fr)) {
@@ -2582,8 +2585,8 @@ void BonnRouteDR::offTrackCatalogue(const int net,
   req.via_cost = layers_[z_of_fr_[frs.back()]].width;
   // The nearest on-track points; some may fail the exact checks below.
   req.max_targets = 2 * params_.max_access_options;
-  req.merge_direction_states = params_.offtrack_hanan_grid;
-  req.on_track_ties = params_.offtrack_on_track_ties;
+  req.merge_direction_states = hanan;
+  req.on_track_ties = params_.offtrack_on_track_ties && !algorithm3;
   for (size_t s = 0; s < frs.size(); s++) {
     const int z = z_of_fr_[frs[s]];
     if (z >= 0) {
@@ -3279,33 +3282,42 @@ void BonnRouteDR::buildOffTrackAccess(const std::vector<char>& pre_skip)
     }
     return choice;
   };
-  // A pin with a catalogue and no primary path, after its instance's other
-  // pins are reserved: its own catalogue against the current routing space
-  // (offtrack_primary_regenerate); the new paths go first in its options.
-  auto recover_primary = [&](NetData& net, Term& term) {
-    if (!params_.offtrack_primary_regenerate) {
+  // offtrack_algorithm3_fallback: an instance whose selection leaves a pin
+  // with a catalogue unassigned tries Algorithm 3 catalogues (equal costs,
+  // other equal-cost paths) and keeps them if they assign more pins.
+  auto algorithm3_fallback = [&](const InstanceAccess& ia,
+                                 std::vector<std::vector<AccessOption>>& cats,
+                                 std::vector<int>& choice,
+                                 const std::vector<int>& nets) {
+    if (!params_.offtrack_algorithm3_fallback
+        || !params_.offtrack_hanan_grid) {
       return;
     }
-    stats.primary_missing++;
-    std::vector<std::vector<AccessOption>> fresh(1);
-    offTrackCatalogue(net.id, term, nullptr, fresh[0], stats, 2);
-    if (fresh[0].empty()) {
+    const int n = static_cast<int>(cats.size());
+    int assigned = 0;
+    bool missing = false;
+    for (int p = 0; p < n; p++) {
+      assigned += choice[p] >= 0;
+      missing = missing || (choice[p] < 0 && !cats[p].empty());
+    }
+    if (!missing) {
       return;
     }
-    const std::vector<int> choice = solve(fresh, {net.id});
-    if (choice[0] < 0) {
-      return;
+    stats.fallback_instances++;
+    std::vector<std::vector<AccessOption>> alt(n);
+    for (int p = 0; p < n; p++) {
+      const auto [net, t] = ia.terms[p];
+      offTrackCatalogue(
+          net, nets_[net].terms[t], nullptr, alt[p], stats, 0, true);
     }
-    std::vector<AccessOption> options = std::move(fresh[0]);
-    for (AccessOption& o : term.options) {
-      if (options.size() >= 1000) {
-        break;
-      }
-      options.push_back(std::move(o));
+    std::vector<int> alt_choice = solve(alt, nets);
+    const int alt_assigned = static_cast<int>(
+        std::ranges::count_if(alt_choice, [](const int c) { return c >= 0; }));
+    if (alt_assigned > assigned) {
+      cats = std::move(alt);
+      choice = std::move(alt_choice);
+      stats.fallback_improved++;
     }
-    term.options = std::move(options);
-    reserve(net, term, choice[0]);
-    stats.primary_recovered++;
   };
   // D10 pin keys (also for the M3 statistics): per access pin, the inputs
   // of its own catalogue search that are equal between instances of a
@@ -3600,7 +3612,7 @@ void BonnRouteDR::buildOffTrackAccess(const std::vector<char>& pre_skip)
         phases.member_solve += step_timer.elapsed();
       }
       step_timer.reset();
-      std::vector<int> missing;
+      algorithm3_fallback(ia, cats, choice, nets);
       for (int p = 0; p < n; p++) {
         const auto [net_id, t] = ia.terms[p];
         NetData& net = nets_[net_id];
@@ -3612,13 +3624,7 @@ void BonnRouteDR::buildOffTrackAccess(const std::vector<char>& pre_skip)
         keepStubs(term, cats[p]);
         if (choice[p] >= 0) {
           reserve(net, term, choice[p]);
-        } else {
-          missing.push_back(p);
         }
-      }
-      for (const int p : missing) {
-        const auto [net_id, t] = ia.terms[p];
-        recover_primary(nets_[net_id], nets_[net_id].terms[t]);
       }
       phases.member_reservations += step_timer.elapsed();
       md = MemberData();
@@ -3714,7 +3720,7 @@ void BonnRouteDR::buildOffTrackAccess(const std::vector<char>& pre_skip)
       phases.member_solve += step_timer.elapsed();
     }
     step_timer.reset();
-    std::vector<int> missing;
+    algorithm3_fallback(ia, cats, choice, nets);
     for (int p = 0; p < n; p++) {
       const auto [net_id, t] = ia.terms[p];
       NetData& net = nets_[net_id];
@@ -3726,13 +3732,7 @@ void BonnRouteDR::buildOffTrackAccess(const std::vector<char>& pre_skip)
       keepStubs(term, cats[p]);
       if (choice[p] >= 0) {
         reserve(net, term, choice[p]);
-      } else {
-        missing.push_back(p);
       }
-    }
-    for (const int p : missing) {
-      const auto [net_id, t] = ia.terms[p];
-      recover_primary(nets_[net_id], nets_[net_id].terms[t]);
     }
     phases.member_reservations += step_timer.elapsed();
   }
@@ -3748,23 +3748,34 @@ void BonnRouteDR::buildOffTrackAccess(const std::vector<char>& pre_skip)
       reserve_fallback(net, term);
       continue;
     }
-    const std::vector<int> choice = solve(cats, {net_id});
+    std::vector<int> choice = solve(cats, {net_id});
+    if (choice[0] < 0 && params_.offtrack_algorithm3_fallback
+        && params_.offtrack_hanan_grid) {
+      // A top-level pin without a legal path: Algorithm 3 catalogue.
+      stats.fallback_instances++;
+      std::vector<std::vector<AccessOption>> alt(1);
+      offTrackCatalogue(net_id, term, nullptr, alt[0], stats, 0, true);
+      const std::vector<int> alt_choice = solve(alt, {net_id});
+      if (alt_choice[0] >= 0) {
+        cats = std::move(alt);
+        choice = alt_choice;
+        stats.fallback_improved++;
+      }
+    }
     keepStubs(term, cats[0]);
     if (choice[0] >= 0) {
       reserve(net, term, choice[0]);
-    } else {
-      recover_primary(net, term);
     }
   }
   phases.top_level_pins = phase_timer.elapsed();
-  if (params_.verbose && params_.offtrack_primary_regenerate) {
+  if (params_.verbose && params_.offtrack_algorithm3_fallback) {
     logger_->info(utl::DRT,
                   9165,
-                  "BonnRoute off-track primary regeneration: {} pins with a "
-                  "catalogue and no primary path, {} got a primary path from "
-                  "their own catalogue.",
-                  stats.primary_missing,
-                  stats.primary_recovered);
+                  "BonnRoute off-track Algorithm 3 fallback: {} instances with "
+                  "a pin without a primary path on the Hanan grid, {} assign "
+                  "more pins with Algorithm 3 catalogues.",
+                  stats.fallback_instances,
+                  stats.fallback_improved);
   }
   for (NetData& net : nets_) {
     if (pre_skip[net.id]) {

@@ -131,11 +131,19 @@ the catalogue targets and costs are equal, the equal-cost paths differ), and
 the left nets with such a pin are the left-net difference between the two
 grids (`offtrack_access_report`).
 
-With `offtrack_primary_regenerate 1` such a pin, after the instance's other
-pins are reserved, generates its own catalogue against the current routing
-space two pitches farther out (the Sec. 4.4 dynamic generation, at setup)
-and reserves its best legal path; the new paths go first in its options.
-DRT-9165 counts the pins and those that got a primary path.
+Larger catalogues (`max_access_options 16`), a larger radius
+(`offtrack_radius 3`) and a catalogue regenerated at setup against the
+instance's reservations leave the count unchanged: the instance's pins
+have no complete conflict-free assignment among these paths. The
+instances that fail with Algorithm 3 are a subset of those that fail on
+the Hanan grid.
+
+With `offtrack_algorithm3_fallback 1` (and `offtrack_hanan_grid 1`) an
+instance whose selection leaves a pin with a catalogue unassigned
+recomputes its catalogues on the Algorithm 3 grid (five states, no
+on-track ties: the paths of `offtrack_hanan_grid 0`), solves again and
+keeps the result that assigns more pins. A top-level pin without a legal
+path does the same. DRT-9165 counts the instances and those that improve.
 
 ## Multi-layer blockage grid
 
