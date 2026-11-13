@@ -4715,6 +4715,7 @@ bool BonnRouteDR::connectInRegion(NetData& net,
     }
     worker.searches++;
     worker.heap_pops += res.heap_pops;
+    worker.held_pops += res.held_pops;
     worker.settled += res.settled;
     worker.fast_grid_queries += res.fast_grid_queries;
     worker.checker_queries += res.checker_queries;
@@ -7512,6 +7513,7 @@ void BonnRouteDR::main()
   }
   int64_t searches = 0;
   int64_t heap_pops = 0;
+  int64_t held_pops = 0;
   int64_t settled = 0;
   int64_t intervals = 0;
   int64_t labels = 0;
@@ -7536,6 +7538,7 @@ void BonnRouteDR::main()
     searches += w.searches;
     path_region_searches += w.path_region_searches;
     heap_pops += w.heap_pops;
+    held_pops += w.held_pops;
     settled += w.settled;
     if (w.interval_search) {
       intervals += w.interval_search->intervals();
@@ -7835,6 +7838,14 @@ void BonnRouteDR::main()
         rollbacks_,
         path_region_searches,
         timer.elapsed());
+    if (!params_.use_intervals) {
+      logger_->report(
+          "BonnRoute DR vertex search queue: {} of {} heap pops answered by "
+          "the last pushed item ({:.1f}%).",
+          held_pops,
+          heap_pops,
+          heap_pops > 0 ? 100.0 * held_pops / heap_pops : 0.0);
+    }
     br::CleanupStats cleanup;
     int64_t regenerations = 0;
     int64_t regenerated_paths = 0;

@@ -69,6 +69,7 @@ cc_library(
         "src/br/BrPotential.h",
         "src/br/BrPotentialOracle.h",
         "src/br/BrSameNetRules.h",
+        "src/br/BrSearchQueue.h",
         "src/br/BrShapeGrid.h",
         "src/br/BrTailPipeline.h",
         "src/br/BrTrackGraph.h",

@@ -586,6 +586,7 @@ class BonnRouteDR
     int64_t searches = 0;
     int64_t path_region_searches = 0;
     int64_t heap_pops = 0;
+    int64_t held_pops = 0;
     int64_t settled = 0;
   };
   // Saved routing of a net, for restoring a failed rip-up sequence.

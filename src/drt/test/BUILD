@@ -100,6 +100,13 @@ cc_test(
 )
 
 cc_test(
+    name = "bonnroute_search_queue_test",
+    size = "small",
+    srcs = ["BonnRouteSearchQueueTest.cpp"],
+    deps = ["//src/drt:bonnroute_core"],
+)
+
+cc_test(
     name = "bonnroute_access_footprint_test",
     size = "small",
     srcs = [

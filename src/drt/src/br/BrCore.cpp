@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <functional>
+#include <stdexcept>
 #include <vector>
 
 namespace drt::br {
@@ -127,54 +128,6 @@ Cost PathSearch::penalty(const At a, const RipupLevel l) const
          * (1 + static_cast<Cost>(grid_.history(graph_.vertex(a.z, a.i, a.j))));
 }
 
-void PathSearch::push(const Item& item)
-{
-  heap_.push_back(item);
-  size_t k = heap_.size() - 1;
-  while (k > 0) {
-    const size_t parent = (k - 1) / 4;
-    if (!(heap_[parent] > item)) {
-      break;
-    }
-    heap_[k] = heap_[parent];
-    k = parent;
-  }
-  heap_[k] = item;
-  res_->heap_pushes++;
-}
-
-PathSearch::Item PathSearch::pop()
-{
-  const Item top = heap_.front();
-  const Item last = heap_.back();
-  heap_.pop_back();
-  const size_t n = heap_.size();
-  if (n == 0) {
-    return top;
-  }
-  size_t k = 0;
-  while (true) {
-    const size_t first = 4 * k + 1;
-    if (first >= n) {
-      break;
-    }
-    size_t best = first;
-    const size_t end = std::min(first + 4, n);
-    for (size_t c = first + 1; c < end; c++) {
-      if (heap_[best] > heap_[c]) {
-        best = c;
-      }
-    }
-    if (!(last > heap_[best])) {
-      break;
-    }
-    heap_[k] = heap_[best];
-    k = best;
-  }
-  heap_[k] = last;
-  return top;
-}
-
 bool PathSearch::relax(const int z,
                        const int i,
                        const int j,
@@ -193,7 +146,7 @@ bool PathSearch::relax(const int z,
   label.dist = g;
   label.parent = parent;
   const auto [x, y] = graph_.layers[z].point(i, j);
-  push(Item{g + futureCost(z, x, y), g, i, j, 0, static_cast<int8_t>(z), dir});
+  push(makeItem(g + futureCost(z, x, y), g, z, i, j, 0, dir));
   return true;
 }
 
@@ -250,8 +203,7 @@ void PathSearch::settle(const int z, const int i, const int j, const Cost g)
   const bool is_source = (label.marks & kMarkSource) != 0;
   if ((label.marks & kMarkTarget) != 0) {
     const auto& t = req_->targets[label.target_index];
-    push(Item{
-        g + t.cost, g, i, j, label.target_index, static_cast<int8_t>(z), 2});
+    push(makeItem(g + t.cost, g, z, i, j, label.target_index, 2));
   }
   const TrackLayer& layer = graph_.layers[z];
   const Region& region = *req_->region;
@@ -427,7 +379,20 @@ SearchResult PathSearch::run(const SearchRequest& request)
   min_wire_rate_ = request.discounts.empty()
                        ? graph_.wire_unit
                        : std::min(graph_.wire_unit, request.discount_rate);
-  heap_.clear();
+  queue_.clear();
+  const int64_t held_before = queue_.heldPops();
+  {
+    // Item::order field widths from the largest track and position counts.
+    int tracks = 1;
+    int positions = 1;
+    for (const TrackLayer& l : graph_.layers) {
+      tracks = std::max(tracks, l.numTracks());
+      positions = std::max(positions, l.numPositions());
+    }
+    if (!order_.setup(graph_.numLayers(), tracks, positions)) {
+      throw std::length_error("PathSearch: track graph too large for Item");
+    }
+  }
   boxes_.setup(request, via_prefix_, min_via_cost_);
   setupWindow(request);
 
@@ -461,33 +426,32 @@ SearchResult PathSearch::run(const SearchRequest& request)
     label.dist = c;
     label.parent = kSource;
     const auto [x, y] = graph_.layers[z].point(i, j);
-    push(Item{c + futureCost(z, x, y), c, i, j, 0, static_cast<int8_t>(z), 0});
+    push(makeItem(c + futureCost(z, x, y), c, z, i, j, 0, 0));
   }
 
   // The continuation pushed by the last popped run label (statistics only).
   bool continuation_pushed = false;
   Item continuation{};
-  while (!heap_.empty()) {
+  while (!queue_.empty()) {
     if (labels_.overflow()) {
       result.aborted = true;
       break;
     }
-    const Item item = pop();
+    const Item item = queue_.pop();
     result.heap_pops++;
     if (continuation_pushed && item.key == continuation.key
-        && item.g == continuation.g && item.i == continuation.i
-        && item.j == continuation.j && item.z == continuation.z
-        && item.dir == continuation.dir) {
+        && item.g == continuation.g && item.order == continuation.order) {
       result.run_continuations++;
     }
     continuation_pushed = false;
-    if (item.dir == 1 || item.dir == -1) {
+    const int item_dir = VertexOrder::dir(item.order);
+    if (item_dir == 1 || item_dir == -1) {
       result.run_label_pops++;
     }
-    const int z = item.z;
-    const int i = item.i;
-    const int j = item.j;
-    if (item.dir == 2) {
+    const int z = order_.z(item.order);
+    const int i = order_.i(item.order);
+    const int j = order_.j(item.order);
+    if (item_dir == 2) {
       result.found = true;
       result.cost = item.key;
       result.target_id = request.targets[item.aux].id;
@@ -503,7 +467,7 @@ SearchResult PathSearch::run(const SearchRequest& request)
     const Region& region = *request.region;
     settle(z, i, j, item.g);
     const bool is_source = (labels_[li].marks & kMarkSource) != 0;
-    if (item.dir == 0) {
+    if (item_dir == 0) {
       // Vertex label: start runs in both preferred directions.
       if (!is_source && !enter(At{z, i, j}, kWire)) {
         continue;
@@ -537,7 +501,7 @@ SearchResult PathSearch::run(const SearchRequest& request)
     }
     // Run label: continue along the track. While the reduced cost stays
     // zero, the run is labelled without heap operations.
-    const int d = item.dir;
+    const int d = item_dir;
     const int j2 = j + d;
     if (j2 < 0 || j2 >= layer.numPositions()
         || !region.contains(layer, z, i, j2)) {
@@ -566,18 +530,13 @@ SearchResult PathSearch::run(const SearchRequest& request)
     next.dist = ng;
     next.parent = d > 0 ? kFromLower : kFromHigher;
     const auto [x, y] = layer.point(i, j2);
-    continuation = Item{ng + futureCost(z, x, y),
-                        ng,
-                        i,
-                        j2,
-                        0,
-                        static_cast<int8_t>(z),
-                        static_cast<int8_t>(d)};
+    continuation = makeItem(ng + futureCost(z, x, y), ng, z, i, j2, 0, d);
     continuation_pushed = true;
     push(continuation);
   }
   result.fast_grid_queries = counters_.fast_grid;
   result.checker_queries = counters_.checker;
+  result.held_pops = queue_.heldPops() - held_before;
   if (labels_.overflow()) {
     result.aborted = true;
     result.found = false;
