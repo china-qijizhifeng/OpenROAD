@@ -1022,6 +1022,9 @@ int FlexDR::runGridWorkersAhead(std::vector<GridWorkerSlot>& slots,
     int num_markers = 0;
   };
   const int num_slots = slots.size();
+  if (num_slots == 0) {
+    return 0;
+  }
   std::vector<Slot> states(num_slots);
   std::vector<int> batch_end(num_batches, 0);
   for (int i = 0; i < num_slots; i++) {
@@ -2022,13 +2025,10 @@ void FlexDR::optimizationFlow(const SearchRepairArgs& args,
   // The marker-driven iterations of the clean-up after BonnRoute run few
   // workers per batch, so workers of later batches start ahead on idle
   // threads (runGridWorkersAhead; same results as the batch loop below).
-  // The debug group bonnroute_cleanup_batch_barrier keeps the batch loop,
-  // for timing comparisons inside one binary.
   const bool start_ahead
       = initial_routing_cleanup_.start_grid_workers_ahead && markers_only
         && iter_ >= 2 && !dist_on_ && graphics_ == nullptr
-        && (!skip_unaffected || marker_cleanup)
-        && !logger_->debugCheck(DRT, "bonnroute_cleanup_batch_barrier", 1);
+        && (!skip_unaffected || marker_cleanup);
   if (start_ahead) {
     std::vector<GridWorkerSlot> slots;
     int num_batches = 0;

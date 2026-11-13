@@ -308,6 +308,8 @@ bool BonnRouteDRParams::set(const std::string& name, const double value)
     planar_first = v != 0;
   } else if (name == "cleanup_normalize_initial_routing") {
     cleanup_normalize_initial_routing = v != 0;
+  } else if (name == "cleanup_grid_workers_ahead") {
+    cleanup_grid_workers_ahead = v != 0;
   } else if (name == "left_net_track_assignment") {
     left_net_track_assignment = v != 0;
   } else if (name == "incremental") {

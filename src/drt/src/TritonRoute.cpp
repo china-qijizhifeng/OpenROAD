@@ -914,9 +914,11 @@ void TritonRoute::dr()
     // iteration 0 checks the changed regions (check-only workers where all
     // nets are routed) and routes what BonnRoute left; the repair
     // iterations follow directly, limited to workers with markers.
-    dr_->setInitialRoutingCleanup({.incremental_iterations = 0,
-                                   .check_only_workers = true,
-                                   .start_grid_workers_ahead = true});
+    dr_->setInitialRoutingCleanup(
+        {.incremental_iterations = 0,
+         .check_only_workers = true,
+         .start_grid_workers_ahead
+         = bonnroute_params_ && bonnroute_params_->cleanup_grid_workers_ahead});
   } else if (bonnroute_ && !distributed_ && bonnroute_params_) {
     dr_->setInitialRoutingCleanup(
         {.incremental_iterations
@@ -924,7 +926,8 @@ void TritonRoute::dr()
          .check_only_workers = bonnroute_params_->cleanup_check_only_workers,
          .normalize_initial_routing
          = bonnroute_params_->cleanup_normalize_initial_routing,
-         .start_grid_workers_ahead = true});
+         .start_grid_workers_ahead
+         = bonnroute_params_->cleanup_grid_workers_ahead});
   }
   if (router_cfg_->SINGLE_STEP_DR) {
     dr_->init();

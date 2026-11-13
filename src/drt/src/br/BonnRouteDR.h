@@ -351,6 +351,12 @@ struct BonnRouteDRParams
   // the Recheck markers of this check are dropped, since iteration 0 checks
   // every tile.
   bool cleanup_normalize_initial_routing = false;
+  // In FlexDR's marker-driven grid iterations (iteration 3 on), workers of
+  // later checkerboard batches start ahead of their batch on idle threads;
+  // a worker's result is kept when it read the design state its batch starts
+  // from. The routing result equals that of the batch-by-batch run
+  // (bit-identical result files); 0 runs batch by batch.
+  bool cleanup_grid_workers_ahead = true;
   // Track assignment runs after BonnRoute instead of before it, for the nets
   // left to FlexDR only, and sees BonnRoute's routing as obstacles. FlexDR
   // reads track assignment only for those nets (their tile-boundary pins in
