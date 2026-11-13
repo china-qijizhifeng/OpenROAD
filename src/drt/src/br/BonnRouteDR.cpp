@@ -30,6 +30,7 @@
 #include "br/BrDrtRules.h"
 #include "br/BrFixedShapes.h"
 #include "br/BrGeometry.h"
+#include "br/BrIoPinArea.h"
 #include "br/BrOffTrackSearch.h"
 #include "br/BrPathCleanup.h"
 #include "br/BrPinAccess.h"
@@ -352,6 +353,8 @@ bool BonnRouteDRParams::set(const std::string& name, const double value)
     partition_check = partition_check || dependency_trace;
   } else if (name == "start_check") {
     start_check = std::clamp(v, 0, 1);
+  } else if (name == "io_pin_area") {
+    io_pin_area = v != 0;
   } else if (name == "planar_first") {
     planar_first = v != 0;
   } else if (name == "cleanup_normalize_initial_routing") {
@@ -9514,14 +9517,21 @@ void BonnRouteDR::writeNets()
   // distance to the fills of earlier nets; fillNotches reads the net's own
   // FlexDR objects and the routing space, which the writes above leave
   // unchanged.
-  if (params_.notch_fill) {
+  // io_pin_area: the patches of the routed metal on IO pins follow each
+  // net's notch fills, in the same net order.
+  if (params_.notch_fill || params_.io_pin_area) {
     for (size_t k = 0; k < ids.size(); k++) {
       if (!written[k]) {
         continue;
       }
       const int id = ids[k];
       const size_t first_fill = notch_fill_rects.size();
-      fillNotches(nets_[id].net, id, notch_fill_rects);
+      if (params_.notch_fill) {
+        fillNotches(nets_[id].net, id, notch_fill_rects);
+      }
+      if (params_.io_pin_area && !nets_[id].net->getBTerms().empty()) {
+        fillIoPinArea(nets_[id].net, id, notch_fill_rects);
+      }
       for (size_t f = first_fill; f < notch_fill_rects.size(); f++) {
         written_fills.emplace_back(id, f);
       }
@@ -9538,6 +9548,126 @@ void BonnRouteDR::writeNets()
       nets_[id].shapes.push_back(s);
       changeShape(s, routedType(s.role), id, true, nullptr);
     }
+  }
+}
+
+void BonnRouteDR::fillIoPinArea(
+    frNet* net,
+    const int id,
+    std::vector<std::pair<frLayerNum, odb::Rect>>& fills)
+{
+  // The net's routed metal per layer and the anchors of patches (via
+  // origins and wire ends), as FlexDR's connectivity check keeps them.
+  std::vector<std::pair<frLayerNum, odb::Rect>> metal;
+  std::vector<std::pair<frLayerNum, odb::Point>> anchors;
+  for (const auto& shape : net->getShapes()) {
+    if (shape->typeId() != frcPathSeg) {
+      continue;
+    }
+    const auto* seg = static_cast<const frPathSeg*>(shape.get());
+    metal.emplace_back(seg->getLayerNum(), seg->getBBox());
+    const auto [b, e] = seg->getPoints();
+    anchors.emplace_back(seg->getLayerNum(), b);
+    anchors.emplace_back(seg->getLayerNum(), e);
+  }
+  for (const auto& via : net->getVias()) {
+    const frViaDef* def = via->getViaDef();
+    metal.emplace_back(def->getLayer1Num(), via->getLayer1BBox());
+    metal.emplace_back(def->getLayer2Num(), via->getLayer2BBox());
+    anchors.emplace_back(def->getLayer1Num(), via->getOrigin());
+    anchors.emplace_back(def->getLayer2Num(), via->getOrigin());
+  }
+  for (const auto& patch : net->getPatchWires()) {
+    metal.emplace_back(patch->getLayerNum(), patch->getBBox());
+  }
+  std::vector<frRect> pins;
+  for (frBTerm* bt : net->getBTerms()) {
+    bt->getShapes(pins);
+  }
+  const frCoord grid
+      = std::max<frCoord>(1, design_->getTech()->getManufacturingGrid());
+  auto to_box = [](const odb::Rect& r) {
+    return br::Box{r.xMin(), r.yMin(), r.xMax(), r.yMax()};
+  };
+  for (const frRect& pin : pins) {
+    const frLayerNum layer = pin.getLayerNum();
+    const int z = layer >= 0 && layer < static_cast<int>(z_of_fr_.size())
+                      ? z_of_fr_[layer]
+                      : -1;
+    if (z < 0 || same_net_rules_[z].min_area <= 0) {
+      continue;
+    }
+    const odb::Rect box = pin.getBBox();
+    std::vector<br::Box> on_layer;
+    for (const auto& [l, r] : metal) {
+      if (l == layer) {
+        on_layer.push_back(to_box(r));
+      }
+    }
+    const std::vector<size_t> group = br::piecesOnPin(on_layer, to_box(box));
+    if (group.empty()) {
+      continue;
+    }
+    io_pin_pieces_++;
+    br::IoPinPatchRequest req;
+    for (const size_t k : group) {
+      req.group.push_back(on_layer[k]);
+    }
+    if (br::unionArea(req.group) >= same_net_rules_[z].min_area) {
+      continue;
+    }
+    io_pin_below_++;
+    // Anchor: a via origin or wire end on this layer inside the pin.
+    const std::pair<frLayerNum, odb::Point>* anchor = nullptr;
+    for (const auto& a : anchors) {
+      if (a.first == layer && box.intersects(a.second)) {
+        anchor = &a;
+        break;
+      }
+    }
+    if (anchor == nullptr) {
+      continue;
+    }
+    req.anchor = {anchor->second.x(), anchor->second.y()};
+    req.horizontal = layers_[z].horizontal;
+    req.half_width = layers_[z].width / 2;
+    req.min_area = same_net_rules_[z].min_area;
+    req.grid = grid;
+    req.die = to_box(die_);
+    // Legal against other nets: the routing space and the patches and
+    // fills written for earlier nets.
+    req.legal = [&](const br::Box& b) {
+      const odb::Rect ext(b.xlo, b.ylo, b.xhi, b.yhi);
+      if (shapeConflicts(
+              RShape{layer, ext, br::ShapeRole::kPreferredWire}, id, nullptr)) {
+        return false;
+      }
+      const frCoord space = spacing(z, ext.minDXDY(), ext.minDXDY(), 0);
+      return std::ranges::none_of(fills, [&](const auto& other) {
+        if (other.first != layer) {
+          return false;
+        }
+        const odb::Rect& o = other.second;
+        const int dx = std::max(o.xMin() - ext.xMax(), ext.xMin() - o.xMax());
+        const int dy = std::max(o.yMin() - ext.yMax(), ext.yMin() - o.yMax());
+        return std::max(dx, dy) < space;
+      });
+    };
+    const std::optional<br::Box> patch = br::ioPinPatch(req);
+    if (!patch) {
+      continue;
+    }
+    const odb::Rect ext(patch->xlo, patch->ylo, patch->xhi, patch->yhi);
+    auto pwire = std::make_unique<frPatchWire>();
+    pwire->setLayerNum(layer);
+    pwire->setOrigin(anchor->second);
+    odb::Rect offset = ext;
+    offset.moveDelta(-anchor->second.x(), -anchor->second.y());
+    pwire->setOffsetBox(offset);
+    net->addPatchWire(std::move(pwire));
+    metal.emplace_back(layer, ext);
+    fills.emplace_back(layer, ext);
+    io_pin_extended_++;
   }
 }
 
@@ -10685,6 +10815,16 @@ void BonnRouteDR::main()
         "pin contact (truncated wire end or connected via) left to FlexDR.",
         uncontacted_nets_,
         uncontacted_pins_);
+    if (params_.io_pin_area) {
+      logger_->info(utl::DRT,
+                    9263,
+                    "BonnRoute DR IO pins: {} routed pieces on top-level pin "
+                    "shapes, {} below the layer's minimum area without the "
+                    "pin, {} patched to it.",
+                    io_pin_pieces_,
+                    io_pin_below_,
+                    io_pin_extended_);
+    }
     if (params_.postprocess) {
       logger_->report(
           "BonnRoute DR post-processing: {} layer runs, same-net violations "

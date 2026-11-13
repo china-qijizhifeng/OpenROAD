@@ -107,6 +107,13 @@ cc_test(
 )
 
 cc_test(
+    name = "bonnroute_io_pin_area_test",
+    size = "small",
+    srcs = ["BonnRouteIoPinAreaTest.cpp"],
+    deps = ["//src/drt:bonnroute_core"],
+)
+
+cc_test(
     name = "bonnroute_search_queue_test",
     size = "small",
     srcs = ["BonnRouteSearchQueueTest.cpp"],

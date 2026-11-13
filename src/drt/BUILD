@@ -67,6 +67,7 @@ cc_library(
         "src/br/BrFixedShapes.h",
         "src/br/BrGeometry.h",
         "src/br/BrIncrementalCore.h",
+        "src/br/BrIoPinArea.h",
         "src/br/BrOffTrackSearch.h",
         "src/br/BrPathCleanup.h",
         "src/br/BrPinAccess.h",
