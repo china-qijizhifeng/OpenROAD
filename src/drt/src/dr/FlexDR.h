@@ -586,10 +586,12 @@ class FlexDRWorker
   }
   frCoord getHalfViaEncArea(frMIdx z, bool isLayer1, frNonDefaultRule* ndr);
   bool isSkipRouting() const { return skipRouting_; }
-  // Stubborn tiles: the worker stops routing as soon as *first_clean holds a
-  // creation index below its own (an earlier worker of its cluster ended with
-  // zero markers); a stopped worker is discarded.
-  void setStopBelow(const std::atomic<int>* first_clean, int creation_index)
+  // Stubborn tiles: *first_clean holds the lowest creation index of a worker
+  // of this worker's cluster that ended with zero markers.  The worker stops
+  // routing as soon as that index is below its own; a stopped worker is
+  // discarded.  A null pointer detaches the worker from the shared index.
+  void setFirstCleanCreationIndex(const std::atomic<int>* first_clean,
+                                  int creation_index)
   {
     first_clean_ = first_clean;
     creation_index_ = creation_index;

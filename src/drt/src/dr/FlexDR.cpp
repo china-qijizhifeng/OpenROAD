@@ -767,7 +767,7 @@ std::vector<int> FlexDR::runStubbornWorkersUntilClean(
                             std::numeric_limits<int>::max()))
                .first;
     }
-    workers_batch[i]->setStopBelow(it->second.get(), i);
+    workers_batch[i]->setFirstCleanCreationIndex(it->second.get(), i);
   }
   std::vector<char> finished(workers_batch.size(), 0);
   std::atomic<int> not_finished{0};
@@ -801,6 +801,10 @@ std::vector<int> FlexDR::runStubbornWorkersUntilClean(
     } catch (...) {
       exception.capture();
     }
+  }
+  // The shared indices live in this function; the workers outlive it.
+  for (auto& worker : workers_batch) {
+    worker->setFirstCleanCreationIndex(nullptr, 0);
   }
   exception.rethrow();
   iter_prog.total_num_workers -= not_finished.load();
