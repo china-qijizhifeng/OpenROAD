@@ -97,6 +97,50 @@ FlexTA::FlexTA(frDesign* in,
 
 FlexTA::~FlexTA() = default;
 
+void FlexTA::initUnroutedGuideBoxes()
+{
+  frBlock* block = getDesign()->getTopBlock();
+  for (auto& boxes : unrouted_guide_boxes_) {
+    boxes.clear();
+  }
+  for (const auto& net : block->getNets()) {
+    if (net->hasInitialRouting()) {
+      continue;
+    }
+    for (const auto& guide : net->getGuides()) {
+      const frLayer* layer = getTech()->getLayer(guide->getLayerNum());
+      if (layer->getType() != dbTechLayerType::ROUTING) {
+        continue;
+      }
+      const auto [bp, ep] = guide->getPoints();
+      odb::Rect box = block->getGCellBox(block->getGCellIdx(bp));
+      box.merge(block->getGCellBox(block->getGCellIdx(ep)));
+      const bool is_h = layer->getDir() == dbTechLayerDir::HORIZONTAL;
+      unrouted_guide_boxes_[is_h ? 1 : 0].push_back(box);
+    }
+  }
+}
+
+bool FlexTA::clipToUnroutedGuides(bool isH, odb::Rect& routeBox) const
+{
+  // Guides run between gcell centers, so a guide of the panel direction lies
+  // in one panel; the merged gcell boxes of those guides contain them all.
+  odb::Rect clip;
+  clip.mergeInit();
+  for (const odb::Rect& box : unrouted_guide_boxes_[isH ? 1 : 0]) {
+    const odb::Point center((box.xMin() + box.xMax()) / 2,
+                            (box.yMin() + box.yMax()) / 2);
+    if (routeBox.intersects(center)) {
+      clip.merge(box);
+    }
+  }
+  if (clip.isInverted()) {
+    return false;
+  }
+  routeBox = routeBox.intersect(clip);
+  return true;
+}
+
 int FlexTA::initTA_helper(int iter,
                           int size,
                           int offset,
@@ -121,6 +165,9 @@ int FlexTA::initTA_helper(int iter,
                      std::min(i + size - 1, (int) ygp.getCount() - 1)));
       odb::Rect routeBox(
           beginBox.xMin(), beginBox.yMin(), endBox.xMax(), endBox.yMax());
+      if (unrouted_nets_only_ && !clipToUnroutedGuides(true, routeBox)) {
+        continue;
+      }
       odb::Rect extBox;
       routeBox.bloat(ygp.getSpacing() / 2, extBox);
       worker.setRouteBox(routeBox);
@@ -129,6 +176,7 @@ int FlexTA::initTA_helper(int iter,
       worker.setTAIter(iter);
       worker.setNetsWithoutInitialRoutingOnly(
           nets_without_initial_routing_only_);
+      worker.setUnroutedNetsOnly(unrouted_nets_only_);
       if (workers.empty()
           || (int) workers.back().size() >= router_cfg_->BATCHSIZETA) {
         workers.emplace_back(std::vector<std::unique_ptr<FlexTAWorker>>());
@@ -147,6 +195,9 @@ int FlexTA::initTA_helper(int iter,
                      (int) ygp.getCount() - 1));
       odb::Rect routeBox(
           beginBox.xMin(), beginBox.yMin(), endBox.xMax(), endBox.yMax());
+      if (unrouted_nets_only_ && !clipToUnroutedGuides(false, routeBox)) {
+        continue;
+      }
       odb::Rect extBox;
       routeBox.bloat(xgp.getSpacing() / 2, extBox);
       worker.setRouteBox(routeBox);
@@ -155,6 +206,7 @@ int FlexTA::initTA_helper(int iter,
       worker.setTAIter(iter);
       worker.setNetsWithoutInitialRoutingOnly(
           nets_without_initial_routing_only_);
+      worker.setUnroutedNetsOnly(unrouted_nets_only_);
       if (workers.empty()
           || (int) workers.back().size() >= router_cfg_->BATCHSIZETA) {
         workers.emplace_back(std::vector<std::unique_ptr<FlexTAWorker>>());
@@ -325,6 +377,9 @@ int FlexTA::main()
   frTime t;
   if (router_cfg_->VERBOSE > 0) {
     logger_->info(DRT, 181, "Start track assignment.");
+  }
+  if (unrouted_nets_only_) {
+    initUnroutedGuideBoxes();
   }
   initTA(50);
   if (graphics_) {

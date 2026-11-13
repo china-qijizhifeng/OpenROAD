@@ -107,6 +107,9 @@ void BonnRouteDRParams::applyProfile(const int which)
   postprocess = true;
   access_classes = true;
   reservations = false;
+  // Sec. 5.2 incremental routing of the later detailed_route -bonnroute
+  // calls (the post-antenna ECO routes), in every profile.
+  incremental = true;
   if (profile == 2) {
     // 2021: the bulk routing experiment of Ahrens et al., arXiv:2111.06169
     // (Table 3) on top of 2013-reimpl: the general-model potential for every
@@ -282,6 +285,20 @@ bool BonnRouteDRParams::set(const std::string& name, const double value)
     cleanup_normalize_initial_routing = v != 0;
   } else if (name == "left_net_track_assignment") {
     left_net_track_assignment = v != 0;
+  } else if (name == "incremental") {
+    incremental = v != 0;
+  } else if (name == "incremental_resident") {
+    incremental_resident = v != 0;
+  } else if (name == "reserve_short_pitches") {
+    reserve_short_pitches = std::max(0, v);
+  } else if (name == "incremental_reservations") {
+    incremental_reservations = v != 0;
+  } else if (name == "incremental_potential") {
+    incremental_potential = std::clamp(v, 0, 4);
+  } else if (name == "incremental_ripup") {
+    incremental_ripup = v != 0;
+  } else if (name == "incremental_check") {
+    incremental_check = std::clamp(v, 0, 2);
   } else if (name == "verbose") {
     verbose = v != 0;
   } else {
@@ -301,6 +318,8 @@ BonnRouteDR::BonnRouteDR(frDesign* design,
       params_(params),
       block_(block)
 {
+  // A routing space kept for incremental calls records instance shapes.
+  record_fixed_ = params_.incremental && params_.incremental_resident;
 }
 
 void BonnRouteDR::loadExtraSpace()
@@ -1050,7 +1069,13 @@ void BonnRouteDR::markWideNets()
   const int threads = static_cast<int>(workers_.size());
 #pragma omp parallel for num_threads(threads) schedule(dynamic, 256)
   for (int k = 0; k < static_cast<int>(nets_.size()); k++) {
-    NetData& net = nets_[k];
+    nets_[k].wide_shapes = netHasWideShapes(nets_[k]);
+  }
+}
+
+bool BonnRouteDR::netHasWideShapes(const NetData& net) const
+{
+  {
     bool wide = net.wire_type != 0;
     auto check = [&](const RShape& shape) {
       const int g = gridLayer(shape.layer);
@@ -1083,7 +1108,7 @@ void BonnRouteDR::markWideNets()
         }
       }
     }
-    net.wide_shapes = wide;
+    return wide;
   }
 }
 
@@ -1273,6 +1298,12 @@ void BonnRouteDR::ownShapes(
       add(s, br::ShapeType::kReservation);
     }
   }
+  // Incremental mode: kept input routing is a component of the net.
+  if (net.input_present) {
+    for (const RShape& s : net.input_shapes) {
+      add(s, routedType(s.role));
+    }
+  }
 }
 
 void BonnRouteDR::buildNets()
@@ -1328,6 +1359,7 @@ void BonnRouteDR::buildFixed()
   {
     odb::Rect rect;
     int owner;
+    const frBlockObject* obj = nullptr;
     br::ClassId cls = 0;
     br::ClassId projection_cls = 0;
   };
@@ -1354,7 +1386,7 @@ void BonnRouteDR::buildFixed()
           owner = it->second;
         }
       }
-      fixed[fr].push_back({rect, owner});
+      fixed[fr].push_back({rect, owner, obj});
     }
   }
   setup_phases_.fixed_query = timer.elapsed();
@@ -1414,6 +1446,14 @@ void BonnRouteDR::buildFixed()
     for (const FixedShape& f : fixed[fr]) {
       if (f.owner >= 0) {
         nets_[f.owner].pins.push_back({static_cast<frLayerNum>(fr), f.rect});
+      }
+      // Incremental mode: the fixed shapes of each instance.
+      if (record_fixed_) {
+        recordFixedShape(
+            f.obj,
+            {static_cast<frLayerNum>(fr), f.rect},
+            f.owner >= 0 ? br::ShapeType::kPin : br::ShapeType::kBlockage,
+            f.owner);
       }
     }
   }
@@ -2201,6 +2241,34 @@ int BonnRouteDR::pinsWithoutContact(const NetData& net,
          {v.def->getLayer1Num(), v.def->getLayer2Num()}) {
       if (atAccessPoint(net, layer, v.point)) {
         add_pins(layer, v.point);
+      }
+    }
+  }
+  if (net.keeps_input) {
+    // Incremental calls (Fig. 9): the kept pin-to-pin paths stay in the
+    // frNet and carry the contacts of the pins they join, by the same rule.
+    for (const auto& shape : net.net->getShapes()) {
+      if (shape->typeId() != frcPathSeg) {
+        continue;
+      }
+      const auto* seg = static_cast<const frPathSeg*>(shape.get());
+      const auto [b, e] = seg->getPoints();
+      if (seg->getBeginStyle() == frcTruncateEndStyle) {
+        add_pins(seg->getLayerNum(), b);
+      }
+      if (seg->getEndStyle() == frcTruncateEndStyle) {
+        add_pins(seg->getLayerNum(), e);
+      }
+    }
+    for (const auto& via : net.net->getVias()) {
+      const frViaDef* def = via->getViaDef();
+      const odb::Point o = via->getOrigin();
+      if (via->isBottomConnected()
+          || atAccessPoint(net, def->getLayer1Num(), o)) {
+        add_pins(def->getLayer1Num(), o);
+      }
+      if (via->isTopConnected() || atAccessPoint(net, def->getLayer2Num(), o)) {
+        add_pins(def->getLayer2Num(), o);
       }
     }
   }
@@ -5111,6 +5179,11 @@ void BonnRouteDR::ripupNet(NetData& net)
   for (const RShape& s : net.shapes) {
     changeShape(s, routedType(s.role), net.id, false, nullptr, &pending);
   }
+  // Incremental mode: input routing is ripped up with the net.
+  if (net.input_present) {
+    setInputShapes(net, false, &pending);
+    net.input_removed = true;
+  }
   fast_builder_.flush(pending);
   net.shapes.clear();
   net.wires.clear();
@@ -6424,6 +6497,7 @@ BonnRouteDR::SavedRouting BonnRouteDR::saveRouting(const NetData& net) const
   saved.vias = net.vias;
   saved.pin_points = net.pin_points;
   saved.input_reserved = net.input_reserved;
+  saved.input_present = net.input_present;
   for (const Term& term : net.terms) {
     saved.chosen.push_back(term.chosen);
     saved.reserved.push_back(term.reservation_active);
@@ -6445,6 +6519,9 @@ void BonnRouteDR::restoreRouting(const SavedRouting& saved)
     setReservation(net.terms[t], net.id, saved.reserved[t] != 0);
   }
   setInputReservation(net, saved.input_reserved);
+  if (saved.input_present && !net.input_present) {
+    setInputShapes(net, true);
+  }
   if (saved.was_routed) {
     commitNet(net);
   } else {
@@ -6492,6 +6569,11 @@ bool BonnRouteDR::ripupSequence(const int id,
   for (const int victim : victims) {
     if (nets_[victim].ripups >= params_.max_ripups) {
       sequence_outcome_ = kRipupVictimLimit;
+      sequence_outcome_depth_ = depth;
+      return false;
+    }
+    if (!prepareVictim(victim)) {
+      sequence_outcome_ = kRipupVictimFailed;
       sequence_outcome_depth_ = depth;
       return false;
     }
@@ -6760,8 +6842,10 @@ void BonnRouteDR::writeNets()
 {
   frTechObject* tech = design_->getTech();
   std::vector<std::pair<frLayerNum, odb::Rect>> notch_fill_rects;
+  // (net, index in notch_fill_rects) of every fill written.
+  std::vector<std::pair<int, size_t>> written_fills;
   for (NetData& data : nets_) {
-    if (!data.routed) {
+    if (!data.routed || (!write_mask_.empty() && !write_mask_[data.id])) {
       continue;
     }
     frNet* net = data.net;
@@ -6901,10 +6985,26 @@ void BonnRouteDR::writeNets()
       net->addVia(std::move(via));
     }
     if (params_.notch_fill) {
+      const size_t first_fill = notch_fill_rects.size();
       fillNotches(net, data.id, notch_fill_rects);
+      for (size_t k = first_fill; k < notch_fill_rects.size(); k++) {
+        written_fills.emplace_back(data.id, k);
+      }
     }
     net->setHasInitialRouting(true);
     net->setModified(true);
+  }
+  // A routing space kept for incremental calls holds the notch fills as
+  // routed shapes of their net (patch wires, as routingShapes reads them);
+  // inserted after all nets are written, so the written routing is the
+  // same with and without a kept space.
+  if (record_fixed_ || incremental_active_) {
+    for (const auto& [id, k] : written_fills) {
+      const RShape s
+          = patchShape(notch_fill_rects[k].first, notch_fill_rects[k].second);
+      nets_[id].shapes.push_back(s);
+      changeShape(s, routedType(s.role), id, true, nullptr);
+    }
   }
 }
 

@@ -43,6 +43,8 @@ class Logger;
 
 namespace drt {
 
+class frBlock;
+class frBlockObject;
 class frDesign;
 class frNet;
 class frInst;
@@ -314,6 +316,38 @@ struct BonnRouteDRParams
   // report how far beyond the net's core tile box each step reaches. The
   // routing is unchanged.
   bool partition_check = false;
+  // Ahrens et al., arXiv:2111.06169, Sec. 5.2 incremental routing: a
+  // detailed_route -bonnroute call on a design that already carries routing
+  // (the antenna-repair ECO) routes the nets that need routing against the
+  // existing routing (rip-up and reroute included) and writes them; FlexDR
+  // then only checks the changed regions and repairs markers
+  // (BrIncremental.cpp). Default in every profile: the full-flow E2E (eco
+  // line, round r1) gives final DRC 0 and no more antenna nets than the
+  // FlexDR ECO on jpeg/ibex sky130hd, aes nangate45/asap7.
+  bool incremental = true;
+  // Keep the routing space alive across detailed_route calls and update it
+  // with the design changes since the previous call; 0 rebuilds it from the
+  // design and its routing in every incremental call.
+  bool incremental_resident = true;
+  // Input wires shorter than this many pitches of their layer that connect
+  // only to illegal input wires get no reservation (Sec. 5.2).
+  int reserve_short_pitches = 2;
+  // In incremental calls (whatever the profile), legal input wires are
+  // reservations of their net at the discount (Sec. 5.2: the input is a
+  // legal detailed routing); the first call is unaffected. The search of
+  // incremental calls is then the vertex search with discounted runs.
+  bool incremental_reservations = true;
+  // Future cost of incremental calls (values of `potential`); 3 is the
+  // general model with discounts used in the paper's Tables 4 and 6.
+  int incremental_potential = 3;
+  // Rip-up sequences (ripup_depth, ripup_passes) for the nets that fail in
+  // incremental calls, whatever `ripup` is for the first call.
+  bool incremental_ripup = true;
+  // Debug: at the start of every incremental call, count the routing shapes
+  // of the design (wires, vias, patches of nets whose routing did not
+  // change) that no shape of the routing space covers. 1 reports the count,
+  // 2 also stops with an error when it is not 0.
+  int incremental_check = 0;
   bool verbose = true;
   // Algorithm profile: 0 = 2013-improved (default), 1 = 2013-reimpl,
   // 2 = 2021 (2013-reimpl plus Ahrens et al., arXiv:2111.06169).
@@ -341,6 +375,21 @@ class BonnRouteDR
   void buildJogTiles();
 
   void main();
+
+  // Incremental mode (BrIncremental.cpp, arXiv:2111.06169 Sec. 5.2).
+  // True if this routing space belongs to `design` and can be updated.
+  bool residentFor(const frDesign* design) const;
+  // Builds the routing space from the design and its existing routing
+  // (first call without BonnRoute, or incremental_resident 0).
+  void buildFromDesign();
+  // After main(): turns the routes written by main() into input routing and
+  // releases all reservations, so that later incremental calls start from
+  // the routing space of the design as written.
+  void keepRoutingSpace();
+  // Updates the routing space with the design changes, routes the nets
+  // that need routing against the existing routing and writes them;
+  // `regions` receives the areas FlexDR checks afterwards.
+  void routeIncremental(std::vector<odb::Rect>& regions);
 
  private:
   struct LayerInfo
@@ -481,6 +530,23 @@ class BonnRouteDR
     std::vector<std::array<int, 3>> guide_tiles;
     // Tiles (z, tile x * tiles_y + tile y) with GR extra space for the net.
     std::vector<std::pair<int, int>> extra_space_tiles;
+    // Routing read from the design (incremental mode, Sec. 5.2): routed
+    // shapes of the net in the routing space while input_present.
+    std::vector<RShape> input_shapes;
+    bool input_present = false;
+    // The input shapes were ripped up in this call: the frNet's routing is
+    // replaced when the net is written.
+    bool input_removed = false;
+    // Terms built for this incremental call (access and guide tiles).
+    bool prepared = false;
+    // Kept pin-to-pin paths of the input routing are a terminal of the
+    // net in this call (Fig. 9 of arXiv:2111.06169).
+    bool keeps_input = false;
+    // The frNet was deleted from the design.
+    bool dead = false;
+    // Fingerprints of the frNet's routing and pins at the last update.
+    uint64_t routing_fp = 0;
+    uint64_t terms_fp = 0;
     int ripups = 0;
     bool routed = false;
     bool failed = false;
@@ -611,6 +677,7 @@ class BonnRouteDR
     std::vector<int> chosen;
     std::vector<char> reserved;
     bool input_reserved;
+    bool input_present;
   };
 
   void buildTrackGraph();
@@ -1027,6 +1094,135 @@ class BonnRouteDR
     int64_t collapsed = 0;
   } bridge_stats_, lower_bridge_stats_;
 
+  // Incremental mode (BrIncremental.cpp).
+  struct FixedEntry
+  {
+    RShape shape;
+    br::ShapeType type;
+    int owner;
+  };
+  // Fixed shapes of an instance in the routing space and the state they
+  // were read in.
+  struct InstRecord
+  {
+    std::string name;
+    odb::Rect bbox;
+    int orient = 0;
+    const void* master = nullptr;
+    std::vector<const frNet*> term_nets;
+    std::vector<FixedEntry> shapes;
+    bool seen = false;
+  };
+  struct SyncStats
+  {
+    int64_t instances_changed = 0;
+    int64_t nets_reread = 0;
+    int64_t nets_added = 0;
+    int64_t nets_removed = 0;
+    int64_t shapes_removed = 0;
+    int64_t shapes_inserted = 0;
+    std::vector<odb::Rect> inst_regions;
+    std::unordered_set<const frInst*> changed_insts;
+  };
+  // buildFixed hook: records the fixed shapes of instances.
+  void recordFixedShape(const frBlockObject* obj,
+                        const RShape& shape,
+                        br::ShapeType type,
+                        int owner);
+  void recordInstanceState(const frInst* inst, InstRecord& record) const;
+  void readInstanceShapes(const frInst* inst, InstRecord& record);
+  void removeInstanceShapes(InstRecord& record, SyncStats& stats);
+  void syncInstances(SyncStats& stats);
+  void syncNets(SyncStats& stats);
+  // Routed shapes of the frNet's own geometry (wires, vias, patches).
+  void routingShapes(const frNet* net, std::vector<RShape>& shapes) const;
+  // The routed shape of a patch wire (or notch fill) as routingShapes reads
+  // it from the design.
+  RShape patchShape(frLayerNum layer, const odb::Rect& rect) const;
+  // incremental_check: design routing shapes outside the routing space.
+  void checkRoutingSpace(int64_t& nets, int64_t& uncovered) const;
+  static uint64_t routingFingerprint(const frNet* net);
+  static uint64_t termsFingerprint(const frNet* net);
+  int addNetData(frNet* net);
+  // Wire type of the net's nondefault rule, 0 for the default rule.
+  int ndrType(const frNet* net) const;
+  void setInputShapes(NetData& net,
+                      bool present,
+                      br::FastGridBuilder::PendingRemovals* pending = nullptr);
+  void insertDesignRouting();
+  bool routableType(const NetData& net) const;
+  // Terms, access catalogues and guide tiles of a net routed in this call;
+  // false if BonnRoute cannot route it (FlexDR does).
+  bool prepareNet(NetData& net,
+                  const std::unordered_set<const frInst*>& changed_insts);
+  // Rip-up hook: a victim of an incremental call is prepared before it is
+  // removed; false keeps it in place.
+  bool prepareVictim(int net);
+  // Sec. 5.2 / Fig. 9: pieces of a net's input routing (wires, vias,
+  // patches) classified into kept pin-to-pin paths, reservations and
+  // dropped pieces.
+  struct InputPiece
+  {
+    std::vector<RShape> shapes;
+    const frBlockObject* obj = nullptr;
+    int kind = 0;  // 0 wire, 1 via, 2 patch
+  };
+  struct InputClassification
+  {
+    std::vector<InputPiece> pieces;
+    std::vector<char> kept;
+    std::vector<char> reserved;
+    // Component label per term (net.terms order) and per piece.
+    std::vector<int> term_label;
+    std::vector<int> piece_label;
+    bool complete = false;
+    bool any_illegal = false;
+  };
+  struct ClassifyStats
+  {
+    int64_t nets = 0;
+    int64_t pieces = 0;
+    int64_t illegal = 0;
+    int64_t kept = 0;
+    int64_t reserved = 0;
+    int64_t dropped = 0;
+    int64_t discount_runs = 0;
+  };
+  void classifyInput(const NetData& net, InputClassification& out) const;
+  // Applies a classification: dropped pieces leave the routing space,
+  // reserved ones become reservations of the net (with discount runs on
+  // their tracks), kept ones stay.
+  void applyClassification(NetData& net,
+                           const InputClassification& c,
+                           ClassifyStats& stats);
+  // Terms of a component joined by kept pieces become one terminal whose
+  // options include the track vertices on the kept pieces.
+  void mergeKeptComponents(NetData& net, const InputClassification& c);
+  std::unordered_map<int, InputClassification> classified_;
+  std::unordered_map<const frInst*, InstRecord> inst_records_;
+  bool record_fixed_ = false;
+  bool incremental_active_ = false;
+  // writeNets() writes only the nets marked here (empty: all routed nets).
+  std::vector<char> write_mask_;
+  const frDesign* built_design_ = nullptr;
+  const frBlock* built_block_ = nullptr;
+  const std::unordered_set<const frInst*>* victim_changed_insts_ = nullptr;
+  // Bulk updates of the incremental mode change the shape grid only; the
+  // fast grid is rebuilt afterwards.
+  bool grid_only_ = false;
+  // Incremental calls: wire costs scaled to the discount denominator and
+  // the vertex search set up (enableIncrementalDiscounts).
+  bool incremental_discounts_ = false;
+  void enableIncrementalDiscounts();
+  // Components of the net's routing and pins in the design (touching metal
+  // on a layer joins two objects); 1 for a connected net. Debug check of
+  // the nets written by an incremental call.
+  int routingComponents(const frNet* net) const;
+  void gridOnlyChange(const RShape& shape,
+                      br::ShapeType type,
+                      int owner,
+                      bool insert);
+
   int tileX(frCoord x) const;
   int tileY(frCoord y) const;
 
@@ -1090,6 +1286,8 @@ class BonnRouteDR
   // Sets NetData::wide_shapes from the net's wire type, pins, reservations
   // and the shapes of its access options (end of setup).
   void markWideNets();
+  // NetData::wide_shapes of one net (as markWideNets).
+  bool netHasWideShapes(const NetData& net) const;
   // Largest distance at which two shapes of the routing space interact
   // (any layer, incl. via-layer rules), plus one pitch.
   int64_t interaction_reach_ = 0;

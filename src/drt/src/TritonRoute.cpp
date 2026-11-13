@@ -373,6 +373,7 @@ void TritonRoute::resetDb(const char* file_name)
 void TritonRoute::clearDesign()
 {
   invalidateChangeTracking();
+  bonnroute_dr_.reset();
   design_ = std::make_unique<frDesign>(logger_, router_cfg_.get());
 }
 
@@ -849,16 +850,17 @@ void TritonRoute::prep()
   rp.main();
 }
 
-void TritonRoute::ta(const bool nets_without_initial_routing_only)
+void TritonRoute::ta(const TrackAssignmentNets nets)
 {
   std::unique_ptr<FlexTA> ta = std::make_unique<FlexTA>(
       getDesign(), logger_, router_cfg_.get(), distributed_);
-  if (nets_without_initial_routing_only) {
+  if (nets == TrackAssignmentNets::kLeftByBonnRoute) {
     // The initial routing is read through the routed-object index, which
     // FlexDR::init builds again.
     getDesign()->getRegionQuery()->initDRObj();
     ta->setNetsWithoutInitialRoutingOnly(true);
   }
+  ta->setUnroutedNetsOnly(nets == TrackAssignmentNets::kIncrementalFallback);
   if (debug_->debugTA) {
     ta->setDebug(graphics_factory_->makeUniqueTAGraphics());
   }
@@ -866,6 +868,33 @@ void TritonRoute::ta(const bool nets_without_initial_routing_only)
   if (debug_->writeNetTracks) {
     io::Writer writer(getDesign(), logger_);
     writer.updateTrackAssignment(db_->getChip()->getBlock());
+  }
+}
+
+void TritonRoute::prepareBonnRouteFallbacks(std::vector<odb::Rect>& regions)
+{
+  frBlock* block = getDesign()->getTopBlock();
+  bool needs_ta = false;
+  for (const auto& net : block->getNets()) {
+    if (net->hasInitialRouting() || !net->hasGuides()) {
+      continue;
+    }
+    needs_ta = true;
+    // Include every unrouted net, including NDR nets BonnRoute does not try.
+    // All workers along its guides must run to connect its pin components.
+    for (const auto& guide : net->getGuides()) {
+      odb::Rect box
+          = block->getGCellBox(block->getGCellIdx(guide->getBeginPoint()));
+      box.merge(block->getGCellBox(block->getGCellIdx(guide->getEndPoint())));
+      regions.push_back(box);
+    }
+  }
+  if (needs_ta) {
+    // FlexDR creates the boundary pins of unrouted nets from TA guide routes.
+    // Without them, separate workers can leave disconnected pin components.
+    // Nets with routing do not read guide routes, so only the unrouted nets'
+    // guides are assigned.
+    ta(TrackAssignmentNets::kIncrementalFallback);
   }
 }
 
@@ -880,7 +909,14 @@ void TritonRoute::dr()
   if (distributed_) {
     dr_->setDistributed(dist_, dist_ip_, dist_port_, shared_volume_);
   }
-  if (bonnroute_ && !distributed_ && bonnroute_params_) {
+  if (bonnroute_cleanup_) {
+    // After BonnRoute's incremental routing (arXiv:2111.06169 Sec. 5.2):
+    // iteration 0 checks the changed regions (check-only workers where all
+    // nets are routed) and routes what BonnRoute left; the repair
+    // iterations follow directly, limited to workers with markers.
+    dr_->setInitialRoutingCleanup(
+        {.incremental_iterations = 0, .check_only_workers = true});
+  } else if (bonnroute_ && !distributed_ && bonnroute_params_) {
     dr_->setInitialRoutingCleanup(
         {.incremental_iterations
          = bonnroute_params_->cleanup_incremental_iterations,
@@ -1306,22 +1342,67 @@ int TritonRoute::main()
   if (run_bonnroute && !bonnroute_params_) {
     bonnroute_params_ = std::make_unique<BonnRouteDRParams>();
   }
-  const bool track_assignment_after_bonnroute
-      = run_bonnroute && bonnroute_params_->left_net_track_assignment
-        && !bonnroute_params_->reservations;
-  if (!track_assignment_after_bonnroute) {
-    ta();
+  // arXiv:2111.06169 Sec. 5.2: a -bonnroute call on a design that already
+  // carries routing routes the changed nets with BonnRoute against it;
+  // FlexDR then only checks the changed regions and repairs markers.
+  bool has_routing = false;
+  if (run_bonnroute && bonnroute_params_->incremental
+      && !router_cfg_->SINGLE_STEP_DR) {
+    for (const auto& net : getDesign()->getTopBlock()->getNets()) {
+      if (net->hasInitialRouting()) {
+        has_routing = true;
+        break;
+      }
+    }
   }
-  if (run_bonnroute) {
-    BonnRouteDR bonnroute(getDesign(),
-                          logger_,
-                          router_cfg_.get(),
-                          *bonnroute_params_,
-                          db_->getChip()->getBlock());
-    bonnroute.main();
+  bonnroute_cleanup_ = false;
+  bool track_assignment_after_bonnroute = false;
+  if (has_routing) {
+    if (!bonnroute_params_->incremental_resident || !bonnroute_dr_
+        || !bonnroute_dr_->residentFor(getDesign())) {
+      bonnroute_dr_ = std::make_unique<BonnRouteDR>(getDesign(),
+                                                    logger_,
+                                                    router_cfg_.get(),
+                                                    *bonnroute_params_,
+                                                    db_->getChip()->getBlock());
+      bonnroute_dr_->buildFromDesign();
+    }
+    std::vector<odb::Rect> regions;
+    bonnroute_dr_->routeIncremental(regions);
+    prepareBonnRouteFallbacks(regions);
+    incremental_changed_regions_ = std::move(regions);
+    bonnroute_cleanup_ = true;
+    if (!bonnroute_params_->incremental_resident) {
+      bonnroute_dr_.reset();
+    }
+  } else {
+    // left_net_track_assignment: track assignment follows BonnRoute and
+    // assigns only the nets it left.
+    track_assignment_after_bonnroute
+        = run_bonnroute && bonnroute_params_->left_net_track_assignment
+          && !bonnroute_params_->reservations;
+    if (!track_assignment_after_bonnroute) {
+      ta();
+    }
+    if (run_bonnroute) {
+      auto bonnroute
+          = std::make_unique<BonnRouteDR>(getDesign(),
+                                          logger_,
+                                          router_cfg_.get(),
+                                          *bonnroute_params_,
+                                          db_->getChip()->getBlock());
+      bonnroute->main();
+      if (bonnroute_params_->incremental
+          && bonnroute_params_->incremental_resident) {
+        bonnroute->keepRoutingSpace();
+        bonnroute_dr_ = std::move(bonnroute);
+      } else {
+        bonnroute_dr_.reset();
+      }
+    }
   }
   if (track_assignment_after_bonnroute) {
-    ta(/* nets_without_initial_routing_only */ true);
+    ta(TrackAssignmentNets::kLeftByBonnRoute);
   }
   if (distributed_) {
     asio::post(*dist_pool_,
@@ -1329,6 +1410,7 @@ int TritonRoute::main()
   }
   dr();
   incremental_changed_regions_.reset();
+  bonnroute_cleanup_ = false;
   if (!router_cfg_->SINGLE_STEP_DR) {
     endFR();
     if (!distributed_) {

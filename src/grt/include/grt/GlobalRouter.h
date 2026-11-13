@@ -156,6 +156,10 @@ class GlobalRouter
   void setCongestionReportFile(const char* file_name);
   void setGridOrigin(int x, int y);
   void setAllowCongestion(bool allow_congestion);
+  // repair_antennas -keep_detailed_wires: diode-only repairs of a detailed
+  // routing keep the repaired nets' detailed wires; the next detailed_route
+  // connects the diodes (BonnRoute incremental routing, arXiv:2111.06169).
+  void setKeepDetailedWires(bool keep) { keep_detailed_wires_ = keep; }
   void setResistanceAware(bool resistance_aware);
   void setCUGRViaDemand(bool enabled);
   void setResAwareNetsPercentage(float percentage);
@@ -652,6 +656,9 @@ class GlobalRouter
   int congestion_iterations_{50};
   int congestion_report_iter_step_;
   bool allow_congestion_;
+  bool keep_detailed_wires_{false};
+  // Set while repairAntennas updates the routes of nets with new diodes.
+  bool keeping_detailed_wires_{false};
   bool resistance_aware_{false};
   int snapshot_batched_width_{0};
   int num_threads_;
