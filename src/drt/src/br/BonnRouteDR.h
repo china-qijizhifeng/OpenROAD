@@ -392,6 +392,11 @@ struct BonnRouteDRParams
   // Effort budget of that phase in percent of the vertices settled by the
   // parallel phases (0: unlimited).
   int final_ripup_effort = 10;
+  // The base of that budget leaves out the vertices settled by speculative
+  // tail attempts decided as conflicts (searched again in a later batch), so
+  // larger tail batches (tail_batch_max) do not lengthen the serial rip-up
+  // phase by their re-searches. 0: every settled vertex counts.
+  bool ripup_effort_conflicts_excluded = false;
   // Skip that phase when more than this percentage of the nets failed.
   int final_ripup_max_share = 2;
   // Catalogue paths start at the pin's OpenROAD access points (1) or
@@ -825,6 +830,9 @@ class BonnRouteDR
     int64_t partial_commits = 0;
     int64_t partial_resumes = 0;
     int64_t tail_partial_commits = 0;
+    // Vertices settled by this worker's tail searches whose attempt was
+    // decided as a conflict (ripup_effort_conflicts_excluded).
+    int64_t conflict_settled = 0;
     int64_t area_deferrals = 0;
     // Settled-vertex budget of the current connect (0: none), the settled
     // count at its start, and whether a search was skipped for it.

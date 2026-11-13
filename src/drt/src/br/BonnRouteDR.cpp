@@ -214,6 +214,8 @@ bool BonnRouteDRParams::set(const std::string& name, const double value)
     final_ripup_max_share = std::clamp(v, 0, 100);
   } else if (name == "final_ripup_effort") {
     final_ripup_effort = std::max(0, v);
+  } else if (name == "ripup_effort_conflicts_excluded") {
+    ripup_effort_conflicts_excluded = v != 0;
   } else if (name == "potential_detour_tiles") {
     potential_detour_tiles = std::max(0, v);
   } else if (name == "critical_nets") {
@@ -7417,6 +7419,7 @@ void BonnRouteDR::routeSpeculativeBatches(const std::vector<int>& order,
           retry.push_back(net.id);
           conflicts++;
           outcome = 2;
+          commit_worker.conflict_settled += settled[k];
         } else if (partial) {
           commitPartial(net, batch_progress[k], nullptr);
           commit_worker.tail_partial_commits++;
@@ -7733,6 +7736,8 @@ void BonnRouteDR::routeSpeculativePipeline(const std::vector<int>& order,
         net.vias.clear();
         net.pin_points.clear();
         decision = Decision::kConflict;
+        // The attempt's search, done before this decision (R2).
+        w.conflict_settled += settled[id];
       } else if (partial) {
         // Committed for the batch (later decisions see it); the net stays
         // unrouted (see the failed list below).
@@ -9714,6 +9719,9 @@ void BonnRouteDR::main()
       int64_t parallel_settled = 0;
       for (const Worker& w : workers_) {
         parallel_settled += w.settled;
+        if (params_.ripup_effort_conflicts_excluded) {
+          parallel_settled -= w.conflict_settled;
+        }
       }
       budget = parallel_settled * params_.final_ripup_effort / 100;
       std::ranges::stable_sort(failed_first, [&](int a, int b) {
