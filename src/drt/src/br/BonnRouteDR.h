@@ -264,6 +264,17 @@ struct BonnRouteDRParams
   // assigns more pins is kept (ties: the Hanan one). 0: Hanan catalogues
   // only.
   bool offtrack_algorithm3_fallback = true;
+  // An instance whose selection leaves a pin with a catalogue without a
+  // primary path repeats the selection with other catalogues of its pins
+  // (br::selectionCompletionVariants): every access point of a pin at equal
+  // cost (the preference for the access point pin access chose fills a
+  // catalogue with that point's paths), on the configured grid and on the
+  // Algorithm 3 grid, then twice more with one more pitch of radius and
+  // twice the paths. The first selection that gives every pin a primary
+  // path is kept (DRT-9240). 1: after the Algorithm 3 fallback; 2: the
+  // catalogues with all access points alike before it; 0: off. An instance
+  // whose selection is complete keeps its catalogues and primary paths.
+  int offtrack_complete_selection = 1;
   // Reuse a circuit class's catalogues and conflict-free solution for all
   // its instances; 0 solves every instance separately.
   bool access_classes = true;
@@ -809,6 +820,12 @@ class BonnRouteDR
     // more pins.
     int64_t fallback_instances = 0;
     int64_t fallback_improved = 0;
+    // offtrack_complete_selection: instances whose selection is complete
+    // after the variants, instances that keep a pin without a primary path,
+    // and the instances per kept variant (index into the variant list).
+    int64_t completion_complete = 0;
+    int64_t completion_incomplete = 0;
+    std::array<int64_t, 8> completion_kept{};
     // D10 pin classes: classes, mapped paths of member pins and those
     // illegal at the member.
     int64_t pin_classes = 0;
@@ -957,8 +974,8 @@ class BonnRouteDR
                          const Worker* worker,
                          std::vector<AccessOption>& out,
                          AccessStats& stats,
-                         int extra_radius = 0,
-                         bool algorithm3 = false) const;
+                         const br::CatalogueVariant& variant
+                         = br::CatalogueVariant()) const;
   void candidateOf(const AccessOption& option,
                    int net,
                    br::AccessCandidate& candidate) const;

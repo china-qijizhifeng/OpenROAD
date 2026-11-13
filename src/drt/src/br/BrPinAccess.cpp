@@ -414,6 +414,55 @@ SelectionResult selectConflictFree(const SelectionInput& in)
   return bounding.run();
 }
 
+std::vector<CatalogueVariant> selectionCompletionVariants(
+    const bool algorithm3_fallback,
+    const int mode,
+    const int widenings)
+{
+  std::vector<CatalogueVariant> variants;
+  auto completion = [&variants](const int widening) {
+    for (const bool algorithm3 : {false, true}) {
+      variants.push_back({.algorithm3 = algorithm3,
+                          .all_access_points = true,
+                          .extra_radius = widening,
+                          .paths_factor = 1 << widening});
+    }
+  };
+  if (mode == 2) {
+    completion(0);
+  }
+  if (algorithm3_fallback) {
+    variants.push_back({.algorithm3 = true});
+  }
+  if (mode == 1) {
+    completion(0);
+  }
+  if (mode >= 1) {
+    for (int widening = 1; widening <= widenings; widening++) {
+      completion(widening);
+    }
+  }
+  return variants;
+}
+
+int bestSelectionAttempt(const int pins,
+                         const int assigned,
+                         const std::vector<int>& attempts)
+{
+  int best = -1;
+  int best_assigned = assigned;
+  for (size_t k = 0; k < attempts.size(); k++) {
+    if (attempts[k] >= pins) {
+      return static_cast<int>(k);
+    }
+    if (attempts[k] > best_assigned) {
+      best = static_cast<int>(k);
+      best_assigned = attempts[k];
+    }
+  }
+  return best;
+}
+
 SelectionResult selectGreedy(const SelectionInput& in)
 {
   SelectionResult r;
