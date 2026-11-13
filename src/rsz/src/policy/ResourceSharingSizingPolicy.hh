@@ -39,7 +39,7 @@ struct ResourceSharingSizingConfig
     // the arc's local criticality, then projected onto flow conservation.
     kLagrangian,
   };
-  Multipliers multipliers = Multipliers::kResourceSharing;
+  Multipliers multipliers = Multipliers::kLagrangian;
   // Lagrangian update: lambda *= max(floor, 1 + criticality) ^ exponent,
   // where criticality = -(slack through the arc) / period.
   double lagrangian_exponent = 1.0;
