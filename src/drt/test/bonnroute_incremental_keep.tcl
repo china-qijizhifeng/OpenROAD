@@ -30,4 +30,19 @@ detailed_route -bonnroute -verbose 0
 if { [detailed_route_num_drvs] != 0 } {
   error "new pin routing has DRC violations"
 }
+# Two diodes on net_M3, one next to each inverter: each must be joined to its
+# own gate (incremental_diode_node routes them one at a time; DRT-9193 stops
+# the test when a diode lands on the other gate's node).
+set net3 [$block findNet net_M3]
+foreach {name x} {keep_diode_1 20900 keep_diode_2 180880} {
+  set d [odb::dbInst_create $block $master $name]
+  $d setOrient R0
+  $d setLocation $x 100800
+  $d setPlacementStatus PLACED
+  [$d findITerm A] connect $net3
+}
+detailed_route -bonnroute -verbose 0
+if { [detailed_route_num_drvs] != 0 } {
+  error "multi-diode routing has DRC violations"
+}
 puts "pass"
