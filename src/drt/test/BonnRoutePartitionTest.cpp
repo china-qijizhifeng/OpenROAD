@@ -8,6 +8,8 @@
 // disjoint tile regions on parallel threads and checks that the final
 // shape grid content, the fast grid words and every query answer equal a
 // serial run of the same sequences (also run it with -fsanitize=thread).
+// Every region thread records its access footprint (BrAccessFootprint.h):
+// all block and tile accesses stay inside the region's own tiles.
 
 #include <algorithm>
 #include <cstdint>
@@ -19,6 +21,7 @@
 #include <vector>
 
 #include "BonnRouteRoutingSpaceTestUtil.h"
+#include "br/BrAccessFootprint.h"
 #include "br/BrDistanceRules.h"
 #include "br/BrFastGrid.h"
 #include "br/BrGeometry.h"
@@ -280,13 +283,43 @@ int main()
     }
     std::vector<std::vector<std::vector<RipupLevel>>> answers(ops.size());
     std::vector<ShapeGridWriteCache> caches(ops.size());
+    std::vector<AccessFootprint> footprints(ops.size());
     std::vector<std::thread> threads;
     for (size_t r = 0; r < ops.size(); r++) {
-      threads.emplace_back(
-          [&, r]() { answers[r] = run(parallel, ops[r], caches[r]); });
+      threads.emplace_back([&, r]() {
+        // Region r = (a, b): tiles [3a, 3a + 1] x [3b, 3b + 1].
+        const int a = static_cast<int>(r) / 3;
+        const int b = static_cast<int>(r) % 3;
+        const AccessFootprintScope scope(&footprints[r]);
+        footprints[r].begin(static_cast<int32_t>(r),
+                            {3 * a, 3 * b, 3 * a + 1, 3 * b + 1});
+        answers[r] = run(parallel, ops[r], caches[r]);
+      });
     }
     for (std::thread& t : threads) {
       t.join();
+    }
+    for (size_t r = 0; r < ops.size(); r++) {
+      const AccessFootprint& f = footprints[r];
+      if (f.records() == 0 || f.violationCount() != 0) {
+        std::printf(
+            "case %d region %zu: %lld accesses recorded, %lld outside the "
+            "region\n",
+            c,
+            r,
+            static_cast<long long>(f.records()),
+            static_cast<long long>(f.violationCount()));
+        for (const AccessFootprint::Violation& v : f.violations()) {
+          std::printf("  %s layer %d tiles [%d, %d] - [%d, %d]\n",
+                      accessKindName(v.kind),
+                      v.layer,
+                      v.tiles.xlo,
+                      v.tiles.ylo,
+                      v.tiles.xhi,
+                      v.tiles.yhi);
+        }
+        fails++;
+      }
     }
     ShapeGridWriteCache serial_cache;
     for (size_t r = 0; r < ops.size(); r++) {

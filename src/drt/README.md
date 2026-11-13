@@ -159,7 +159,8 @@ set_bonnroute_dr_param name value
 | `offtrack_preferred_access_points` | `1` | Prefer the access point pin access chose for each pin: paths from its other access points start with a penalty of `pin_cost` pitches, as for the access stubs; `0` treats all access points alike. Access points off the manufacturing grid are never used. |
 | `offtrack_from_access_points` | `1` | Start catalogue paths at the pin's OpenROAD access points. `0` starts anywhere on the pin, as in the paper; it is incompatible with the FlexDR clean-up, whose workers need every pin contact at an access point (the contact guard then leaves the affected nets to FlexDR). |
 | `layer_dilation` | `1` | Extra routing layers around a guide. |
-| `retry_dilation` | `2` | Extra guide tiles for a retry. |
+| `guide_dilation` | `0` | Width of the detailed routing corridor: the guide area of a net (its path regions and its whole area) includes this many tiles around the guide tiles. `0` keeps the global routing corridor. |
+| `retry_dilation` | `2` | A net whose connections fail in its guide area is routed again in the area dilated by this many tiles. A partition thread does so where the dilated area's tile box lies inside its region; otherwise the net continues in a later partition or the tail. |
 | `use_intervals` | `0` | Use vertex search by default; `1` selects interval label sets. |
 | `ripup` | `0` | Leave unresolved nets to FlexDR by default; `1` enables serial rip-up and rerouting. |
 | `interval_via_property` | `1` | Interval property (ii) of Section 4.1 also for vias; `0` relaxes vias per vertex. |
@@ -178,7 +179,9 @@ set_bonnroute_dr_param name value
 | `tail_pipeline` | `0` | `1` runs the batches as a pipeline: each batch keeps its semantics (searched on the commits of the earlier batches, decided in net order), and searches and commits of nets with disjoint tile boxes (including the interaction halo) overlap across batches instead of waiting at a barrier per batch. A conflicting net is searched again `tail_retry_delay` batches later. Results depend on the net order, `tail_batch` and `tail_retry_delay` only, not on the thread count. The default `0` uses a barrier per batch and searches a conflicting net again at the front of the next batch: in the E2E runs the pipeline shortened the tail by a further 12-33% (aes_nangate45 most), with TNS 1-3% worse than the noise of the barrier batches on the sky130 designs. |
 | `tail_retry_delay` | `1` | With `tail_pipeline 1`, the batch distance at which a net that conflicted with an earlier commit of its batch is searched again. |
 | `tail_defer_settled` | `300000` | Settled vertices a net may use in its speculative attempt (checked before each of its searches). A net that needs more, almost always one without a route that goes to FlexDR anyway, is deferred to a final pass of the stage without a budget, in net order, so its long search does not hold up the other nets. `0` disables the budget. |
+| `tail_deferred_pass` | `1` | The final pass of a tail stage for the nets over `tail_defer_settled`. `0` hands those nets to the rip-up phase (`final_ripup`) without a second search. |
 | `partition_regions` | `0` | Regions of the first partition; `0` means twice the thread count. |
+| `tail_regions` | `0` | With `tail_batch`, the speculative tail takes over at the first partition with fewer regions than this; `0` means the thread count. With `partition_regions` and `tail_regions` both set, the routing is the same for every thread count. |
 | `reservations` | `0` | Reserve legal track-assignment wires for their nets and discount them (Ahrens et al., arXiv:2111.06169, Section 5.2). Selects the vertex search. |
 | `discount_numerator` / `discount_denominator` | `3` / `4` | Cost factor of reserved edges for their own net. |
 | `reserve_min_layer` | `0` | Lowest track-graph layer whose input wires become reservations. |
@@ -191,6 +194,7 @@ set_bonnroute_dr_param name value
 | `final_ripup_effort` | `10` | Effort budget of that phase (without `ripup`) in percent of the vertices settled by the parallel phases; nets beyond it are left to FlexDR, smallest nets first. `0`: unlimited. |
 | `final_ripup_max_share` | `2` | Skip that phase when more than this percentage of the routed nets failed in the parallel phases (failures then come from rules the routing space does not model, which FlexDR cleans up anyway). |
 | `potential_check` | `0` | Debug: repeat each search that used a potential with the l1 bound and report how many shortest path costs differ (expected 0). |
+| `partition_check` | `0` | Debug: record the global routing tiles that the search and the commit of every net read and write in the shape grid and the fast grid, compare them with the net's tile box and its partition region (expected: no access outside), and report per step how many tiles beyond the net's core tile box (guides, access options, pins) the accesses reach. The routing is unchanged. |
 | `potential_detour_tiles` | `2` | Detour, in GCells beyond the tile distance of its ends, from which `potential 4` uses the general model. |
 | `spreading` | `1` | Wire spreading (Section 4.2): in GCells whose global routing utilization is at most `spread_utilization` percent, a wire vertex beside an occupied track costs `spread_cost` pitches more. Reads the congestion that `global_route` stores in the database. Selects the vertex search. Not on layers whose wires stay on tracks in the preferred direction unless `spread_unidirectional 1`. Without spreading, routes had 1.4–4.0% more signal coupling capacitance than FlexDR's and worse setup slack. |
 | `spread_from_extra_space` | `1` | With `spreading 1`, spread a net where BonnRoute global routing assigned it extra space (`set_bonnroute_param extra_space 1`, Section 2.1); designs without that information use the GCell congestion tiles. |
@@ -198,6 +202,10 @@ set_bonnroute_dr_param name value
 | `cleanup_incremental_iterations` | `2` | FlexDR clean-up: how many of FlexDR's incremental iterations 1 and 2 follow iteration 0 (which routes the nets BonnRoute left and checks every tile). Incremental iterations reroute only nets without BonnRoute routing and keep every BonnRoute net fixed; iteration 3, the first that rips up nets at violations, follows the last one. Range `0`–`2`. Fewer incremental iterations pay off when few nets are left to FlexDR; designs with many left nets clean up faster with both. |
 | `cleanup_check_only_workers` | `0` | FlexDR clean-up, incremental iterations 0–2: a worker whose nets all carry BonnRoute's routing has no net to reroute and runs only the design-rule check (with FlexDR's patches), without the maze grid graph. The result equals the full worker's. |
 | `verbose` | `1` | Print coverage and search statistics. |
+
+The debug group `bonnroute_connect` (`set_debug_level DRT bonnroute_connect 1`) prints one line per search of a connection (net, phase, area dilation, path region or whole area, tile box of the area, settled vertices, result, milliseconds) and one line per partition region.
+
+The log line `BonnRoute DR left nets` attributes the nets left to FlexDR: the output guard that dropped a routed net, or the step at which the net's last connection attempt failed (a pin without a feasible access option, with the kind of shapes that block its options at the end; no path; a search budget) and the outcome of its last rip-up sequence. The debug group `bonnroute_left` prints one line per such net.
 
 The interval search maintains reduced-distance label envelopes on tracks,
 removes dominated labels, and propagates jog labels between intervals

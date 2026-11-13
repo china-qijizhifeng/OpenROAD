@@ -102,6 +102,33 @@ void FastGrid::init(const TrackGraph* graph, const int num_wire_types)
   }
 }
 
+void FastGrid::recordWiring(AccessFootprint& footprint,
+                            const AccessKind kind,
+                            const int z,
+                            const int i,
+                            const int j0,
+                            const int j1) const
+{
+  const TrackLayer& l = graph_->layers[z];
+  const int t = l.track_tile[i];
+  const int p0 = l.pos_tile[j0];
+  const int p1 = l.pos_tile[j1];
+  footprint.record(
+      kind, z, l.horizontal ? TileBox{p0, t, p1, t} : TileBox{t, p0, t, p1});
+}
+
+void FastGrid::recordVia(AccessFootprint& footprint,
+                         const AccessKind kind,
+                         const int z,
+                         const int i,
+                         const int c0,
+                         const int c1) const
+{
+  const Layer& fl = layers_[z];
+  recordWiring(
+      footprint, kind, z, i, fl.via_position[c0], fl.via_position[c1]);
+}
+
 uint64_t FastGrid::lookup(const TileRuns* tile,
                           const int track,
                           const int index)
@@ -240,6 +267,12 @@ void FastGrid::writeWiring(const int z,
                            const int n,
                            const uint64_t mask)
 {
+  if (AccessFootprint* footprint = AccessFootprint::current())
+      [[unlikely]] {
+    if (n > 0) {
+      recordWiring(*footprint, AccessKind::kFastGridWrite, z, i, j0, j0 + n - 1);
+    }
+  }
   Layer& fl = layers_[z];
   const int tc = fl.track_chunk[i];
   const int tracks = fl.chunk_first_track[tc + 1] - fl.chunk_first_track[tc];
@@ -267,6 +300,12 @@ void FastGrid::writeVia(const int z,
                         const int n,
                         const uint64_t mask)
 {
+  if (AccessFootprint* footprint = AccessFootprint::current())
+      [[unlikely]] {
+    if (n > 0) {
+      recordVia(*footprint, AccessKind::kFastGridWrite, z, i, c0, c0 + n - 1);
+    }
+  }
   Layer& fl = layers_[z];
   const int tc = fl.track_chunk[i];
   const int tracks = fl.chunk_first_track[tc + 1] - fl.chunk_first_track[tc];
@@ -289,6 +328,10 @@ void FastGrid::writeVia(const int z,
 
 uint64_t FastGrid::wiringWord(const int z, const int i, const int j) const
 {
+  if (AccessFootprint* footprint = AccessFootprint::current())
+      [[unlikely]] {
+    recordWiring(*footprint, AccessKind::kFastGridRead, z, i, j, j);
+  }
   const Layer& fl = layers_[z];
   const int k = fl.pos_chunk[j];
   const int tc = fl.track_chunk[i];
@@ -299,6 +342,10 @@ uint64_t FastGrid::wiringWord(const int z, const int i, const int j) const
 
 uint64_t FastGrid::viaWord(const int z, const int i, const int c) const
 {
+  if (AccessFootprint* footprint = AccessFootprint::current())
+      [[unlikely]] {
+    recordVia(*footprint, AccessKind::kFastGridRead, z, i, c, c);
+  }
   const Layer& fl = layers_[z];
   const int k = fl.via_chunk[c];
   const int tc = fl.track_chunk[i];
@@ -314,6 +361,12 @@ void FastGrid::assignWiring(const int z,
                             const uint64_t word,
                             const uint64_t mask)
 {
+  if (AccessFootprint* footprint = AccessFootprint::current())
+      [[unlikely]] {
+    if (j0 <= j1) {
+      recordWiring(*footprint, AccessKind::kFastGridWrite, z, i, j0, j1);
+    }
+  }
   Layer& fl = layers_[z];
   const int tc = fl.track_chunk[i];
   const int tracks = fl.chunk_first_track[tc + 1] - fl.chunk_first_track[tc];
@@ -341,6 +394,12 @@ void FastGrid::assignVia(const int z,
                          const uint64_t word,
                          const uint64_t mask)
 {
+  if (AccessFootprint* footprint = AccessFootprint::current())
+      [[unlikely]] {
+    if (c0 <= c1) {
+      recordVia(*footprint, AccessKind::kFastGridWrite, z, i, c0, c1);
+    }
+  }
   Layer& fl = layers_[z];
   const int tc = fl.track_chunk[i];
   const int tracks = fl.chunk_first_track[tc + 1] - fl.chunk_first_track[tc];
@@ -423,6 +482,10 @@ uint64_t FastGrid::wiringRun(const int z,
                              int& lo,
                              int& hi) const
 {
+  if (AccessFootprint* footprint = AccessFootprint::current())
+      [[unlikely]] {
+    recordWiring(*footprint, AccessKind::kFastGridRead, z, i, j, j);
+  }
   const Layer& fl = layers_[z];
   const int k = fl.pos_chunk[j];
   const int tc = fl.track_chunk[i];
@@ -445,6 +508,10 @@ uint64_t FastGrid::viaRun(const int z,
                           int& lo,
                           int& hi) const
 {
+  if (AccessFootprint* footprint = AccessFootprint::current())
+      [[unlikely]] {
+    recordVia(*footprint, AccessKind::kFastGridRead, z, i, c, c);
+  }
   const Layer& fl = layers_[z];
   const int k = fl.via_chunk[c];
   const int tc = fl.track_chunk[i];
@@ -532,6 +599,10 @@ FastGrid::RunsView FastGrid::wiringRuns(const int z,
                                         const int i,
                                         const int j) const
 {
+  if (AccessFootprint* footprint = AccessFootprint::current())
+      [[unlikely]] {
+    recordWiring(*footprint, AccessKind::kFastGridRead, z, i, j, j);
+  }
   const Layer& fl = layers_[z];
   const int k = fl.pos_chunk[j];
   const int tc = fl.track_chunk[i];

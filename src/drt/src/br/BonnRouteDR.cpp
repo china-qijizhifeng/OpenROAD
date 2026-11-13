@@ -147,6 +147,8 @@ bool BonnRouteDRParams::set(const std::string& name, const double value)
     layer_dilation = v;
   } else if (name == "retry_dilation") {
     retry_dilation = v;
+  } else if (name == "guide_dilation") {
+    guide_dilation = std::max(0, v);
   } else if (name == "use_intervals") {
     use_intervals = v != 0;
   } else if (name == "ripup") {
@@ -201,12 +203,16 @@ bool BonnRouteDRParams::set(const std::string& name, const double value)
     tail_pipeline = v != 0;
   } else if (name == "tail_retry_delay") {
     tail_retry_delay = std::max(1, v);
+  } else if (name == "tail_deferred_pass") {
+    tail_deferred_pass = v != 0;
   } else if (name == "tail_defer_settled") {
     tail_defer_settled = std::max(0, v);
   } else if (name == "partitions") {
     partitions = v != 0;
   } else if (name == "partition_regions") {
     partition_regions = std::max(0, v);
+  } else if (name == "tail_regions") {
+    tail_regions = std::max(0, v);
   } else if (name == "spread_from_extra_space") {
     spread_from_extra_space = v != 0;
   } else if (name == "spreading") {
@@ -267,6 +273,8 @@ bool BonnRouteDRParams::set(const std::string& name, const double value)
     cleanup_incremental_iterations = std::clamp(v, 0, 2);
   } else if (name == "cleanup_check_only_workers") {
     cleanup_check_only_workers = v != 0;
+  } else if (name == "partition_check") {
+    partition_check = v != 0;
   } else if (name == "verbose") {
     verbose = v != 0;
   } else {
@@ -840,6 +848,8 @@ void BonnRouteDR::buildRoutingSpace()
     max_pitch = std::max(max_pitch, info.pitch);
   }
   int64_t need = 0;
+  need_by_grid_layer_.assign(shape_classes_.numLayers(), 0);
+  narrow_need_by_grid_layer_.assign(shape_classes_.numLayers(), 0);
   for (int g = 0; g < shape_classes_.numLayers(); g++) {
     const bool low = g >= track_grid_layers_;
     const int z = low ? 0 : g / 2;
@@ -917,9 +927,12 @@ void BonnRouteDR::buildRoutingSpace()
         extent(w.via[z].cut);
       }
     }
-    need = std::max<int64_t>(need,
-                             shape_classes_.ruleReach(g) + model
-                                 + std::max(geom.cross_cell, geom.along_cell));
+    need_by_grid_layer_[g] = int64_t{shape_classes_.ruleReach(g)} + model
+                             + std::max(geom.cross_cell, geom.along_cell);
+    narrow_need_by_grid_layer_[g]
+        = int64_t{shape_classes_.narrowRuleReach(g)} + model
+          + std::max(geom.cross_cell, geom.along_cell);
+    need = std::max(need, need_by_grid_layer_[g]);
   }
   shape_grid_.init(&shape_classes_,
                    geometries,
@@ -954,11 +967,117 @@ void BonnRouteDR::buildRoutingSpace()
   interaction_reach_ = need + max_pitch;
   halo_tiles_ = static_cast<int>(
       std::max<int64_t>(1, (2 * need + max_pitch + tile - 1) / tile));
+  // Per net halos follow in buildPartitionHalos(), once tau is known.
+  area_halo_tiles_.assign(num_z, halo_tiles_);
+  access_halo_tiles_.assign(num_z, halo_tiles_);
+  narrow_area_halo_tiles_.assign(num_z, halo_tiles_);
+  narrow_access_halo_tiles_.assign(num_z, halo_tiles_);
   // Search label budget: a label count, search_label_mb MiB of 32-byte
   // labels (the vertex-search label size when the budget was introduced;
   // the count is kept so that searches stop at the same label).
   label_limit_ = static_cast<size_t>(std::max(0, params_.search_label_mb))
                  * (size_t{1} << 20) / 32;
+}
+
+void BonnRouteDR::buildPartitionHalos()
+{
+  const int num_z = graph_.numLayers();
+  const int64_t tile = std::max<int64_t>(1, std::min(tile_dx_, tile_dy_));
+  auto tiles = [tile](const int64_t distance) {
+    return static_cast<int>(
+        std::max<int64_t>(1, (distance + tile - 1) / tile));
+  };
+  // Access paths start within this many pitches of the pin (catalogue
+  // radius, stub jogs); dynamic generation looks two pitches farther and
+  // collects obstacles one pitch plus 2 tau beyond its targets.
+  const int64_t radius
+      = std::max(params_.offtrack_radius, params_.max_access_jog);
+  int64_t reach = 0;
+  int64_t narrow_reach = 0;
+  frCoord pitch = 0;
+  int64_t tau = 0;
+  for (int z = 0; z < num_z; z++) {
+    // Grid layers of a net up to track layer z: wires up to z, vias up to
+    // the one between z - 1 and z, whose cut projects into the cut layer
+    // above z; the low layers hold pins and access vias.
+    for (int g = 0; g < shape_classes_.numLayers(); g++) {
+      if (g >= track_grid_layers_ || g <= 2 * z + 1) {
+        reach = std::max(reach, need_by_grid_layer_[g]);
+        // The narrow distance holds where the fast grid's models are narrow
+        // (FastGridBuilder::modelReach); the low layers have no models.
+        const bool narrow_models
+            = g >= track_grid_layers_ || !fast_builder_.wideModels(g);
+        narrow_reach = std::max(narrow_reach,
+                                narrow_models ? narrow_need_by_grid_layer_[g]
+                                              : need_by_grid_layer_[g]);
+      }
+    }
+    // Pitches of the jog pairs and edges the updates recompute: layer z and
+    // its positions, the tracks of layer z + 1.
+    pitch = std::max(pitch, layers_[std::min(z + 1, num_z - 1)].pitch);
+    pitch = std::max(pitch, layers_[z].pitch);
+    tau = std::max<int64_t>(tau, z < static_cast<int>(tau_.size()) ? tau_[z] : 1);
+    // A shape change writes up to reach + one pitch beyond the shape and
+    // reads up to 2 * reach + one pitch; a query reads up to reach.
+    area_halo_tiles_[z] = tiles(2 * reach + pitch);
+    narrow_area_halo_tiles_[z] = tiles(2 * narrow_reach + pitch);
+    // Around a pin. Its access paths, also the dynamically generated ones,
+    // lie within (radius + 3) pitches + 2 tau of it (targets up to radius +
+    // 2 pitches, paths inside the window one pitch + 2 tau beyond them) and
+    // are committed and released like any shape: 2 * distance + pitch
+    // beyond them. Dynamic generation collects obstacles up to the layer's
+    // whole rule distance beyond that window (Legality::blockages).
+    const int64_t paths = (radius + 3) * pitch + 2 * tau;
+    access_halo_tiles_[z] = tiles(paths + 2 * reach + pitch);
+    narrow_access_halo_tiles_[z]
+        = tiles(std::max(paths + 2 * narrow_reach + pitch, paths + reach));
+  }
+}
+
+void BonnRouteDR::markWideNets()
+{
+  // Nets whose own shapes can be wide: nondefault wire types; pins and
+  // reservations (the overlay of the net's own shapes reads up to
+  // classReach() around a wide one); access path shapes, which a partition
+  // thread commits and releases.
+  const int threads = static_cast<int>(workers_.size());
+#pragma omp parallel for num_threads(threads) schedule(dynamic, 256)
+  for (int k = 0; k < static_cast<int>(nets_.size()); k++) {
+    NetData& net = nets_[k];
+    bool wide = net.wire_type != 0;
+    auto check = [&](const RShape& shape) {
+      const int g = gridLayer(shape.layer);
+      if (g < 0) {
+        return;
+      }
+      wide = wide || shape_classes_.wide(shapeClass(shape, g));
+      const int above = projectionLayer(g);
+      if (above >= 0) {
+        RShape projection = shape;
+        projection.role = br::ShapeRole::kCutProjection;
+        wide = wide || shape_classes_.wide(shapeClass(projection, above));
+      }
+    };
+    for (const RShape& pin : net.pins) {
+      check(pin);
+    }
+    for (const RShape& shape : net.input_reservation) {
+      check(shape);
+    }
+    std::vector<RShape> shapes;
+    for (const Term& term : net.terms) {
+      for (const RShape& shape : term.reservation) {
+        check(shape);
+      }
+      for (size_t o = 0; o < term.options.size() && !wide; o++) {
+        accessShapes(term.options[o], shapes);
+        for (const RShape& shape : shapes) {
+          check(shape);
+        }
+      }
+    }
+    net.wide_shapes = wide;
+  }
 }
 
 void BonnRouteDR::rebuildFastGrid()
@@ -1079,6 +1198,11 @@ void BonnRouteDR::changeShape(const RShape& shape,
                         : shape_grid_.remove(layer, r, cls, type, owner, cache);
     if (!ok) {
       inconsistent_updates_++;
+    }
+    // Sec. 5.1: the halo of a net without wide shapes covers narrow classes.
+    if (local != nullptr && owner >= 0 && !nets_[owner].wide_shapes
+        && shape_classes_.wide(cls)) {
+      unexpected_wide_updates_++;
     }
     // Sec. 3.6: the fast grid follows every change of the shape grid of
     // the track layers and their cuts, incrementally.
@@ -3731,10 +3855,11 @@ void BonnRouteDR::buildRegion(const NetData& net,
                               br::Region& region)
 {
   region.reset();
+  const int around = dilation + params_.guide_dilation;
   auto allow = [&](int z, int tx, int ty) {
     for (int dz = -params_.layer_dilation; dz <= params_.layer_dilation; dz++) {
-      for (int dx = -dilation; dx <= dilation; dx++) {
-        for (int dy = -dilation; dy <= dilation; dy++) {
+      for (int dx = -around; dx <= around; dx++) {
+        for (int dy = -around; dy <= around; dy++) {
           region.allow(z + dz, tx + dx, ty + dy);
         }
       }
@@ -3892,8 +4017,13 @@ bool BonnRouteDR::buildPathRegion(const NetData& net,
     }
     last_x = x;
     last_y = y;
+    const int around = params_.guide_dilation;
     for (int dz = -params_.layer_dilation; dz <= params_.layer_dilation; dz++) {
-      region.allow(z + dz, x, y);
+      for (int dx = -around; dx <= around; dx++) {
+        for (int dy = -around; dy <= around; dy++) {
+          region.allow(z + dz, x + dx, y + dy);
+        }
+      }
     }
   }
   worker.path_detour
@@ -4123,6 +4253,9 @@ bool BonnRouteDR::connect(NetData& net,
   // searches read the fast grid through an exact overlay with the net's
   // shapes removed, and every checker query of the connection ignores them
   // (see DataStructures.md); the routing space itself is not changed.
+  net.left_step = kLeftNone;
+  net.left_term = -1;
+  worker.footprint.setStep(kStepAccess);
   ownShapes(net, worker.own_shapes);
   fast_builder_.buildOverlay(net.id, worker.own_shapes, worker.overlay);
   worker.reader.reset(&grid_, &worker.overlay);
@@ -4143,6 +4276,7 @@ bool BonnRouteDR::connectWithoutOwnShapes(NetData& net,
   // Stub and attachment legality depend on the committed shapes, not on
   // the guide dilation. Check them once for both clean windows.
   std::vector<std::vector<char>> valid(num_terms);
+  bool options_grown = false;
   auto option_valid = [&](const AccessOption& opt) {
     const br::RipupLevel level
         = worker.reader.level(opt.vertex, br::kWire, net.wire_type);
@@ -4198,7 +4332,11 @@ bool BonnRouteDR::connectWithoutOwnShapes(NetData& net,
     if (!ripup && params_.offtrack_access && !worker.speculative
         && feasible < params_.offtrack_regenerate) {
       const size_t before = net.terms[t].options.size();
-      if (regenerateAccess(net, t, worker)) {
+      worker.footprint.setStep(kStepRegenerate);
+      const bool regenerated = regenerateAccess(net, t, worker);
+      worker.footprint.setStep(kStepAccess);
+      if (regenerated) {
+        options_grown = true;
         const Term& grown = net.terms[t];
         valid[t].resize(grown.options.size(), 0);
         for (size_t o = before; o < grown.options.size(); o++) {
@@ -4208,16 +4346,51 @@ bool BonnRouteDR::connectWithoutOwnShapes(NetData& net,
     }
     if (std::ranges::find(valid[t], 1) == valid[t].end()) {
       worker.access_failures++;
+      net.left_step = kLeftAccess;
+      net.left_term = t;
       return false;
     }
   }
+  // Sec. 5.1: generated access paths extend the net's area. The thread
+  // continues only where the area's tile box still lies inside its region.
+  if (options_grown && worker.limit != nullptr) {
+    const br::TileBox box = netAreaTileBox(net, extra_dilation);
+    if (!worker.limit->contains(box)) {
+      worker.area_deferred = true;
+      worker.area_deferrals++;
+      return false;
+    }
+    worker.footprint.widen(box);
+  }
   const int retry = params_.retry_dilation + extra_dilation;
+  worker.footprint.setStep(kStepSearch);
   if (ripup) {
     return connectInRegion(net, retry, true, valid, worker);
   }
-  return connectInRegion(net, extra_dilation, false, valid, worker)
-         || (retry != extra_dilation
-             && connectInRegion(net, retry, false, valid, worker));
+  if (!net.dilated_area) {
+    if (connectInRegion(net, extra_dilation, false, valid, worker)) {
+      return true;
+    }
+    // A search skipped for the effort budget says nothing about the area.
+    if (retry == extra_dilation || worker.effort_exceeded) {
+      return false;
+    }
+    net.dilated_area = true;
+  }
+  // Sec. 5.1: the dilated area is searched where its tile box lies inside
+  // the thread's region. Otherwise the net continues there in a later
+  // partition, whose regions are larger, or in the tail.
+  if (worker.limit != nullptr) {
+    const br::TileBox box = netAreaTileBox(net, retry);
+    if (!worker.limit->contains(box)) {
+      worker.area_deferred = true;
+      worker.area_deferrals++;
+      return false;
+    }
+    worker.footprint.widen(box);
+  }
+  worker.footprint.setStep(kStepRetrySearch);
+  return connectInRegion(net, retry, false, valid, worker);
 }
 
 bool BonnRouteDR::connectInRegion(NetData& net,
@@ -4235,10 +4408,13 @@ bool BonnRouteDR::connectInRegion(NetData& net,
   // Effort budget of a speculative tail attempt (tail_defer_settled):
   // checked before each search, so an attempt settles at most the budget
   // plus one search; the net is then deferred (see routeSpeculative).
-  auto over_budget = [&worker]() {
+  auto over_budget = [&worker, &net]() {
     if (worker.effort_budget > 0
         && worker.settled - worker.effort_start >= worker.effort_budget) {
       worker.effort_exceeded = true;
+    }
+    if (worker.effort_exceeded) {
+      net.left_step = kLeftSearchBudget;
     }
     return worker.effort_exceeded;
   };
@@ -4458,9 +4634,41 @@ bool BonnRouteDR::connectInRegion(NetData& net,
   auto run = [&](const bool path_region) {
     sync_cuts();
     choose_potential(path_region);
+    const double search_start = trace_connections_ ? omp_get_wtime() : 0.0;
     br::SearchResult res = params_.use_intervals
                                ? worker.interval_search->run(req)
                                : worker.search->run(req);
+    if (trace_connections_) {
+      // The area of the search: bounding box of its allowed tiles, their
+      // number over all layers and the number of distinct planar tiles.
+      std::vector<size_t> planar;
+      planar.reserve(worker.region.touched.size());
+      for (const auto& [z, index] : worker.region.touched) {
+        planar.push_back(index);
+      }
+      std::ranges::sort(planar);
+      const size_t planar_tiles
+          = std::ranges::unique(planar).begin() - planar.begin();
+      logger_->debug(
+          utl::DRT,
+          "bonnroute_connect",
+          "connect net {} phase {} dilation {} path {} area {} {} {} {} tiles "
+          "{} planar {} settled {} found {} ms {:.3f}",
+          net.id,
+          worker.speculative ? "tail"
+                             : (worker.limit != nullptr ? "region" : "serial"),
+          dilation,
+          path_region ? 1 : 0,
+          worker.region.bx_lo,
+          worker.region.by_lo,
+          worker.region.bx_hi,
+          worker.region.by_hi,
+          worker.region.touched.size(),
+          planar_tiles,
+          res.settled,
+          res.found ? 1 : 0,
+          1e3 * (omp_get_wtime() - search_start));
+    }
     if (params_.potential_check && req.future_cost != nullptr) {
       // A feasible future cost leaves the shortest path cost unchanged.
       const br::FutureCostOracle* oracle = req.future_cost;
@@ -4515,11 +4723,13 @@ bool BonnRouteDR::connectInRegion(NetData& net,
       }
       req.sources = sources;
       if (!set_targets(false)) {
+        net.left_step = kLeftNoPath;
         return false;
       }
       res = run(false);
     }
     if (!res.found) {
+      net.left_step = res.aborted ? kLeftSearchBudget : kLeftNoPath;
       return false;
     }
     const int t = res.target_id / 1024;
@@ -4615,6 +4825,7 @@ bool BonnRouteDR::connectInRegion(NetData& net,
   }
   for (Term& term : net.terms) {
     if (term.chosen < 0) {
+      net.left_step = kLeftNoPath;
       return false;
     }
     const AccessOption& opt = term.options[term.chosen];
@@ -4881,20 +5092,16 @@ void BonnRouteDR::collectVictims(const NetData& net,
   std::ranges::sort(victims);
 }
 
-void BonnRouteDR::netTileBox(const NetData& net,
-                             int& xlo,
-                             int& ylo,
-                             int& xhi,
-                             int& yhi) const
+br::TileBox BonnRouteDR::netCoreTileBox(const NetData& net) const
 {
   frBlock* block = design_->getTopBlock();
-  xlo = ylo = std::numeric_limits<int>::max();
-  xhi = yhi = -1;
-  auto add = [&](int x, int y) {
-    xlo = std::min(xlo, x);
-    ylo = std::min(ylo, y);
-    xhi = std::max(xhi, x);
-    yhi = std::max(yhi, y);
+  br::TileBox box;
+  box.xhi = box.yhi = -1;
+  auto add = [&box](int x, int y) {
+    box.xlo = std::min(box.xlo, x);
+    box.ylo = std::min(box.ylo, y);
+    box.xhi = std::max(box.xhi, x);
+    box.yhi = std::max(box.yhi, y);
   };
   for (const auto& guide : net.net->getGuides()) {
     const odb::Point a = block->getGCellIdx(guide->getBeginPoint());
@@ -4913,12 +5120,260 @@ void BonnRouteDR::netTileBox(const NetData& net,
     add(tileX(pin.rect.xMin()), tileY(pin.rect.yMin()));
     add(tileX(pin.rect.xMax()), tileY(pin.rect.yMax()));
   }
-  // Retry dilation plus the routing-space interaction halo (Sec. 5.1).
-  const int halo = params_.retry_dilation + halo_tiles_;
-  xlo -= halo;
-  ylo -= halo;
-  xhi += halo;
-  yhi += halo;
+  return box;
+}
+
+int BonnRouteDR::netTopLayer(const NetData& net) const
+{
+  const int num_z = graph_.numLayers();
+  // Routing area (buildRegion, buildPathRegion): guide and option layers
+  // plus layer_dilation.
+  int top = -1;
+  for (const auto& tile : net.guide_tiles) {
+    top = std::max(top, tile[0]);
+  }
+  for (const Term& term : net.terms) {
+    for (const AccessOption& option : term.options) {
+      top = std::max(top, option.z);
+    }
+  }
+  if (top < 0) {
+    return num_z - 1;
+  }
+  return std::min(top + params_.layer_dilation, num_z - 1);
+}
+
+int BonnRouteDR::netAccessTopLayer(const NetData& net) const
+{
+  const int num_z = graph_.numLayers();
+  int top = 0;
+  for (const RShape& pin : net.pins) {
+    if (pin.layer >= 0 && pin.layer < static_cast<int>(z_of_fr_.size())
+        && z_of_fr_[pin.layer] >= 0) {
+      top = std::max(top, z_of_fr_[pin.layer] + 1);
+    }
+  }
+  return std::min(top, num_z - 1);
+}
+
+int BonnRouteDR::netHaloTiles(const NetData& net) const
+{
+  const int top = netTopLayer(net);
+  const int access_top = netAccessTopLayer(net);
+  return net.wide_shapes ? std::max(area_halo_tiles_[top],
+                                    access_halo_tiles_[access_top])
+                         : std::max(narrow_area_halo_tiles_[top],
+                                    narrow_access_halo_tiles_[access_top]);
+}
+
+void BonnRouteDR::netTileBox(const NetData& net,
+                             int& xlo,
+                             int& ylo,
+                             int& xhi,
+                             int& yhi) const
+{
+  const br::TileBox core = netCoreTileBox(net);
+  // Corridor width, retry dilation and the routing-space interaction halo
+  // (Sec. 5.1).
+  const int halo
+      = params_.guide_dilation + params_.retry_dilation + netHaloTiles(net);
+  xlo = core.xlo - halo;
+  ylo = core.ylo - halo;
+  xhi = core.xhi + halo;
+  yhi = core.yhi + halo;
+}
+
+br::TileBox BonnRouteDR::netAreaTileBox(const NetData& net,
+                                        const int dilation) const
+{
+  br::TileBox box = netCoreTileBox(net);
+  const int margin = params_.guide_dilation + dilation + netHaloTiles(net);
+  box.xlo = std::max(box.xlo - margin, 0);
+  box.ylo = std::max(box.ylo - margin, 0);
+  box.xhi = std::min(box.xhi + margin, tiles_x_ - 1);
+  box.yhi = std::min(box.yhi + margin, tiles_y_ - 1);
+  return box;
+}
+
+br::TileBox BonnRouteDR::netClippedTileBox(const NetData& net) const
+{
+  br::TileBox box;
+  netTileBox(net, box.xlo, box.ylo, box.xhi, box.yhi);
+  box.xlo = std::max(box.xlo, 0);
+  box.ylo = std::max(box.ylo, 0);
+  box.xhi = std::min(box.xhi, tiles_x_ - 1);
+  box.yhi = std::min(box.yhi, tiles_y_ - 1);
+  return box;
+}
+
+void BonnRouteDR::beginFootprint(Worker& worker,
+                                 const NetData& net,
+                                 const FootprintPhase phase,
+                                 const br::TileBox& box)
+{
+  worker.footprint_phase = phase;
+  worker.footprint.begin(net.id, box);
+}
+
+void BonnRouteDR::endFootprint(Worker& worker,
+                               const NetData& net,
+                               const br::TileBox* region)
+{
+  const br::AccessFootprint& footprint = worker.footprint;
+  FootprintStats& stats = worker.footprint_stats;
+  const int phase = worker.footprint_phase;
+  stats.units[phase]++;
+  if (footprint.unitViolations() > 0) {
+    stats.outside_box_units[phase]++;
+  }
+  const br::TileBox accessed = footprint.accessed();
+  if (region != nullptr && !region->contains(accessed)) {
+    stats.outside_region_units[phase]++;
+    if (stats.region_examples.size() < 8) {
+      stats.region_examples.push_back(fmt::format(
+          "net {} ({}): tiles [{}, {}] - [{}, {}], region [{}, {}] - [{}, {}]",
+          net.id,
+          net.net->getName(),
+          accessed.xlo,
+          accessed.ylo,
+          accessed.xhi,
+          accessed.yhi,
+          region->xlo,
+          region->ylo,
+          region->xhi,
+          region->yhi));
+    }
+  }
+  // Reach beyond the core box, per step: reads and writes.
+  const br::TileBox core = netCoreTileBox(net);
+  for (int step = 0; step < kNumFootprintSteps; step++) {
+    for (int write = 0; write < 2; write++) {
+      const br::TileBox& box
+          = write != 0 ? footprint.writes(step) : footprint.reads(step);
+      if (!box.empty()) {
+        const int reach
+            = std::min(core.reachOf(box), FootprintStats::kReachBins - 1);
+        stats.reach[phase][step][write][reach]++;
+      }
+    }
+  }
+}
+
+void BonnRouteDR::reportFootprints()
+{
+  static constexpr std::array<const char*, kNumFootprintPhases> kPhaseNames{
+      "region", "tail search", "tail commit"};
+  static constexpr std::array<const char*, kNumFootprintSteps> kStepNames{
+      "access", "regenerate", "search", "retry search", "commit", "release"};
+  FootprintStats total;
+  int64_t records = 0;
+  int64_t violations = 0;
+  std::vector<br::AccessFootprint::Violation> examples;
+  for (const Worker& w : workers_) {
+    const FootprintStats& s = w.footprint_stats;
+    for (int phase = 0; phase < kNumFootprintPhases; phase++) {
+      total.units[phase] += s.units[phase];
+      total.outside_box_units[phase] += s.outside_box_units[phase];
+      total.outside_region_units[phase] += s.outside_region_units[phase];
+      for (int step = 0; step < kNumFootprintSteps; step++) {
+        for (int write = 0; write < 2; write++) {
+          for (int bin = 0; bin < FootprintStats::kReachBins; bin++) {
+            total.reach[phase][step][write][bin]
+                += s.reach[phase][step][write][bin];
+          }
+        }
+      }
+    }
+    total.region_examples.insert(total.region_examples.end(),
+                                 s.region_examples.begin(),
+                                 s.region_examples.end());
+    records += w.footprint.records();
+    violations += w.footprint.violationCount();
+    examples.insert(examples.end(),
+                    w.footprint.violations().begin(),
+                    w.footprint.violations().end());
+  }
+  int64_t outside_box = 0;
+  int64_t outside_region = 0;
+  for (int phase = 0; phase < kNumFootprintPhases; phase++) {
+    outside_box += total.outside_box_units[phase];
+    outside_region += total.outside_region_units[phase];
+  }
+  logger_->report(
+      "BonnRoute DR access footprint check: {} region units, {} tail search "
+      "units, {} tail commit units, {} recorded accesses; box margin {} "
+      "tiles (retry dilation {} + halo {}) at most; {} accesses outside the "
+      "net box in {} units, {} units outside their region.",
+      total.units[kPhaseRegion],
+      total.units[kPhaseTailSearch],
+      total.units[kPhaseTailCommit],
+      records,
+      params_.guide_dilation + params_.retry_dilation + halo_tiles_,
+      params_.guide_dilation + params_.retry_dilation,
+      halo_tiles_,
+      violations,
+      outside_box,
+      outside_region);
+  for (int phase = 0; phase < kNumFootprintPhases; phase++) {
+    for (int step = 0; step < kNumFootprintSteps; step++) {
+      for (int write = 0; write < 2; write++) {
+        const FootprintStats::Histogram& h = total.reach[phase][step][write];
+        int64_t units = 0;
+        std::string bins;
+        for (int bin = 0; bin < FootprintStats::kReachBins; bin++) {
+          units += h[bin];
+          bins += fmt::format(" {}:{}", bin, h[bin]);
+        }
+        if (units == 0) {
+          continue;
+        }
+        logger_->report(
+            "BonnRoute DR access footprint reach: phase {} step {} {} units "
+            "{} tiles beyond the core box{}.",
+            kPhaseNames[phase],
+            kStepNames[step],
+            write != 0 ? "writes" : "reads",
+            units,
+            bins);
+      }
+    }
+  }
+  if (violations == 0 && outside_region == 0) {
+    return;
+  }
+  std::string detail;
+  for (size_t k = 0; k < examples.size() && k < 8; k++) {
+    const br::AccessFootprint::Violation& v = examples[k];
+    detail += fmt::format(
+        "\n  net {} ({}) step {} {} layer {}: tiles [{}, {}] - [{}, {}], "
+        "box [{}, {}] - [{}, {}]",
+        v.unit,
+        v.unit >= 0 && v.unit < static_cast<int>(nets_.size())
+            ? nets_[v.unit].net->getName()
+            : std::string("-"),
+        kStepNames[std::clamp(v.step, 0, kNumFootprintSteps - 1)],
+        br::accessKindName(v.kind),
+        v.layer,
+        v.tiles.xlo,
+        v.tiles.ylo,
+        v.tiles.xhi,
+        v.tiles.yhi,
+        v.allowed.xlo,
+        v.allowed.ylo,
+        v.allowed.xhi,
+        v.allowed.yhi);
+  }
+  for (size_t k = 0; k < total.region_examples.size() && k < 8; k++) {
+    detail += "\n  " + total.region_examples[k];
+  }
+  logger_->warn(utl::DRT,
+                9130,
+                "BonnRoute access footprint check failed: {} accesses outside "
+                "the net box in {} units, {} units outside their region.{}",
+                violations,
+                outside_box,
+                outside_region,
+                detail);
 }
 
 void BonnRouteDR::routeParallel(const std::vector<int>& order,
@@ -5084,6 +5539,11 @@ void BonnRouteDR::routeSpeculative(const std::vector<int>& order,
   if (deferred.empty()) {
     return;
   }
+  if (!params_.tail_deferred_pass) {
+    // To the rip-up phase, in net order.
+    failed.insert(failed.end(), deferred.begin(), deferred.end());
+    return;
+  }
   const std::string late = std::string(stage) + " deferred";
   if (params_.tail_pipeline) {
     routeSpeculativePipeline(deferred, failed, none, late, threads, 0);
@@ -5155,6 +5615,14 @@ void BonnRouteDR::routeSpeculativeBatches(const std::vector<int>& order,
       Worker& w = workers_[omp_get_thread_num()];
       const double start = omp_get_wtime();
       const int64_t settled_before = w.settled;
+      const br::AccessFootprintScope footprint_scope(
+          params_.partition_check ? &w.footprint : nullptr);
+      if (params_.partition_check) {
+        beginFootprint(w,
+                       nets_[batch[k]],
+                       kPhaseTailSearch,
+                       netClippedTileBox(nets_[batch[k]]));
+      }
       w.speculative = true;
       w.effort_budget = budget;
       w.effort_start = w.settled;
@@ -5165,6 +5633,9 @@ void BonnRouteDR::routeSpeculativeBatches(const std::vector<int>& order,
       w.effort_exceeded = false;
       w.speculative = false;
       settled[k] = w.settled - settled_before;
+      if (params_.partition_check) {
+        endFootprint(w, nets_[batch[k]], nullptr);
+      }
       busy[k] = omp_get_wtime() - start;
     }
     const double wall = omp_get_wtime() - wall_start;
@@ -5212,6 +5683,17 @@ void BonnRouteDR::routeSpeculativeBatches(const std::vector<int>& order,
       // the effort budget); exact check run.
       int outcome = 0;
       bool exact = false;
+      // partition_check: the decision and commit of the net, recorded on
+      // the first worker (no search runs during the commits).
+      Worker& commit_worker = workers_.front();
+      const br::AccessFootprintScope footprint_scope(
+          params_.partition_check && ok[k] ? &commit_worker.footprint
+                                           : nullptr);
+      if (params_.partition_check && ok[k]) {
+        beginFootprint(
+            commit_worker, net, kPhaseTailCommit, netClippedTileBox(net));
+        commit_worker.footprint.setStep(kStepCommit);
+      }
       if (!ok[k]) {
         net.wires.clear();
         net.vias.clear();
@@ -5255,6 +5737,7 @@ void BonnRouteDR::routeSpeculativeBatches(const std::vector<int>& order,
           outcome = 2;
         } else {
           commitNet(net, nullptr);
+          commit_worker.footprint.setStep(kStepRelease);
           setReservations(net, false, nullptr, &released);
           odb::Rect box;
           box.mergeInit();
@@ -5267,6 +5750,9 @@ void BonnRouteDR::routeSpeculativeBatches(const std::vector<int>& order,
           }
           nets++;
           outcome = 1;
+        }
+        if (params_.partition_check) {
+          endFootprint(commit_worker, net, nullptr);
         }
       }
       if (logger_->debugCheck(utl::DRT, "bonnroute_tail", 1)) {
@@ -5440,6 +5926,13 @@ void BonnRouteDR::routeSpeculativePipeline(const std::vector<int>& order,
     Worker& w = workers_[t];
     const double start = omp_get_wtime();
     const int64_t before = w.settled;
+    const br::AccessFootprintScope footprint_scope(
+        params_.partition_check ? &w.footprint : nullptr);
+    if (params_.partition_check) {
+      const auto& b = boxes[id];
+      beginFootprint(
+          w, nets_[id], kPhaseTailSearch, {b[0], b[1], b[2], b[3]});
+    }
     w.speculative = true;
     w.effort_budget = budget;
     w.effort_start = w.settled;
@@ -5450,6 +5943,9 @@ void BonnRouteDR::routeSpeculativePipeline(const std::vector<int>& order,
     w.effort_exceeded = false;
     w.speculative = false;
     settled[id] = w.settled - before;
+    if (params_.partition_check) {
+      endFootprint(w, nets_[id], nullptr);
+    }
     search_seconds[id] = omp_get_wtime() - start;
     times[t].push_back(search_seconds[id]);
     return found;
@@ -5463,6 +5959,13 @@ void BonnRouteDR::routeSpeculativePipeline(const std::vector<int>& order,
     NetData& net = nets_[id];
     Decision decision = Decision::kCommitted;
     bool exact = false;
+    const br::AccessFootprintScope footprint_scope(
+        params_.partition_check && found ? &w.footprint : nullptr);
+    if (params_.partition_check && found) {
+      const auto& b = boxes[id];
+      beginFootprint(w, net, kPhaseTailCommit, {b[0], b[1], b[2], b[3]});
+      w.footprint.setStep(kStepCommit);
+    }
     if (!found) {
       net.wires.clear();
       net.vias.clear();
@@ -5501,6 +6004,7 @@ void BonnRouteDR::routeSpeculativePipeline(const std::vector<int>& order,
       } else {
         commitNet(net, &w);
         // Released and recomputed exactly inside the net's box.
+        w.footprint.setStep(kStepRelease);
         setReservations(net, false, &w);
         odb::Rect box;
         box.mergeInit();
@@ -5511,6 +6015,9 @@ void BonnRouteDR::routeSpeculativePipeline(const std::vector<int>& order,
           box.bloat(static_cast<int>(interaction_reach_), box);
           committed_box[id] = box;
         }
+      }
+      if (params_.partition_check) {
+        endFootprint(w, net, nullptr);
       }
     }
     if (trace) {
@@ -5620,24 +6127,35 @@ void BonnRouteDR::routePartitions(const std::vector<int>& order,
                                   const int initial_regions,
                                   const char* stage)
 {
+  // Sec. 5.1: a net enters a region that contains the tile box of its
+  // guide area (netAreaTileBox). A net whose connections failed there
+  // enters with the box of the dilated area; connect() tests that box
+  // against the region before it searches the dilated area.
   std::vector<std::array<int, 4>> boxes(nets_.size());
+  auto set_box = [&](const int id) {
+    const NetData& net = nets_[id];
+    const br::TileBox box
+        = netAreaTileBox(net, net.dilated_area ? params_.retry_dilation : 0);
+    boxes[id] = {box.xlo, box.ylo, box.xhi, box.yhi};
+  };
   for (const int id : order) {
-    auto& b = boxes[id];
-    netTileBox(nets_[id], b[0], b[1], b[2], b[3]);
-    b[0] = std::max(b[0], 0);
-    b[1] = std::max(b[1], 0);
-    b[2] = std::min(b[2], tiles_x_ - 1);
-    b[3] = std::min(b[3], tiles_y_ - 1);
+    set_box(id);
   }
+  // Marks of the nets that stay pending after a partition.
+  std::vector<char> stays(nets_.size(), 0);
   const int threads = static_cast<int>(workers_.size());
   int count = initial_regions > 0             ? initial_regions
               : params_.partition_regions > 0 ? params_.partition_regions
                                               : 2 * threads;
+  // The tail takes over below this many regions (a partition with fewer
+  // regions than threads leaves threads idle).
+  const int tail_below
+      = params_.tail_regions > 0 ? params_.tail_regions : threads;
   std::vector<int> pending = order;
   std::vector<std::array<int, 4>> regions;
   int partition = 0;
   while (!pending.empty()) {
-    if (params_.tail_batch > 0 && count < threads) {
+    if (params_.tail_batch > 0 && count < tail_below) {
       routeSpeculative(pending, failed, stage);
       return;
     }
@@ -5646,8 +6164,23 @@ void BonnRouteDR::routePartitions(const std::vector<int>& order,
     } else {
       partitionRegions(pending, boxes, count, partition % 2 == 1, regions);
     }
+    if (trace_connections_) {
+      for (const auto& g : regions) {
+        logger_->debug(utl::DRT,
+                       "bonnroute_connect",
+                       "partition {} {} region {} {} {} {}",
+                       stage,
+                       partition,
+                       g[0],
+                       g[1],
+                       g[2],
+                       g[3]);
+      }
+    }
     std::vector<std::vector<int>> members(regions.size());
     std::vector<std::vector<int>> region_failed(regions.size());
+    // Nets that need the dilated area, whose box leaves the region.
+    std::vector<std::vector<int>> region_again(regions.size());
     std::vector<int> next;
     for (const int id : pending) {
       const auto& b = boxes[id];
@@ -5680,15 +6213,32 @@ void BonnRouteDR::routePartitions(const std::vector<int>& order,
     for (int r = 0; r < static_cast<int>(regions.size()); r++) {
       Worker& w = workers_[omp_get_thread_num()];
       const double region_start = omp_get_wtime();
+      const br::AccessFootprintScope footprint_scope(
+          params_.partition_check ? &w.footprint : nullptr);
+      const br::TileBox region{
+          regions[r][0], regions[r][1], regions[r][2], regions[r][3]};
       for (const int id : members[r]) {
         NetData& net = nets_[id];
-        if (connect(net, false, w)) {
+        if (params_.partition_check) {
+          const auto& b = boxes[id];
+          beginFootprint(w, net, kPhaseRegion, {b[0], b[1], b[2], b[3]});
+        }
+        w.limit = &region;
+        w.area_deferred = false;
+        const bool connected = connect(net, false, w);
+        w.limit = nullptr;
+        if (connected) {
+          w.footprint.setStep(kStepCommit);
           commitNet(net, &w);
+          w.footprint.setStep(kStepRelease);
           setReservations(net, false, &w);
         } else {
           net.wires.clear();
           net.vias.clear();
-          region_failed[r].push_back(id);
+          (w.area_deferred ? region_again : region_failed)[r].push_back(id);
+        }
+        if (params_.partition_check) {
+          endFootprint(w, net, &region);
         }
       }
       busy[r] = omp_get_wtime() - region_start;
@@ -5707,6 +6257,16 @@ void BonnRouteDR::routePartitions(const std::vector<int>& order,
     for (const auto& f : region_failed) {
       failed.insert(failed.end(), f.begin(), f.end());
     }
+    // The nets that continue in the dilated area stay pending with that
+    // area's box, at their positions in the net order.
+    size_t again = 0;
+    for (const auto& a : region_again) {
+      again += a.size();
+      for (const int id : a) {
+        set_box(id);
+        stays[id] = 1;
+      }
+    }
     if (params_.verbose) {
       size_t routed = 0;
       for (const auto& m : members) {
@@ -5716,7 +6276,8 @@ void BonnRouteDR::routePartitions(const std::vector<int>& order,
                     9107,
                     "BonnRoute {} {}: {} regions, {} nets inside, {} "
                     "deferred; {:.2f}s, longest region {:.2f}s, thread "
-                    "utilization {:.0f}%.",
+                    "utilization {:.0f}%; {} nets inside continue in the "
+                    "dilated area later.",
                     stage,
                     partition,
                     regions.size(),
@@ -5724,7 +6285,20 @@ void BonnRouteDR::routePartitions(const std::vector<int>& order,
                     next.size(),
                     wall,
                     busy_max,
-                    wall > 0 ? 100.0 * busy_sum / (wall * threads) : 0.0);
+                    wall > 0 ? 100.0 * busy_sum / (wall * threads) : 0.0,
+                    again);
+    }
+    if (again > 0) {
+      for (const int id : next) {
+        stays[id] = 1;
+      }
+      next.clear();
+      for (const int id : pending) {
+        if (stays[id] != 0) {
+          next.push_back(id);
+          stays[id] = 0;
+        }
+      }
     }
     pending.swap(next);
     partition++;
@@ -5794,6 +6368,8 @@ bool BonnRouteDR::ripupSequence(const int id,
     }
   }
   if (depth >= params_.ripup_depth) {
+    sequence_outcome_ = kRipupDepth;
+    sequence_outcome_depth_ = depth;
     return false;
   }
   const double start = omp_get_wtime();
@@ -5801,12 +6377,16 @@ bool BonnRouteDR::ripupSequence(const int id,
   ripup_mode_seconds_ += omp_get_wtime() - start;
   ripup_mode_connects_++;
   if (!found) {
+    sequence_outcome_ = kRipupNoPath;
+    sequence_outcome_depth_ = depth;
     return false;
   }
   std::vector<int> victims;
   collectVictims(net, victims);
   for (const int victim : victims) {
     if (nets_[victim].ripups >= params_.max_ripups) {
+      sequence_outcome_ = kRipupVictimLimit;
+      sequence_outcome_depth_ = depth;
       return false;
     }
   }
@@ -5845,18 +6425,33 @@ void BonnRouteDR::routeRipupQueue(const std::vector<int>& failed,
       if (settled_budget > 0 && worker.settled - start >= settled_budget) {
         unrouted.push_back(id);
         ripup_budget_skipped_++;
+        if (nets_[id].ripup_outcome == kRipupNotStarted) {
+          nets_[id].ripup_outcome = kRipupBudget;
+        }
         continue;
       }
       journal.clear();
+      sequence_outcome_ = kRipupNotStarted;
+      sequence_outcome_depth_ = 0;
       if (ripupSequence(id, 0, pass, journal, false)) {
         continue;
       }
+      // The step the net's own rip-up mode search failed at, before the
+      // rollback restores the routings.
+      const uint8_t step = nets_[id].left_step;
+      const int term = nets_[id].left_term;
       // Sec. 4.4: a failed sequence restores the original situation.
       for (auto it = journal.rbegin(); it != journal.rend(); ++it) {
         restoreRouting(*it);
       }
       rollbacks_++;
       unrouted.push_back(id);
+      // A failure below the net's own call is a victim's.
+      nets_[id].ripup_outcome = sequence_outcome_depth_ > 0
+                                    ? uint8_t{kRipupVictimFailed}
+                                    : sequence_outcome_;
+      nets_[id].left_step = step;
+      nets_[id].left_term = term;
     }
     queue.swap(unrouted);
   }
@@ -5866,6 +6461,193 @@ void BonnRouteDR::routeRipupQueue(const std::vector<int>& failed,
     net.vias.clear();
     net.failed = true;
   }
+}
+
+int BonnRouteDR::blockerKinds(const RShape& shape, const int net) const
+{
+  int kinds = 0;
+  auto scan = [&](const int g, const RShape& s) {
+    const br::Coord reach = shape_classes_.reach(g);
+    const br::Rect r = brRect(s.rect);
+    br::GridWindow pieces;
+    shape_grid_.collect(g, r.bloated(reach, reach), pieces);
+    const br::PlacedShape placed{r, shapeClass(s, g), 3};
+    for (const br::GridPiece& p : pieces.pieces) {
+      if (p.owner == net && net >= 0 && br::isOwned(p.type)) {
+        continue;
+      }
+      if (!br::shapesViolate(shape_classes_,
+                             placed,
+                             br::PlacedShape{p.rect, p.cls, p.line_end_ends})) {
+        continue;
+      }
+      switch (p.type) {
+        case br::ShapeType::kBlockage:
+          kinds |= 1;
+          break;
+        case br::ShapeType::kPin:
+          kinds |= 2;
+          break;
+        case br::ShapeType::kReservation:
+          kinds |= 4;
+          break;
+        default:
+          kinds |= 8;
+          break;
+      }
+    }
+  };
+  const int g = gridLayer(shape.layer);
+  if (g < 0) {
+    return 0;
+  }
+  scan(g, shape);
+  const int above = projectionLayer(g);
+  if (above >= 0) {
+    RShape projection = shape;
+    projection.role = br::ShapeRole::kCutProjection;
+    scan(above, projection);
+  }
+  return kinds;
+}
+
+BonnRouteDR::AccessBlock BonnRouteDR::accessBlock(const NetData& net,
+                                                  const Term& term) const
+{
+  AccessBlock best = kAccessNoOption;
+  bool any = false;
+  std::vector<RShape> via;
+  for (const AccessOption& option : term.options) {
+    int kinds = 0;
+    // The wire at the option's track vertex.
+    const auto [x, y] = graph_.point(option.vertex);
+    const frCoord half = layers_[option.z].width / 2;
+    kinds |= blockerKinds(RShape{layers_[option.z].fr,
+                                 odb::Rect(x - half, y - half, x + half, y + half),
+                                 br::ShapeRole::kPreferredWire},
+                          net.id);
+    for (const OutWire& wire : option.wires) {
+      kinds |= blockerKinds(wireShape(wire), net.id);
+    }
+    for (size_t k = 0; k < option.vias.size(); k++) {
+      via.clear();
+      viaShapes(option.vias[k], via);
+      for (size_t s = 0; s < via.size(); s++) {
+        int v = blockerKinds(via[s], net.id);
+        // Pin access checked the pin-layer pad and the cut of the access
+        // point's own via against the fixed surroundings (optionLegal).
+        if (static_cast<int>(k) == option.pin_via && s + 1 < via.size()) {
+          v &= 4 | 8;
+        }
+        kinds |= v;
+      }
+    }
+    const AccessBlock block = kinds == 0             ? kAccessFeasible
+                              : (kinds & (1 | 2)) != 0 ? kAccessFixed
+                              : (kinds & 4) != 0       ? kAccessReservation
+                                                       : kAccessRouted;
+    best = any ? std::min(best, block) : block;
+    any = true;
+  }
+  return best;
+}
+
+void BonnRouteDR::reportLeftNets() const
+{
+  static constexpr std::array<const char*, kNumLeftSteps> kSteps{
+      "none", "access", "no path", "search budget"};
+  static constexpr std::array<const char*, kNumRipupOutcomes> kOutcomes{
+      "not started",
+      "effort budget",
+      "depth",
+      "no path with rip-up",
+      "victim at its rip-up limit",
+      "victim not routed again"};
+  static constexpr std::array<const char*, kNumAccessBlocks> kBlocks{
+      "no option",
+      "feasible at the end",
+      "routed shapes",
+      "reservations",
+      "fixed shapes or pins"};
+  int64_t left = 0;
+  int64_t guard_contact = 0;
+  int64_t guard_on_track = 0;
+  int64_t guard_missing_contact = 0;
+  std::array<int64_t, kNumLeftSteps> by_step{};
+  std::array<int64_t, kNumRipupOutcomes> by_outcome{};
+  std::array<int64_t, kNumAccessBlocks> by_block{};
+  const bool trace = logger_->debugCheck(utl::DRT, "bonnroute_left", 1);
+  for (const NetData& net : nets_) {
+    if (net.routed || net.skip) {
+      continue;
+    }
+    left++;
+    AccessBlock block = kAccessNoOption;
+    const bool access = net.left_guard == kGuardNone
+                        && net.left_step == kLeftAccess && net.left_term >= 0
+                        && net.left_term < static_cast<int>(net.terms.size());
+    if (net.left_guard == kGuardPinContact) {
+      guard_contact++;
+    } else if (net.left_guard == kGuardOnTrack) {
+      guard_on_track++;
+    } else if (net.left_guard == kGuardMissingContact) {
+      guard_missing_contact++;
+    } else {
+      by_step[net.left_step]++;
+      by_outcome[net.ripup_outcome]++;
+      if (access) {
+        block = accessBlock(net, net.terms[net.left_term]);
+        by_block[block]++;
+      }
+    }
+    if (trace) {
+      logger_->debug(
+          utl::DRT,
+          "bonnroute_left",
+          "left net {} ({}) terms {} hpwl {} guide_tiles {} guard {} step {} "
+          "term {} access {} ripup {} ripups {} dilated {}",
+          net.id,
+          net.net->getName(),
+          net.terms.size(),
+          net.hpwl,
+          net.guide_tiles.size(),
+          static_cast<int>(net.left_guard),
+          kSteps[net.left_step],
+          net.left_term,
+          access ? kBlocks[block] : "-",
+          kOutcomes[net.ripup_outcome],
+          net.ripups,
+          net.dilated_area ? 1 : 0);
+    }
+  }
+  logger_->report(
+      "BonnRoute DR left nets: {}; output guards: {} pin contact, {} "
+      "on-track-only layer, {} without a FlexDR pin contact; last failed "
+      "step of the others: {} access ({} pin without an option, {} blocked "
+      "by fixed shapes or pins, {} by "
+      "reservations, {} by routed shapes, {} feasible at the end), {} no "
+      "path, {} search budget, {} none; their rip-up sequence: {} not "
+      "started, {} over the effort budget, {} no path with rip-up, {} victim "
+      "at its rip-up limit, {} victim not routed again, {} depth.",
+      left,
+      guard_contact,
+      guard_on_track,
+      guard_missing_contact,
+      by_step[kLeftAccess],
+      by_block[kAccessNoOption],
+      by_block[kAccessFixed],
+      by_block[kAccessReservation],
+      by_block[kAccessRouted],
+      by_block[kAccessFeasible],
+      by_step[kLeftNoPath],
+      by_step[kLeftSearchBudget],
+      by_step[kLeftNone],
+      by_outcome[kRipupNotStarted],
+      by_outcome[kRipupBudget],
+      by_outcome[kRipupNoPath],
+      by_outcome[kRipupVictimLimit],
+      by_outcome[kRipupVictimFailed],
+      by_outcome[kRipupDepth]);
 }
 
 void BonnRouteDR::writeNets()
@@ -5910,6 +6692,7 @@ void BonnRouteDR::writeNets()
     if (const int64_t bad = pinContactViolations(data, wires, data.vias)) {
       guard_nets_++;
       guard_contacts_ += bad;
+      data.left_guard = kGuardPinContact;
       data.routed = false;
       data.wires.clear();
       data.vias.clear();
@@ -5923,6 +6706,7 @@ void BonnRouteDR::writeNets()
         || !std::ranges::all_of(
             patches, [&](const OutWire& w) { return wireOnTracks(w); })) {
       wrong_way_nets_++;
+      data.left_guard = kGuardOnTrack;
       data.routed = false;
       data.wires.clear();
       data.vias.clear();
@@ -5934,6 +6718,7 @@ void BonnRouteDR::writeNets()
     if (const int missing = pinsWithoutContact(data, wires)) {
       uncontacted_nets_++;
       uncontacted_pins_ += missing;
+      data.left_guard = kGuardMissingContact;
       data.routed = false;
       data.wires.clear();
       data.vias.clear();
@@ -6292,6 +7077,7 @@ void BonnRouteDR::main()
                   "use_intervals is ignored.");
     params_.use_intervals = false;
   }
+  trace_connections_ = logger_->debugCheck(utl::DRT, "bonnroute_connect", 1);
   SetupPhases& phases = setup_phases_;
   utl::Timer phase_timer;
   // Wall seconds since the previous lap.
@@ -6339,6 +7125,7 @@ void BonnRouteDR::main()
   buildFixed();
   lap();
   buildSameNetRules();
+  buildPartitionHalos();
   phases.same_net_rules = lap();
   // Reads the extra space of the nets built above (grt/BonnRouteExtraSpace.h).
   if (params_.spreading && params_.spread_from_extra_space) {
@@ -6380,6 +7167,7 @@ void BonnRouteDR::main()
   if (params_.reservations) {
     reserveInputWires();
   }
+  markWideNets();
   phases.input_wires = lap();
   const double setup_time = timer.elapsed();
   if (params_.verbose) {
@@ -6439,6 +7227,9 @@ void BonnRouteDR::main()
     routeParallel(regular, failed_first);
   }
   const double parallel_time = timer.elapsed();
+  if (params_.partition_check) {
+    reportFootprints();
+  }
   // Unresolved nets get the serial rip-up sequences of Sec. 4.4 (ripup,
   // or final_ripup for the nets the parallel phases left). A net left to
   // FlexDR is routed by its iteration 0 over the fixed BonnRoute routing,
@@ -6622,6 +7413,85 @@ void BonnRouteDR::main()
     }
   }
   if (params_.verbose) {
+    // Sec. 5.1: halos of the nets' boxes.
+    std::vector<int64_t> nets_by_top(graph_.numLayers(), 0);
+    std::vector<int64_t> nets_by_access(graph_.numLayers(), 0);
+    std::vector<int64_t> nets_by_halo;
+    for (const NetData& net : nets_) {
+      if (net.skip) {
+        continue;
+      }
+      nets_by_top[netTopLayer(net)]++;
+      nets_by_access[netAccessTopLayer(net)]++;
+      const size_t halo = static_cast<size_t>(netHaloTiles(net));
+      if (nets_by_halo.size() <= halo) {
+        nets_by_halo.resize(halo + 1, 0);
+      }
+      nets_by_halo[halo]++;
+    }
+    std::string by_layer;
+    int64_t wide_nets = 0;
+    for (const NetData& net : nets_) {
+      wide_nets += !net.skip && net.wide_shapes;
+    }
+    for (int z = 0; z < graph_.numLayers(); z++) {
+      by_layer += fmt::format(
+          "{}{} area {} (narrow {}) tiles ({} nets) access {} (narrow {}) "
+          "tiles ({} nets)",
+          z == 0 ? "" : ", ",
+          layers_[z].layer->getName(),
+          area_halo_tiles_[z],
+          narrow_area_halo_tiles_[z],
+          nets_by_top[z],
+          access_halo_tiles_[z],
+          narrow_access_halo_tiles_[z],
+          nets_by_access[z]);
+    }
+    std::string by_halo;
+    for (size_t h = 0; h < nets_by_halo.size(); h++) {
+      if (nets_by_halo[h] > 0) {
+        by_halo += fmt::format(" {}:{}", h, nets_by_halo[h]);
+      }
+    }
+    // narrowReach() grows with the classes interned during routing; the
+    // halos assume it stays within narrowRuleReach().
+    int reach_layers = 0;
+    for (int g = 0; g < shape_classes_.numLayers(); g++) {
+      reach_layers += shape_classes_.narrowReach(g)
+                      > shape_classes_.narrowRuleReach(g);
+    }
+    logger_->report(
+        "BonnRoute DR partition halo by top layer: {}; nets by halo tiles{}; "
+        "{} nets with wide shapes use the rule distance; {} wide shape "
+        "updates for other nets by partition threads, {} layers whose "
+        "narrow class distance exceeds its rule bound.",
+        by_layer,
+        by_halo,
+        wide_nets,
+        unexpected_wide_updates_.load(),
+        reach_layers);
+    // Sec. 4.4 / 5.1: nets that left their guide area.
+    int64_t dilated = 0;
+    int64_t dilated_routed = 0;
+    for (const NetData& net : nets_) {
+      if (net.dilated_area) {
+        dilated++;
+        dilated_routed += net.routed;
+      }
+    }
+    int64_t area_deferrals = 0;
+    for (const Worker& w : workers_) {
+      area_deferrals += w.area_deferrals;
+    }
+    logger_->report(
+        "BonnRoute DR routing areas: {} nets continued in the area dilated "
+        "by {} tiles ({} of them routed); {} times a net's next area did "
+        "not fit its partition region and the net continued in a later "
+        "partition or the tail.",
+        dilated,
+        params_.retry_dilation,
+        dilated_routed,
+        area_deferrals);
     const br::ShapeGrid::Statistics sg = shape_grid_.statistics();
     const br::FastGrid::Statistics fg = grid_.statistics();
     logger_->report(
@@ -6816,6 +7686,7 @@ void BonnRouteDR::main()
           params_.discount_numerator,
           params_.discount_denominator);
     }
+    reportLeftNets();
     logger_->report(
         "BonnRoute DR: routed {} nets, {} left to FlexDR, {} skipped; {} "
         "searches ({}), {} heap pops, {} settled vertices, {} intervals, "

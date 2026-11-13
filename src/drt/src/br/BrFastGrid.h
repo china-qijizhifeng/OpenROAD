@@ -48,6 +48,7 @@
 #include <utility>
 #include <vector>
 
+#include "br/BrAccessFootprint.h"
 #include "br/BrDistanceRules.h"
 #include "br/BrGeometry.h"
 #include "br/BrShapeGrid.h"
@@ -257,6 +258,20 @@ class FastGrid
                      uint64_t word,
                      uint64_t mask);
   static size_t bytes(const std::vector<std::unique_ptr<TileRuns>>& tiles);
+  // AccessFootprint records: the tiles of positions [j0, j1] / via
+  // positions [c0, c1] of track i.
+  void recordWiring(AccessFootprint& footprint,
+                    AccessKind kind,
+                    int z,
+                    int i,
+                    int j0,
+                    int j1) const;
+  void recordVia(AccessFootprint& footprint,
+                 AccessKind kind,
+                 int z,
+                 int i,
+                 int c0,
+                 int c1) const;
   static void assignWords(std::unique_ptr<TileRuns>& tile,
                           int tracks,
                           int track,
@@ -560,6 +575,14 @@ class FastGridBuilder final : public LegalityOracle
                         int wire_type,
                         Kind kind,
                         int32_t ignored_owner) const;
+
+  // A fast wire type has a wide model class on this shape-grid layer: the
+  // updates and windows of the layer then reach classReach() instead of
+  // narrowReach().
+  bool wideModels(const int grid_layer) const
+  {
+    return wide_models_[grid_layer];
+  }
 
   struct UpdateStatistics
   {

@@ -56,6 +56,7 @@ cc_library(
         "src/br/BrWireModel.cpp",
     ],
     hdrs = [
+        "src/br/BrAccessFootprint.h",
         "src/br/BrBlockageGrid.h",
         "src/br/BrCore.h",
         "src/br/BrDistanceRules.h",

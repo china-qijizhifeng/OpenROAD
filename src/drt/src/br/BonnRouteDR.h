@@ -18,6 +18,7 @@
 #include <utility>
 #include <vector>
 
+#include "br/BrAccessFootprint.h"
 #include "br/BrCore.h"
 #include "br/BrDistanceRules.h"
 #include "br/BrFastGrid.h"
@@ -73,6 +74,11 @@ struct BonnRouteDRParams
   // Routing area: guide tiles plus this many adjacent layers / tiles.
   int layer_dilation = 1;
   int retry_dilation = 2;
+  // Width of the corridor: the guide area (path regions and the net's whole
+  // area) includes this many tiles around the guide tiles. 0 keeps the
+  // global routing corridor; the dilated area of a retry adds
+  // retry_dilation on top.
+  int guide_dilation = 0;
   bool use_intervals = false;
   bool ripup = false;
   // Sec. 4.4: search area of a connection = GR tiles of a shortest path
@@ -82,6 +88,11 @@ struct BonnRouteDRParams
   // bounding boxes. partition_regions = 0 uses twice the thread count.
   bool partitions = true;
   int partition_regions = 0;
+  // The speculative tail (tail_batch) takes over at the first partition
+  // with fewer regions than this; 0 uses the thread count. The routing
+  // depends on the thread count only through these two defaults: with both
+  // parameters set, every thread count gives the same result.
+  int tail_regions = 0;
   // Late partitions with fewer regions than threads are replaced by batches
   // of this many pending nets, searched in parallel on the unchanged
   // routing space and committed in net order; a net whose shapes conflict
@@ -110,6 +121,11 @@ struct BonnRouteDRParams
   // deferred to a final pass of the stage without a budget, so it does not
   // hold up the batches. 0 disables the budget.
   int tail_defer_settled = 300000;
+  // The final pass of the stage for the deferred nets. 0 hands them to the
+  // rip-up phase instead (final_ripup), whose rip-up mode search finds a
+  // legal path at no penalty when one exists and does not exhaust the area
+  // when none exists.
+  bool tail_deferred_pass = true;
   // Sec. 5.1: a critical net routing step before the partitions; clock
   // nets are routed first, serially, on the whole chip.
   bool critical_nets = true;
@@ -266,6 +282,12 @@ struct BonnRouteDRParams
   // (with FlexGC's patches) and writes back the same result without
   // building the maze grid graph.
   bool cleanup_check_only_workers = false;
+  // Debug (Sec. 5.1): record the global routing tiles that the search and
+  // the commit of every net read and write in the shape grid and the fast
+  // grid, compare them with the net's tile box and its partition region, and
+  // report how far beyond the net's core tile box each step reaches. The
+  // routing is unchanged.
+  bool partition_check = false;
   bool verbose = true;
   // Algorithm profile: 0 = 2013-improved (default), 1 = 2013-reimpl,
   // 2 = 2021 (2013-reimpl plus Ahrens et al., arXiv:2111.06169).
@@ -371,10 +393,53 @@ class BonnRouteDR
     frBTerm* bterm = nullptr;
     int primary = -1;
   };
+  // Why a net is left to FlexDR (reportLeftNets): the step at which its
+  // last connect() failed, the outcome of its last rip-up sequence, and the
+  // output guard that dropped its routing.
+  enum LeftStep : uint8_t
+  {
+    kLeftNone = 0,
+    kLeftAccess,        // a pin without a feasible access option
+    kLeftNoPath,        // a connection without a path in the net's area
+    kLeftSearchBudget,  // a search stopped at its label or effort budget
+    kNumLeftSteps
+  };
+  enum RipupOutcome : uint8_t
+  {
+    kRipupNotStarted = 0,
+    kRipupBudget,        // the phase's effort budget was used up
+    kRipupDepth,         // ripup_depth reached
+    kRipupNoPath,        // no path in rip-up mode (LeftStep says why)
+    kRipupVictimLimit,   // a victim was ripped up max_ripups times already
+    kRipupVictimFailed,  // a victim could not be routed again
+    kNumRipupOutcomes
+  };
+  enum LeftGuard : uint8_t
+  {
+    kGuardNone = 0,
+    kGuardPinContact,      // a pin contact away from the pin's access points
+    kGuardOnTrack,         // a wire off the tracks of an on-track-only layer
+    kGuardMissingContact,  // a pin without a contact FlexDR recognises
+  };
+  // What blocks the access options of a pin at the end of routing, the
+  // least severe kind over its options.
+  enum AccessBlock : uint8_t
+  {
+    kAccessNoOption = 0,  // the pin has no access option
+    kAccessFeasible,      // an option is legal now
+    kAccessRouted,        // routed shapes of other nets only
+    kAccessReservation,   // reservations of other nets
+    kAccessFixed,         // blockages or pins of other nets
+    kNumAccessBlocks
+  };
   struct NetData
   {
     frNet* net = nullptr;
     int id = 0;
+    uint8_t left_step = kLeftNone;
+    int left_term = -1;
+    uint8_t ripup_outcome = kRipupNotStarted;
+    uint8_t left_guard = kGuardNone;
     std::vector<Term> terms;
     std::vector<OutWire> wires;
     std::vector<OutVia> vias;
@@ -394,17 +459,71 @@ class BonnRouteDR
     bool routed = false;
     bool failed = false;
     bool skip = false;
+    // Sec. 4.4 / 5.1: the net's connections failed in the guide area; its
+    // next attempt starts in the area dilated by retry_dilation.
+    bool dilated_area = false;
+    // Sec. 5.1: the net has a nondefault wire type, or a pin, reservation
+    // or access path shape of a wide class; its updates and queries reach
+    // the layer's whole rule distance (buildPartitionHalos, markWideNets).
+    bool wide_shapes = false;
     int64_t hpwl = 0;
     // Wire type (Sec. 3.2): 0 = default rule, else the net's NDR.
     int wire_type = 0;
+  };
+
+  // partition_check (Sec. 5.1): the steps of a net's unit of work, the
+  // phases they run in, and per (phase, step, read / write) the number of
+  // units by the tiles their accesses reach beyond the net's core tile box.
+  enum FootprintStep
+  {
+    kStepAccess = 0,   // own-shape overlay, access option legality
+    kStepRegenerate,   // dynamic generation of access paths
+    kStepSearch,       // connections in the guide area
+    kStepRetrySearch,  // the net again in the area dilated by retry_dilation
+    kStepCommit,       // conflict check and insertion of the routed shapes
+    kStepRelease,      // release of the reservations
+    kNumFootprintSteps
+  };
+  enum FootprintPhase
+  {
+    kPhaseRegion = 0,  // a net of a partition region
+    kPhaseTailSearch,  // speculative search of a tail attempt
+    kPhaseTailCommit,  // decision and commit of a tail attempt
+    kNumFootprintPhases
+  };
+  struct FootprintStats
+  {
+    static constexpr int kReachBins = 10;  // 0 .. 8 tiles, 9 or more
+    using Histogram = std::array<int64_t, kReachBins>;
+    std::array<int64_t, kNumFootprintPhases> units{};
+    std::array<int64_t, kNumFootprintPhases> outside_box_units{};
+    std::array<int64_t, kNumFootprintPhases> outside_region_units{};
+    // [phase][step][0 reads, 1 writes]
+    std::array<std::array<std::array<Histogram, 2>, kNumFootprintSteps>,
+               kNumFootprintPhases>
+        reach{};
+    // The first units whose accesses left their partition region.
+    std::vector<std::string> region_examples;
   };
 
   // Per-thread search state (Sec. 5.1: nets in disjoint areas are routed
   // in parallel).
   struct Worker
   {
+    // partition_check: the accesses of the net being routed, its phase, and
+    // the statistics of the units finished on this worker.
+    br::AccessFootprint footprint;
+    FootprintPhase footprint_phase = kPhaseRegion;
+    FootprintStats footprint_stats;
     // Searching in a speculative batch: read-only on shared routing space.
     bool speculative = false;
+    // Sec. 5.1: the partition region of the thread (nullptr: the whole
+    // chip). A net continues in the dilated area only where that area's tile
+    // box lies inside the region; otherwise connect() stops and sets
+    // area_deferred, and the net continues in a later partition or the tail.
+    const br::TileBox* limit = nullptr;
+    bool area_deferred = false;
+    int64_t area_deferrals = 0;
     // Settled-vertex budget of the current connect (0: none), the settled
     // count at its start, and whether a search was skipped for it.
     int64_t effort_budget = 0;
@@ -705,12 +824,39 @@ class BonnRouteDR
                        const std::vector<size_t>& tree,
                        const std::vector<std::vector<char>>& valid,
                        Worker& worker);
+  // Tile box of the net's guides, access options and pins.
+  br::TileBox netCoreTileBox(const NetData& net) const;
+  // Highest track layer of the net's routing area: guides and access
+  // options plus layer_dilation.
+  int netTopLayer(const NetData& net) const;
+  // Highest track layer of the access paths of the net's pins: the track
+  // layer above each pin's layer (offTrackCatalogue, buildAccess).
+  int netAccessTopLayer(const NetData& net) const;
+  // Halo of the net's box: the larger of area_halo_tiles_ at netTopLayer
+  // and access_halo_tiles_ at netAccessTopLayer.
+  int netHaloTiles(const NetData& net) const;
+  // Tile box of the net's searches and commit in its guide area dilated by
+  // `dilation` tiles, with halo, clipped to the tile grid.
+  br::TileBox netAreaTileBox(const NetData& net, int dilation) const;
   // Tile box of everything the net's searches may touch, with halo.
   void netTileBox(const NetData& net,
                   int& xlo,
                   int& ylo,
                   int& xhi,
                   int& yhi) const;
+  // netTileBox clipped to the tile grid.
+  br::TileBox netClippedTileBox(const NetData& net) const;
+  // partition_check: starts / ends recording the accesses of `net`'s unit
+  // of work on `worker` (whose footprint the caller installed); `region`
+  // is the partition region of the unit, if any.
+  void beginFootprint(Worker& worker,
+                      const NetData& net,
+                      FootprintPhase phase,
+                      const br::TileBox& box);
+  void endFootprint(Worker& worker,
+                    const NetData& net,
+                    const br::TileBox* region);
+  void reportFootprints();
   void routeParallel(const std::vector<int>& order, std::vector<int>& failed);
   // settled_budget: stop starting sequences once the serial worker settled
   // this many vertices in the phase (0: unlimited).
@@ -726,6 +872,17 @@ class BonnRouteDR
                      std::vector<SavedRouting>& journal,
                      bool try_plain = true);
   SavedRouting saveRouting(const NetData& net) const;
+  // Where the running rip-up sequence failed first: the outcome and the
+  // depth of that call.
+  uint8_t sequence_outcome_ = kRipupNotStarted;
+  int sequence_outcome_depth_ = 0;
+  // Kinds of shapes of other nets that `shape` violates: bit 0 blockages,
+  // bit 1 pins, bit 2 reservations, bit 3 routed wires and vias.
+  int blockerKinds(const RShape& shape, int net) const;
+  AccessBlock accessBlock(const NetData& net, const Term& term) const;
+  // Log: the nets left to FlexDR by cause; debug group bonnroute_left
+  // prints one line per net.
+  void reportLeftNets() const;
   int64_t input_wires_ = 0;
   int64_t input_reserved_ = 0;
   void restoreRouting(const SavedRouting& saved);
@@ -867,13 +1024,44 @@ class BonnRouteDR
   std::vector<int> grid_of_fr_;
   int track_grid_layers_ = 0;
   // Tiles between a net's routing area and its partition box border, so
-  // that its routing-space updates and queries stay inside (Sec. 5.1).
+  // that its routing-space updates and queries stay inside (Sec. 5.1): the
+  // value for a routing area on all layers.
   int halo_tiles_ = 1;
+  // Largest distance at which an update or query of a shape-grid layer
+  // reads or writes (rule reach, model, one cell), per layer; and the same
+  // with the rule reach of the narrow classes, which holds for nets whose
+  // own shapes are all narrow on a layer without wide fast-grid models:
+  // their block and tile accesses use narrowReach(), wide shapes come from
+  // the locked wide-shape lists.
+  std::vector<int64_t> need_by_grid_layer_;
+  std::vector<int64_t> narrow_need_by_grid_layer_;
+  // The halo per net (buildPartitionHalos). area_halo_tiles_[z]: routing
+  // area up to track layer z; such a net reads and writes the grid layers
+  // up to the cut layer above z and the low layers, so the interaction
+  // distances of the layers above z, the largest ones, do not enter.
+  // access_halo_tiles_[z]: pins with access paths up to track layer z
+  // (reservation release and dynamic generation of access paths around the
+  // pins).
+  std::vector<int> area_halo_tiles_;
+  std::vector<int> access_halo_tiles_;
+  // The same tables for nets without wide shapes (NetData::wide_shapes).
+  std::vector<int> narrow_area_halo_tiles_;
+  std::vector<int> narrow_access_halo_tiles_;
+  // Routed shapes of a wide class inserted or removed by a partition thread
+  // for a net that was not marked wide_shapes (expected: none).
+  std::atomic<int64_t> unexpected_wide_updates_{0};
+  void buildPartitionHalos();
+  // Sets NetData::wide_shapes from the net's wire type, pins, reservations
+  // and the shapes of its access options (end of setup).
+  void markWideNets();
   // Largest distance at which two shapes of the routing space interact
   // (any layer, incl. via-layer rules), plus one pitch.
   int64_t interaction_reach_ = 0;
   size_t label_limit_ = 0;
   std::atomic<int64_t> inconsistent_updates_{0};
+  // Debug group bonnroute_connect: one line per search of a connection
+  // (phase, area, settled vertices) and one per partition region.
+  bool trace_connections_ = false;
   std::vector<Worker> workers_;
   std::vector<LayerInfo> layers_;  // per z
   std::vector<int> z_of_fr_;       // routing layer -> z, -1

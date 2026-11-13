@@ -340,8 +340,14 @@ class ShapeClassTable
   // interned narrow classes; both only grow, when intern() adds a class. A
   // window around a model of class c must extend by reachOf(c); the shape
   // grid reports wide pieces from the wider area on its own
-  // (ShapeGrid::collect).
+  // (ShapeGrid::collect). narrowRuleReach() bounds every pair of narrow
+  // classes the layer's rules allow, including classes interned later:
+  // narrowReach() <= narrowRuleReach() <= ruleReach() at all times.
   Coord ruleReach(const int layer) const { return rule_reach_[layer]; }
+  Coord narrowRuleReach(const int layer) const
+  {
+    return narrow_rule_reach_[layer];
+  }
   Coord reach(const int layer) const { return rule_reach_[layer]; }
   Coord classReach(const int layer) const
   {
@@ -379,6 +385,7 @@ class ShapeClassTable
  private:
   std::vector<LayerRules> layers_;
   std::vector<Coord> rule_reach_;
+  std::vector<Coord> narrow_rule_reach_;
   std::vector<int> wide_row_;
   std::vector<std::vector<bool>> wide_ndr_;  // per layer, per NDR
   std::unique_ptr<std::atomic<Coord>[]> class_reach_;

@@ -273,13 +273,54 @@ segment, so constant point levels on an edge imply its level.
   is written by the one thread whose region contains it; updates are applied
   in place, no deferral or merge is needed, and results do not depend on the
   thread count (configuration ids may differ between runs; they are content
-  addressed and nothing depends on their values). `netTileBox` adds
-  `halo_tiles_` tiles beyond the largest routing area, computed from the
-  rule interaction distance (`2 · (ruleReach + model + cell) + pitch`,
-  rounded up to tiles), so all reads and writes of a net stay in its region;
-  the halo does not depend on the classes interned later.
+  addressed and nothing depends on their values). `netTileBox` adds a halo
+  beyond the largest routing area, computed from the rule interaction
+  distance (`2 · (ruleReach + model + cell) + pitch`, rounded up to
+  tiles), so all reads and writes of a net stay in its region; the halo
+  does not depend on the classes interned later. The halo is per net
+  (`buildPartitionHalos`): the distance is taken over the grid layers the
+  net can touch, those up to the cut layer above the top layer of its
+  routing area (guides and access options plus `layer_dilation`) and the
+  low layers, so the large distances of the upper layers enter only for
+  nets routed there; a second term covers the access paths around the pins:
+  they lie within `(radius + 3)` pitches `+ 2 τ` of the pin and are
+  committed and released like any shape, and dynamic generation collects
+  obstacles up to the whole rule distance beyond that window.
+  For a net whose own shapes are narrow (default wire type; pins,
+  reservations and access path shapes of narrow classes, `markWideNets`)
+  the distance of a layer is taken from `narrowRuleReach`, the
+  largest rule distance between narrow classes, where the fast grid has no
+  wide model on the layer: its block and tile accesses extend by
+  `narrowReach`, and wide shapes (power straps, macro blockages) are read
+  from the locked wide-shape lists. `ruleReach`, which also covers the
+  spacing rows of wide shapes, remains the distance of the other nets.
+  A net enters a region that contains the box of its guide area
+  (`netAreaTileBox(net, 0)`: guides, access options and pins plus the
+  halo). The larger areas are admitted at run time: before a thread
+  searches the area dilated by `retry_dilation`, or continues after
+  dynamic generation added access options, it tests the new area's box
+  against its region (`Worker::limit`). A net that does not fit stays
+  pending with `NetData::dilated_area` set and its larger box, at its
+  position in the net order, and continues in a later partition or the
+  tail, where it starts in the dilated area. The test depends on geometry
+  only, so the results do not depend on the thread schedule.
   `BonnRoutePartitionTest` checks equality with a serial run; run it with
   `-fsanitize=thread` as well.
+* Access footprint check (`BrAccessFootprint.h`, `partition_check 1`): the
+  shape grid records the tile chunks of every block it reads (`collect`,
+  the presence test of a removal) or writes (`insert`, `remove`) and of the
+  wide-shape lists, the fast grid the tile of every word or run it reads or
+  writes, into the footprint installed on the calling thread. BonnRouteDR
+  starts a unit per net and phase (partition region, speculative tail
+  search, tail commit) with the net's tile box as the allowed area,
+  compares the accessed tiles with that box and with the partition region,
+  and reports per step (access checks, dynamic access generation, searches,
+  retry search, commit, reservation release) how many tiles beyond the
+  net's core box (guides, access options, pins) the reads and writes
+  reach. Reads of the wide-shape lists are locked and may reach beyond the
+  box; they are recorded apart. `bonnroute_access_footprint_test` compares
+  the recorded tiles with an enumeration of the cells and vertices of each
+  call; `bonnroute_partition_test` runs its region threads with footprints.
 * Speculative tail pipeline (`BrTailPipeline.h`, `tail_pipeline 1`): the
   same tile-box argument lets the tail batches overlap. An attempt of batch
   b reads the commits of the earlier batches and nothing else inside its
@@ -363,7 +404,8 @@ segment, so constant point levels on an edge imply its level.
 
 `src/drt/test`: `bonnroute_wire_model_test`, `bonnroute_shape_grid_test`,
 `bonnroute_distance_rules_test`, `bonnroute_fast_grid_test`,
-`bonnroute_partition_test`, `bonnroute_core_test`; all randomized against
+`bonnroute_partition_test`, `bonnroute_access_footprint_test`,
+`bonnroute_core_test`; all randomized against
 brute-force references that keep every shape in a vector and apply
 `shapesViolate` pairwise with the same classes. `bonnroute_routing_space_bench
 [seed] [extent] [searches]` prints shape-grid and fast-grid statistics,
