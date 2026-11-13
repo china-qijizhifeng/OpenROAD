@@ -8555,7 +8555,11 @@ void BonnRouteDR::routeRipupBoxes(std::vector<int>& queue,
     ripup_box_stats_.capacity += stats.wall * stats.threads;
     again.clear();
     for (const Slot& slot : slots) {
-      settled += slot.settled;
+      // The budget counts the last run of a sequence: a run that failed at
+      // the limit of its box is repeated with a larger box.
+      if (slot.routed || !slot.limited) {
+        settled += slot.settled;
+      }
       const RipupState& s = slot.state;
       serial_ripup_.events += s.events;
       serial_ripup_.rollbacks += s.rollbacks;
