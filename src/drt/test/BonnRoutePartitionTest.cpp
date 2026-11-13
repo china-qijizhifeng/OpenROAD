@@ -60,7 +60,8 @@ void build(Space& s,
            ShapeClassTable& classes,
            const std::vector<WireTypeGeometry>& geometry,
            const int num_z,
-           const std::vector<StoredShape>& initial)
+           const std::vector<StoredShape>& initial,
+           const bool dense)
 {
   s.classes = &classes;
   s.graph.layers.resize(num_z);
@@ -103,6 +104,11 @@ void build(Space& s,
   }
   s.checker.init(&s.grid);
   s.fast.init(&s.graph, 1);
+  // Dense encoding on every layer (fast_grid_dense): written in place by
+  // the region threads; the answers equal the serial run in runs.
+  for (int z = 0; dense && z < num_z; z++) {
+    s.fast.setDense(z, true);
+  }
   s.builder.init(&s.graph, &s.types, 1, &s.checker, &s.fast);
   ShapeGridWriteCache cache;
   for (const StoredShape& sh : initial) {
@@ -242,8 +248,9 @@ int main()
     }
     Space parallel;
     Space serial;
-    build(parallel, classes, geometry, num_z, initial);
-    build(serial, classes, geometry, num_z, initial);
+    // Odd cases: the parallel space in the dense encoding.
+    build(parallel, classes, geometry, num_z, initial, c % 2 == 1);
+    build(serial, classes, geometry, num_z, initial, false);
     // Regions: 2 x 2 tiles at (3a, 3b), one free tile between regions.
     // Shapes keep the router's halo from the region border: updates and
     // queries reach at most 2 (reach + model + cell) + pitch beyond them.

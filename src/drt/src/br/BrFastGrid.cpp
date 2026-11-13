@@ -274,6 +274,14 @@ void FastGrid::writeWiring(const int z,
     }
   }
   Layer& fl = layers_[z];
+  if (fl.dense) {
+    uint64_t* row = fl.dense_wiring.data()
+                    + static_cast<size_t>(i) * fl.pos_chunk.size() + j0;
+    for (int k = 0; k < n; k++) {
+      row[k] = (row[k] & ~mask) | (values[k] & mask);
+    }
+    return;
+  }
   const int tc = fl.track_chunk[i];
   const int tracks = fl.chunk_first_track[tc + 1] - fl.chunk_first_track[tc];
   for (int j = j0; j < j0 + n;) {
@@ -307,6 +315,14 @@ void FastGrid::writeVia(const int z,
     }
   }
   Layer& fl = layers_[z];
+  if (fl.dense) {
+    uint64_t* row = fl.dense_via.data()
+                    + static_cast<size_t>(i) * fl.via_position.size() + c0;
+    for (int k = 0; k < n; k++) {
+      row[k] = (row[k] & ~mask) | (values[k] & mask);
+    }
+    return;
+  }
   const int tc = fl.track_chunk[i];
   const int tracks = fl.chunk_first_track[tc + 1] - fl.chunk_first_track[tc];
   for (int c = c0; c < c0 + n;) {
@@ -333,6 +349,9 @@ uint64_t FastGrid::wiringWord(const int z, const int i, const int j) const
     recordWiring(*footprint, AccessKind::kFastGridRead, z, i, j, j);
   }
   const Layer& fl = layers_[z];
+  if (fl.dense) {
+    return fl.dense_wiring[static_cast<size_t>(i) * fl.pos_chunk.size() + j];
+  }
   const int k = fl.pos_chunk[j];
   const int tc = fl.track_chunk[i];
   return lookup(fl.wiring[static_cast<size_t>(tc) * fl.pos_chunks + k].get(),
@@ -347,6 +366,9 @@ uint64_t FastGrid::viaWord(const int z, const int i, const int c) const
     recordVia(*footprint, AccessKind::kFastGridRead, z, i, c, c);
   }
   const Layer& fl = layers_[z];
+  if (fl.dense) {
+    return fl.dense_via[static_cast<size_t>(i) * fl.via_position.size() + c];
+  }
   const int k = fl.via_chunk[c];
   const int tc = fl.track_chunk[i];
   return lookup(fl.via[static_cast<size_t>(tc) * fl.pos_chunks + k].get(),
@@ -368,6 +390,14 @@ void FastGrid::assignWiring(const int z,
     }
   }
   Layer& fl = layers_[z];
+  if (fl.dense) {
+    uint64_t* row
+        = fl.dense_wiring.data() + static_cast<size_t>(i) * fl.pos_chunk.size();
+    for (int j = j0; j <= j1; j++) {
+      row[j] = (row[j] & ~mask) | (word & mask);
+    }
+    return;
+  }
   const int tc = fl.track_chunk[i];
   const int tracks = fl.chunk_first_track[tc + 1] - fl.chunk_first_track[tc];
   for (int j = j0; j <= j1;) {
@@ -401,6 +431,14 @@ void FastGrid::assignVia(const int z,
     }
   }
   Layer& fl = layers_[z];
+  if (fl.dense) {
+    uint64_t* row = fl.dense_via.data()
+                    + static_cast<size_t>(i) * fl.via_position.size();
+    for (int c = c0; c <= c1; c++) {
+      row[c] = (row[c] & ~mask) | (word & mask);
+    }
+    return;
+  }
   const int tc = fl.track_chunk[i];
   const int tracks = fl.chunk_first_track[tc + 1] - fl.chunk_first_track[tc];
   for (int c = c0; c <= c1;) {
@@ -488,6 +526,14 @@ uint64_t FastGrid::wiringRun(const int z,
   }
   const Layer& fl = layers_[z];
   const int k = fl.pos_chunk[j];
+  if (fl.dense) {
+    return denseRun(denseWiringRow(z, i),
+                    fl.chunk_first_pos[k],
+                    fl.chunk_first_pos[k + 1] - 1,
+                    j,
+                    lo,
+                    hi);
+  }
   const int tc = fl.track_chunk[i];
   const int first = fl.chunk_first_pos[k];
   const uint64_t w
@@ -514,6 +560,14 @@ uint64_t FastGrid::viaRun(const int z,
   }
   const Layer& fl = layers_[z];
   const int k = fl.via_chunk[c];
+  if (fl.dense) {
+    return denseRun(denseViaRow(z, i),
+                    fl.via_chunk_first[k],
+                    fl.via_chunk_first[k + 1] - 1,
+                    c,
+                    lo,
+                    hi);
+  }
   const int tc = fl.track_chunk[i];
   const int first = fl.via_chunk_first[k];
   const uint64_t w
@@ -536,9 +590,11 @@ void FastGridReader::reset(const FastGrid* grid, const FastGridOverlay* overlay)
   overlay_ = overlay != nullptr && overlay->owner != kNoNet ? overlay : nullptr;
   for (Cursor& c : wiring_) {
     c.z = -1;
+    c.row = nullptr;
   }
   for (Cursor& c : via_) {
     c.z = -1;
+    c.row = nullptr;
   }
 }
 
@@ -609,6 +665,10 @@ FastGrid::RunsView FastGrid::wiringRuns(const int z,
   RunsView v;
   v.first = fl.chunk_first_pos[k];
   v.count = fl.chunk_first_pos[k + 1] - v.first;
+  if (fl.dense) {
+    v.dense = denseWiringRow(z, i) + v.first;
+    return v;
+  }
   const TileRuns* t
       = fl.wiring[static_cast<size_t>(tc) * fl.pos_chunks + k].get();
   if (t != nullptr) {
@@ -621,11 +681,65 @@ FastGrid::RunsView FastGrid::wiringRuns(const int z,
   return v;
 }
 
+uint64_t FastGridReader::fillDense(
+    Cursor& c,
+    const std::unordered_map<uint64_t, std::vector<FastGridOverlay::Run>>*
+        runs,
+    const uint64_t* row,
+    const int z,
+    const int i,
+    const int j)
+{
+  // A new track: find its overlay runs once; the cursor keeps them.
+  if (c.z != z || c.i != i) {
+    c.z = z;
+    c.i = i;
+    c.run = -1;
+    c.overlay = nullptr;
+    if (runs != nullptr) {
+      const auto it = runs->find(FastGridOverlay::key(z, i));
+      if (it != runs->end()) {
+        c.overlay = &it->second;
+      }
+    }
+  }
+  if (c.overlay == nullptr) {
+    c.row = row;
+    return row[j];
+  }
+  c.row = nullptr;
+  const std::vector<FastGridOverlay::Run>& r = *c.overlay;
+  const auto at = std::lower_bound(
+      r.begin(), r.end(), j, [](const FastGridOverlay::Run& run, int x) {
+        return run.hi < x;
+      });
+  if (at != r.end() && at->lo <= j) {
+    c.lo = at->lo;
+    c.hi = at->hi;
+    c.word = at->word;
+    return c.word;
+  }
+  c.lo = j;
+  c.hi = j;
+  c.word = row[j];
+  return c.word;
+}
+
 uint64_t FastGridReader::fillWiring(Cursor& c,
                                     const int z,
                                     const int i,
                                     const int j)
 {
+  if (grid_->dense(z)) {
+    return fillDense(c,
+                     overlay_ != nullptr ? &overlay_->wiring : nullptr,
+                     grid_->denseWiringRow(z, i),
+                     z,
+                     i,
+                     j);
+  }
+  c.row = nullptr;
+  c.overlay = nullptr;
   // Same track and tile: the next run, or a search in the cached runs.
   if (c.z == z && c.i == i && c.run >= 0 && j >= c.runs.first
       && j < c.runs.first + c.runs.count) {
@@ -689,6 +803,16 @@ uint64_t FastGridReader::fillVia(Cursor& c,
                                  const int i,
                                  const int v)
 {
+  if (grid_->dense(z)) {
+    return fillDense(c,
+                     overlay_ != nullptr ? &overlay_->via : nullptr,
+                     grid_->denseViaRow(z, i),
+                     z,
+                     i,
+                     v);
+  }
+  c.row = nullptr;
+  c.overlay = nullptr;
   int lo;
   int hi;
   uint64_t w = grid_->viaRun(z, i, v, lo, hi);
@@ -773,6 +897,119 @@ void FastGrid::compact()
   }
 }
 
+uint64_t FastGrid::denseRun(const uint64_t* row,
+                            const int first,
+                            const int last,
+                            const int x,
+                            int& lo,
+                            int& hi)
+{
+  const uint64_t w = row[x];
+  lo = x;
+  while (lo > first && row[lo - 1] == w) {
+    lo--;
+  }
+  hi = x;
+  while (hi < last && row[hi + 1] == w) {
+    hi++;
+  }
+  return w;
+}
+
+void FastGrid::denseStatistics(const Layer& fl,
+                               const std::vector<uint64_t>& words,
+                               const int positions,
+                               const std::vector<int>& chunk_first,
+                               const int chunks,
+                               int64_t& intervals,
+                               int64_t* marked) const
+{
+  // As the run encoding: per track and tile chunk the maximal runs, at
+  // least one (an empty or all-zero chunk is one interval); marked edges
+  // count the runs whose word has an edge bit.
+  const int tracks = static_cast<int>(fl.track_chunk.size());
+  for (int i = 0; i < tracks; i++) {
+    const uint64_t* row = words.data() + static_cast<size_t>(i) * positions;
+    for (int k = 0; k < chunks; k++) {
+      const int a = chunk_first[k];
+      const int b = chunk_first[k + 1];
+      int64_t runs = 0;
+      for (int x = a; x < b; x++) {
+        if (x == a || row[x] != row[x - 1]) {
+          runs++;
+          if (marked != nullptr && (row[x] & kEdgeBits) != 0) {
+            (*marked)++;
+          }
+        }
+      }
+      intervals += std::max<int64_t>(1, runs);
+    }
+  }
+}
+
+size_t FastGrid::denseBytes(const int z) const
+{
+  const Layer& fl = layers_[z];
+  return (fl.track_chunk.size() * fl.pos_chunk.size()
+          + fl.track_chunk.size() * fl.via_position.size())
+         * sizeof(uint64_t);
+}
+
+void FastGrid::setDense(const int z, const bool dense)
+{
+  Layer& fl = layers_[z];
+  if (fl.dense == dense) {
+    return;
+  }
+  const int tracks = static_cast<int>(fl.track_chunk.size());
+  const int np = static_cast<int>(fl.pos_chunk.size());
+  const int nv = static_cast<int>(fl.via_position.size());
+  if (dense) {
+    std::vector<uint64_t> wiring(static_cast<size_t>(tracks) * np);
+    std::vector<uint64_t> via(static_cast<size_t>(tracks) * nv);
+    // Tiles are allocated on their first non-zero word: without tiles the
+    // layer is all zero.
+    const bool empty = std::ranges::none_of(fl.wiring, [](const auto& t) {
+      return t != nullptr;
+    }) && std::ranges::none_of(fl.via, [](const auto& t) {
+      return t != nullptr;
+    });
+    for (int i = 0; i < tracks && !empty; i++) {
+      for (int j = 0; j < np; j++) {
+        wiring[static_cast<size_t>(i) * np + j] = wiringWord(z, i, j);
+      }
+      for (int c = 0; c < nv; c++) {
+        via[static_cast<size_t>(i) * nv + c] = viaWord(z, i, c);
+      }
+    }
+    for (auto& t : fl.wiring) {
+      t.reset();
+    }
+    for (auto& t : fl.via) {
+      t.reset();
+    }
+    fl.dense_wiring = std::move(wiring);
+    fl.dense_via = std::move(via);
+    fl.dense = true;
+    return;
+  }
+  std::vector<uint64_t> wiring = std::move(fl.dense_wiring);
+  std::vector<uint64_t> via = std::move(fl.dense_via);
+  fl.dense_wiring = {};
+  fl.dense_via = {};
+  fl.dense = false;
+  for (int i = 0; i < tracks; i++) {
+    if (np > 0) {
+      writeWiring(z, i, 0, wiring.data() + static_cast<size_t>(i) * np, np,
+                  ~uint64_t{0});
+    }
+    if (nv > 0) {
+      writeVia(z, i, 0, via.data() + static_cast<size_t>(i) * nv, nv,
+               ~uint64_t{0});
+    }
+  }
+}
+
 FastGrid::Statistics FastGrid::statistics() const
 {
   Statistics s;
@@ -782,6 +1019,34 @@ FastGrid::Statistics FastGrid::statistics() const
     s.vertices += static_cast<int64_t>(l.numTracks()) * l.numPositions();
     s.via_vertices
         += static_cast<int64_t>(l.numTracks()) * fl.via_position.size();
+    if (fl.dense) {
+      const size_t dense = (fl.dense_wiring.capacity() + fl.dense_via.capacity())
+                           * sizeof(uint64_t);
+      s.dense_layers++;
+      s.dense_bytes += dense;
+      s.bytes += dense
+                 + (fl.pos_chunk.capacity() + fl.track_chunk.capacity()
+                    + fl.via_index.capacity() + fl.via_position.capacity()
+                    + fl.via_chunk.capacity())
+                       * sizeof(int);
+      denseStatistics(fl,
+                      fl.dense_wiring,
+                      static_cast<int>(fl.pos_chunk.size()),
+                      fl.chunk_first_pos,
+                      fl.pos_chunks,
+                      s.wiring_intervals,
+                      &s.marked_edges);
+      if (z + 1 < layers_.size()) {
+        denseStatistics(fl,
+                        fl.dense_via,
+                        static_cast<int>(fl.via_position.size()),
+                        fl.via_chunk_first,
+                        fl.pos_chunks,
+                        s.via_intervals,
+                        nullptr);
+      }
+      continue;
+    }
     s.bytes += bytes(fl.wiring) + bytes(fl.via)
                + (fl.pos_chunk.capacity() + fl.track_chunk.capacity()
                   + fl.via_index.capacity() + fl.via_position.capacity()

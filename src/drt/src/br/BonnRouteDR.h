@@ -277,6 +277,12 @@ struct BonnRouteDRParams
   // Sec. 4.1 searches: per-worker label budget in MB (0: unlimited); a
   // search that would exceed it stops without a path (counted).
   int search_label_mb = 512;
+  // Fast grid (Sec. 3.6) in the dense encoding: layers keep one word per
+  // track-graph vertex (and via position) instead of runs, within
+  // fast_grid_memory_mb MB of dense arrays, layers taken bottom-up; the
+  // other layers keep the run encoding. Same words, same results.
+  bool fast_grid_dense = false;
+  int fast_grid_memory_mb = 8192;
   // FlexDR clean-up after BonnRoute. FlexDR's iterations 0-2 run in
   // incremental mode, which reroutes only nets without initial routing
   // (the nets BonnRoute left) and keeps every BonnRoute net fixed; iteration

@@ -272,6 +272,10 @@ bool BonnRouteDRParams::set(const std::string& name, const double value)
     offtrack_preferred_access_points = v != 0;
   } else if (name == "search_label_mb") {
     search_label_mb = std::max(0, v);
+  } else if (name == "fast_grid_dense") {
+    fast_grid_dense = v != 0;
+  } else if (name == "fast_grid_memory_mb") {
+    fast_grid_memory_mb = std::max(0, v);
   } else if (name == "cleanup_incremental_iterations") {
     cleanup_incremental_iterations = std::clamp(v, 0, 2);
   } else if (name == "cleanup_check_only_workers") {
@@ -944,6 +948,30 @@ void BonnRouteDR::buildRoutingSpace()
   checker_.init(&shape_grid_);
   // Sec. 3.6: the fast grid holds the most frequent wire types.
   grid_.init(&graph_, fast_types_);
+  if (params_.fast_grid_dense) {
+    // Dense layers bottom-up while their arrays fit the budget.
+    const size_t budget
+        = static_cast<size_t>(params_.fast_grid_memory_mb) * (size_t{1} << 20);
+    size_t used = 0;
+    std::string dense_layers;
+    std::string run_layers;
+    for (int z = 0; z < graph_.numLayers(); z++) {
+      const size_t b = grid_.denseBytes(z);
+      std::string& list = used + b <= budget ? dense_layers : run_layers;
+      if (used + b <= budget) {
+        grid_.setDense(z, true);
+        used += b;
+      }
+      list += (list.empty() ? "" : " ") + std::to_string(z);
+    }
+    logger_->report(
+        "BonnRoute DR fast grid dense: track layers [{}] dense ({:.1f} MB of "
+        "{} MB), layers [{}] in runs.",
+        dense_layers,
+        used / 1e6,
+        params_.fast_grid_memory_mb,
+        run_layers);
+  }
   fast_builder_.init(&graph_, &wire_types_, fast_types_, &checker_, &grid_);
   // Removal recomputations of a batch (flush) run their tile groups on the
   // router's threads; inside a parallel region (partition workers) serially.
