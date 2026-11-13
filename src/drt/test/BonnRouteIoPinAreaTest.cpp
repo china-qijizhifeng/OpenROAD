@@ -107,6 +107,17 @@ int main()
     const std::vector<size_t> group = piecesOnPin(metal, pin);
     check(group.size() == 2, "touching wire joins the group");
   }
+  {
+    // asap7 aes text_in[25]: the access wire from the pin centre to the via
+    // at x = 81 lies inside pin and pad; FlexDR removes it, so it adds no
+    // area and the lone pad still needs its patch.
+    const Box pin25{0, 37536, 84, 37560};
+    const Box pad25{61, 37536, 101, 37560};
+    const Box wire25{30, 37536, 93, 37560};
+    check(coveredByPinAndPads(wire25, pin25, {pad25}), "access wire covered");
+    check(!coveredByPinAndPads({30, 37536, 140, 37560}, pin25, {pad25}),
+          "longer wire counts");
+  }
   std::printf("io pin area: %d failures\n", fails);
   return fails != 0;
 }

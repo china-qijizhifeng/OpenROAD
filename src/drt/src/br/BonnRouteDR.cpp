@@ -9559,27 +9559,30 @@ void BonnRouteDR::fillIoPinArea(
   // The net's routed metal per layer and the anchors of patches (via
   // origins and wire ends), as FlexDR's connectivity check keeps them.
   std::vector<std::pair<frLayerNum, odb::Rect>> metal;
+  std::vector<std::pair<frLayerNum, odb::Rect>> wires;
+  std::vector<std::pair<frLayerNum, odb::Rect>> pads;
   std::vector<std::pair<frLayerNum, odb::Point>> anchors;
   for (const auto& shape : net->getShapes()) {
     if (shape->typeId() != frcPathSeg) {
       continue;
     }
     const auto* seg = static_cast<const frPathSeg*>(shape.get());
-    metal.emplace_back(seg->getLayerNum(), seg->getBBox());
+    wires.emplace_back(seg->getLayerNum(), seg->getBBox());
     const auto [b, e] = seg->getPoints();
     anchors.emplace_back(seg->getLayerNum(), b);
     anchors.emplace_back(seg->getLayerNum(), e);
   }
   for (const auto& via : net->getVias()) {
     const frViaDef* def = via->getViaDef();
-    metal.emplace_back(def->getLayer1Num(), via->getLayer1BBox());
-    metal.emplace_back(def->getLayer2Num(), via->getLayer2BBox());
+    pads.emplace_back(def->getLayer1Num(), via->getLayer1BBox());
+    pads.emplace_back(def->getLayer2Num(), via->getLayer2BBox());
     anchors.emplace_back(def->getLayer1Num(), via->getOrigin());
     anchors.emplace_back(def->getLayer2Num(), via->getOrigin());
   }
   for (const auto& patch : net->getPatchWires()) {
     metal.emplace_back(patch->getLayerNum(), patch->getBBox());
   }
+  metal.insert(metal.end(), pads.begin(), pads.end());
   std::vector<frRect> pins;
   for (frBTerm* bt : net->getBTerms()) {
     bt->getShapes(pins);
@@ -9599,8 +9602,21 @@ void BonnRouteDR::fillIoPinArea(
     }
     const odb::Rect box = pin.getBBox();
     std::vector<br::Box> on_layer;
+    std::vector<br::Box> pads_on_layer;
+    for (const auto& [l, r] : pads) {
+      if (l == layer) {
+        pads_on_layer.push_back(to_box(r));
+      }
+    }
     for (const auto& [l, r] : metal) {
       if (l == layer) {
+        on_layer.push_back(to_box(r));
+      }
+    }
+    // Wires that FlexDR's connectivity check removes do not count.
+    for (const auto& [l, r] : wires) {
+      if (l == layer
+          && !br::coveredByPinAndPads(to_box(r), to_box(box), pads_on_layer)) {
         on_layer.push_back(to_box(r));
       }
     }
@@ -9636,10 +9652,23 @@ void BonnRouteDR::fillIoPinArea(
     req.die = to_box(die_);
     // Legal against other nets: the routing space and the patches and
     // fills written for earlier nets.
+    const bool trace = logger_->debugCheck(utl::DRT, "bonnroute_io_pin", 1);
     req.legal = [&](const br::Box& b) {
       const odb::Rect ext(b.xlo, b.ylo, b.xhi, b.yhi);
-      if (shapeConflicts(
-              RShape{layer, ext, br::ShapeRole::kPreferredWire}, id, nullptr)) {
+      const RShape shape{layer, ext, br::ShapeRole::kPreferredWire};
+      if (shapeConflicts(shape, id, nullptr)) {
+        if (trace) {
+          logger_->debug(utl::DRT,
+                         "bonnroute_io_pin",
+                         "io pin patch net {} rect {} {} {} {} blocked kinds "
+                         "{}",
+                         net->getName(),
+                         ext.xMin(),
+                         ext.yMin(),
+                         ext.xMax(),
+                         ext.yMax(),
+                         blockerKinds(shape, id));
+        }
         return false;
       }
       const frCoord space = spacing(z, ext.minDXDY(), ext.minDXDY(), 0);
@@ -9655,6 +9684,15 @@ void BonnRouteDR::fillIoPinArea(
     };
     const std::optional<br::Box> patch = br::ioPinPatch(req);
     if (!patch) {
+      if (trace) {
+        logger_->debug(utl::DRT,
+                       "bonnroute_io_pin",
+                       "io pin left net {} anchor {} {} area {}",
+                       net->getName(),
+                       anchor->second.x(),
+                       anchor->second.y(),
+                       br::unionArea(req.group));
+      }
       continue;
     }
     const odb::Rect ext(patch->xlo, patch->ylo, patch->xhi, patch->yhi);

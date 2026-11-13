@@ -45,6 +45,21 @@ inline std::vector<size_t> piecesOnPin(const std::vector<Box>& metal,
   return group;
 }
 
+// A wire on the pin layer that adds no metal beyond the pin and the net's
+// via pads there: FlexDR's connectivity check removes it (a pin-layer
+// segment next to a via whose pad already touches the pin), so it does not
+// count toward the routed metal's area.
+inline bool coveredByPinAndPads(const Box& wire,
+                                const Box& pin,
+                                const std::vector<Box>& pads)
+{
+  std::vector<Box> base = pads;
+  base.push_back(pin);
+  std::vector<Box> with = base;
+  with.push_back(wire);
+  return unionArea(with) == unionArea(base);
+}
+
 struct IoPinPatchRequest
 {
   std::vector<Box> group;  // the routed metal on the pin (piecesOnPin)
