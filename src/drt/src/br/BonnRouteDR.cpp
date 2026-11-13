@@ -281,6 +281,8 @@ bool BonnRouteDRParams::set(const std::string& name, const double value)
     partition_check = v != 0;
   } else if (name == "start_check") {
     start_check = std::clamp(v, 0, 1);
+  } else if (name == "planar_first") {
+    planar_first = v != 0;
   } else if (name == "cleanup_normalize_initial_routing") {
     cleanup_normalize_initial_routing = v != 0;
   } else if (name == "left_net_track_assignment") {
@@ -2210,6 +2212,231 @@ const frAccessPoint* BonnRouteDR::accessPointAt(const frBlockObject* term,
   return nullptr;
 }
 
+bool BonnRouteDR::viaCheckClean(frBlockObject* term,
+                                frNet* net,
+                                const frViaDef* def,
+                                const odb::Point& p,
+                                const bool own_net_only) const
+{
+  FlexGCWorker gc(design_->getTech(), logger_, router_cfg_);
+  gc.setIgnoreMinArea();
+  gc.setIgnoreLongSideEOL();
+  gc.setIgnoreCornerSpacing();
+  const frCoord pitch
+      = design_->getTech()->getLayer(def->getLayer1Num())->getPitch();
+  odb::Rect ext_box;
+  odb::Rect(p, p).bloat(5 * pitch, ext_box);
+  gc.setExtBox(ext_box);
+  gc.setDrcBox(ext_box);
+  if (!net->hasNDR()
+      || net->autoTaperEnabled(router_cfg_->AUTO_TAPER_NDR_NETS)) {
+    if (term->typeId() == frcInstTerm) {
+      gc.addTargetObj(static_cast<frInstTerm*>(term)->getInst());
+    } else {
+      gc.addTargetObj(term);
+    }
+  }
+  gc.initPA0(design_);
+  frVia via(def, p);
+  gc.addPAObj(&via, net);
+  gc.initPA1();
+  gc.main();
+  for (const auto& marker : gc.getMarkers()) {
+    if (!own_net_only) {
+      return false;
+    }
+    const auto& srcs = marker->getSrcs();
+    if (!srcs.empty()
+        && std::ranges::all_of(
+            srcs, [net](const frBlockObject* s) { return s == net; })) {
+      return false;
+    }
+  }
+  return true;
+}
+
+void BonnRouteDR::buildPinViaLegality()
+{
+  // Every lower vertex of a search via whose bottom pad overlaps a pin shape
+  // of the net. Approved as is: an access point whose FlexPA via definitions
+  // include the via. Otherwise the via is checked once per instance class
+  // (master, orientation, offset in master coordinates, definition) on the
+  // first instance of the class in net order; same-net markers only, so the
+  // verdict depends on the class alone (different-net spacing is the routing
+  // space's).
+  const double start = omp_get_wtime();
+  struct ClassKey
+  {
+    const void* owner;
+    int orient;
+    frCoord x, y;
+    const frViaDef* def;
+    bool operator==(const ClassKey&) const = default;
+  };
+  struct ClassKeyHash
+  {
+    size_t operator()(const ClassKey& k) const
+    {
+      size_t h = std::hash<const void*>()(k.owner);
+      for (const size_t v : {static_cast<size_t>(k.orient),
+                             static_cast<size_t>(k.x),
+                             static_cast<size_t>(k.y),
+                             std::hash<const void*>()(k.def)}) {
+        h ^= v + 0x9e3779b97f4a7c15ULL + (h << 6) + (h >> 2);
+      }
+      return h;
+    }
+  };
+  struct ClassCheck
+  {
+    frBlockObject* term;
+    frNet* net;
+    const frViaDef* def;
+    odb::Point point;
+    bool clean = true;
+  };
+  struct Position
+  {
+    int net;
+    size_t vertex;
+    int check;
+  };
+  std::unordered_map<ClassKey, int, ClassKeyHash> class_index;
+  std::vector<ClassCheck> checks;
+  std::vector<Position> positions;
+  int64_t approved = 0;
+  const int num_fr = static_cast<int>(z_of_fr_.size());
+  std::vector<frRect> shapes;
+  for (int n = 0; n < static_cast<int>(nets_.size()); n++) {
+    NetData& data = nets_[n];
+    if (data.skip) {
+      continue;
+    }
+    const br::WireType& type = wire_types_[data.wire_type];
+    auto visit = [&](frBlockObject* term) {
+      shapes.clear();
+      if (term->typeId() == frcInstTerm) {
+        static_cast<frInstTerm*>(term)->getShapes(shapes);
+      } else {
+        static_cast<frBTerm*>(term)->getShapes(shapes);
+      }
+      for (const frRect& shape : shapes) {
+        const frLayerNum fr = shape.getLayerNum();
+        const int z = fr >= 0 && fr < num_fr ? z_of_fr_[fr] : -1;
+        if (z < 0 || z + 1 >= graph_.numLayers()
+            || z >= static_cast<int>(type.via.size()) || !type.via[z].valid
+            || z >= static_cast<int>(type_vias_[data.wire_type].size())
+            || type_vias_[data.wire_type][z] == nullptr) {
+          continue;
+        }
+        const frViaDef* def = type_vias_[data.wire_type][z];
+        const br::Rect pad = type.via[z].bottom.rect;
+        const odb::Rect r = shape.getBBox();
+        const br::TrackLayer& layer = graph_.layers[z];
+        // Vertices v with (v + pad) overlapping r with positive area.
+        const br::Coord c_lo = layer.horizontal ? r.yMin() - pad.yhi
+                                                : r.xMin() - pad.xhi;
+        const br::Coord c_hi = layer.horizontal ? r.yMax() - pad.ylo
+                                                : r.xMax() - pad.xlo;
+        const br::Coord a_lo = layer.horizontal ? r.xMin() - pad.xhi
+                                                : r.yMin() - pad.yhi;
+        const br::Coord a_hi = layer.horizontal ? r.xMax() - pad.xlo
+                                                : r.yMax() - pad.ylo;
+        const int i0 = static_cast<int>(
+            std::ranges::upper_bound(layer.tracks, c_lo) - layer.tracks.begin());
+        const int i1 = static_cast<int>(
+            std::ranges::lower_bound(layer.tracks, c_hi) - layer.tracks.begin());
+        const int j0 = static_cast<int>(
+            std::ranges::upper_bound(layer.positions, a_lo)
+            - layer.positions.begin());
+        const int j1 = static_cast<int>(
+            std::ranges::lower_bound(layer.positions, a_hi)
+            - layer.positions.begin());
+        for (int i = i0; i < i1; i++) {
+          for (int j = j0; j < j1; j++) {
+            const auto [x, y] = layer.point(i, j);
+            const odb::Point p(x, y);
+            const size_t v = graph_.vertex(z, i, j);
+            if (const frAccessPoint* ap = accessPointAt(term, fr, p)) {
+              bool listed = false;
+              for (int cuts = 1; ap->hasViaDef(cuts) && !listed; cuts++) {
+                listed = std::ranges::find(ap->getViaDefs(cuts), def)
+                         != ap->getViaDefs(cuts).end();
+              }
+              if (listed) {
+                approved++;
+                continue;
+              }
+            }
+            ClassKey key{term, 0, p.x(), p.y(), def};
+            if (term->typeId() == frcInstTerm) {
+              frInst* inst = static_cast<frInstTerm*>(term)->getInst();
+              odb::dbTransform xform = inst->getTransform();
+              xform.invert();
+              odb::Point q = p;
+              xform.apply(q);
+              key = {inst->getMaster(),
+                     static_cast<int>(inst->getOrient().getValue()),
+                     q.x(),
+                     q.y(),
+                     def};
+            }
+            auto [it, inserted]
+                = class_index.try_emplace(key, static_cast<int>(checks.size()));
+            if (inserted) {
+              checks.push_back({term, data.net, def, p});
+            }
+            positions.push_back({n, v, it->second});
+          }
+        }
+      }
+    };
+    for (frInstTerm* term : data.net->getInstTerms()) {
+      visit(term);
+    }
+    for (frBTerm* term : data.net->getBTerms()) {
+      visit(term);
+    }
+  }
+#pragma omp parallel for num_threads(router_cfg_->MAX_THREADS) \
+    schedule(dynamic, 64)
+  for (int k = 0; k < static_cast<int>(checks.size()); k++) {
+    ClassCheck& c = checks[k];
+    c.clean = viaCheckClean(c.term, c.net, c.def, c.point, true);
+  }
+  int64_t forbidden = 0;
+  int64_t forbidden_nets = 0;
+  int64_t unclean_classes = 0;
+  for (const ClassCheck& c : checks) {
+    unclean_classes += !c.clean;
+  }
+  for (const Position& pos : positions) {
+    if (!checks[pos.check].clean) {
+      nets_[pos.net].forbidden_pin_vias.push_back(pos.vertex);
+    }
+  }
+  for (NetData& data : nets_) {
+    std::vector<size_t>& f = data.forbidden_pin_vias;
+    std::ranges::sort(f);
+    f.erase(std::unique(f.begin(), f.end()), f.end());
+    forbidden += static_cast<int64_t>(f.size());
+    forbidden_nets += !f.empty();
+  }
+  if (params_.verbose) {
+    logger_->report(
+        "BonnRoute DR planar-first rule: {} via positions on own pins ({} at "
+        "approved access points), {} instance-class checks ({} unclean), {} "
+        "forbidden positions on {} nets; {:.2f}s.",
+        positions.size() + approved,
+        approved,
+        checks.size(),
+        unclean_classes,
+        forbidden,
+        forbidden_nets,
+        omp_get_wtime() - start);
+  }
+}
+
 void BonnRouteDR::checkPathStarts()
 {
   // Every via whose bottom pad lies on a pin shape of its own net, checked
@@ -2255,31 +2482,7 @@ void BonnRouteDR::checkPathStarts()
     }
   }
   auto via_clean = [this](const StartCheck& c, const frViaDef* def) {
-    FlexGCWorker gc(design_->getTech(), logger_, router_cfg_);
-    gc.setIgnoreMinArea();
-    gc.setIgnoreLongSideEOL();
-    gc.setIgnoreCornerSpacing();
-    const frCoord pitch
-        = design_->getTech()->getLayer(def->getLayer1Num())->getPitch();
-    odb::Rect ext_box;
-    odb::Rect(c.point, c.point).bloat(5 * pitch, ext_box);
-    gc.setExtBox(ext_box);
-    gc.setDrcBox(ext_box);
-    frNet* net = c.net->net;
-    if (!net->hasNDR()
-        || net->autoTaperEnabled(router_cfg_->AUTO_TAPER_NDR_NETS)) {
-      if (c.term->typeId() == frcInstTerm) {
-        gc.addTargetObj(static_cast<frInstTerm*>(c.term)->getInst());
-      } else {
-        gc.addTargetObj(c.term);
-      }
-    }
-    gc.initPA0(design_);
-    frVia via(def, c.point);
-    gc.addPAObj(&via, net);
-    gc.initPA1();
-    gc.main();
-    return gc.getMarkers().empty();
+    return viaCheckClean(c.term, c.net->net, def, c.point, false);
   };
 #pragma omp parallel for num_threads(router_cfg_->MAX_THREADS) \
     schedule(dynamic, 64)
@@ -4351,8 +4554,26 @@ class NetViaRules final : public br::SameNetVias
     }
   }
 
+  // planar_first: vias on the net's own pins that the searches may not place
+  // (sorted lower vertices); their via layers become active.
+  void setForbiddenPinVias(const std::vector<size_t>& vertices)
+  {
+    forbidden_ = &vertices;
+    for (const size_t v : vertices) {
+      int z, i, j;
+      graph_.decode(v, z, i, j);
+      if (z >= 0 && z < static_cast<int>(layers.size())) {
+        layers[z] = 1;
+      }
+    }
+  }
+
   bool allowed(const int zv, const int i, const int j) const override
   {
+    if (forbidden_ != nullptr
+        && std::ranges::binary_search(*forbidden_, graph_.vertex(zv, i, j))) {
+      return false;
+    }
     const br::ViaModel* m = model(zv);
     if (m == nullptr || !cut_rule_[zv] || cuts_[zv].empty()) {
       return true;
@@ -4444,6 +4665,7 @@ class NetViaRules final : public br::SameNetVias
   // Largest x extent of the cuts per layer: the window of allowed() starts
   // this much before the reach.
   std::vector<br::Coord> max_dx_;
+  const std::vector<size_t>* forbidden_ = nullptr;
 };
 
 }  // namespace
@@ -4686,6 +4908,9 @@ bool BonnRouteDR::connectInRegion(NetData& net,
   std::vector<char> synced_terms(net.terms.size(), 0);
   if (params_.same_net_vias && !params_.use_intervals) {
     net_vias.emplace(shape_classes_, graph_, wire_types_[net.wire_type]);
+    if (!net.forbidden_pin_vias.empty()) {
+      net_vias->setForbiddenPinVias(net.forbidden_pin_vias);
+    }
     if (net_vias->any()) {
       req.same_net_vias = &*net_vias;
     } else {
@@ -7431,6 +7656,9 @@ void BonnRouteDR::main()
   buildFixed();
   lap();
   buildSameNetRules();
+  if (params_.planar_first) {
+    buildPinViaLegality();
+  }
   buildPartitionHalos();
   phases.same_net_rules = lap();
   // Reads the extra space of the nets built above (grt/BonnRouteExtraSpace.h).

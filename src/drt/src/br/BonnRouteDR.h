@@ -320,6 +320,14 @@ struct BonnRouteDRParams
   // every other via definition of the access point when it fails. Prints
   // statistics and one line per failing via; the routing is unchanged.
   int start_check = 0;
+  // C5 step 2 (lead/cleanup/C5-revised.md, rule 3'): the searches place a
+  // via whose bottom pad overlaps a pin shape of its own net only at an
+  // access point whose FlexPA via definitions include the via, or where the
+  // start check passes with same-net markers only; elsewhere on the pin the
+  // path leaves the pin on the pin layer first. The check runs once per
+  // instance class (master, orientation, offset in master coordinates, via
+  // definition) before routing; the searches look the result up.
+  bool planar_first = false;
   bool verbose = true;
   // Algorithm profile: 0 = 2013-improved (default), 1 = 2013-reimpl,
   // 2 = 2021 (2013-reimpl plus Ahrens et al., arXiv:2111.06169).
@@ -478,6 +486,9 @@ class BonnRouteDR
     std::vector<RShape> shapes;  // committed shapes
     std::vector<RShape> pins;    // pin shapes in the shape grid
     std::vector<std::pair<frLayerNum, odb::Point>> pin_points;
+    // planar_first: lower vertices of vias the searches may not place
+    // (pad on an own pin, neither FlexPA-approved nor clean); sorted.
+    std::vector<size_t> forbidden_pin_vias;
     // Legal input wires reserved for this net (arXiv:2111.06169 Sec. 5.2)
     // and the track-graph edges they cover.
     std::vector<RShape> input_reservation;
@@ -1014,6 +1025,16 @@ class BonnRouteDR
   void writeNets();
   // start_check: FlexPA's via check on the written vias (statistics only).
   void checkPathStarts();
+  // FlexPA's via check (FlexPA::isViaViolationFree) of via `def` at p on the
+  // pin `term` (frInstTerm or frBTerm) of `net`; with own_net_only, only
+  // markers whose sources are all `net` count.
+  bool viaCheckClean(frBlockObject* term,
+                     frNet* net,
+                     const frViaDef* def,
+                     const odb::Point& p,
+                     bool own_net_only) const;
+  // planar_first: NetData::forbidden_pin_vias of every net.
+  void buildPinViaLegality();
   // The access point of `term` (frInstTerm or frBTerm) at p on layer, or
   // nullptr.
   const frAccessPoint* accessPointAt(const frBlockObject* term,
