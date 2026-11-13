@@ -327,7 +327,7 @@ struct BonnRouteDRParams
   // path leaves the pin on the pin layer first. The check runs once per
   // instance class (master, orientation, offset in master coordinates, via
   // definition) before routing; the searches look the result up.
-  bool planar_first = false;
+  bool planar_first = true;
   bool verbose = true;
   // Algorithm profile: 0 = 2013-improved (default), 1 = 2013-reimpl,
   // 2 = 2021 (2013-reimpl plus Ahrens et al., arXiv:2111.06169).
