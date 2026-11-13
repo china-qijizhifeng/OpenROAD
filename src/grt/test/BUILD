@@ -262,6 +262,13 @@ regression_test(
 )
 
 regression_test(
+    name = "critical_nets_partial_parasitics",
+    check_log = False,
+    check_passfail = True,
+    data = [":test_resources"],
+)
+
+regression_test(
     name = "congestion_report_file_cugr",
     check_log = False,
     check_passfail = True,

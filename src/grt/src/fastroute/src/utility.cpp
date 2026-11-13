@@ -1792,7 +1792,8 @@ void FastRouteCore::updatePartialRouteParasitics(
 {
   const bool trace = logger_->debugCheck(GRT, "partial_parasitics", 1);
   // The keys describe the 2D routes of a non-incremental run.
-  const bool use_keys = trace && !is_3d_step_ && !is_incremental_grt_;
+  const bool use_keys = (incremental_partial_parasitics_ || trace)
+                        && !is_3d_step_ && !is_incremental_grt_;
   Timer timer;
   std::vector<size_t> changed;
   bool have_previous_keys = false;
@@ -1810,8 +1811,36 @@ void FastRouteCore::updatePartialRouteParasitics(
   }
   const double key_seconds = timer.elapsed();
   timer.reset();
-  estimator.estimateAllGlobalRouteParasitics(num_threads_);
+  // The parasitics of the other nets were estimated from their current
+  // planar routes: re-estimate the changed nets only. Without the keys of
+  // the previous estimate, estimate every net.
+  bool incremental = false;
+  if (incremental_partial_parasitics_ && have_previous_keys) {
+    std::vector<std::pair<odb::dbNet*, GRoute>> routes;
+    routes.reserve(changed.size());
+    for (const size_t position : changed) {
+      odb::dbNet* db_net = nets_[net_ids_[position]]->getDbNet();
+      routes.emplace_back(db_net, GRoute());
+      getPlanarRoute(db_net, routes.back().second);
+    }
+    incremental = estimator.updatePartialRouteParasitics(routes, num_threads_);
+  }
+  if (!incremental) {
+    estimator.estimateAllGlobalRouteParasitics(num_threads_);
+  }
   const double estimate_seconds = timer.elapsed();
+  partial_parasitics_update_count_++;
+  debugPrint(logger_,
+             GRT,
+             "timer",
+             1,
+             "Partial route parasitics (update {}, {} of {} nets, keys {:.3f} "
+             "sec): {:.3f} sec",
+             partial_parasitics_update_count_,
+             incremental ? changed.size() : net_ids_.size(),
+             net_ids_.size(),
+             key_seconds,
+             key_seconds + estimate_seconds);
   if (use_keys) {
     std::swap(planar_route_keys_, next_planar_route_keys_);
     if (planar_route_key_net_ids_ != net_ids_) {
@@ -1824,7 +1853,7 @@ void FastRouteCore::updatePartialRouteParasitics(
   if (trace) {
     tracePartialRouteParasitics(changed,
                                 have_previous_keys,
-                                /*incremental=*/false,
+                                incremental,
                                 key_seconds,
                                 estimate_seconds);
   }
@@ -1865,7 +1894,6 @@ void FastRouteCore::tracePartialRouteParasitics(
     const double key_seconds,
     const double estimate_seconds)
 {
-  partial_parasitics_update_count_++;
   const size_t net_count = net_ids_.size();
   if (partial_route_changed_in_run_.size() != net_count) {
     partial_route_changed_in_run_.assign(net_count, 0);

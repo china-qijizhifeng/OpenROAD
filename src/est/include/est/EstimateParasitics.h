@@ -92,6 +92,9 @@ class EstimateParasitics : public sta::dbStaState, public ParasiticsService
   void estimateAllGlobalRouteParasitics(int threads = 1) override;
   void updateGlobalRouteParasitics(odb::dbNet* net,
                                    grt::GRoute& route) override;
+  bool updatePartialRouteParasitics(
+      std::vector<std::pair<odb::dbNet*, grt::GRoute>>& routes,
+      int threads) override;
   void initSteinerRenderer(
       std::unique_ptr<est::AbstractSteinerRenderer> steiner_renderer);
   void setLayerRC(odb::dbTechLayer* layer,

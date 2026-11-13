@@ -167,6 +167,18 @@ get_snapshot_batched_width()
   return getGlobalRouter()->getSnapshotBatchedWidth();
 }
 
+void
+set_incremental_partial_parasitics(bool incremental)
+{
+  getGlobalRouter()->setIncrementalPartialParasitics(incremental);
+}
+
+bool
+get_incremental_partial_parasitics()
+{
+  return getGlobalRouter()->getIncrementalPartialParasitics();
+}
+
 int
 get_snapshot_batch_count()
 {

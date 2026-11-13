@@ -143,6 +143,16 @@ void GlobalRouter::setSnapshotBatchedWidth(int snapshot_batched_width)
   fastroute_->setSnapshotBatchedWidth(snapshot_batched_width_);
 }
 
+void GlobalRouter::setIncrementalPartialParasitics(const bool incremental)
+{
+  fastroute_->setIncrementalPartialParasitics(incremental);
+}
+
+bool GlobalRouter::getIncrementalPartialParasitics() const
+{
+  return fastroute_->getIncrementalPartialParasitics();
+}
+
 int GlobalRouter::getSnapshotBatchedWidth() const
 {
   return fastroute_->getSnapshotBatchedWidth();
@@ -365,6 +375,11 @@ NetRouteMap GlobalRouter::getPartialRoutes()
   }
 
   return net_routes;
+}
+
+bool GlobalRouter::partialRoutesAreFastRouteRoutes() const
+{
+  return !is_incremental_ && !use_cugr_ && routes_.empty();
 }
 
 void GlobalRouter::ensureEngineSelected()

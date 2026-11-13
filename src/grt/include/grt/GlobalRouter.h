@@ -164,6 +164,8 @@ class GlobalRouter
   void setCUGRViaDemand(bool enabled);
   void setResAwareNetsPercentage(float percentage);
   void setSnapshotBatchedWidth(int snapshot_batched_width);
+  void setIncrementalPartialParasitics(bool incremental);
+  bool getIncrementalPartialParasitics() const;
   int getSnapshotBatchedWidth() const;
   int getSnapshotBatchCount() const;
   bool isResistanceAware() { return resistance_aware_; };
@@ -225,6 +227,10 @@ class GlobalRouter
   void saveCongestion();
   NetRouteMap& getRoutes();
   NetRouteMap getPartialRoutes();
+  // True while getPartialRoutes() returns FastRoute's current route of every
+  // FastRoute net, i.e. during a FastRoute run of global_route that is not
+  // incremental.
+  bool partialRoutesAreFastRouteRoutes() const;
   Net* getNet(odb::dbNet* db_net);
   int getTileSize() const;
   bool isNonLeafClock(odb::dbNet* db_net);

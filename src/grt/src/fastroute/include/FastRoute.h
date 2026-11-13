@@ -299,6 +299,17 @@ class FastRouteCore
     snapshot_batched_width_ = snapshot_batched_width;
   }
   int getSnapshotBatchedWidth() const { return snapshot_batched_width_; }
+  // With true (the default), the slack updates of the 2D maze routing after
+  // the first one of a run re-estimate only the parasitics of the nets whose
+  // planar route changed; the parasitics, slacks and routing are the same.
+  void setIncrementalPartialParasitics(bool incremental)
+  {
+    incremental_partial_parasitics_ = incremental;
+  }
+  bool getIncrementalPartialParasitics() const
+  {
+    return incremental_partial_parasitics_;
+  }
   void getCongestionNets(odb::PtrSet<odb::dbNet>& congestion_nets);
   void computeCongestionInformation();
   std::vector<int> getOriginalResources();
@@ -870,8 +881,10 @@ class FastRouteCore
   PlanarRouteKeys next_planar_route_keys_;
   std::vector<int> planar_route_key_net_ids_;
   bool planar_route_keys_valid_ = false;
-  // Debug trace GRT partial_parasitics: slack updates of this run and, per net
-  // position, whether its planar route changed between two updates.
+  bool incremental_partial_parasitics_ = true;
+  // Slack updates of this run and, for the debug trace GRT
+  // partial_parasitics, whether the planar route of each net position changed
+  // between two updates.
   int partial_parasitics_update_count_ = 0;
   std::vector<char> partial_route_changed_in_run_;
   utl::Timer partial_slack_query_timer_;
