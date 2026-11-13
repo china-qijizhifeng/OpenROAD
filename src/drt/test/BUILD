@@ -253,6 +253,31 @@ filegroup(
     for test_name in ALL_TESTS
 ]
 
+# BonnRoute DR end-to-end regressions: pass/fail on the last log line (the
+# log carries timings, so it is not compared with a golden file).
+BONNROUTE_TCL_TESTS = [
+    "bonnroute_port_contact",
+]
+
+[
+    filegroup(
+        name = test_name + "_resources",
+        srcs = [":regression_resources"] + glob([test_name + ".*"]),
+    )
+    for test_name in BONNROUTE_TCL_TESTS
+]
+
+[
+    regression_test(
+        name = test_name,
+        size = "small",
+        check_log = False,
+        check_passfail = True,
+        data = [":" + test_name + "_resources"],
+    )
+    for test_name in BONNROUTE_TCL_TESTS
+]
+
 py_library(
     name = "helpers",
     srcs = [

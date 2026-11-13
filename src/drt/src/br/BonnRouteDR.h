@@ -604,6 +604,13 @@ class BonnRouteDR
   bool atAccessPoint(const NetData& net,
                      frLayerNum layer,
                      const odb::Point& p) const;
+  // Pins of the net without a contact FlexDR recognises (a wire end in
+  // the net's pin points, or a via at an access point), with writeNets'
+  // split `wires`; such a net is left to FlexDR.
+  int pinsWithoutContact(const NetData& net,
+                         const std::vector<OutWire>& wires) const;
+  int64_t uncontacted_nets_ = 0;
+  int64_t uncontacted_pins_ = 0;
   int64_t guard_nets_ = 0;
   int64_t guard_contacts_ = 0;
   // Via pads on pins away from access points (not a FlexDR term: retained
@@ -811,7 +818,8 @@ class BonnRouteDR
                    int id,
                    std::vector<std::pair<frLayerNum, odb::Rect>>& fills);
   // collapse_bridges: replace via up, one wire, via down by a wrong-way
-  // wire on the lower layer where that wire is legal. Returns the count.
+  // wire on the lower layer where that wire is legal and neither via lies
+  // on a pin of the net (pin contacts stay as routed). Returns the count.
   int64_t collapseBridges();
   struct BridgeStats
   {
@@ -819,6 +827,7 @@ class BonnRouteDR
     int64_t other_wire = 0;
     int64_t patch = 0;
     int64_t other_via_or_pin = 0;
+    int64_t pin_contact = 0;  // a bridge via on a pin of the net
     int64_t illegal = 0;
     int64_t illegal_routed = 0;
     int64_t illegal_fixed = 0;

@@ -2039,6 +2039,55 @@ bool BonnRouteDR::atAccessPoint(const NetData& net,
   return found;
 }
 
+int BonnRouteDR::pinsWithoutContact(const NetData& net,
+                                    const std::vector<OutWire>& wires) const
+{
+  // FlexDR's pin contacts (dr/FlexDR_conn.cpp buildPin2epMap, and the
+  // worker's initNets_searchRepair_pin2epMap): every pin of the net with a
+  // shape at a truncated path-segment end, or at a via marked bottom / top
+  // connected, on that layer. writeNets truncates wire ends at the net's
+  // pin points and marks vias at access points connected.
+  std::vector<const frBlockObject*> contacted;
+  frRegionQuery* rq = design_->getRegionQuery();
+  auto add_pins = [&](const frLayerNum layer, const odb::Point& p) {
+    forEachNetPinAt(
+        rq, net.net, layer, p, [&](const frBlockObject* obj, const odb::Rect&) {
+          contacted.push_back(obj);
+        });
+  };
+  for (const OutWire& w : wires) {
+    if (w.begin == w.end) {
+      continue;
+    }
+    for (const auto& [layer, p] : net.pin_points) {
+      if (layer == w.layer && (p == w.begin || p == w.end)) {
+        add_pins(layer, p);
+      }
+    }
+  }
+  for (const OutVia& v : net.vias) {
+    for (const frLayerNum layer :
+         {v.def->getLayer1Num(), v.def->getLayer2Num()}) {
+      if (atAccessPoint(net, layer, v.point)) {
+        add_pins(layer, v.point);
+      }
+    }
+  }
+  int missing = 0;
+  auto check = [&](const frBlockObject* pin) {
+    if (std::ranges::find(contacted, pin) == contacted.end()) {
+      missing++;
+    }
+  };
+  for (const frInstTerm* it : net.net->getInstTerms()) {
+    check(it);
+  }
+  for (const frBTerm* bt : net.net->getBTerms()) {
+    check(bt);
+  }
+  return missing;
+}
+
 bool BonnRouteDR::nodeAllowed(const int net,
                               const frLayerNum layer,
                               const odb::Point& p) const
@@ -4713,6 +4762,28 @@ int64_t BonnRouteDR::collapseBridges()
               stats.other_via_or_pin++;
               continue;
             }
+            // Bridges collapse only away from the net's pins. A bridge via
+            // whose point lies on a pin of the net is a pin contact (FlexDR
+            // finds pins at via points and at truncated wire ends,
+            // dr/FlexDR_conn.cpp); the jog would end inside that pin with
+            // an extended end, which FlexDR does not see as connected
+            // (ibex: a met3 port at the die edge, DRT-0206).
+            bool on_pin = false;
+            for (const odb::Point& p : {A, B}) {
+              for (const frLayerNum layer : {lower, upper}) {
+                forEachNetPinAt(design_->getRegionQuery(),
+                                net.net,
+                                layer,
+                                p,
+                                [&](const frBlockObject*, const odb::Rect&) {
+                                  on_pin = true;
+                                });
+              }
+            }
+            if (on_pin) {
+              stats.pin_contact++;
+              continue;
+            }
             const OutWire jog{jogl, A, B, false, net.wire_type};
             const RShape jog_shape = wireShape(jog);
             if (shapeConflicts(jog_shape, net.id, nullptr)) {
@@ -5857,6 +5928,17 @@ void BonnRouteDR::writeNets()
       data.vias.clear();
       continue;
     }
+    // Every pin of the net needs a contact FlexDR recognises; a pin without
+    // one stops FlexDR's connectivity check (DRT-0206). Leave the net to
+    // FlexDR instead.
+    if (const int missing = pinsWithoutContact(data, wires)) {
+      uncontacted_nets_++;
+      uncontacted_pins_ += missing;
+      data.routed = false;
+      data.wires.clear();
+      data.vias.clear();
+      continue;
+    }
     for (const OutWire& w : wires) {
       if (w.begin == w.end) {
         continue;
@@ -6423,14 +6505,15 @@ void BonnRouteDR::main()
       logger_->report(
           "BonnRoute DR bridges: {} collapsed into wrong-way wires ({} vias "
           "fewer); kept: {} with other wires on the bridge, {} with "
-          "patches, {} with other vias or pin points, {} illegal against "
-          "other nets ({} only routed shapes, {} fixed shapes) (of {} "
-          "candidate checks).",
+          "patches, {} with other vias or pin points, {} with a via on a "
+          "pin of the net, {} illegal against other nets ({} only routed "
+          "shapes, {} fixed shapes) (of {} candidate checks).",
           bridge_stats_.collapsed,
           2 * bridge_stats_.collapsed,
           bridge_stats_.other_wire,
           bridge_stats_.patch,
           bridge_stats_.other_via_or_pin,
+          bridge_stats_.pin_contact,
           bridge_stats_.illegal,
           bridge_stats_.illegal_routed,
           bridge_stats_.illegal_fixed,
@@ -6440,14 +6523,15 @@ void BonnRouteDR::main()
             "BonnRoute DR lower bridges: {} collapsed into wrong-way wires ({} "
             "vias "
             "fewer); kept: {} with other wires on the bridge, {} with "
-            "patches, {} with other vias or pin points, {} illegal against "
-            "other nets ({} only routed shapes, {} fixed shapes) (of {} "
-            "candidate checks).",
+            "patches, {} with other vias or pin points, {} with a via on a "
+            "pin of the net, {} illegal against other nets ({} only routed "
+            "shapes, {} fixed shapes) (of {} candidate checks).",
             lower_bridge_stats_.collapsed,
             2 * lower_bridge_stats_.collapsed,
             lower_bridge_stats_.other_wire,
             lower_bridge_stats_.patch,
             lower_bridge_stats_.other_via_or_pin,
+            lower_bridge_stats_.pin_contact,
             lower_bridge_stats_.illegal,
             lower_bridge_stats_.illegal_routed,
             lower_bridge_stats_.illegal_fixed,
@@ -6780,6 +6864,11 @@ void BonnRouteDR::main()
         connected_vias_,
         wrong_way_nets_,
         notch_fills_);
+    logger_->report(
+        "BonnRoute DR pin contacts: {} nets with {} pins without a FlexDR "
+        "pin contact (truncated wire end or connected via) left to FlexDR.",
+        uncontacted_nets_,
+        uncontacted_pins_);
     if (params_.postprocess) {
       logger_->report(
           "BonnRoute DR post-processing: {} layer runs, same-net violations "
