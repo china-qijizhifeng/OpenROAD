@@ -243,6 +243,9 @@ class GlobalRouter
                           int final_y,
                           int layer_level,
                           odb::dbNet* db_net) const;
+  // Debug group "jumper_rejections" (log only): the routing resources per
+  // layer as the jumper insertion sees them.
+  void logJumperLayerResources();
   odb::Point getPositionOnGrid(const odb::Point& real_position);
   int repairAntennas(odb::dbMTerm* diode_mterm,
                      int iterations,

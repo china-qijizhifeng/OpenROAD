@@ -2706,6 +2706,46 @@ bool GlobalRouter::hasJumperResources(const int init_x,
                                    dbuToTile(final_y, /*is_x=*/false));
 }
 
+void GlobalRouter::logJumperLayerResources()
+{
+  if (!logger_->debugCheck(GRT, "jumper_rejections", 1)) {
+    return;
+  }
+  if (use_cugr_) {
+    cugr_->logJumperLayerResources();
+    return;
+  }
+  // FastRoute: edges by available tracks (capacity minus use).
+  const int x_grids = grid_->getXGrids();
+  const int y_grids = grid_->getYGrids();
+  for (int layer = getMinRoutingLayer(); layer <= getMaxRoutingLayer();
+       layer++) {
+    const bool is_horizontal
+        = db_->getTech()->findRoutingLayer(layer)->getDirection()
+          == odb::dbTechLayerDir::HORIZONTAL;
+    std::map<int, int> available;
+    for (int x = 0; x < x_grids - (is_horizontal ? 1 : 0); x++) {
+      for (int y = 0; y < y_grids - (is_horizontal ? 0 : 1); y++) {
+        const int tracks = fastroute_->getAvailableResources(
+            x, y, is_horizontal ? x + 1 : x, is_horizontal ? y : y + 1, layer);
+        available[tracks]++;
+      }
+    }
+    for (const auto& [tracks, edges] : available) {
+      debugPrint(logger_,
+                 GRT,
+                 "jumper_rejections",
+                 1,
+                 "JR layer_available layer={} direction={} available={} "
+                 "edges={}",
+                 layer,
+                 is_horizontal ? "H" : "V",
+                 tracks,
+                 edges);
+    }
+  }
+}
+
 // Find the position of the middle of a GCell closest to the position
 odb::Point GlobalRouter::getPositionOnGrid(const odb::Point& real_position)
 {

@@ -3401,7 +3401,91 @@ bool CUGR::hasAvailableResources(odb::dbNet* db_net,
   auto it = db_net_map_.find(db_net);
   const double demand
       = it == db_net_map_.end() ? 1.0 : it->second->getNdrCost(layer_0);
-  return grid_graph_->getEdge(layer_0, tile_x, tile_y).getResource() >= demand;
+  const GraphEdge& edge = grid_graph_->getEdge(layer_0, tile_x, tile_y);
+  if (edge.getResource() < demand) {
+    debugPrint(logger_,
+               GRT,
+               "jumper_rejections",
+               3,
+               "JR position layer={} x={} y={} capacity={:.3f} used={:.3f} "
+               "demand={:.3f}",
+               layer_index,
+               tile_x,
+               tile_y,
+               edge.capacity,
+               edge.demand,
+               demand);
+  }
+  return edge.getResource() >= demand;
+}
+
+void CUGR::logJumperLayerResources() const
+{
+  if (!grid_graph_ || !logger_->debugCheck(GRT, "jumper_rejections", 1)) {
+    return;
+  }
+  const int num_layers = grid_graph_->getNumLayers();
+  for (int layer = std::max(0, grid_graph_->getMinRoutingLayer());
+       layer < num_layers;
+       layer++) {
+    const int direction = grid_graph_->getLayerDirection(layer);
+    const int x_edges = grid_graph_->getXSize() - (direction == 0 ? 1 : 0);
+    const int y_edges = grid_graph_->getYSize() - (direction == 0 ? 0 : 1);
+    // Capacity in tenths of a track (30 = three tracks and more) -> edges,
+    // edges without use, capacity, use.
+    std::map<int, std::array<double, 4>> classes;
+    for (int x = 0; x < x_edges; x++) {
+      for (int y = 0; y < y_edges; y++) {
+        const GraphEdge& edge = grid_graph_->getEdge(layer, x, y);
+        const int tenths = std::min(
+            30, static_cast<int>(std::floor(edge.capacity * 10 + 1e-6)));
+        std::array<double, 4>& entry = classes[tenths];
+        entry[0] += 1;
+        entry[1] += edge.demand < 1e-9 ? 1 : 0;
+        entry[2] += edge.capacity;
+        entry[3] += edge.demand;
+      }
+    }
+    for (const auto& [tenths, entry] : classes) {
+      debugPrint(logger_,
+                 GRT,
+                 "jumper_rejections",
+                 1,
+                 "JR layer_resources layer={} direction={} capacity_tenths={} "
+                 "edges={} unused={} capacity={:.1f} used={:.1f}",
+                 layer + 1,
+                 direction == 0 ? "H" : "V",
+                 tenths,
+                 static_cast<int>(entry[0]),
+                 static_cast<int>(entry[1]),
+                 entry[2],
+                 entry[3]);
+    }
+    if (layer >= 2) {
+      std::string pads;
+      grid_graph_->forEachStackFlankEdge(
+          layer - 2,
+          layer,
+          PointT(grid_graph_->getXSize() / 2, grid_graph_->getYSize() / 2),
+          {},
+          [&](int l, PointT edge_loc, CapacityT demand, double factor) {
+            pads += fmt::format("{}:{}:{}:{:.3f};",
+                                l + 1,
+                                edge_loc.x(),
+                                edge_loc.y(),
+                                demand * factor);
+          });
+      debugPrint(logger_,
+                 GRT,
+                 "jumper_rejections",
+                 1,
+                 "JR jumper_stack layer={} at={}:{} flank_demands={}",
+                 layer + 1,
+                 grid_graph_->getXSize() / 2,
+                 grid_graph_->getYSize() / 2,
+                 pads);
+    }
+  }
 }
 
 bool CUGR::hasJumperResources(odb::dbNet* db_net,
@@ -3461,14 +3545,52 @@ bool CUGR::hasJumperResources(odb::dbNet* db_net,
           edge_demands[{l, loc.x(), loc.y()}] += demand * factor;
         });
   }
+  bool fits = true;
   for (const auto& [edge, demand] : edge_demands) {
     const auto& [layer, x, y] = edge;
     if (demand > 0
         && grid_graph_->getEdge(layer, x, y).getResource() < demand) {
-      return false;
+      fits = false;
+      break;
     }
   }
-  return true;
+  if (logger_->debugCheck(GRT, "jumper_rejections", 3)) {
+    // layer, x, y, demand of the jumper; capacity and use of the edge
+    std::vector<std::tuple<int, int, int, double>> charged;
+    for (const auto& [edge, demand] : edge_demands) {
+      if (demand > 0) {
+        const auto& [layer, x, y] = edge;
+        charged.emplace_back(layer, x, y, demand);
+      }
+    }
+    std::ranges::sort(charged);
+    std::string edges;
+    for (const auto& [layer, x, y, demand] : charged) {
+      const GraphEdge& edge = grid_graph_->getEdge(layer, x, y);
+      edges += fmt::format("{}:{}:{}:{:.3f}:{:.3f}:{:.3f};",
+                           layer + 1,
+                           x,
+                           y,
+                           demand,
+                           edge.capacity,
+                           edge.demand);
+    }
+    debugPrint(logger_,
+               GRT,
+               "jumper_rejections",
+               3,
+               "JR fit net={} layer={} x0={} y0={} x1={} y1={} fits={} "
+               "edges={}",
+               db_net->getConstName(),
+               layer_index,
+               init_tile_x,
+               init_tile_y,
+               final_tile_x,
+               final_tile_y,
+               fits ? 1 : 0,
+               edges);
+  }
+  return fits;
 }
 
 }  // namespace grt

@@ -195,6 +195,10 @@ class CUGR
                           int init_tile_y,
                           int final_tile_x,
                           int final_tile_y) const;
+  // Debug group "jumper_rejections" (log only): per routing layer the edges
+  // by capacity class with their use, and the flank demands of a jumper's
+  // via stack ending on the layer.
+  void logJumperLayerResources() const;
   // Adopts an externally restored routing (journal restore): rebuilds the
   // net's routing tree from the segments and swaps the grid-graph demand
   // without scheduling a reroute. Returns false if the net must be rerouted.

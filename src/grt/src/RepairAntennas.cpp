@@ -1401,6 +1401,7 @@ void RepairAntennas::jumperInsertion(NetRouteMap& routing,
              smaller_seg_size_,
              max_routing_layer,
              antenna_violations_.size());
+  grouter_->logJumperLayerResources();
   // Iterate the antenna violations
   for (const auto& net_violations : antenna_violations_) {
     odb::dbNet* db_net = net_violations.first;
