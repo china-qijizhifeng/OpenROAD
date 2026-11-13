@@ -257,6 +257,12 @@ class FlexDR
       IterationProgress& iter_prog);
   odb::Rect getDRVBBox(const odb::Rect& drv_rect) const;
   std::vector<odb::Rect> getOffGuideWorkerBoxes(frMarker* marker) const;
+  // Runs a stubborn-tiles batch in creation-order waves of MAX_THREADS workers;
+  // a cluster stops once one of its workers ends with zero markers.  Returns
+  // the indices of the workers that ran, ascending.
+  std::vector<int> runStubbornWorkersUntilClean(
+      std::vector<std::unique_ptr<FlexDRWorker>>& workers_batch,
+      IterationProgress& iter_prog);
   void stubbornTilesFlow(const SearchRepairArgs& args,
                          IterationProgress& iter_prog);
   void guideTilesFlow(const SearchRepairArgs& args,
