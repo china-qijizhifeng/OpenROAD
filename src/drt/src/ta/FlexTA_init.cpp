@@ -594,6 +594,9 @@ void FlexTAWorker::initIroutes()
     result.clear();
     regionQuery->queryGuide(getExtBox(), lNum, result);
     for (auto& [boostb, guide] : result) {
+      if (unrouted_nets_only_ && guide->getNet()->hasInitialRouting()) {
+        continue;
+      }
       initIroute(guide);
     }
   }

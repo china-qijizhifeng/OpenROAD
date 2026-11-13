@@ -132,6 +132,12 @@ set_allow_congestion(bool allowCongestion)
 }
 
 void
+set_keep_detailed_wires(bool keep)
+{
+  getGlobalRouter()->setKeepDetailedWires(keep);
+}
+
+void
 set_resistance_aware(bool resistance_aware)
 {
   getGlobalRouter()->setResistanceAware(resistance_aware);

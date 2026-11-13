@@ -107,6 +107,7 @@ void BonnRouteDRParams::applyProfile(const int which)
   postprocess = true;
   access_classes = true;
   reservations = false;
+  incremental = false;
   if (profile == 2) {
     // 2021: the bulk routing experiment of Ahrens et al., arXiv:2111.06169
     // (Table 3) on top of 2013-reimpl: the general-model potential for every
@@ -116,6 +117,8 @@ void BonnRouteDRParams::applyProfile(const int which)
     potential = 3;
     discount_numerator = 3;
     discount_denominator = 4;
+    // Sec. 5.2 incremental routing of the later detailed_route calls.
+    incremental = true;
   }
 }
 
@@ -278,6 +281,18 @@ bool BonnRouteDRParams::set(const std::string& name, const double value)
     cleanup_check_only_workers = v != 0;
   } else if (name == "partition_check") {
     partition_check = v != 0;
+  } else if (name == "incremental") {
+    incremental = v != 0;
+  } else if (name == "incremental_resident") {
+    incremental_resident = v != 0;
+  } else if (name == "reserve_short_pitches") {
+    reserve_short_pitches = std::max(0, v);
+  } else if (name == "incremental_reservations") {
+    incremental_reservations = v != 0;
+  } else if (name == "incremental_potential") {
+    incremental_potential = std::clamp(v, 0, 4);
+  } else if (name == "incremental_ripup") {
+    incremental_ripup = v != 0;
   } else if (name == "verbose") {
     verbose = v != 0;
   } else {
@@ -297,6 +312,8 @@ BonnRouteDR::BonnRouteDR(frDesign* design,
       params_(params),
       block_(block)
 {
+  // A routing space kept for incremental calls records instance shapes.
+  record_fixed_ = params_.incremental && params_.incremental_resident;
 }
 
 void BonnRouteDR::loadExtraSpace()
@@ -1269,6 +1286,12 @@ void BonnRouteDR::ownShapes(
       add(s, br::ShapeType::kReservation);
     }
   }
+  // Incremental mode: kept input routing is a component of the net.
+  if (net.input_present) {
+    for (const RShape& s : net.input_shapes) {
+      add(s, routedType(s.role));
+    }
+  }
 }
 
 void BonnRouteDR::buildNets()
@@ -1324,6 +1347,7 @@ void BonnRouteDR::buildFixed()
   {
     odb::Rect rect;
     int owner;
+    const frBlockObject* obj = nullptr;
     br::ClassId cls = 0;
     br::ClassId projection_cls = 0;
   };
@@ -1350,7 +1374,7 @@ void BonnRouteDR::buildFixed()
           owner = it->second;
         }
       }
-      fixed[fr].push_back({rect, owner});
+      fixed[fr].push_back({rect, owner, obj});
     }
   }
   setup_phases_.fixed_query = timer.elapsed();
@@ -1410,6 +1434,14 @@ void BonnRouteDR::buildFixed()
     for (const FixedShape& f : fixed[fr]) {
       if (f.owner >= 0) {
         nets_[f.owner].pins.push_back({static_cast<frLayerNum>(fr), f.rect});
+      }
+      // Incremental mode: the fixed shapes of each instance.
+      if (record_fixed_) {
+        recordFixedShape(
+            f.obj,
+            {static_cast<frLayerNum>(fr), f.rect},
+            f.owner >= 0 ? br::ShapeType::kPin : br::ShapeType::kBlockage,
+            f.owner);
       }
     }
   }
@@ -5107,6 +5139,11 @@ void BonnRouteDR::ripupNet(NetData& net)
   for (const RShape& s : net.shapes) {
     changeShape(s, routedType(s.role), net.id, false, nullptr, &pending);
   }
+  // Incremental mode: input routing is ripped up with the net.
+  if (net.input_present) {
+    setInputShapes(net, false, &pending);
+    net.input_removed = true;
+  }
   fast_builder_.flush(pending);
   net.shapes.clear();
   net.wires.clear();
@@ -6420,6 +6457,7 @@ BonnRouteDR::SavedRouting BonnRouteDR::saveRouting(const NetData& net) const
   saved.vias = net.vias;
   saved.pin_points = net.pin_points;
   saved.input_reserved = net.input_reserved;
+  saved.input_present = net.input_present;
   for (const Term& term : net.terms) {
     saved.chosen.push_back(term.chosen);
     saved.reserved.push_back(term.reservation_active);
@@ -6441,6 +6479,9 @@ void BonnRouteDR::restoreRouting(const SavedRouting& saved)
     setReservation(net.terms[t], net.id, saved.reserved[t] != 0);
   }
   setInputReservation(net, saved.input_reserved);
+  if (saved.input_present && !net.input_present) {
+    setInputShapes(net, true);
+  }
   if (saved.was_routed) {
     commitNet(net);
   } else {
@@ -6488,6 +6529,11 @@ bool BonnRouteDR::ripupSequence(const int id,
   for (const int victim : victims) {
     if (nets_[victim].ripups >= params_.max_ripups) {
       sequence_outcome_ = kRipupVictimLimit;
+      sequence_outcome_depth_ = depth;
+      return false;
+    }
+    if (!prepareVictim(victim)) {
+      sequence_outcome_ = kRipupVictimFailed;
       sequence_outcome_depth_ = depth;
       return false;
     }
@@ -6757,7 +6803,7 @@ void BonnRouteDR::writeNets()
   frTechObject* tech = design_->getTech();
   std::vector<std::pair<frLayerNum, odb::Rect>> notch_fill_rects;
   for (NetData& data : nets_) {
-    if (!data.routed) {
+    if (!data.routed || (!write_mask_.empty() && !write_mask_[data.id])) {
       continue;
     }
     frNet* net = data.net;

@@ -41,6 +41,9 @@ class FlexTA
   // others
   int main();
   void setDebug(std::unique_ptr<AbstractTAGraphics> ta_graphics);
+  // Assign only the guides of nets without initial routing, in panels
+  // clipped to those guides (FlexDR reads guide routes only for such nets).
+  void setUnroutedNetsOnly(bool in) { unrouted_nets_only_ = in; }
 
  private:
   frTechObject* tech_;
@@ -48,12 +51,20 @@ class FlexTA
   utl::Logger* logger_;
   RouterConfiguration* router_cfg_;
   bool save_updates_;
+  bool unrouted_nets_only_{false};
+  // Gcell-snapped guide boxes of the nets without initial routing, by panel
+  // direction (0 vertical, 1 horizontal); filled when unrouted_nets_only_.
+  std::vector<odb::Rect> unrouted_guide_boxes_[2];
   std::unique_ptr<AbstractTAGraphics> graphics_;
   // others
   void main_helper(frLayerNum lNum, int maxOffsetIter, int panelWidth);
   void initTA(int size);
   void searchRepair(int iter, int size, int offset);
   int initTA_helper(int iter, int size, int offset, bool isH, int& numPanels);
+  void initUnroutedGuideBoxes();
+  // Clips a panel to the gcell boxes of the unrouted nets' guides of its
+  // direction; false when the panel has none.
+  bool clipToUnroutedGuides(bool isH, odb::Rect& routeBox) const;
 };
 
 class FlexTAWorker;
@@ -126,6 +137,7 @@ class FlexTAWorker
   void setExtBox(const odb::Rect& boxIn) { extBox_ = boxIn; }
   void setDir(const odb::dbTechLayerDir& in) { dir_ = in; }
   void setTAIter(int in) { taIter_ = in; }
+  void setUnroutedNetsOnly(bool in) { unrouted_nets_only_ = in; }
   void addIroute(std::unique_ptr<taPin> in, bool isExt = false)
   {
     in->setId(iroutes_.size() + extIroutes_.size());
@@ -197,6 +209,7 @@ class FlexTAWorker
   odb::Rect extBox_;
   odb::dbTechLayerDir dir_;
   int taIter_{0};
+  bool unrouted_nets_only_{false};
   FlexTAWorkerRegionQuery rq_;
 
   std::vector<std::unique_ptr<taPin>> iroutes_;  // unsorted iroutes
