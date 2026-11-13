@@ -275,14 +275,6 @@ struct BonnRouteDRParams
   // catalogues with all access points alike before it; 0: off. An instance
   // whose selection is complete keeps its catalogues and primary paths.
   int offtrack_complete_selection = 1;
-  // Sec. 5.1 routes critical nets first, among them nets "that would be
-  // hard to route when the majority of nets has already been routed". The
-  // nets with a pin on an instance whose selection of primary access paths
-  // was incomplete on the plain catalogues (DRT-9165) join that step: the
-  // pins of such an instance leave the cell only around each other, and
-  // routed after the other nets their nets find those ways taken (a
-  // victim of their rip-up sequence is then not routed again).
-  bool critical_access_nets = false;
   // Reuse a circuit class's catalogues and conflict-free solution for all
   // its instances; 0 solves every instance separately.
   bool access_classes = true;
@@ -654,10 +646,6 @@ class BonnRouteDR
     // or access path shape of a wide class; its updates and queries reach
     // the layer's whole rule distance (buildPartitionHalos, markWideNets).
     bool wide_shapes = false;
-    // A pin of the net lies on an instance whose selection of primary
-    // access paths was incomplete on the plain catalogues
-    // (critical_access_nets).
-    bool access_critical = false;
     int64_t hpwl = 0;
     // Wire type (Sec. 3.2): 0 = default rule, else the net's NDR.
     int wire_type = 0;
