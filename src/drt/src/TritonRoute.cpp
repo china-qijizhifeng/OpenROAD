@@ -849,10 +849,16 @@ void TritonRoute::prep()
   rp.main();
 }
 
-void TritonRoute::ta()
+void TritonRoute::ta(const bool nets_without_initial_routing_only)
 {
   std::unique_ptr<FlexTA> ta = std::make_unique<FlexTA>(
       getDesign(), logger_, router_cfg_.get(), distributed_);
+  if (nets_without_initial_routing_only) {
+    // The initial routing is read through the routed-object index, which
+    // FlexDR::init builds again.
+    getDesign()->getRegionQuery()->initDRObj();
+    ta->setNetsWithoutInitialRoutingOnly(true);
+  }
   if (debug_->debugTA) {
     ta->setDebug(graphics_factory_->makeUniqueTAGraphics());
   }
@@ -1296,17 +1302,26 @@ int TritonRoute::main()
   }
   invalidateChangeTracking();
   prep();
-  ta();
-  if (bonnroute_ && !distributed_) {
-    if (!bonnroute_params_) {
-      bonnroute_params_ = std::make_unique<BonnRouteDRParams>();
-    }
+  const bool run_bonnroute = bonnroute_ && !distributed_;
+  if (run_bonnroute && !bonnroute_params_) {
+    bonnroute_params_ = std::make_unique<BonnRouteDRParams>();
+  }
+  const bool track_assignment_after_bonnroute
+      = run_bonnroute && bonnroute_params_->left_net_track_assignment
+        && !bonnroute_params_->reservations;
+  if (!track_assignment_after_bonnroute) {
+    ta();
+  }
+  if (run_bonnroute) {
     BonnRouteDR bonnroute(getDesign(),
                           logger_,
                           router_cfg_.get(),
                           *bonnroute_params_,
                           db_->getChip()->getBlock());
     bonnroute.main();
+  }
+  if (track_assignment_after_bonnroute) {
+    ta(/* nets_without_initial_routing_only */ true);
   }
   if (distributed_) {
     asio::post(*dist_pool_,

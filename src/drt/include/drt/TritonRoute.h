@@ -264,7 +264,9 @@ class TritonRoute : public PinAccessService
 
   void initDesign();
   void initGraphics();
-  void ta();
+  // nets_without_initial_routing_only: assign only the guides of nets
+  // without initial routing, with the initial routing as obstacles.
+  void ta(bool nets_without_initial_routing_only = false);
   void dr();
   void applyUpdates(const std::vector<std::vector<drUpdate>>& updates);
   void getDRCMarkers(std::list<std::unique_ptr<frMarker>>& markers,

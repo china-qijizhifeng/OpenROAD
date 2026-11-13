@@ -275,6 +275,12 @@ struct BonnRouteDRParams
   // the Recheck markers of this check are dropped, since iteration 0 checks
   // every tile.
   bool cleanup_normalize_initial_routing = false;
+  // Track assignment runs after BonnRoute instead of before it, for the nets
+  // left to FlexDR only, and sees BonnRoute's routing as obstacles. FlexDR
+  // reads track assignment only for those nets (their tile-boundary pins in
+  // iteration 0). With reservations 1, BonnRoute reads track assignment
+  // before routing, so track assignment keeps its place before BonnRoute.
+  bool left_net_track_assignment = false;
   bool verbose = true;
   // Algorithm profile: 0 = 2013-improved (default), 1 = 2013-reimpl,
   // 2 = 2021 (2013-reimpl plus Ahrens et al., arXiv:2111.06169).
