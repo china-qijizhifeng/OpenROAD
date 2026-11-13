@@ -13,7 +13,9 @@
 //  - the same-net post-processing invariants;
 //  - the search against its reference formulation (equal results);
 //  - the reach filter of the primary-path conflicts (no rule applies to
-//    shapes farther apart than the layer's rule reach in x or y).
+//    shapes farther apart than the layer's rule reach in x or y);
+//  - the catalogue variants of the selection completion and the attempt
+//    that is kept.
 #include <algorithm>
 #include <array>
 #include <chrono>
@@ -2724,6 +2726,113 @@ void testCatalogueSharing(std::mt19937& rng)
 
 }  // namespace
 
+// ---------------------------------------------------------------------------
+// Selection completion: the catalogue variants of an instance whose
+// selection leaves a pin without a primary path, and the attempt kept.
+void testSelectionCompletion()
+{
+  using Variant = CatalogueVariant;
+  const Variant fallback{.algorithm3 = true};
+  // Mode 0 is the Algorithm 3 fallback alone.
+  CHECK(selectionCompletionVariants(false, 0, 2).empty(),
+        "mode 0 without the fallback has variants");
+  CHECK(selectionCompletionVariants(true, 0, 2)
+            == std::vector<Variant>{fallback},
+        "mode 0 is not the fallback alone");
+  for (const int widenings : {0, 1, 2, 3}) {
+    for (const bool with_fallback : {false, true}) {
+      const std::vector<Variant> after
+          = selectionCompletionVariants(with_fallback, 1, widenings);
+      const std::vector<Variant> before
+          = selectionCompletionVariants(with_fallback, 2, widenings);
+      const size_t count = 2 * (widenings + 1) + (with_fallback ? 1 : 0);
+      CHECK(after.size() == count && before.size() == count,
+            "variants: %zu and %zu, want %zu",
+            after.size(),
+            before.size(),
+            count);
+      // Mode 1 starts with the fallback, mode 2 with the two catalogues
+      // of all access points alike at the catalogue size.
+      CHECK(!with_fallback || after.front() == fallback,
+            "mode 1 does not start with the fallback");
+      CHECK(before[0] == (Variant{.all_access_points = true})
+                && before[1]
+                       == (Variant{.algorithm3 = true,
+                                   .all_access_points = true}),
+            "mode 2 does not start with all access points alike");
+      CHECK(!with_fallback || before[2] == fallback,
+            "mode 2: the fallback is not third");
+      // Both modes hold the same variants, each once.
+      for (const Variant& v : after) {
+        CHECK(std::count(after.begin(), after.end(), v) == 1
+                  && std::count(before.begin(), before.end(), v) == 1,
+              "a variant is missing or repeated");
+      }
+      // Completion variants: all access points alike; widening k has k more
+      // pitches of radius and 2^k times the paths, in increasing order.
+      int last_radius = 0;
+      for (const Variant& v : after) {
+        if (v == fallback) {
+          continue;
+        }
+        CHECK(v.all_access_points, "completion variant with a preference");
+        CHECK(v.paths_factor == 1 << v.extra_radius
+                  && v.extra_radius <= widenings,
+              "radius %d with %d times the paths",
+              v.extra_radius,
+              v.paths_factor);
+        CHECK(v.extra_radius >= last_radius, "widenings out of order");
+        last_radius = v.extra_radius;
+      }
+    }
+  }
+  // The attempt kept: the first that assigns all pins, else the first of
+  // those assigning the most pins when more than now, else none.
+  CHECK(bestSelectionAttempt(7, 6, {}) == -1, "no attempt");
+  CHECK(bestSelectionAttempt(7, 6, {6, 6}) == -1, "no attempt assigns more");
+  CHECK(bestSelectionAttempt(7, 6, {5, 4}) == -1, "fewer pins kept");
+  CHECK(bestSelectionAttempt(7, 6, {6, 7, 7}) == 1, "first complete attempt");
+  CHECK(bestSelectionAttempt(7, 4, {6, 6, 5}) == 0, "first of the most");
+  CHECK(bestSelectionAttempt(7, 4, {5, 6, 7}) == 2, "complete after more");
+  CHECK(bestSelectionAttempt(7, 4, {7, 6}) == 0, "complete first");
+  std::mt19937 rng(9240);
+  int cases = 0;
+  for (int it = 0; it < 20000; it++) {
+    const int pins = 1 + static_cast<int>(rng() % 8);
+    const int assigned = static_cast<int>(rng() % pins);
+    std::vector<int> attempts(rng() % 6);
+    for (int& a : attempts) {
+      a = static_cast<int>(rng() % (pins + 1));
+    }
+    // Direct statement of the rule.
+    int want = -1;
+    for (size_t k = 0; k < attempts.size() && want < 0; k++) {
+      if (attempts[k] == pins) {
+        want = static_cast<int>(k);
+      }
+    }
+    if (want < 0 && !attempts.empty()) {
+      const int most = *std::max_element(attempts.begin(), attempts.end());
+      if (most > assigned) {
+        want = static_cast<int>(
+            std::find(attempts.begin(), attempts.end(), most)
+            - attempts.begin());
+      }
+    }
+    const int got = bestSelectionAttempt(pins, assigned, attempts);
+    CHECK(got == want, "it=%d kept attempt %d, want %d", it, got, want);
+    // The kept attempt never assigns fewer pins than the selection it
+    // replaces, and an incomplete selection is replaced whenever an attempt
+    // is complete.
+    CHECK(got < 0 || attempts[got] > assigned, "it=%d kept a worse attempt", it);
+    cases++;
+  }
+  std::printf(
+      "selection completion: variant lists of modes 0-2, %d kept attempts "
+      "equal to the rule\n",
+      cases);
+}
+
 int main()
 {
   std::mt19937 rng(20261111);
@@ -2745,6 +2854,7 @@ int main()
   testSearchMatchesReference(rng);
   testConflictReachFilter(rng);
   testCatalogueSharing(rng);
+  testSelectionCompletion();
   const double secs
       = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0)
             .count();

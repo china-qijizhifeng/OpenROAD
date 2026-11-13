@@ -141,6 +141,13 @@ cc_test(
 )
 
 cc_test(
+    name = "bonnroute_worker_cancel_test",
+    size = "small",
+    srcs = ["BonnRouteWorkerCancelTest.cpp"],
+    deps = ["//src/drt:base_types"],
+)
+
+cc_test(
     name = "bonnroute_tail_pipeline_test",
     size = "small",
     srcs = ["BonnRouteTailPipelineTest.cpp"],
@@ -330,6 +337,7 @@ filegroup(
 # BonnRoute DR end-to-end regressions: pass/fail on the last log line (the
 # log carries timings, so it is not compared with a golden file).
 BONNROUTE_TCL_TESTS = [
+    "bonnroute_access_completion",
     "bonnroute_port_contact",
 ]
 

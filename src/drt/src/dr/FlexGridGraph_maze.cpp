@@ -792,14 +792,15 @@ void FlexGridGraph::traceBackPath(const FlexWavefrontGrid& currGrid,
   }
 }
 
-bool FlexGridGraph::search(std::vector<FlexMazeIdx>& connComps,
-                           drPin* nextPin,
-                           std::vector<FlexMazeIdx>& path,
-                           FlexMazeIdx& ccMazeIdx1,
-                           FlexMazeIdx& ccMazeIdx2,
-                           const odb::Point& centerPt,
-                           std::map<FlexMazeIdx, frBox3D*>& mazeIdx2TaperBox,
-                           bool route_with_jumpers)
+MazeSearchStatus FlexGridGraph::search(
+    std::vector<FlexMazeIdx>& connComps,
+    drPin* nextPin,
+    std::vector<FlexMazeIdx>& path,
+    FlexMazeIdx& ccMazeIdx1,
+    FlexMazeIdx& ccMazeIdx2,
+    const odb::Point& centerPt,
+    std::map<FlexMazeIdx, frBox3D*>& mazeIdx2TaperBox,
+    bool route_with_jumpers)
 {
   if (debug_) {
     dump_file_.open("expansions.dump");
@@ -835,7 +836,7 @@ bool FlexGridGraph::search(std::vector<FlexMazeIdx>& connComps,
   for (auto& idx : connComps) {
     if (isDst(idx.x(), idx.y(), idx.z())) {
       path.emplace_back(idx.x(), idx.y(), idx.z());
-      return true;
+      return MazeSearchStatus::kFound;
     }
     getPoint(currPt, idx.x(), idx.y());
     frCoord currDist = odb::Point::manhattanDistance(currPt, centerPt);
@@ -868,6 +869,10 @@ bool FlexGridGraph::search(std::vector<FlexMazeIdx>& connComps,
       printExpansion(currGrid, "Popping");
     }
     wavefront_.pop();
+    // A detached worker's result is never written back (runGridWorkersAhead).
+    if (drWorker_->pollCancelAfterAstarPop()) {
+      return MazeSearchStatus::kCancelled;
+    }
     if (getPrevAstarNodeDir({currGrid.x(), currGrid.y(), currGrid.z()})
         != frDirEnum::UNKNOWN) {
       continue;
@@ -883,13 +888,13 @@ bool FlexGridGraph::search(std::vector<FlexMazeIdx>& connComps,
     }
     if (isDst(currGrid.x(), currGrid.y(), currGrid.z())) {
       traceBackPath(currGrid, path, connComps, ccMazeIdx1, ccMazeIdx2);
-      return true;
+      return MazeSearchStatus::kFound;
     }
     // expand and update wavefront
     expandWavefront(
         currGrid, dstMazeIdx1, dstMazeIdx2, centerPt, route_with_jumpers);
   }
-  return false;
+  return MazeSearchStatus::kNoPath;
 }
 
 }  // namespace drt

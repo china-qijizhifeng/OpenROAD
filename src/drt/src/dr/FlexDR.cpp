@@ -44,6 +44,7 @@
 #include "distributed/drUpdate.h"
 #include "distributed/frArchive.h"
 #include "dr/AbstractDRGraphics.h"
+#include "dr/FlexDRWorkerCancel.h"
 #include "dr/FlexDR_conn.h"
 #include "drt/TritonRoute.h"
 #include "dst/BalancerJobDescription.h"
@@ -290,15 +291,25 @@ int FlexDRWorker::mainRoute()
   using std::chrono::high_resolution_clock;
   const high_resolution_clock::time_point t0 = main_start_time_;
   auto micronPerDBU = 1.0 / getTech()->getDBUPerUU();
-  if (!skipRouting_) {
+  // A cancelled worker (see setCancelRequest) skips the remaining steps.
+  if (!skipRouting_ && !pollCancelRequest()) {
     init(getDesign());
   }
   const high_resolution_clock::time_point t1 = high_resolution_clock::now();
-  if (!skipRouting_) {
+  if (!skipRouting_ && !pollCancelRequest()) {
     route_queue();
   }
   high_resolution_clock::time_point t2 = high_resolution_clock::now();
   const int num_markers = getNumMarkers();
+  work_statistics_.init_seconds
+      = std::chrono::duration<double>(t1 - t0).count();
+  work_statistics_.total_seconds
+      = std::chrono::duration<double>(t2 - t0).count();
+  if (!skipRouting_
+      && logger_->debugCheck(DRT, "bonnroute_cleanup_worker", 1)) {
+    // Before cleanup(), which frees the pins of the worker's nets.
+    reportWorkStatistics(num_markers);
+  }
   // end() reads the worker's markers, nets and patches, not the GC state.
   // Releasing the GC worker here runs its destruction inside the parallel
   // loop of processWorkersBatch instead of in the serial endWorkersBatch,
@@ -306,6 +317,8 @@ int FlexDRWorker::mainRoute()
   setGCWorker(nullptr);
   cleanup();
   high_resolution_clock::time_point t3 = high_resolution_clock::now();
+  work_statistics_.total_seconds
+      = std::chrono::duration<double>(t3 - t0).count();
 
   using std::chrono::duration;
   using std::chrono::duration_cast;
@@ -335,6 +348,100 @@ int FlexDRWorker::mainRoute()
              num_markers);
 
   return 0;
+}
+
+void FlexDRWorker::reportWorkStatistics(const int num_markers) const
+{
+  // One line per worker that ran: what it was asked to repair, how much its
+  // route queue did and where the seconds went. The nets with the most
+  // reroutes follow as name:reroutes:pins in the worker:flags, with flags
+  // c = clock net, n = non-default rule, l = left by the initial router
+  // (no initial routing). `stopped 1` marks a worker whose route queue was
+  // ended early (stubborn tiles after a clean worker, a discarded grid
+  // worker started ahead); its numbers cover the part that ran.
+  auto* block = design_->getTopBlock();
+  const odb::Point gcell_min = block->getGCellIdx(routeBox_.ll());
+  const odb::Point gcell_max = block->getGCellIdx(
+      odb::Point(routeBox_.xMax() - 1, routeBox_.yMax() - 1));
+  frMIdx x_dim = 0, y_dim = 0, z_dim = 0;
+  if (!check_only_) {
+    gridGraph_.getDim(x_dim, y_dim, z_dim);
+  }
+  std::vector<const drNet*> rerouted;
+  int max_reroutes = 0;
+  for (const auto& net : nets_) {
+    if (net->getNumReroutes() > 0) {
+      rerouted.push_back(net.get());
+      max_reroutes = std::max(max_reroutes, net->getNumReroutes());
+    }
+  }
+  std::ranges::stable_sort(rerouted, [](const drNet* lhs, const drNet* rhs) {
+    return lhs->getNumReroutes() > rhs->getNumReroutes();
+  });
+  std::string top_nets;
+  const size_t listed = std::min<size_t>(rerouted.size(), 6);
+  for (size_t i = 0; i < listed; i++) {
+    const drNet* net = rerouted[i];
+    const frNet* fr_net = net->getFrNet();
+    std::string flags;
+    if (fr_net->isClock()) {
+      flags += 'c';
+    }
+    if (fr_net->getNondefaultRule() != nullptr) {
+      flags += 'n';
+    }
+    if (!fr_net->hasInitialRouting()) {
+      flags += 'l';
+    }
+    top_nets += fmt::format("{}{}:{}:{}:{}",
+                            i == 0 ? "" : " ",
+                            fr_net->getName(),
+                            net->getNumReroutes(),
+                            net->getPins().size(),
+                            flags.empty() ? "-" : flags);
+  }
+  logger_->debug(
+      DRT,
+      "bonnroute_cleanup_worker",
+      "worker iter {} id {} box ( {} {} {} {} ) gcells ( {} {} {} {} ) mode {} "
+      "maze_end_iter {} drc_cost {} marker_cost {} fixed_cost {} nets {} grid "
+      "{}x{}x{} markers {} -> {} recheck {} routed {} checked {} dropped {} "
+      "rerouted_nets {} max_reroutes {} init_s {:.3f} queue_s {:.3f} maze_s "
+      "{:.3f} check_s {:.3f} route_end_s {:.3f} top_nets [{}] stopped {}",
+      drIter_,
+      worker_id_,
+      routeBox_.xMin(),
+      routeBox_.yMin(),
+      routeBox_.xMax(),
+      routeBox_.yMax(),
+      gcell_min.x(),
+      gcell_min.y(),
+      gcell_max.x(),
+      gcell_max.y(),
+      static_cast<int>(ripupMode_),
+      mazeEndIter_,
+      workerDRCCost_,
+      workerMarkerCost_,
+      workerFixedShapeCost_,
+      nets_.size(),
+      x_dim,
+      y_dim,
+      z_dim,
+      initNumMarkers_,
+      num_markers,
+      needRecheck_ ? 1 : 0,
+      work_statistics_.routed_nets,
+      work_statistics_.checked_objects,
+      work_statistics_.dropped_entries,
+      rerouted.size(),
+      max_reroutes,
+      work_statistics_.init_seconds,
+      work_statistics_.queue_seconds,
+      work_statistics_.maze_seconds,
+      work_statistics_.check_seconds,
+      work_statistics_.total_seconds,
+      top_nets,
+      stopped_ ? 1 : 0);
 }
 
 void FlexDRWorker::distributedMain(frDesign* design)
@@ -1013,7 +1120,9 @@ int FlexDR::runGridWorkersAhead(std::vector<GridWorkerSlot>& slots,
     State state = State::kWaiting;
     uint64_t fingerprint = 0;  // of a worker started ahead
     bool runs_in_batch = false;
-    std::unique_ptr<std::atomic<bool>> stop_request;
+    // Of the running worker; replaced at every start.
+    std::unique_ptr<WorkerCancelRequest> cancel_request;
+    WorkerCancelRequest::Clock::time_point run_start;
     // Slots whose extended box intersects this one.
     std::vector<int> overlaps;
     // Markers in the DRC box when last counted.  The count orders the starts
@@ -1074,8 +1183,18 @@ int FlexDR::runGridWorkersAhead(std::vector<GridWorkerSlot>& slots,
   int num_restarted_ahead = 0;
   int num_dropped = 0;
   std::priority_queue<std::pair<int, int>> batch_queue;  // markers, -slot
+  // A worker detached from its slot while its thread runs stays here with
+  // its cancel request until that thread returns; the thread reclaims both.
+  struct DetachedRun
+  {
+    std::unique_ptr<FlexDRWorker> worker;
+    std::unique_ptr<WorkerCancelRequest> cancel_request;
+    WorkerCancelRequest::Clock::time_point run_start;
+  };
+  std::map<const FlexDRWorker*, DetachedRun> detached_runs;
+  // Detached workers without a running thread; released at the end.
   std::vector<std::unique_ptr<FlexDRWorker>> discarded_workers;
-  std::vector<std::unique_ptr<std::atomic<bool>>> discarded_stop_requests;
+  WorkerCancelStatistics cancel_statistics;
   ThreadException exception;
 
   // Needs a slot that still holds its worker.
@@ -1091,13 +1210,21 @@ int FlexDR::runGridWorkersAhead(std::vector<GridWorkerSlot>& slots,
       marked_later_slots.erase(i);
     }
   };
+  // Detaches the worker from slot i; its result is never written back.  A
+  // running worker is asked to cancel.
   const auto discard = [&](const int i) {
     Slot& state = states[i];
     if (state.state == State::kRunning) {
-      state.stop_request->store(true);
+      state.cancel_request->request();
+      cancel_statistics.requests++;
+      const FlexDRWorker* worker = slots[i].worker.get();
+      detached_runs.emplace(worker,
+                            DetachedRun{std::move(slots[i].worker),
+                                        std::move(state.cancel_request),
+                                        state.run_start});
+    } else {
+      discarded_workers.push_back(std::move(slots[i].worker));
     }
-    discarded_workers.push_back(std::move(slots[i].worker));
-    discarded_stop_requests.push_back(std::move(state.stop_request));
   };
   const auto report_progress = [&]() {
     if (router_cfg_->VERBOSE > 0) {
@@ -1267,21 +1394,47 @@ int FlexDR::runGridWorkersAhead(std::vector<GridWorkerSlot>& slots,
         Slot& state = states[picked];
         FlexDRWorker* worker = slots[picked].worker.get();
         state.state = State::kRunning;
-        state.stop_request = std::make_unique<std::atomic<bool>>(false);
-        worker->setStopRequest(state.stop_request.get());
+        state.cancel_request = std::make_unique<WorkerCancelRequest>();
+        worker->setCancelRequest(state.cancel_request.get());
+        state.run_start = WorkerCancelRequest::Clock::now();
         lock.unlock();
         worker->mainRoute();
+        const WorkerCancelRequest::Clock::time_point run_end
+            = WorkerCancelRequest::Clock::now();
         lock.lock();
-        // A worker started ahead may have been replaced or dropped.
+        // A worker started ahead may have been replaced or dropped.  The
+        // detached worker is alive until here, so no other worker has its
+        // address.
         if (slots[picked].worker.get() == worker) {
           state.state = State::kDone;
           if (slots[picked].batch == current_batch) {
             report_progress();
           }
           write_back();
+        } else {
+          auto detached = detached_runs.find(worker);
+          if (detached == detached_runs.end()) {
+            logger_->error(DRT,
+                           9251,
+                           "Grid workers ahead: a worker left its slot "
+                           "without being detached.");
+          }
+          DetachedRun run = std::move(detached->second);
+          detached_runs.erase(detached);
+          cancel_statistics.addExit(*run.cancel_request,
+                                    worker->isCancelled(),
+                                    worker->getAstarPops(),
+                                    run.run_start,
+                                    run_end);
+          lock.unlock();
+          run.worker.reset();
+          run.cancel_request.reset();
+          lock.lock();
         }
         wake.notify_all();
       } catch (...) {
+        // Also an exception of a detached worker ends the iteration: only an
+        // observed cancel request ends a run early without an error.
         if (!lock.owns_lock()) {
           lock.lock();
         }
@@ -1308,7 +1461,81 @@ int FlexDR::runGridWorkersAhead(std::vector<GridWorkerSlot>& slots,
              num_dropped,
              num_started_before_neighbours,
              num_restarted_ahead);
+  if (router_cfg_->VERBOSE > 0 && cancel_statistics.requests > 0) {
+    const int exits = std::max(1, cancel_statistics.exits());
+    logger_->info(
+        DRT,
+        9250,
+        "Grid workers ahead, iteration {}: {} running workers detached, {} "
+        "stopped at a cancel check, {} ended their routing first; cancel to "
+        "exit mean {:.2f} ms, max {:.2f} ms; A* pops after the cancel mean "
+        "{:.0f}, max {}; detached runs {:.2f} thread s, after the cancel "
+        "{:.3f} thread s.",
+        iter_,
+        cancel_statistics.requests,
+        cancel_statistics.cancelled,
+        cancel_statistics.completed,
+        cancel_statistics.exit_latency_sum_ms / exits,
+        cancel_statistics.exit_latency_max_ms,
+        static_cast<double>(cancel_statistics.pops_after_request_sum) / exits,
+        cancel_statistics.pops_after_request_max,
+        cancel_statistics.detached_run_seconds,
+        cancel_statistics.detached_run_seconds_after_request);
+  }
   return num_unaffected_workers;
+}
+
+void FlexDR::reportClusterResults(
+    const std::vector<std::unique_ptr<FlexDRWorker>>& batch,
+    const std::map<int, FlexDRWorker*>& chosen) const
+{
+  // One line per cluster of a guides-tiles or stubborn-tiles batch: the
+  // workers that competed for it in creation order as
+  // markers after:seconds:drc cost:marker cost:route box:state, and the one
+  // whose result is written back. State: r = ran to the end, x = stopped
+  // after an earlier worker of the cluster ended without markers, s = not
+  // started for the same reason (stubborn tiles); only r workers compete.
+  std::map<int, std::vector<const FlexDRWorker*>> clusters;
+  for (const auto& worker : batch) {
+    clusters[worker->getWorkerId()].push_back(worker.get());
+  }
+  for (const auto& [cluster_id, workers] : clusters) {
+    const FlexDRWorker* best = chosen.at(cluster_id);
+    int chosen_index = -1;
+    std::string results;
+    for (size_t i = 0; i < workers.size(); i++) {
+      const FlexDRWorker* worker = workers[i];
+      if (worker == best) {
+        chosen_index = static_cast<int>(i);
+      }
+      const odb::Rect& box = worker->getRouteBox();
+      const double seconds = worker->getWorkStatistics().total_seconds;
+      results += fmt::format("{}{}:{:.3f}:{}:{}:{},{},{},{}:{}",
+                             i == 0 ? "" : " ",
+                             worker->getBestNumMarkers(),
+                             seconds,
+                             worker->getWorkerDRCCost(),
+                             worker->getWorkerMarkerCost(),
+                             box.xMin(),
+                             box.yMin(),
+                             box.xMax(),
+                             box.yMax(),
+                             worker->isStopped() ? 'x'
+                                                 : (seconds > 0 ? 'r' : 's'));
+    }
+    logger_->debug(DRT,
+                   "bonnroute_cleanup_worker",
+                   "cluster iter {} flow {} id {} workers {} chosen {} "
+                   "markers {} -> {} results [{}]",
+                   iter_,
+                   flow_state_machine_->getFlowName(),
+                   cluster_id,
+                   workers.size(),
+                   chosen_index,
+                   best->getInitNumMarkers(),
+                   best->getBestNumMarkers(),
+                   results);
+  }
 }
 
 odb::Rect FlexDR::getDRVBBox(const odb::Rect& drv_rect) const
@@ -1701,6 +1928,9 @@ void FlexDR::stubbornTilesFlow(const SearchRepairArgs& args,
         worker_best_result[worker_id] = worker.get();
       }
     }
+    if (logger_->debugCheck(DRT, "bonnroute_cleanup_worker", 1)) {
+      reportClusterResults(batch, worker_best_result);
+    }
     for (auto [_, worker] : worker_best_result) {
       changed
           |= (worker->end(getDesign())
@@ -1939,6 +2169,9 @@ void FlexDR::guideTilesFlow(const SearchRepairArgs& args,
                  < worker_best_result[worker_id]->getBestNumMarkers()) {
         worker_best_result[worker_id] = worker.get();
       }
+    }
+    if (logger_->debugCheck(DRT, "bonnroute_cleanup_worker", 1)) {
+      reportClusterResults(batch, worker_best_result);
     }
     for (auto [_, worker] : worker_best_result) {
       changed

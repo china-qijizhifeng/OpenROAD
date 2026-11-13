@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <cassert>
+#include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <iostream>
@@ -2077,15 +2078,21 @@ void FlexDRWorker::identifyCongestionLevel()
 
 void FlexDRWorker::route_queue_main(std::queue<RouteQueueEntry>& rerouteQueue)
 {
+  using Clock = std::chrono::steady_clock;
+  const auto seconds_since = [](const Clock::time_point& start) {
+    return std::chrono::duration<double>(Clock::now() - start).count();
+  };
+  const Clock::time_point queue_start = Clock::now();
   int gc_version = 1;
   std::map<frBlockObject*, std::pair<int, int>> obj_gc_version;
   auto& workerRegionQuery = getWorkerRegionQuery();
   while (!rerouteQueue.empty()) {
-    if ((first_clean_ != nullptr
-         && first_clean_->load(std::memory_order_relaxed) < creation_index_)
-        || (stop_request_ != nullptr
-            && stop_request_->load(std::memory_order_relaxed))) {
+    if (first_clean_ != nullptr
+        && first_clean_->load(std::memory_order_relaxed) < creation_index_) {
       stopped_ = true;
+      return;
+    }
+    if (pollCancelRequest()) {
       return;
     }
     auto& entry = rerouteQueue.front();
@@ -2101,6 +2108,7 @@ void FlexDRWorker::route_queue_main(std::queue<RouteQueueEntry>& rerouteQueue)
     if (obj->typeId() == drcNet && doRoute) {
       auto net = static_cast<drNet*>(obj);
       if (numReroute != net->getNumReroutes()) {
+        work_statistics_.dropped_entries++;
         continue;
       }
       if (ripupMode_ == RipUpMode::DRC && checking_obj != nullptr
@@ -2108,6 +2116,7 @@ void FlexDRWorker::route_queue_main(std::queue<RouteQueueEntry>& rerouteQueue)
           && obj_gc_version.find(checking_obj) != obj_gc_version.end()
           && obj_gc_version[net->getFrNet()] == std::make_pair(gc_version, 0)
           && obj_gc_version[checking_obj] == std::make_pair(gc_version, 0)) {
+        work_statistics_.dropped_entries++;
         continue;
       }
       // init
@@ -2138,8 +2147,14 @@ void FlexDRWorker::route_queue_main(std::queue<RouteQueueEntry>& rerouteQueue)
       // route
       mazeNetInit(net);
       std::vector<FlexMazeIdx> paths;
-      bool isRouted = routeNet(net, paths);
-      if (!isRouted) {
+      const Clock::time_point maze_start = Clock::now();
+      const MazeSearchStatus route_status = routeNet(net, paths);
+      work_statistics_.maze_seconds += seconds_since(maze_start);
+      if (route_status == MazeSearchStatus::kCancelled) {
+        return;  // stopped_ is set; the worker is discarded
+      }
+      work_statistics_.routed_nets++;
+      if (route_status == MazeSearchStatus::kNoPath) {
         if (router_cfg_->OUT_MAZE_FILE == std::string("")) {
           if (router_cfg_->VERBOSE > 0) {
             std::cout
@@ -2171,9 +2186,11 @@ void FlexDRWorker::route_queue_main(std::queue<RouteQueueEntry>& rerouteQueue)
       didRoute = true;
       // gc
       if (gcWorker_->setTargetNet(net)) {
+        const Clock::time_point check_start = Clock::now();
         gcWorker_->updateDRNet(net);
         gcWorker_->setEnableSurgicalFix(true);
         gcWorker_->main();
+        work_statistics_.check_seconds += seconds_since(check_start);
         modEolCosts_poly(gcWorker_->getTargetNet(), ModCostType::addRouteShape);
         // write back GC patches
         drNet* currNet = net;
@@ -2251,8 +2268,10 @@ void FlexDRWorker::route_queue_main(std::queue<RouteQueueEntry>& rerouteQueue)
         gcWorker_->setEnableSurgicalFix(false);
         if (obj_gc_version.find(obj) != obj_gc_version.end()
             && obj_gc_version[obj].first == gc_version) {
+          work_statistics_.dropped_entries++;
           continue;
         }
+        const Clock::time_point check_start = Clock::now();
         if (obj->typeId() == frcNet) {
           auto net = static_cast<frNet*>(obj);
           if (gcWorker_->setTargetNet(net)) {
@@ -2264,6 +2283,10 @@ void FlexDRWorker::route_queue_main(std::queue<RouteQueueEntry>& rerouteQueue)
             gcWorker_->main();
             didCheck = true;
           }
+        }
+        if (didCheck) {
+          work_statistics_.check_seconds += seconds_since(check_start);
+          work_statistics_.checked_objects++;
         }
         obj_gc_version[obj] = {gc_version, gcWorker_->getMarkers().size()};
       }
@@ -2286,6 +2309,7 @@ void FlexDRWorker::route_queue_main(std::queue<RouteQueueEntry>& rerouteQueue)
       }
     }
   }
+  work_statistics_.queue_seconds += seconds_since(queue_start);
 }
 
 void FlexDRWorker::modEolCosts_poly(gcPin* shape,
@@ -3413,14 +3437,15 @@ void FlexDRWorker::routeNet_prepAreaMap(drNet* net,
   }
 }
 
-bool FlexDRWorker::routeNet(drNet* net, std::vector<FlexMazeIdx>& paths)
+MazeSearchStatus FlexDRWorker::routeNet(drNet* net,
+                                        std::vector<FlexMazeIdx>& paths)
 {
   //  ProfileTask profile("DR:routeNet");
 
   // Verify if net has jumpers
   const bool route_with_jumpers = net->getFrNet()->hasJumpers();
   if (net->getPins().size() <= 1) {
-    return true;
+    return MazeSearchStatus::kFound;
   }
   if (graphics_) {
     graphics_->show(true);
@@ -3460,18 +3485,25 @@ bool FlexDRWorker::routeNet(drNet* net, std::vector<FlexMazeIdx>& paths)
   bool isFirstConn = true;
   bool searchSuccess = true;
   while (!unConnPins.empty()) {
+    if (pollCancelRequest()) {
+      return MazeSearchStatus::kCancelled;
+    }
     mazePinInit();
     auto nextPin = routeNet_getNextDst(
         ccMazeIdx1, ccMazeIdx2, mazeIdx2unConnPins, pinTaperBoxes);
     path.clear();
-    if (gridGraph_.search(connComps,
-                          nextPin,
-                          path,
-                          ccMazeIdx1,
-                          ccMazeIdx2,
-                          centerPt,
-                          mazeIdx2TaperBox,
-                          route_with_jumpers)) {
+    const MazeSearchStatus search_status = gridGraph_.search(connComps,
+                                                             nextPin,
+                                                             path,
+                                                             ccMazeIdx1,
+                                                             ccMazeIdx2,
+                                                             centerPt,
+                                                             mazeIdx2TaperBox,
+                                                             route_with_jumpers);
+    if (search_status == MazeSearchStatus::kCancelled) {
+      return MazeSearchStatus::kCancelled;
+    }
+    if (search_status == MazeSearchStatus::kFound) {
       routeNet_postAstarUpdate(
           path, connComps, unConnPins, mazeIdx2unConnPins, isFirstConn);
       routeNet_postAstarWritePath(
@@ -3506,7 +3538,7 @@ bool FlexDRWorker::routeNet(drNet* net, std::vector<FlexMazeIdx>& paths)
     }
     routeNet_postRouteAddPathCost(net);
   }
-  return searchSuccess;
+  return searchSuccess ? MazeSearchStatus::kFound : MazeSearchStatus::kNoPath;
 }
 
 void FlexDRWorker::routeNet_postAstarPatchMinAreaVio(

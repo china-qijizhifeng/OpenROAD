@@ -23,6 +23,7 @@
 #include "db/tech/frConstraint.h"
 #include "db/tech/frLayer.h"
 #include "db/tech/frTechObject.h"
+#include "dr/FlexDRWorkerCancel.h"
 #include "dr/FlexMazeTypes.h"
 #include "dr/FlexWavefront.h"
 #include "dr/WatermarkCost.h"
@@ -1035,14 +1036,16 @@ class FlexGridGraph
   void resetPrevNodeDir();
   void resetSrc();
   void resetDst();
-  bool search(std::vector<FlexMazeIdx>& connComps,
-              drPin* nextPin,
-              std::vector<FlexMazeIdx>& path,
-              FlexMazeIdx& ccMazeIdx1,
-              FlexMazeIdx& ccMazeIdx2,
-              const odb::Point& centerPt,
-              std::map<FlexMazeIdx, frBox3D*>& mazeIdx2TaperBox,
-              bool route_with_jumpers);
+  // A* from connComps to nextPin.  kCancelled: the worker's cancel request
+  // was observed at a check after a batch of pops; path is then incomplete.
+  MazeSearchStatus search(std::vector<FlexMazeIdx>& connComps,
+                          drPin* nextPin,
+                          std::vector<FlexMazeIdx>& path,
+                          FlexMazeIdx& ccMazeIdx1,
+                          FlexMazeIdx& ccMazeIdx2,
+                          const odb::Point& centerPt,
+                          std::map<FlexMazeIdx, frBox3D*>& mazeIdx2TaperBox,
+                          bool route_with_jumpers);
   void setCost(frUInt4 drcCostIn,
                frUInt4 markerCostIn,
                frUInt4 FixedShapeCostIn)

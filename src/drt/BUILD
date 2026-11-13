@@ -25,6 +25,7 @@ cc_library(
     name = "base_types",
     srcs = ["src/frBaseTypes.cpp"],
     hdrs = [
+        "src/dr/FlexDRWorkerCancel.h",
         "src/dr/FlexMazeTypes.h",
         "src/dr/WatermarkCost.h",
         "src/frBaseTypes.h",
