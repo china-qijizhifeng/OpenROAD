@@ -1596,16 +1596,29 @@ void FlexDRWorker::initRipUpNetsFromMarkers()
   }
 }
 
+void FlexDRWorker::readDesignNetObjects(const frDesign* design)
+{
+  design_net_objects_ = std::make_unique<DesignNetObjects>();
+  initNetObjs(design,
+              design_net_objects_->nets,
+              design_net_objects_->route_objs,
+              design_net_objects_->ext_objs,
+              design_net_objects_->orig_guides,
+              design_net_objects_->guides);
+}
+
 void FlexDRWorker::initNets(const frDesign* design)
 {
-  frOrderedIdSet<frNet*> nets;
-  frOrderedIdMap<frNet*, std::vector<std::unique_ptr<drConnFig>>> netRouteObjs;
-  frOrderedIdMap<frNet*, std::vector<std::unique_ptr<drConnFig>>> netExtObjs;
-  frOrderedIdMap<frNet*, std::vector<frRect>> netOrigGuides;
-  frOrderedIdMap<frNet*, std::vector<frRect>> netGuides;
-  // get lock
-  initNetObjs(design, nets, netRouteObjs, netExtObjs, netOrigGuides, netGuides);
-  // release lock
+  if (design_net_objects_ == nullptr) {
+    readDesignNetObjects(design);
+  }
+  const std::unique_ptr<DesignNetObjects> objects
+      = std::move(design_net_objects_);
+  auto& nets = objects->nets;
+  auto& netRouteObjs = objects->route_objs;
+  auto& netExtObjs = objects->ext_objs;
+  auto& netOrigGuides = objects->orig_guides;
+  auto& netGuides = objects->guides;
   if (isInitDR()) {
     initNets_initDR(
         design, nets, netRouteObjs, netExtObjs, netOrigGuides, netGuides);
@@ -3295,10 +3308,10 @@ void mixFingerprint(uint64_t& fingerprint, const odb::Rect& rect)
 
 }  // namespace
 
-// Covers the two design queries of mainRead() whose answers change during
-// detailed routing: the markers of initMarkers() and the routed objects of
-// initNetObjs().  The other queries (guides, global-routing pins, fixed
-// shapes) read state that end() leaves alone.
+// Covers the two design queries of a worker whose answers change during
+// detailed routing, both made by mainRead(): the markers of initMarkers()
+// and the routed objects of initNetObjs().  The other queries (guides,
+// global-routing pins, fixed shapes) read state that end() leaves alone.
 uint64_t FlexDRWorker::getDesignReadFingerprint(const frDesign* design) const
 {
   uint64_t fingerprint = 0;

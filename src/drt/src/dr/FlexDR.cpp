@@ -280,9 +280,8 @@ void FlexDRWorker::mainRead(frDesign* design)
     }
   }
   if (!skipRouting_) {
-    init(design);
+    readDesignNetObjects(design);
   }
-  read_end_time_ = high_resolution_clock::now();
 }
 
 int FlexDRWorker::mainRoute()
@@ -290,8 +289,11 @@ int FlexDRWorker::mainRoute()
   ProfileTask profile("DRW:main");
   using std::chrono::high_resolution_clock;
   const high_resolution_clock::time_point t0 = main_start_time_;
-  const high_resolution_clock::time_point t1 = read_end_time_;
   auto micronPerDBU = 1.0 / getTech()->getDBUPerUU();
+  if (!skipRouting_) {
+    init(getDesign());
+  }
+  const high_resolution_clock::time_point t1 = high_resolution_clock::now();
   if (!skipRouting_) {
     route_queue();
   }
@@ -966,23 +968,23 @@ void FlexDR::endWorkersBatch(
 // In the marker-driven iterations few workers run, so most threads idle
 // behind one slow worker per batch.  This function keeps the results of that
 // loop and fills the idle threads:
-//  - A worker reads the design in mainRead() and routes on its own data in
-//    mainRoute().  Results are written back (end()) in the order of the batch
-//    loop: batch by batch, creation order inside a batch.  A result is
-//    written as soon as every earlier result is written and every worker of
-//    the running batch has read the design, so end() never changes what a
-//    worker of the same batch reads.
+//  - A worker copies the changing design state in mainRead() and builds and
+//    routes on its own data in mainRoute().  Every read and every write of
+//    that design state happens under one mutex; mainRoute() runs outside it.
 //  - Which workers of a batch run is decided when every earlier batch is
 //    written back, on the design state the batch loop decides on: the
 //    workers with a marker in their DRC box.  From iteration 2 on a worker
 //    without one skips its routing and writes nothing (FlexDRWorker::main,
-//    FlexDRWorker::end), so it needs no run.
+//    FlexDRWorker::end), so it needs no run.  The workers that run read the
+//    design at that moment, before any result of their batch is written.
+//  - Results are written back (end()) in the order of the batch loop: batch
+//    by batch, creation order inside a batch; a result is written as soon as
+//    every earlier result is written.
 //  - A worker of a later batch may start ahead on an idle thread.  When its
 //    batch starts, its design-read fingerprint is compared with the
 //    fingerprint on the design state of that moment: equal means it read
 //    exactly what it reads in the batch loop, so its result is kept; a
 //    different one stops it and a fresh worker runs in the batch.
-//  - The design is written only while no worker reads it.
 // Start order: workers of the running batch first, most markers first (the
 // order of the starts does not enter the results); then workers of later
 // batches whose overlapping earlier workers are all written back.
@@ -995,7 +997,8 @@ int FlexDR::runGridWorkersAhead(std::vector<GridWorkerSlot>& slots,
 {
   enum class State
   {
-    kWaiting,
+    kWaiting,  // has not read the design
+    kRead,     // read the design at the start of its batch
     kRunning,
     kDone,
     kEnded  // written back, or without markers at the start of its batch
@@ -1003,7 +1006,7 @@ int FlexDR::runGridWorkersAhead(std::vector<GridWorkerSlot>& slots,
   struct Slot
   {
     State state = State::kWaiting;
-    uint64_t fingerprint = 0;
+    uint64_t fingerprint = 0;  // of a worker started ahead
     bool runs_in_batch = false;
     std::unique_ptr<std::atomic<bool>> stop_request;
     // Slots whose extended box intersects this one.
@@ -1044,17 +1047,14 @@ int FlexDR::runGridWorkersAhead(std::vector<GridWorkerSlot>& slots,
     }
   }
 
-  int num_markers_at_batch_start = 0;  // for the progress lines
   std::mutex mutex;
   std::condition_variable wake;
   // Everything below is read and written with the mutex held.
   int front = 0;  // slots before it are ended
   int current_batch = -1;
-  int reads_pending = 0;  // workers of the running batch that have not read
-  int readers = 0;        // workers inside mainRead()
-  bool write_wanted = false;
   bool finished = false;
   bool failed = false;
+  int num_markers_at_batch_start = 0;  // for the progress lines
   // Waiting slots of later batches with markers in their DRC box.
   std::set<int> marked_later_slots;
   bool no_worker_ahead = false;  // until the next result is written back
@@ -1073,9 +1073,9 @@ int FlexDR::runGridWorkersAhead(std::vector<GridWorkerSlot>& slots,
     std::vector<frMarker*> markers;
     getDesign()->getRegionQuery()->queryMarker(slots[i].worker->getDrcBox(),
                                                markers);
-    states[i].num_markers = markers.size();
+    states[i].num_markers = markers.size();  // a Recheck marker counts
     if (slots[i].batch > current_batch && states[i].state == State::kWaiting
-        && states[i].num_markers > 0) {  // a Recheck marker counts
+        && states[i].num_markers > 0) {
       marked_later_slots.insert(i);
     } else {
       marked_later_slots.erase(i);
@@ -1094,11 +1094,11 @@ int FlexDR::runGridWorkersAhead(std::vector<GridWorkerSlot>& slots,
       printIterationProgress(logger_, iter_prog, num_markers_at_batch_start);
     }
   };
-  // Needs: every earlier batch is ended and no worker reads the design.
+  // Needs: every earlier batch is ended.
   const auto start_batch = [&](const int batch) {
     current_batch = batch;
-    reads_pending = 0;
     batch_queue = {};
+    no_worker_ahead = false;
     num_markers_at_batch_start = getDesign()->getTopBlock()->getNumMarkers();
     for (int i = front; i < batch_end[batch]; i++) {
       Slot& state = states[i];
@@ -1123,7 +1123,6 @@ int FlexDR::runGridWorkersAhead(std::vector<GridWorkerSlot>& slots,
       }
       state.runs_in_batch = true;
       if (started) {
-        // readers == 0, so the worker has read the design.
         if (state.fingerprint
             == slots[i].worker->getDesignReadFingerprint(getDesign())) {
           num_kept++;
@@ -1136,28 +1135,16 @@ int FlexDR::runGridWorkersAhead(std::vector<GridWorkerSlot>& slots,
         discard(i);
         slots[i].worker
             = createWorker(slots[i].x_offset, slots[i].y_offset, args);
-        state.state = State::kWaiting;
       }
-      reads_pending++;
+      slots[i].worker->mainRead(getDesign());
+      state.state = State::kRead;
       batch_queue.emplace(state.num_markers, -i);
     }
   };
   // Writes back what the order allows.  Call after every change of a slot.
   const auto write_back = [&]() {
     while (!finished) {
-      if (reads_pending > 0) {
-        return;
-      }
-      if (front < batch_end[current_batch]
-          && states[front].state != State::kDone
-          && states[front].state != State::kEnded) {
-        return;
-      }
-      if (readers > 0) {
-        write_wanted = true;  // no further worker starts reading
-        return;
-      }
-      write_wanted = false;
+      bool wrote = false;
       while (front < batch_end[current_batch]
              && (states[front].state == State::kDone
                  || states[front].state == State::kEnded)) {
@@ -1170,19 +1157,21 @@ int FlexDR::runGridWorkersAhead(std::vector<GridWorkerSlot>& slots,
               count_markers(other);
             }
           }
+          wrote = true;
         }
         front++;
       }
-      no_worker_ahead = false;
-      if (front == batch_end[current_batch]) {
-        if (current_batch + 1 == num_batches) {
-          finished = true;
-        } else {
-          start_batch(current_batch + 1);
-        }
-        continue;
+      if (wrote) {
+        no_worker_ahead = false;
       }
-      return;
+      if (front < batch_end[current_batch]) {
+        return;
+      }
+      if (current_batch + 1 == num_batches) {
+        finished = true;
+      } else {
+        start_batch(current_batch + 1);
+      }
     }
   };
   // A slot of a later batch to start ahead, or -1.
@@ -1220,12 +1209,12 @@ int FlexDR::runGridWorkersAhead(std::vector<GridWorkerSlot>& slots,
   {
     std::unique_lock<std::mutex> lock(mutex);
     while (!finished && !failed) {
-      int picked = -1;
-      if (!write_wanted) {
+      try {
+        int picked = -1;
         while (!batch_queue.empty() && picked < 0) {
           const int i = -batch_queue.top().second;
           batch_queue.pop();
-          if (states[i].state == State::kWaiting) {
+          if (states[i].state == State::kRead) {
             picked = i;
           }
         }
@@ -1234,66 +1223,40 @@ int FlexDR::runGridWorkersAhead(std::vector<GridWorkerSlot>& slots,
           if (picked >= 0) {
             marked_later_slots.erase(picked);
             num_started_ahead++;
+            states[picked].fingerprint
+                = slots[picked].worker->getDesignReadFingerprint(getDesign());
+            slots[picked].worker->mainRead(getDesign());
           }
         }
-      }
-      if (picked < 0) {
-        wake.wait(lock);
-        continue;
-      }
-      Slot& state = states[picked];
-      FlexDRWorker* worker = slots[picked].worker.get();
-      state.state = State::kRunning;
-      state.stop_request = std::make_unique<std::atomic<bool>>(false);
-      worker->setStopRequest(state.stop_request.get());
-      const bool in_batch = slots[picked].batch == current_batch;
-      readers++;
-      lock.unlock();
-      uint64_t fingerprint = 0;
-      bool thrown = false;
-      try {
-        fingerprint = worker->getDesignReadFingerprint(getDesign());
-        worker->mainRead(getDesign());
-      } catch (...) {
-        exception.capture();
-        thrown = true;
-      }
-      lock.lock();
-      readers--;
-      if (thrown) {
-        failed = true;
-        wake.notify_all();
-        break;
-      }
-      // A batch starts only while no worker reads, so this slot still holds
-      // this worker and the running batch is the one of the start.
-      state.fingerprint = fingerprint;
-      if (in_batch) {
-        reads_pending--;
-      }
-      write_back();
-      wake.notify_all();
-      lock.unlock();
-      try {
-        worker->mainRoute();
-      } catch (...) {
-        exception.capture();
-        thrown = true;
-      }
-      lock.lock();
-      if (thrown) {
-        failed = true;
-        wake.notify_all();
-        break;
-      }
-      if (slots[picked].worker.get() == worker) {
-        state.state = State::kDone;
-        if (slots[picked].batch == current_batch) {
-          report_progress();
+        if (picked < 0) {
+          wake.wait(lock);
+          continue;
         }
-        write_back();
+        Slot& state = states[picked];
+        FlexDRWorker* worker = slots[picked].worker.get();
+        state.state = State::kRunning;
+        state.stop_request = std::make_unique<std::atomic<bool>>(false);
+        worker->setStopRequest(state.stop_request.get());
+        lock.unlock();
+        worker->mainRoute();
+        lock.lock();
+        // A worker started ahead may have been replaced or dropped.
+        if (slots[picked].worker.get() == worker) {
+          state.state = State::kDone;
+          if (slots[picked].batch == current_batch) {
+            report_progress();
+          }
+          write_back();
+        }
+        wake.notify_all();
+      } catch (...) {
+        if (!lock.owns_lock()) {
+          lock.lock();
+        }
+        exception.capture();
+        failed = true;
+        wake.notify_all();
       }
-      wake.notify_all();
     }
   }
   exception.rethrow();

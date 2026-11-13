@@ -575,14 +575,15 @@ class FlexDRWorker
   // others
   // main() is mainRead() followed by mainRoute().
   int main(frDesign* design);
-  // Reads the design: the markers in the DRC box and the routed objects in
-  // the extended box, and builds the worker's own nets, grid graph and
-  // design-rule checker from them.
+  // Copies what the worker reads of the design state that detailed routing
+  // changes: the markers in the DRC box and the routed objects in the
+  // extended box (with the guides of their nets).
   void mainRead(frDesign* design);
-  // Routes on the worker's own data.  Of the design it reads only state that
-  // stays fixed during detailed routing (technology, track patterns, fixed
-  // shapes, pins, net attributes), so it may run while end() of other
-  // workers writes routed objects and markers.
+  // Builds nets, grid graph and design-rule checker from the copies and
+  // routes.  Of the design it reads only state that stays fixed during
+  // detailed routing (technology, track patterns, fixed shapes, pins, net
+  // attributes), so it may run while end() of other workers writes routed
+  // objects and markers.
   int mainRoute();
   // Fingerprint of what mainRead() reads of the routed objects and markers:
   // the objects in query order with their identity and every field the
@@ -697,7 +698,17 @@ class FlexDRWorker
   const std::atomic<bool>* stop_request_{nullptr};
   bool stopped_{false};
   std::chrono::high_resolution_clock::time_point main_start_time_;
-  std::chrono::high_resolution_clock::time_point read_end_time_;
+  // The routed objects and guides read by mainRead(), until initNets() turns
+  // them into the worker's nets.
+  struct DesignNetObjects
+  {
+    frOrderedIdSet<frNet*> nets;
+    frOrderedIdMap<frNet*, std::vector<std::unique_ptr<drConnFig>>> route_objs;
+    frOrderedIdMap<frNet*, std::vector<std::unique_ptr<drConnFig>>> ext_objs;
+    frOrderedIdMap<frNet*, std::vector<frRect>> orig_guides;
+    frOrderedIdMap<frNet*, std::vector<frRect>> guides;
+  };
+  std::unique_ptr<DesignNetObjects> design_net_objects_;
   bool check_only_without_reroutable_nets_{false};
   bool check_only_{false};
   bool skipped_without_nets_{false};
@@ -750,6 +761,7 @@ class FlexDRWorker
   // init
   void init(const frDesign* design);
   void initNets(const frDesign* design);
+  void readDesignNetObjects(const frDesign* design);
   void initRipUpNetsFromMarkers();
   void initNetObjs(
       const frDesign* design,
