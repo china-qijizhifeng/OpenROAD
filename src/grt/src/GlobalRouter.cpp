@@ -1502,8 +1502,7 @@ bool GlobalRouter::loadRoutingFromDBGuides(odb::dbNet* db_net)
     int via_layer_idx = guide->getViaLayer() != nullptr
                             ? guide->getViaLayer()->getRoutingLevel()
                             : 0;
-    boxToGlobalRouting(
-        guide->getBox(), layer_idx, via_layer_idx, routes_[db_net]);
+    guideToGlobalRouting(guide, layer_idx, via_layer_idx, routes_[db_net]);
     is_congested_ = is_congested_ || guide->isCongested();
   }
 
@@ -2706,13 +2705,13 @@ bool GlobalRouter::hasJumperResources(const int init_x,
                                    dbuToTile(final_y, /*is_x=*/false));
 }
 
-void GlobalRouter::logJumperLayerResources()
+void GlobalRouter::logJumperLayerResources(const char* phase)
 {
   if (!logger_->debugCheck(GRT, "jumper_rejections", 1)) {
     return;
   }
   if (use_cugr_) {
-    cugr_->logJumperLayerResources();
+    cugr_->logJumperLayerResources(phase);
     return;
   }
   // FastRoute: edges by available tracks (capacity minus use).
@@ -2736,8 +2735,9 @@ void GlobalRouter::logJumperLayerResources()
                  GRT,
                  "jumper_rejections",
                  1,
-                 "JR layer_available layer={} direction={} available={} "
-                 "edges={}",
+                 "JR layer_available phase={} layer={} direction={} "
+                 "available={} edges={}",
+                 phase,
                  layer,
                  is_horizontal ? "H" : "V",
                  tracks,
@@ -3430,8 +3430,7 @@ void GlobalRouter::loadGuidesFromDB()
     for (odb::dbGuide* guide : net->getGuides()) {
       int layer_idx = guide->getLayer()->getRoutingLevel();
       int via_layer_idx = guide->getViaLayer()->getRoutingLevel();
-      boxToGlobalRouting(
-          guide->getBox(), layer_idx, via_layer_idx, routes_[net]);
+      guideToGlobalRouting(guide, layer_idx, via_layer_idx, routes_[net]);
       is_congested_ = is_congested_ || guide->isCongested();
     }
   }
@@ -4448,6 +4447,22 @@ void GlobalRouter::boxToGlobalRouting(const odb::Rect& route_bds,
   while (x0 == x1 && (y0 + tile_size) <= y1) {
     route.emplace_back(x0, y0, layer, x0, y0 + tile_size, layer);
     y0 += tile_size;
+  }
+}
+
+// The segments of a guide; the wire segments of a jumper guide are jumper
+// wires again (saveGuides sets the guide's flag from the segment's).
+void GlobalRouter::guideToGlobalRouting(odb::dbGuide* guide,
+                                        const int layer,
+                                        const int via_layer,
+                                        GRoute& route)
+{
+  const size_t first = route.size();
+  boxToGlobalRouting(guide->getBox(), layer, via_layer, route);
+  if (guide->isJumper()) {
+    for (size_t i = first; i < route.size(); i++) {
+      route[i].is_jumper = !route[i].isVia();
+    }
   }
 }
 

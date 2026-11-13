@@ -316,6 +316,19 @@ See LEF/DEF 5.8 Language Reference, Appendix C, "Calculating and
 Fixing Process Antenna Violations" for a [description](https://coriolis.lip6.fr/doc/lefdef/lefdefref/lefdefref.pdf)
 of antenna violations.
 
+A jumper replaces two gcells of a wire of the violating layer by a wire two
+routing layers above it, with a via stack at each end, at least one gcell away
+from the vias and branches of the wire. With CUGR (`global_route -use_cugr`
+or `-bonnroute`) a jumper is inserted where its wire and the pads of its two
+via stacks fit the resources left on every edge they charge. On the jumper's
+layer the pads lie on the jumper's own track, so they charge no edge the
+jumper wire runs over; the wire charges one track on each of its edges, and
+the pads charge the outer flank edges of that layer and the edges of the two
+layers below. `set_debug_level GRT jumper_rejections 1` logs the search: the
+violations of each check, every candidate segment with the scan of its
+positions and its outcome, every insertion attempt, and the routing resources
+per layer before and after the jumpers.
+
 If no `diode_cell` argument is specified the LEF cell with class CORE, ANTENNACELL will be used.
 If any repairs are made the filler instances are remove and must be
 placed with the `filler_placement` command.

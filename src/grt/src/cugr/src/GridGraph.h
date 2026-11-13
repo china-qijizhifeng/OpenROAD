@@ -460,10 +460,14 @@ class GridGraph
   void forEachViaColumnImpl(const std::shared_ptr<GRTreeNode>& tree,
                             F&& fn) const;
   // Visits each wire edge and wrong-way cell a tree commits, once each.
+  // `jumper_wires` receives the edges of the tree's antenna jumper wires
+  // (layer, lower cell x, y), sorted.
   template <typename F>
-  void forEachTreeWireEdgeImpl(const std::shared_ptr<GRTreeNode>& tree,
-                               bool adopted,
-                               F&& fn) const;
+  void forEachTreeWireEdgeImpl(
+      const std::shared_ptr<GRTreeNode>& tree,
+      bool adopted,
+      F&& fn,
+      std::vector<std::array<int, 3>>* jumper_wires = nullptr) const;
   // Flank edges a wrong-way wire through `cell` loads: fn(edge, demand).
   template <typename F>
   void forEachWrongWayFlankEdgeImpl(int layer_index, PointT cell, F&& fn) const;
