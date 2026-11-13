@@ -323,6 +323,11 @@ struct BonnRouteDRParams
   // Rip-up sequences (ripup_depth, ripup_passes) for the nets that fail in
   // incremental calls, whatever `ripup` is for the first call.
   bool incremental_ripup = true;
+  // Debug: at the start of every incremental call, count the routing shapes
+  // of the design (wires, vias, patches of nets whose routing did not
+  // change) that no shape of the routing space covers. 1 reports the count,
+  // 2 also stops with an error when it is not 0.
+  int incremental_check = 0;
   bool verbose = true;
   // Algorithm profile: 0 = 2013-improved (default), 1 = 2013-reimpl,
   // 2 = 2021 (2013-reimpl plus Ahrens et al., arXiv:2111.06169).
@@ -1111,6 +1116,11 @@ class BonnRouteDR
   void syncNets(SyncStats& stats);
   // Routed shapes of the frNet's own geometry (wires, vias, patches).
   void routingShapes(const frNet* net, std::vector<RShape>& shapes) const;
+  // The routed shape of a patch wire (or notch fill) as routingShapes reads
+  // it from the design.
+  RShape patchShape(frLayerNum layer, const odb::Rect& rect) const;
+  // incremental_check: design routing shapes outside the routing space.
+  void checkRoutingSpace(int64_t& nets, int64_t& uncovered) const;
   static uint64_t routingFingerprint(const frNet* net);
   static uint64_t termsFingerprint(const frNet* net);
   int addNetData(frNet* net);
@@ -1256,6 +1266,8 @@ class BonnRouteDR
   // Sets NetData::wide_shapes from the net's wire type, pins, reservations
   // and the shapes of its access options (end of setup).
   void markWideNets();
+  // NetData::wide_shapes of one net (as markWideNets).
+  bool netHasWideShapes(const NetData& net) const;
   // Largest distance at which two shapes of the routing space interact
   // (any layer, incl. via-layer rules), plus one pitch.
   int64_t interaction_reach_ = 0;

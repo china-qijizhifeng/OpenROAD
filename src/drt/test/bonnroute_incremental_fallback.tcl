@@ -15,6 +15,8 @@ set_bonnroute_dr_param profile 0
 set_bonnroute_dr_param offtrack_access 0
 set_bonnroute_dr_param postprocess 0
 set_bonnroute_dr_param incremental 1
+# Every incremental call checks that the routing space covers the design routing.
+set_bonnroute_dr_param incremental_check 2
 # NDR nets left to FlexDR (route_ndr_nets 0) exercise the fallback path.
 set_bonnroute_dr_param route_ndr_nets 0
 detailed_route -bonnroute -verbose 0

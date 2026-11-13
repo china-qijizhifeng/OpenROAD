@@ -293,6 +293,8 @@ bool BonnRouteDRParams::set(const std::string& name, const double value)
     incremental_potential = std::clamp(v, 0, 4);
   } else if (name == "incremental_ripup") {
     incremental_ripup = v != 0;
+  } else if (name == "incremental_check") {
+    incremental_check = std::clamp(v, 0, 2);
   } else if (name == "verbose") {
     verbose = v != 0;
   } else {
@@ -1063,7 +1065,13 @@ void BonnRouteDR::markWideNets()
   const int threads = static_cast<int>(workers_.size());
 #pragma omp parallel for num_threads(threads) schedule(dynamic, 256)
   for (int k = 0; k < static_cast<int>(nets_.size()); k++) {
-    NetData& net = nets_[k];
+    nets_[k].wide_shapes = netHasWideShapes(nets_[k]);
+  }
+}
+
+bool BonnRouteDR::netHasWideShapes(const NetData& net) const
+{
+  {
     bool wide = net.wire_type != 0;
     auto check = [&](const RShape& shape) {
       const int g = gridLayer(shape.layer);
@@ -1096,7 +1104,7 @@ void BonnRouteDR::markWideNets()
         }
       }
     }
-    net.wide_shapes = wide;
+    return wide;
   }
 }
 
@@ -6802,6 +6810,8 @@ void BonnRouteDR::writeNets()
 {
   frTechObject* tech = design_->getTech();
   std::vector<std::pair<frLayerNum, odb::Rect>> notch_fill_rects;
+  // (net, index in notch_fill_rects) of every fill written.
+  std::vector<std::pair<int, size_t>> written_fills;
   for (NetData& data : nets_) {
     if (!data.routed || (!write_mask_.empty() && !write_mask_[data.id])) {
       continue;
@@ -6943,10 +6953,26 @@ void BonnRouteDR::writeNets()
       net->addVia(std::move(via));
     }
     if (params_.notch_fill) {
+      const size_t first_fill = notch_fill_rects.size();
       fillNotches(net, data.id, notch_fill_rects);
+      for (size_t k = first_fill; k < notch_fill_rects.size(); k++) {
+        written_fills.emplace_back(data.id, k);
+      }
     }
     net->setHasInitialRouting(true);
     net->setModified(true);
+  }
+  // A routing space kept for incremental calls holds the notch fills as
+  // routed shapes of their net (patch wires, as routingShapes reads them);
+  // inserted after all nets are written, so the written routing is the
+  // same with and without a kept space.
+  if (record_fixed_ || incremental_active_) {
+    for (const auto& [id, k] : written_fills) {
+      const RShape s
+          = patchShape(notch_fill_rects[k].first, notch_fill_rects[k].second);
+      nets_[id].shapes.push_back(s);
+      changeShape(s, routedType(s.role), id, true, nullptr);
+    }
   }
 }
 

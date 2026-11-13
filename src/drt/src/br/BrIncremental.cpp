@@ -258,10 +258,46 @@ void BonnRouteDR::routingShapes(const frNet* net,
                       pad_ndr});
   }
   for (const auto& patch : net->getPatchWires()) {
-    const odb::Rect r = patch->getBBox();
-    shapes.push_back({patch->getLayerNum(),
-                      r,
-                      wire_role(patch->getLayerNum(), r, r.dx() >= r.dy())});
+    shapes.push_back(patchShape(patch->getLayerNum(), patch->getBBox()));
+  }
+}
+
+BonnRouteDR::RShape BonnRouteDR::patchShape(const frLayerNum layer,
+                                            const odb::Rect& rect) const
+{
+  const int num_fr = static_cast<int>(z_of_fr_.size());
+  const int z = layer >= 0 && layer < num_fr ? z_of_fr_[layer] : -1;
+  if (z < 0) {
+    return {layer, rect, br::ShapeRole::kFixed};
+  }
+  const bool horizontal = rect.dx() >= rect.dy();
+  return {layer,
+          rect,
+          horizontal == layers_[z].horizontal
+              ? br::ShapeRole::kPreferredWire
+              : br::ShapeRole::kNonPreferredWire};
+}
+
+void BonnRouteDR::checkRoutingSpace(int64_t& nets, int64_t& uncovered) const
+{
+  nets = 0;
+  uncovered = 0;
+  std::vector<RShape> design;
+  for (const NetData& data : nets_) {
+    if (data.dead || data.net == nullptr || !data.input_present) {
+      continue;
+    }
+    routingShapes(data.net, design);
+    int64_t missing = 0;
+    for (const RShape& s : design) {
+      const bool covered
+          = std::ranges::any_of(data.input_shapes, [&](const RShape& in) {
+              return in.layer == s.layer && in.rect.contains(s.rect);
+            });
+      missing += !covered;
+    }
+    nets += missing > 0;
+    uncovered += missing;
   }
 }
 
@@ -651,6 +687,8 @@ void BonnRouteDR::buildFromDesign()
   record_fixed_ = true;
   buildFixed();
   buildSameNetRules();
+  // As main(): per-net partition halos (routeParallel's batch boxes).
+  buildPartitionHalos();
   if (params_.spreading && params_.spread_from_extra_space) {
     loadExtraSpace();
   }
@@ -1267,6 +1305,24 @@ void BonnRouteDR::routeIncremental(std::vector<odb::Rect>& regions)
   SyncStats stats;
   syncInstances(stats);
   syncNets(stats);
+  if (params_.incremental_check > 0) {
+    int64_t bad_nets = 0;
+    int64_t uncovered = 0;
+    checkRoutingSpace(bad_nets, uncovered);
+    logger_->report(
+        "BonnRoute incremental check: {} routing shapes of {} nets outside "
+        "the routing space.",
+        uncovered,
+        bad_nets);
+    if (params_.incremental_check > 1 && uncovered > 0) {
+      logger_->error(utl::DRT,
+                     9190,
+                     "BonnRoute incremental: {} routing shapes of {} nets are "
+                     "not in the routing space.",
+                     uncovered,
+                     bad_nets);
+    }
+  }
   const double sync_s = timer.elapsed();
   victim_changed_insts_ = &stats.changed_insts;
 
@@ -1374,6 +1430,11 @@ void BonnRouteDR::routeIncremental(std::vector<odb::Rect>& regions)
     applyClassification(data, c, cstats);
     mergeKeptComponents(data, c);
     order.push_back(id);
+  }
+  // The batch boxes of routeParallel use the halo of each net's own shapes
+  // (pins, reservations, access options) as prepared in this call.
+  for (const int id : order) {
+    nets_[id].wide_shapes = netHasWideShapes(nets_[id]);
   }
   const double access_s = timer.elapsed() - sync_s;
   std::ranges::stable_sort(
