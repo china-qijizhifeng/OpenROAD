@@ -2854,6 +2854,15 @@ int FlexDR::main()
       break;
     }
     auto args = search_repair_args[iter_];
+    // Clean-up of initial routing: a worker that has rerouted a net this
+    // often without clearing its violations ends, and the next iteration
+    // continues with shifted tiles.  The strategy's own value returns with
+    // iteration 17, its first full rip-up iteration after the clean-up.
+    if (incremental && initial_routing_cleanup_.reroutes_per_net > 0
+        && iter_ >= 3 && iter_ <= 16) {
+      args.mazeEndIter = std::min(args.mazeEndIter,
+                                  initial_routing_cleanup_.reroutes_per_net);
+    }
     int clipSize = args.size;
     if (args.ripupMode != RipUpMode::ALL) {
       if (increaseClipsize_) {

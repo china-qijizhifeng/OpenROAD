@@ -927,7 +927,8 @@ void TritonRoute::dr()
          .normalize_initial_routing
          = bonnroute_params_->cleanup_normalize_initial_routing,
          .start_grid_workers_ahead
-         = bonnroute_params_->cleanup_grid_workers_ahead});
+         = bonnroute_params_->cleanup_grid_workers_ahead,
+         .reroutes_per_net = bonnroute_params_->cleanup_reroutes_per_net});
   }
   if (router_cfg_->SINGLE_STEP_DR) {
     dr_->init();

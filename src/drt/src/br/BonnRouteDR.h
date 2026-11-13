@@ -357,6 +357,13 @@ struct BonnRouteDRParams
   // from. The routing result equals that of the batch-by-batch run
   // (bit-identical result files); 0 runs batch by batch.
   bool cleanup_grid_workers_ahead = true;
+  // FlexDR's clean-up after the first routing, iterations 3 to 16: how often
+  // a worker reroutes one net (FlexDR's mazeEndIter, 8 in its own flow). A
+  // worker that still has violations after that many reroutes of a net ends;
+  // its result is written back when it has no more markers than before, and
+  // the next iteration continues with shifted tiles. 0 keeps FlexDR's value.
+  // From iteration 17 on FlexDR's value applies.
+  int cleanup_reroutes_per_net = 4;
   // Track assignment runs after BonnRoute instead of before it, for the nets
   // left to FlexDR only, and sees BonnRoute's routing as obstacles. FlexDR
   // reads track assignment only for those nets (their tile-boundary pins in

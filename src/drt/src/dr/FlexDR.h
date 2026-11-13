@@ -113,6 +113,9 @@ class FlexDR
     // batches start ahead of their batch on idle threads; the results equal
     // those of the batch loop (FlexDR::runGridWorkersAhead).
     bool start_grid_workers_ahead = false;
+    // Reroutes of one net per worker (mazeEndIter) in the iterations 3 to
+    // 16 when nets carry initial routing; 0 keeps the strategy's value.
+    int reroutes_per_net = 0;
   };
   struct IterationProgress
   {
