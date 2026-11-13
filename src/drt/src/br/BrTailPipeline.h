@@ -34,12 +34,15 @@
 
 #include <array>
 #include <condition_variable>
+#include <algorithm>
 #include <cstdint>
 #include <functional>
 #include <mutex>
 #include <queue>
 #include <tuple>
 #include <utility>
+#include <optional>
+#include <stdexcept>
 #include <vector>
 
 namespace drt::br {
@@ -89,6 +92,10 @@ class TailPipeline
     // Searches that started while an earlier batch still had undecided
     // attempts (overlap gained over a barrier per batch).
     int64_t overlapped_searches = 0;
+    // TailLookahead: smallest and largest batch (attempts, retries
+    // included).
+    int64_t smallest_batch = 0;
+    int64_t largest_batch = 0;
   };
 
   TailPipeline(int batch, int retry_delay)
@@ -208,6 +215,76 @@ class TailPipeline
 // Batch k produces at most r + |U| conflicts, so by (a) the net belongs to
 // batch k + 1. By (b), no attempt of batch k writes its box after the search
 // starts, so the search reads the state of the commits of batches <= k.
+// D6: size of the speculative batches. Batch k holds every retry of batch
+// k-1 first, then fresh nets of the queue up to size(k) in total. size(0) =
+// size(1) = max; size(k+1) follows the conflict share of batch k-1 (the last
+// batch decided when batch k is formed, so the size of the next batch is
+// known while batch k is decided, as TailLookahead's R3 needs): above
+// high_percent conflicts per attempt it halves, below low_percent it
+// doubles, within [min, max]. min 0 or >= max: every batch has max nets.
+struct TailBatchPolicy
+{
+  int max = 32;
+  int min = 0;
+  int high_percent = 50;
+  int low_percent = 20;
+  bool adaptive() const { return min > 0 && min < max; }
+  int next(int size, int64_t attempts, int64_t conflicts) const
+  {
+    if (!adaptive() || attempts <= 0) {
+      return adaptive() ? size : max;
+    }
+    if (conflicts * 100 > static_cast<int64_t>(high_percent) * attempts) {
+      return std::max(min, size / 2);
+    }
+    if (conflicts * 100 < static_cast<int64_t>(low_percent) * attempts) {
+      return std::min(max, size * 2);
+    }
+    return size;
+  }
+};
+
+// Sizes of the batches of one pass under a TailBatchPolicy.
+class TailBatchSizes
+{
+ public:
+  explicit TailBatchSizes(const TailBatchPolicy& policy)
+      : policy_(policy), max_(std::max(1, policy.max))
+  {
+  }
+  // size(k) needs the outcomes of the batches before k - 1.
+  int size(const int k)
+  {
+    while (static_cast<int>(sizes_.size()) <= k) {
+      const int j = static_cast<int>(sizes_.size());
+      if (j < 2 || !policy_.adaptive()) {
+        sizes_.push_back(max_);
+        continue;
+      }
+      if (static_cast<int>(outcomes_.size()) < j - 1) {
+        throw std::logic_error("TailBatchSizes: outcome of batch missing");
+      }
+      const auto [attempts, conflicts] = outcomes_[j - 2];
+      sizes_.push_back(policy_.next(sizes_[j - 1], attempts, conflicts));
+    }
+    return sizes_[k];
+  }
+  // Batch k is decided: its attempts and conflicts.
+  void record(const int k, const int64_t attempts, const int64_t conflicts)
+  {
+    if (static_cast<int>(outcomes_.size()) != k) {
+      throw std::logic_error("TailBatchSizes: outcomes out of order");
+    }
+    outcomes_.emplace_back(attempts, conflicts);
+  }
+
+ private:
+  TailBatchPolicy policy_;
+  int max_;
+  std::vector<int> sizes_;
+  std::vector<std::pair<int64_t, int64_t>> outcomes_;
+};
+
 class TailLookahead
 {
  public:
@@ -226,7 +303,11 @@ class TailLookahead
     bool early;  // searched under R3
   };
 
-  explicit TailLookahead(int batch) : batch_(batch < 1 ? 1 : batch) {}
+  explicit TailLookahead(int batch) : TailLookahead(TailBatchPolicy{batch}) {}
+  explicit TailLookahead(const TailBatchPolicy& policy)
+      : batch_(policy.max < 1 ? 1 : policy.max), policy_(policy)
+  {
+  }
 
   // boxes: indexed by net id. failed receives the nets without a route in
   // (batch, position) order. attempts (optional) receives every attempt in
@@ -274,7 +355,9 @@ class TailLookahead
   void decided(int item);
   bool finished() const { return current_.empty(); }
 
-  const int batch_;
+  const int batch_;  // largest batch size
+  const TailBatchPolicy policy_;
+  std::optional<TailBatchSizes> sizes_;
   const std::vector<int>* order_ = nullptr;
   const std::vector<Box>* boxes_ = nullptr;
   const Hooks* hooks_ = nullptr;

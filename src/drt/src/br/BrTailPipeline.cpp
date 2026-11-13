@@ -342,7 +342,14 @@ int TailLookahead::addItem(const int net)
 void TailLookahead::formBatch()
 {
   // R1: the conflicts of the previous batch in list order, then fresh nets
-  // of the queue; R4: a fresh net searched under R3 keeps that search.
+  // of the queue up to the batch's size; R4: a fresh net searched under R3
+  // keeps that search.
+  const int b = static_cast<int>(batches_.size());
+  if (b > 0) {
+    sizes_->record(b - 1,
+                   static_cast<int64_t>(batches_.back().size()),
+                   current_conflicts_);
+  }
   std::ranges::sort(retries_);
   std::vector<int> members;
   members.reserve(batch_);
@@ -350,7 +357,8 @@ void TailLookahead::formBatch()
     members.push_back(addItem(net));
   }
   retries_.clear();
-  const size_t room = static_cast<size_t>(batch_) - members.size();
+  const size_t size = static_cast<size_t>(sizes_->size(b));
+  const size_t room = size > members.size() ? size - members.size() : 0;
   const size_t fresh = std::min(room, order_->size() - queue_head_);
   for (size_t p = 0; p < early_.size(); p++) {
     if (p < fresh) {
@@ -370,7 +378,6 @@ void TailLookahead::formBatch()
   if (current_.empty()) {
     return;
   }
-  const int b = static_cast<int>(batches_.size());
   for (size_t k = 0; k < current_.size(); k++) {
     items_[current_[k]].batch = b;
     items_[current_[k]].position = static_cast<int>(k);
@@ -435,9 +442,11 @@ int TailLookahead::lookaheadCandidate()
       writers.push_back(x);
     }
   }
-  // R3 (a): p < batch - r - |U|.
+  // R3 (a): p < size of the next batch - r - |U|.
+  const int next_size
+      = sizes_->size(static_cast<int>(batches_.size()));
   const int64_t limit = std::min<int64_t>(
-      static_cast<int64_t>(batch_) - current_conflicts_
+      static_cast<int64_t>(next_size) - current_conflicts_
           - static_cast<int64_t>(writers.size()),
       static_cast<int64_t>(order_->size() - queue_head_));
   for (int64_t p = 0; p < limit; p++) {
@@ -509,6 +518,7 @@ TailLookahead::Stats TailLookahead::run(const std::vector<int>& order,
   retries_.clear();
   queue_head_ = 0;
   early_.assign(batch_, -1);
+  sizes_.emplace(policy_);
   running_ = 0;
   deadlock_ = false;
   ready_decide_ = {};
@@ -598,6 +608,10 @@ TailLookahead::Stats TailLookahead::run(const std::vector<int>& order,
   }
   stats.batches = static_cast<int64_t>(batches_.size());
   for (const std::vector<int>& batch : batches_) {
+    const int64_t n = static_cast<int64_t>(batch.size());
+    stats.smallest_batch
+        = stats.smallest_batch == 0 ? n : std::min(stats.smallest_batch, n);
+    stats.largest_batch = std::max(stats.largest_batch, n);
     for (const int x : batch) {
       const Item& item = items_[x];
       stats.attempts++;

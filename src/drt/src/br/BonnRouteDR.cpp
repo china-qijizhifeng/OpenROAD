@@ -204,6 +204,12 @@ bool BonnRouteDRParams::set(const std::string& name, const double value)
     fast_wire_types = std::clamp(v, 1, br::FastGrid::kMaxWireTypes);
   } else if (name == "tail_batch") {
     tail_batch = std::max(0, v);
+  } else if (name == "tail_batch_min") {
+    tail_batch_min = std::max(0, v);
+  } else if (name == "tail_batch_high") {
+    tail_batch_high = std::clamp(v, 0, 100);
+  } else if (name == "tail_batch_low") {
+    tail_batch_low = std::clamp(v, 0, 100);
   } else if (name == "tail_threads") {
     tail_threads = std::max(0, v);
   } else if (name == "tail_order") {
@@ -5664,6 +5670,14 @@ void BonnRouteDR::routeSpeculative(const std::vector<int>& order,
   }
 }
 
+br::TailBatchPolicy BonnRouteDR::tailBatchPolicy() const
+{
+  return {params_.tail_batch,
+          params_.tail_batch_min,
+          params_.tail_batch_high,
+          params_.tail_batch_low};
+}
+
 void BonnRouteDR::routeSpeculativeBatches(const std::vector<int>& order,
                                           std::vector<int>& failed,
                                           std::vector<int>& deferred,
@@ -5672,6 +5686,13 @@ void BonnRouteDR::routeSpeculativeBatches(const std::vector<int>& order,
                                           const int64_t budget)
 {
   const size_t batch_size = static_cast<size_t>(params_.tail_batch);
+  br::TailBatchSizes sizes(tailBatchPolicy());
+  // Retries of the previous batch at the queue's front: all join the batch.
+  size_t pending_retries = 0;
+  int64_t previous_attempts = 0;
+  int64_t previous_conflicts = 0;
+  int64_t smallest_batch = 0;
+  int64_t largest_batch = 0;
   std::deque<int> queue(order.begin(), order.end());
   std::vector<int> batch;
   std::vector<char> ok;
@@ -5698,10 +5719,20 @@ void BonnRouteDR::routeSpeculativeBatches(const std::vector<int>& order,
   std::vector<double> search_times;
   while (!queue.empty()) {
     batch.clear();
-    while (!queue.empty() && batch.size() < batch_size) {
+    if (batches > 0) {
+      sizes.record(
+          static_cast<int>(batches) - 1, previous_attempts, previous_conflicts);
+    }
+    const size_t size = std::max<size_t>(
+        pending_retries, static_cast<size_t>(sizes.size(batches)));
+    while (!queue.empty() && batch.size() < size) {
       batch.push_back(queue.front());
       queue.pop_front();
     }
+    smallest_batch = smallest_batch == 0
+                         ? static_cast<int64_t>(batch.size())
+                         : std::min<int64_t>(smallest_batch, batch.size());
+    largest_batch = std::max<int64_t>(largest_batch, batch.size());
     ok.assign(batch.size(), 0);
     busy.assign(batch.size(), 0);
     settled.assign(batch.size(), 0);
@@ -5898,7 +5929,22 @@ void BonnRouteDR::routeSpeculativeBatches(const std::vector<int>& order,
     for (auto it = retry.rbegin(); it != retry.rend(); ++it) {
       queue.push_front(*it);
     }
+    pending_retries = retry.size();
+    previous_attempts = static_cast<int64_t>(batch.size());
+    previous_conflicts = static_cast<int64_t>(retry.size());
     batches++;
+  }
+  if (params_.verbose && tailBatchPolicy().adaptive()) {
+    logger_->info(utl::DRT,
+                  9132,
+                  "BonnRoute {} adaptive batches: {} batches of {} to {} nets "
+                  "(tail_batch_min {}, tail_batch {}).",
+                  stage,
+                  batches,
+                  smallest_batch,
+                  largest_batch,
+                  params_.tail_batch_min,
+                  params_.tail_batch);
   }
   partition_wall_ += wall_total;
   partition_busy_ += busy_total;
@@ -6162,8 +6208,20 @@ void BonnRouteDR::routeSpeculativePipeline(const std::vector<int>& order,
   std::vector<int> unrouted;
   br::TailPipeline::Stats stats;
   if (params_.tail_lookahead) {
-    br::TailLookahead lookahead(params_.tail_batch);
+    br::TailLookahead lookahead(tailBatchPolicy());
     stats = lookahead.run(order, boxes, threads, hooks, unrouted);
+    if (params_.verbose && tailBatchPolicy().adaptive()) {
+      logger_->info(utl::DRT,
+                    9132,
+                    "BonnRoute {} adaptive batches: {} batches of {} to {} "
+                    "nets (tail_batch_min {}, tail_batch {}).",
+                    stage,
+                    stats.batches,
+                    stats.smallest_batch,
+                    stats.largest_batch,
+                    params_.tail_batch_min,
+                    params_.tail_batch);
+    }
   } else {
     br::TailPipeline pipeline(params_.tail_batch, params_.tail_retry_delay);
     stats = pipeline.run(order, boxes, threads, hooks, unrouted);

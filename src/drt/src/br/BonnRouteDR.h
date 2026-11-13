@@ -28,6 +28,7 @@
 #include "br/BrPotentialOracle.h"
 #include "br/BrSameNetRules.h"
 #include "br/BrShapeGrid.h"
+#include "br/BrTailPipeline.h"
 #include "br/BrWireModel.h"
 #include "frBaseTypes.h"
 #include "frRTree.h"
@@ -118,6 +119,14 @@ struct BonnRouteDRParams
   // Results depend on the net order and the batch size only. 0 keeps the
   // partition sequence to its end.
   int tail_batch = 32;
+  // D6 (BrTailPipeline.h, TailBatchPolicy): batches of at least
+  // tail_batch_min and at most tail_batch nets; the size halves after a
+  // batch with more than tail_batch_high percent conflicts per attempt and
+  // doubles below tail_batch_low percent. 0: every batch has tail_batch
+  // nets. Barrier batches and the lookahead follow the same sizes.
+  int tail_batch_min = 0;
+  int tail_batch_high = 50;
+  int tail_batch_low = 20;
   // Threads of the speculative batches; 0 uses all router threads. The
   // batch results do not depend on it (a check of that determinism).
   int tail_threads = 0;
@@ -945,6 +954,8 @@ class BonnRouteDR
                     const br::TileBox* region);
   void reportFootprints();
   void routeParallel(const std::vector<int>& order, std::vector<int>& failed);
+  // D6: the batch size policy of the speculative tail.
+  br::TailBatchPolicy tailBatchPolicy() const;
   // settled_budget: stop starting sequences once the serial worker settled
   // this many vertices in the phase (0: unlimited).
   void routeRipupQueue(const std::vector<int>& failed,

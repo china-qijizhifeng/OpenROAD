@@ -289,6 +289,10 @@ struct LookaheadInstance
   std::vector<Box> boxes;
   std::vector<int> order;
   int batch;
+  // D6 adaptive batches: batch_min 0 keeps every batch at `batch` nets.
+  int batch_min = 0;
+  int high_percent = 50;
+  int low_percent = 20;
   uint64_t salt;
   int found_modulus;     // a route is missing when route % found_modulus == 0
   int conflict_modulus;  // routes conflict when mix % conflict_modulus == 0
@@ -311,7 +315,35 @@ struct LookaheadOutcome
   std::map<std::pair<int, int>, uint64_t> visible;
   int64_t violations = 0;
   int64_t early = 0;
+  // Batch sizes of the serial S (fresh room of each batch), both passes.
+  std::vector<int> sizes;
 };
+
+// D6 size rule, written independently of TailBatchPolicy: size(0) = size(1)
+// = batch; size(k) from size(k-1) and the attempts and conflicts of batch
+// k-2.
+int referenceSize(const LookaheadInstance& in,
+                  const std::vector<int>& sizes,
+                  const std::vector<std::pair<int, int>>& outcomes)
+{
+  const size_t k = sizes.size();
+  const bool adaptive = in.batch_min > 0 && in.batch_min < in.batch;
+  if (k < 2 || !adaptive) {
+    return in.batch;
+  }
+  const int previous = sizes[k - 1];
+  const auto [attempts, conflicts] = outcomes[k - 2];
+  if (attempts == 0) {
+    return previous;
+  }
+  if (100 * conflicts > in.high_percent * attempts) {
+    return previous / 2 < in.batch_min ? in.batch_min : previous / 2;
+  }
+  if (100 * conflicts < in.low_percent * attempts) {
+    return previous * 2 > in.batch ? in.batch : previous * 2;
+  }
+  return previous;
+}
 
 bool lookaheadFound(const LookaheadInstance& in, const uint64_t route)
 {
@@ -389,10 +421,17 @@ LookaheadOutcome lookaheadReference(const LookaheadInstance& in)
                   AttemptList& list,
                   std::vector<int>& deferred) {
     std::deque<int> queue(order.begin(), order.end());
+    std::vector<int> retries;
+    std::vector<int> sizes;
+    std::vector<std::pair<int, int>> outcomes;
     int b = 0;
-    while (!queue.empty()) {
-      std::vector<int> batch;
-      while (!queue.empty() && static_cast<int>(batch.size()) < in.batch) {
+    while (!queue.empty() || !retries.empty()) {
+      // Every retry of the previous batch, then fresh nets up to the size.
+      std::vector<int> batch = retries;
+      retries.clear();
+      sizes.push_back(referenceSize(in, sizes, outcomes));
+      out.sizes.push_back(sizes.back());
+      while (!queue.empty() && static_cast<int>(batch.size()) < sizes.back()) {
         batch.push_back(queue.front());
         queue.pop_front();
       }
@@ -434,9 +473,9 @@ LookaheadOutcome lookaheadReference(const LookaheadInstance& in)
         attempt[n]++;
         list.emplace_back(b, static_cast<int>(k), n, static_cast<int>(d));
       }
-      for (auto it = retry.rbegin(); it != retry.rend(); ++it) {
-        queue.push_front(*it);
-      }
+      outcomes.emplace_back(static_cast<int>(batch.size()),
+                            static_cast<int>(retry.size()));
+      retries = retry;
       b++;
     }
   };
@@ -561,7 +600,8 @@ LookaheadOutcome lookaheadScheduled(const LookaheadInstance& in,
   auto pass = [&](const std::vector<int>& order,
                   AttemptList& list,
                   std::vector<int>& deferred) {
-    TailLookahead lookahead(in.batch);
+    TailLookahead lookahead(drt::br::TailBatchPolicy{
+        in.batch, in.batch_min, in.high_percent, in.low_percent});
     std::vector<int> unrouted;
     std::vector<TailLookahead::Attempt> attempts;
     const TailLookahead::Stats stats
@@ -613,6 +653,11 @@ LookaheadInstance randomLookaheadInstance(std::mt19937_64& rng)
   }
   std::shuffle(in.order.begin(), in.order.end(), rng);
   in.batch = uniform(1, 40);
+  if (rng() % 2 == 0) {
+    in.batch_min = uniform(1, in.batch);
+    in.high_percent = uniform(0, 100);
+    in.low_percent = uniform(0, in.high_percent);
+  }
   in.salt = rng();
   in.found_modulus = uniform(2, 16);
   in.conflict_modulus = uniform(1, 8);
@@ -622,13 +667,19 @@ LookaheadInstance randomLookaheadInstance(std::mt19937_64& rng)
 }
 
 // Returns the number of failing runs.
-int runLookaheadCases(const int cases, int64_t& attempts, int64_t& early)
+int runLookaheadCases(const int cases,
+                      int64_t& attempts,
+                      int64_t& early,
+                      int64_t& varied)
 {
   std::mt19937_64 rng(20261113);
   int failures = 0;
   for (int c = 0; c < cases; c++) {
     const LookaheadInstance in = randomLookaheadInstance(rng);
     const LookaheadOutcome ref = lookaheadReference(in);
+    // Cases whose batch sizes changed during a pass.
+    varied += std::ranges::any_of(
+        ref.sizes, [&](const int s) { return s != in.batch; });
     // Thread counts 1-8, each in a quarter of the cases.
     for (const int threads : {1 + c % 8, 1 + (c + 4) % 8}) {
       const LookaheadOutcome got = lookaheadScheduled(in, threads, rng());
@@ -715,16 +766,21 @@ int main(int argc, char** argv)
       failures);
   int64_t lookahead_attempts = 0;
   int64_t early = 0;
+  int64_t varied = 0;
   const int lookahead_failures
-      = runLookaheadCases(lookahead_cases, lookahead_attempts, early);
+      = runLookaheadCases(lookahead_cases, lookahead_attempts, early, varied);
   std::printf(
       "tail lookahead: %d cases x 2 thread counts (1-8), %lld attempts, "
-      "%lld searches started early, %d failures\n",
+      "%lld searches started early, %lld cases with adaptive batch sizes, "
+      "%d failures\n",
       lookahead_cases,
       static_cast<long long>(lookahead_attempts),
       static_cast<long long>(early),
+      static_cast<long long>(varied),
       lookahead_failures);
-  // The lookahead must actually start searches early on these instances.
-  const bool exercised = lookahead_cases == 0 || early > 0;
+  // The lookahead must actually start searches early on these instances,
+  // and batch sizes must actually change in some of them.
+  const bool exercised
+      = lookahead_cases == 0 || (early > 0 && varied > 0);
   return failures == 0 && lookahead_failures == 0 && exercised ? 0 : 1;
 }
