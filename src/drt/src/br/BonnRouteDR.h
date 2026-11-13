@@ -397,6 +397,10 @@ struct BonnRouteDRParams
   // larger tail batches (tail_batch_max) do not lengthen the serial rip-up
   // phase by their re-searches. 0: every settled vertex counts.
   bool ripup_effort_conflicts_excluded = false;
+  // A fixed budget of that phase in settled vertices, in place of the
+  // percentage (for comparisons at an equal budget, e.g. the budget a
+  // default run logged in DRT-9136). 0: final_ripup_effort.
+  int64_t final_ripup_budget = 0;
   // Skip that phase when more than this percentage of the nets failed.
   int final_ripup_max_share = 2;
   // Catalogue paths start at the pin's OpenROAD access points (1) or

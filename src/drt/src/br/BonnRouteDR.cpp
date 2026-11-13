@@ -216,6 +216,8 @@ bool BonnRouteDRParams::set(const std::string& name, const double value)
     final_ripup_effort = std::max(0, v);
   } else if (name == "ripup_effort_conflicts_excluded") {
     ripup_effort_conflicts_excluded = v != 0;
+  } else if (name == "final_ripup_budget") {
+    final_ripup_budget = std::max<int64_t>(0, static_cast<int64_t>(value));
   } else if (name == "potential_detour_tiles") {
     potential_detour_tiles = std::max(0, v);
   } else if (name == "critical_nets") {
@@ -9785,15 +9787,39 @@ void BonnRouteDR::main()
     // the vertices the parallel phases settled (deterministic). Smaller
     // nets first, so the budget goes to the most nets.
     int64_t budget = 0;
-    if (!params_.ripup && params_.final_ripup_effort > 0) {
+    if (!params_.ripup
+        && (params_.final_ripup_effort > 0 || params_.final_ripup_budget > 0)) {
       int64_t parallel_settled = 0;
+      int64_t conflict_settled = 0;
       for (const Worker& w : workers_) {
         parallel_settled += w.settled;
-        if (params_.ripup_effort_conflicts_excluded) {
-          parallel_settled -= w.conflict_settled;
-        }
+        conflict_settled += w.conflict_settled;
       }
-      budget = parallel_settled * params_.final_ripup_effort / 100;
+      const int64_t base = params_.ripup_effort_conflicts_excluded
+                               ? parallel_settled - conflict_settled
+                               : parallel_settled;
+      budget = params_.final_ripup_budget > 0
+                   ? params_.final_ripup_budget
+                   : base * params_.final_ripup_effort / 100;
+      if (params_.verbose) {
+        logger_->info(
+            utl::DRT,
+            9136,
+            "BonnRoute DR rip-up budget: {} settled vertices ({}); the "
+            "parallel phases settled {}, {} of them in tail attempts "
+            "decided as conflicts; final_ripup_effort {}% of the base "
+            "gives {}.",
+            budget,
+            params_.final_ripup_budget > 0
+                ? "fixed by final_ripup_budget"
+                : (params_.ripup_effort_conflicts_excluded
+                       ? "conflicting attempts excluded from the base"
+                       : "all settled vertices as the base"),
+            parallel_settled,
+            conflict_settled,
+            params_.final_ripup_effort,
+            base * params_.final_ripup_effort / 100);
+      }
       std::ranges::stable_sort(failed_first, [&](int a, int b) {
         return nets_[a].hpwl < nets_[b].hpwl;
       });
