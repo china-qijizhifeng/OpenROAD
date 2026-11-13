@@ -873,6 +873,7 @@ int GlobalRouter::repairAntennas(odb::dbMTerm* diode_mterm,
                                                           diode_mterm,
                                                           ratio_margin,
                                                           num_threads);
+    repair_antennas_->logViolations("before", itr + 1);
     // if run in GRT and it need run jumper insertion
     std::vector<odb::dbNet*> nets_with_jumpers;
     if (!diode_only && repair_antennas_->hasNewViolations()
@@ -904,6 +905,7 @@ int GlobalRouter::repairAntennas(odb::dbMTerm* diode_mterm,
                                                      diode_mterm,
                                                      ratio_margin,
                                                      num_threads);
+      repair_antennas_->logViolations("after_jumpers", itr + 1);
       updateDbCongestion();
     }
     if (violations && !jumper_only) {
