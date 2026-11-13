@@ -1331,24 +1331,43 @@ class BonnRouteDR
   // Terms of a component joined by kept pieces become one terminal whose
   // options include the track vertices on the kept pieces.
   void mergeKeptComponents(NetData& net, const InputClassification& c);
-  // incremental_diode_node: new diode pins of a net and the gates they
-  // serve, the allowed targets, and the unrestricted options for the
-  // fallback.
+  // incremental_diode_node: new diode pins of a net, the gates they serve
+  // and the targets of one diode's connection.
   struct DiodeConnection
   {
     std::vector<std::pair<const frInstTerm*, const frInstTerm*>> pairs;
     // Access options of the paired gates before the merge.
     std::vector<AccessOption> gate_options;
     std::unordered_set<size_t> targets;
-    std::vector<std::vector<AccessOption>> unrestricted;
-    // Track layer cap of the current restriction; -1: unrestricted.
-    int cap = -1;
+    // Per pair: the gate's own options before the merge, the first cap
+    // (lowest violating layer from the antenna checker, else 0), the cap the
+    // diode was routed under (-1: unrestricted), whether the checker paired it.
+    std::vector<std::vector<AccessOption>> gate_options_by_pair;
+    std::vector<int> start_cap;
+    std::vector<int> achieved;
+    std::vector<char> from_checker;
   };
+  // A gate pin with an antenna violation (ant::AntennaChecker) and the
+  // track layer of its lowest violating layer.
+  struct GateViolation
+  {
+    std::string inst;
+    std::string term;
+    int z = 0;
+  };
+  // Antenna checker violations of the nets `ids` (their odb routing).
+  void antennaViolationsOf(
+      const std::vector<int>& ids,
+      std::unordered_map<int, std::vector<GateViolation>>& out) const;
+  // Routes the diodes of a net one at a time, each against its own gate's
+  // node under a rising cap; commits the union of the connections.
+  bool routeDiodeNet(int id, const InputClassification& c, DiodeConnection& dc);
   std::unordered_map<int, DiodeConnection> diode_connections_;
   // Before mergeKeptComponents: false if the net has no new diode pin or
   // its kept routing is not one component.
   bool planDiodeConnection(const NetData& net,
                            const InputClassification& c,
+                           const std::vector<GateViolation>* violations,
                            DiodeConnection& out) const;
   // Targets of the diode connections with the search capped at track layer
   // `cap`: track vertices at or below it on kept metal joined to a paired
@@ -1356,13 +1375,6 @@ class BonnRouteDR
   void diodeTargets(const InputClassification& c,
                     DiodeConnection& dc,
                     int cap) const;
-  // After mergeKeptComponents: restricts the options and the search layers
-  // to `cap`; false (and unrestricted) when a term has no option left.
-  bool restrictDiodeConnection(NetData& net,
-                               const InputClassification& c,
-                               DiodeConnection& dc,
-                               int cap);
-  void unrestrictDiodeConnection(NetData& net, DiodeConnection& dc);
   // The pins a and b of `net` are joined by its metal on the layers at or
   // below track layer `cap` (antenna node of that layer).
   bool joinedOnLowLayers(const frNet* net,
