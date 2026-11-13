@@ -753,44 +753,63 @@ std::vector<int> FlexDR::runStubbornWorkersUntilClean(
     IterationProgress& iter_prog)
 {
   const int num_markers = getDesign()->getTopBlock()->getNumMarkers();
-  const size_t wave_size
-      = static_cast<size_t>(std::max(1, router_cfg_->MAX_THREADS));
-  std::set<int> clean_clusters;  // clusters with a zero-marker worker
-  std::vector<int> ran;
-  ran.reserve(workers_batch.size());
-  size_t next = 0;
-  while (next < workers_batch.size()) {
-    std::vector<int> wave;
-    while (next < workers_batch.size() && wave.size() < wave_size) {
-      if (!clean_clusters.contains(workers_batch[next]->getWorkerId())) {
-        wave.push_back(static_cast<int>(next));
-      }
-      next++;
+  // Per cluster: the lowest creation index of a worker that ran to the end
+  // with zero markers.  Workers at or below that index are never skipped or
+  // stopped, so the first zero-marker worker always runs to the end.
+  std::map<int, std::unique_ptr<std::atomic<int>>> first_clean;
+  for (int i = 0; i < (int) workers_batch.size(); i++) {
+    const int cluster = workers_batch[i]->getWorkerId();
+    auto it = first_clean.find(cluster);
+    if (it == first_clean.end()) {
+      it = first_clean
+               .emplace(cluster,
+                        std::make_unique<std::atomic<int>>(
+                            std::numeric_limits<int>::max()))
+               .first;
     }
-    ThreadException exception;
+    workers_batch[i]->setStopBelow(it->second.get(), i);
+  }
+  std::vector<char> finished(workers_batch.size(), 0);
+  std::atomic<int> not_finished{0};
+  ThreadException exception;
 #pragma omp parallel for schedule(dynamic)
-    for (int k = 0; k < (int) wave.size(); k++) {  // NOLINT
-      try {
-        workers_batch[wave[k]]->main(getDesign());
-#pragma omp critical
-        {
-          if (router_cfg_->VERBOSE > 0) {
-            printIterationProgress(logger_, iter_prog, num_markers);
-          }
+  for (int i = 0; i < (int) workers_batch.size(); i++) {  // NOLINT
+    try {
+      auto& worker = workers_batch[i];
+      std::atomic<int>& clean = *first_clean.at(worker->getWorkerId());
+      if (clean.load() < i) {
+        not_finished++;
+        continue;
+      }
+      worker->main(getDesign());
+      if (worker->isStopped()) {
+        not_finished++;
+        continue;
+      }
+      finished[i] = 1;
+      if (worker->getBestNumMarkers() == 0) {
+        int current = clean.load();
+        while (i < current && !clean.compare_exchange_weak(current, i)) {
         }
-      } catch (...) {
-        exception.capture();
       }
-    }
-    exception.rethrow();
-    for (const int index : wave) {
-      ran.push_back(index);
-      if (workers_batch[index]->getBestNumMarkers() == 0) {
-        clean_clusters.insert(workers_batch[index]->getWorkerId());
+#pragma omp critical
+      {
+        if (router_cfg_->VERBOSE > 0) {
+          printIterationProgress(logger_, iter_prog, num_markers);
+        }
       }
+    } catch (...) {
+      exception.capture();
     }
   }
-  std::ranges::sort(ran);
+  exception.rethrow();
+  iter_prog.total_num_workers -= not_finished.load();
+  std::vector<int> ran;
+  for (int i = 0; i < (int) workers_batch.size(); i++) {
+    if (finished[i]) {
+      ran.push_back(i);
+    }
+  }
   return ran;
 }
 
@@ -1287,10 +1306,12 @@ void FlexDR::stubbornTilesFlow(const SearchRepairArgs& args,
     // The selection below keeps, per cluster (worker id), the first worker in
     // creation order with the fewest markers.  A worker that ends with zero
     // markers is therefore the selected one whatever the later workers of its
-    // cluster find.  Workers only read the design until end(), so the workers
-    // run in waves in creation order and a cluster stops once one of its
-    // workers reaches zero markers; the selected worker is the same as when
-    // every worker runs, at any thread count.
+    // cluster find.  Workers only read the design until end(), so the later
+    // workers of a cluster are skipped or stopped once an earlier one has
+    // ended with zero markers; the selection runs over the workers that ran to
+    // the end, a set that holds every worker up to the first zero-marker one,
+    // so the selected worker is the same as when every worker runs, at any
+    // thread count and timing.
     const std::vector<int> ran = runStubbornWorkersUntilClean(batch, iter_prog);
     std::map<int, FlexDRWorker*>
         worker_best_result;  // holds the best worker in results

@@ -1951,6 +1951,9 @@ void FlexDRWorker::route_queue()
 
     // route
     route_queue_main(rerouteQueue);
+    if (stopped_) {
+      return;
+    }
   }
   // end
   gcWorker_->resetTargetNet();
@@ -2078,6 +2081,11 @@ void FlexDRWorker::route_queue_main(std::queue<RouteQueueEntry>& rerouteQueue)
   std::map<frBlockObject*, std::pair<int, int>> obj_gc_version;
   auto& workerRegionQuery = getWorkerRegionQuery();
   while (!rerouteQueue.empty()) {
+    if (first_clean_ != nullptr
+        && first_clean_->load(std::memory_order_relaxed) < creation_index_) {
+      stopped_ = true;
+      return;
+    }
     auto& entry = rerouteQueue.front();
     frBlockObject* obj = entry.block;
     bool doRoute = entry.doRoute;

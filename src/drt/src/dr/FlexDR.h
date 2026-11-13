@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <atomic>
 #include <cstdint>
 #include <deque>
 #include <list>
@@ -257,9 +258,9 @@ class FlexDR
       IterationProgress& iter_prog);
   odb::Rect getDRVBBox(const odb::Rect& drv_rect) const;
   std::vector<odb::Rect> getOffGuideWorkerBoxes(frMarker* marker) const;
-  // Runs a stubborn-tiles batch in creation-order waves of MAX_THREADS workers;
-  // a cluster stops once one of its workers ends with zero markers.  Returns
-  // the indices of the workers that ran, ascending.
+  // Runs a stubborn-tiles batch; per cluster, a worker created after the first
+  // worker that ended with zero markers is skipped or stopped.  Returns the
+  // indices of the workers that ran to the end, ascending.
   std::vector<int> runStubbornWorkersUntilClean(
       std::vector<std::unique_ptr<FlexDRWorker>>& workers_batch,
       IterationProgress& iter_prog);
@@ -585,6 +586,15 @@ class FlexDRWorker
   }
   frCoord getHalfViaEncArea(frMIdx z, bool isLayer1, frNonDefaultRule* ndr);
   bool isSkipRouting() const { return skipRouting_; }
+  // Stubborn tiles: the worker stops routing as soon as *first_clean holds a
+  // creation index below its own (an earlier worker of its cluster ended with
+  // zero markers); a stopped worker is discarded.
+  void setStopBelow(const std::atomic<int>* first_clean, int creation_index)
+  {
+    first_clean_ = first_clean;
+    creation_index_ = creation_index;
+  }
+  bool isStopped() const { return stopped_; }
 
   enum ModCostType
   {
@@ -630,6 +640,9 @@ class FlexDRWorker
   bool followGuide_{false};
   bool needRecheck_{false};
   bool skipRouting_{false};
+  const std::atomic<int>* first_clean_{nullptr};
+  int creation_index_{0};
+  bool stopped_{false};
   bool check_only_without_reroutable_nets_{false};
   bool check_only_{false};
   bool skipped_without_nets_{false};
