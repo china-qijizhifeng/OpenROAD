@@ -2227,6 +2227,9 @@ void BonnRouteDR::checkPathStarts()
     bool clean = true;
     int alternatives = 0;
     const frViaDef* clean_alternative = nullptr;
+    // Other one-cut definitions of the cut layer (technology).
+    int technology_alternatives = 0;
+    const frViaDef* clean_technology_alternative = nullptr;
   };
   const double start = omp_get_wtime();
   std::vector<StartCheck> checks;
@@ -2283,7 +2286,20 @@ void BonnRouteDR::checkPathStarts()
   for (int i = 0; i < static_cast<int>(checks.size()); i++) {
     StartCheck& c = checks[i];
     c.clean = via_clean(c, c.def);
-    if (c.clean || c.ap == nullptr) {
+    if (c.clean) {
+      continue;
+    }
+    for (const frViaDef* def :
+         design_->getTech()->getLayer(c.def->getCutLayerNum())->getViaDefs()) {
+      if (def == c.def || def->getNumCut() != 1) {
+        continue;
+      }
+      c.technology_alternatives++;
+      if (c.clean_technology_alternative == nullptr && via_clean(c, def)) {
+        c.clean_technology_alternative = def;
+      }
+    }
+    if (c.ap == nullptr) {
       continue;
     }
     for (int cuts = 1; c.ap->hasViaDef(cuts); cuts++) {
@@ -2304,6 +2320,7 @@ void BonnRouteDR::checkPathStarts()
   int64_t unclean_first_definition = 0;
   int64_t with_clean_alternative = 0;
   int64_t without_alternative = 0;
+  int64_t with_clean_technology_alternative = 0;
   for (const StartCheck& c : checks) {
     at_access_point += c.ap != nullptr;
     if (c.clean) {
@@ -2317,9 +2334,12 @@ void BonnRouteDR::checkPathStarts()
     }
     with_clean_alternative += c.clean_alternative != nullptr;
     without_alternative += c.alternatives == 0;
+    with_clean_technology_alternative
+        += c.clean_technology_alternative != nullptr;
     logger_->report(
         "BonnRoute DR start check unclean: net {} via {} at ( {} {} ) access "
-        "point {} alternatives {} clean alternative {}",
+        "point {} alternatives {} clean alternative {} technology "
+        "alternatives {} clean technology alternative {}",
         c.net->net->getName(),
         c.def->getName(),
         c.point.x(),
@@ -2327,13 +2347,18 @@ void BonnRouteDR::checkPathStarts()
         c.ap != nullptr ? 1 : 0,
         c.alternatives,
         c.clean_alternative != nullptr ? c.clean_alternative->getName()
-                                       : std::string("-"));
+                                       : std::string("-"),
+        c.technology_alternatives,
+        c.clean_technology_alternative != nullptr
+            ? c.clean_technology_alternative->getName()
+            : std::string("-"));
   }
   logger_->report(
       "BonnRoute DR start check: {} vias on own pins checked ({} at access "
       "points); {} unclean ({} at access points, {} with the access point's "
       "first one-cut definition); {} with a clean alternative definition, {} "
-      "without an alternative definition; {:.2f}s.",
+      "without an alternative definition; {} with a clean one-cut definition "
+      "of the cut layer; {:.2f}s.",
       checks.size(),
       at_access_point,
       unclean,
@@ -2341,6 +2366,7 @@ void BonnRouteDR::checkPathStarts()
       unclean_first_definition,
       with_clean_alternative,
       without_alternative,
+      with_clean_technology_alternative,
       omp_get_wtime() - start);
 }
 
