@@ -226,6 +226,12 @@ struct BonnRouteDRParams
   // D10 sampled comparison: every n-th member pin also generates its own
   // catalogue, compared with the mapped one (0: off; results unchanged).
   int offtrack_catalogue_sample = 0;
+  // Access report (verbose log, results unchanged): wire sharing of the
+  // catalogues and off-track wire and blocked tracks of the primary paths
+  // after setup; pins without a primary path, pins of failed connects
+  // (no feasible access option) and nets left to FlexDR, each listed up to
+  // this many lines (0: off).
+  int offtrack_access_report = 0;
   // Reuse a circuit class's catalogues and conflict-free solution for all
   // its instances; 0 solves every instance separately.
   bool access_classes = true;
@@ -478,6 +484,8 @@ class BonnRouteDR
     // connect() calls that failed because a pin had no feasible access
     // option even after dynamic generation.
     int64_t access_failures = 0;
+    // (net, term) of each such failure (offtrack_access_report only).
+    std::vector<std::pair<int, int>> access_failure_terms;
     int64_t regenerated_paths = 0;
     int64_t searches = 0;
     int64_t path_region_searches = 0;
@@ -611,6 +619,11 @@ class BonnRouteDR
   void buildSameNetRules();
   // pre_skip: net skip flags before buildAccess.
   void buildOffTrackAccess(const std::vector<char>& pre_skip);
+  // offtrack_access_report: the catalogues and primary paths after setup,
+  // and the access failures and left nets after routing.
+  void reportOffTrackAccess() const;
+  void reportAccessFailures() const;
+  std::string termName(const Term& term) const;
   // Rectangles of the pin on its access layer (the lowest routing layer
   // that is a track layer or directly below the lowest one).
   // A start of catalogue paths: an access point with its up via, if any.

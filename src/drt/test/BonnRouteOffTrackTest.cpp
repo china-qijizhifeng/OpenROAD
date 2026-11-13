@@ -2645,6 +2645,83 @@ void testConflictReachFilter(std::mt19937& rng)
       violations);
 }
 
+// catalogueSharing against brute force: every piece split into unit edges
+// (layer, horizontal, line, start); shared wire = a common unit edge.
+void testCatalogueSharing(std::mt19937& rng)
+{
+  using Edge = std::tuple<int, bool, GeoCoord, GeoCoord>;
+  int catalogues = 0;
+  int sharing = 0;
+  for (int c = 0; c < 3000; c++) {
+    const int num_paths = test::randomInt(rng, 0, 8);
+    std::vector<std::vector<CatalogueWire>> paths(num_paths);
+    std::vector<std::set<Edge>> edges(num_paths);
+    for (int k = 0; k < num_paths; k++) {
+      const int pieces = test::randomInt(rng, 0, 5);
+      for (int q = 0; q < pieces; q++) {
+        CatalogueWire w;
+        w.layer = test::randomInt(rng, 0, 1);
+        w.horizontal = rng() % 2 == 0;
+        w.line = test::randomInt(rng, 0, 4);
+        const GeoCoord a = test::randomInt(rng, 0, 12);
+        const GeoCoord b = test::randomInt(rng, 0, 12);
+        // Pieces in either direction, some of zero length.
+        w.lo = rng() % 2 == 0 ? a : b;
+        w.hi = w.lo == a ? b : a;
+        paths[k].push_back(w);
+        for (GeoCoord x = std::min(a, b); x < std::max(a, b); x++) {
+          edges[k].insert({w.layer, w.horizontal, w.line, x});
+        }
+      }
+    }
+    int64_t pairs = 0;
+    int64_t sharing_pairs = 0;
+    int64_t wire = 0;
+    std::set<Edge> all;
+    for (int i = 0; i < num_paths; i++) {
+      wire += static_cast<int64_t>(edges[i].size());
+      all.insert(edges[i].begin(), edges[i].end());
+      for (int j = i + 1; j < num_paths; j++) {
+        pairs++;
+        sharing_pairs += std::ranges::any_of(
+            edges[i], [&](const Edge& e) { return edges[j].count(e) > 0; });
+      }
+    }
+    bool common = false;
+    if (num_paths >= 2) {
+      for (const Edge& e : edges[0]) {
+        common = common || std::ranges::all_of(edges, [&](const auto& set) {
+                   return set.count(e) > 0;
+                 });
+      }
+    }
+    const CatalogueSharing got = catalogueSharing(paths);
+    CHECK(got.pairs == pairs && got.sharing_pairs == sharing_pairs
+              && got.common == common && got.wire == wire
+              && got.distinct_wire == static_cast<int64_t>(all.size()),
+          "catalogue %d: pairs %lld/%lld sharing %lld/%lld common %d/%d wire "
+          "%lld/%lld distinct %lld/%zu",
+          c,
+          static_cast<long long>(got.pairs),
+          static_cast<long long>(pairs),
+          static_cast<long long>(got.sharing_pairs),
+          static_cast<long long>(sharing_pairs),
+          got.common ? 1 : 0,
+          common ? 1 : 0,
+          static_cast<long long>(got.wire),
+          static_cast<long long>(wire),
+          static_cast<long long>(got.distinct_wire),
+          all.size());
+    catalogues++;
+    sharing += common ? 1 : 0;
+  }
+  std::printf(
+      "catalogue sharing: %d random catalogues equal the unit-edge brute "
+      "force (%d with a piece on every path)\n",
+      catalogues,
+      sharing);
+}
+
 }  // namespace
 
 int main()
@@ -2667,6 +2744,7 @@ int main()
   testSourceCosts(rng);
   testSearchMatchesReference(rng);
   testConflictReachFilter(rng);
+  testCatalogueSharing(rng);
   const double secs
       = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0)
             .count();

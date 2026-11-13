@@ -253,6 +253,8 @@ bool BonnRouteDRParams::set(const std::string& name, const double value)
     offtrack_access_stats = v != 0;
   } else if (name == "offtrack_catalogue_sample") {
     offtrack_catalogue_sample = std::max(0, v);
+  } else if (name == "offtrack_access_report") {
+    offtrack_access_report = std::max(0, v);
   } else if (name == "access_classes") {
     access_classes = v != 0;
   } else if (name == "access_class_margin") {
@@ -3715,6 +3717,9 @@ void BonnRouteDR::buildOffTrackAccess(const std::vector<char>& pre_skip)
         net.terms, [](const Term& term) { return term.options.empty(); });
   }
   stats.seconds = timer.elapsed();
+  if (params_.verbose && params_.offtrack_access_report > 0) {
+    reportOffTrackAccess();
+  }
   if (params_.verbose) {
     logger_->report(
         "BonnRoute off-track access: {} instances in {} circuit classes, {} "
@@ -3841,6 +3846,234 @@ void BonnRouteDR::buildOffTrackAccess(const std::vector<char>& pre_skip)
           stats.search_states,
           stats.settled);
     }
+  }
+}
+
+std::string BonnRouteDR::termName(const Term& term) const
+{
+  if (term.inst_term != nullptr) {
+    return term.inst_term->getName() + " ("
+           + term.inst_term->getInst()->getMaster()->getName() + ")";
+  }
+  if (term.bterm != nullptr) {
+    return term.bterm->getName() + " (top)";
+  }
+  return "?";
+}
+
+void BonnRouteDR::reportOffTrackAccess() const
+{
+  int64_t pins = 0;
+  int64_t options = 0;
+  int64_t pairs = 0;
+  int64_t sharing_pairs = 0;
+  int64_t common = 0;
+  int64_t wire = 0;
+  int64_t distinct_wire = 0;
+  int64_t catalogue_preferred = 0;
+  int64_t catalogue_off_track = 0;
+  int64_t primaries = 0;
+  int64_t primary_preferred = 0;
+  int64_t primary_off_track = 0;
+  int64_t primary_tracks = 0;
+  int64_t primary_missing = 0;
+  int64_t primary_common = 0;
+  std::vector<std::string> without;
+  for (const NetData& net : nets_) {
+    for (const Term& term : net.terms) {
+      std::vector<std::vector<br::CatalogueWire>> paths;
+      std::vector<int64_t> off_track_of;
+      for (const AccessOption& opt : term.options) {
+        if (!opt.offtrack) {
+          continue;
+        }
+        std::vector<br::CatalogueWire>& path = paths.emplace_back();
+        int64_t off = 0;
+        for (const OutWire& w : opt.wires) {
+          const bool horizontal = w.begin.y() == w.end.y();
+          const br::GeoCoord line = horizontal ? w.begin.y() : w.begin.x();
+          const br::GeoCoord a = horizontal ? w.begin.x() : w.begin.y();
+          const br::GeoCoord b = horizontal ? w.end.x() : w.end.y();
+          path.push_back(
+              {w.layer, horizontal, line, std::min(a, b), std::max(a, b)});
+          const int z = w.layer >= 0
+                                && w.layer < static_cast<int>(z_of_fr_.size())
+                            ? z_of_fr_[w.layer]
+                            : -1;
+          if (z < 0 || horizontal != layers_[z].horizontal) {
+            continue;
+          }
+          const int64_t len = std::abs(int64_t{b} - a);
+          catalogue_preferred += len;
+          if (!std::ranges::binary_search(graph_.layers[z].tracks, line)) {
+            catalogue_off_track += len;
+            off += len;
+          }
+        }
+        off_track_of.push_back(off);
+      }
+      if (paths.empty()) {
+        continue;
+      }
+      pins++;
+      options += static_cast<int64_t>(paths.size());
+      const br::CatalogueSharing s = br::catalogueSharing(paths);
+      pairs += s.pairs;
+      sharing_pairs += s.sharing_pairs;
+      common += s.common;
+      wire += s.wire;
+      distinct_wire += s.distinct_wire;
+      if (term.primary >= 0 && term.options[term.primary].offtrack) {
+        const AccessOption& opt = term.options[term.primary];
+        primaries++;
+        primary_common += s.common;
+        for (const OutWire& w : opt.wires) {
+          const int z = w.layer >= 0
+                                && w.layer < static_cast<int>(z_of_fr_.size())
+                            ? z_of_fr_[w.layer]
+                            : -1;
+          const bool horizontal = w.begin.y() == w.end.y();
+          if (z >= 0 && horizontal == layers_[z].horizontal) {
+            primary_preferred += std::abs(int64_t{w.end.x()} - w.begin.x())
+                                 + std::abs(int64_t{w.end.y()} - w.begin.y());
+          }
+        }
+        primary_off_track += off_track_of[term.primary];
+        br::AccessCandidate c;
+        candidateOf(opt, net.id, c);
+        primary_tracks += static_cast<int64_t>(c.blocked_tracks.size());
+        primary_missing += c.missing_directions;
+      } else if (term.primary < 0) {
+        int64_t legal = 0;
+        for (const AccessOption& opt : term.options) {
+          legal += opt.offtrack && optionLegal(opt, net.id, nullptr);
+        }
+        without.push_back(fmt::format("{}: net {}, {} catalogue paths, {} "
+                                      "legal after setup, common wire {}",
+                                      termName(term),
+                                      net.net->getName(),
+                                      paths.size(),
+                                      legal,
+                                      s.common ? 1 : 0));
+      }
+    }
+  }
+  std::ranges::sort(without);
+  logger_->info(
+      utl::DRT,
+      9160,
+      "BonnRoute off-track access report: {} pins with catalogues, {} paths; "
+      "path pairs sharing wire {} of {} ({:.1f}%); pins whose paths all "
+      "share a wire piece {} ({:.1f}%); distinct / total catalogue wire "
+      "{:.3f}; preferred-direction catalogue wire off track {:.1f}%; {} "
+      "primary paths: preferred-direction wire off track {:.1f}%, {:.2f} "
+      "blocked tracks and {:.2f} missing directions per path, {} of them on "
+      "pins whose paths all share a wire piece; {} pins with catalogues and "
+      "no primary path.",
+      pins,
+      options,
+      sharing_pairs,
+      pairs,
+      pairs > 0 ? 100.0 * sharing_pairs / pairs : 0.0,
+      common,
+      pins > 0 ? 100.0 * common / pins : 0.0,
+      wire > 0 ? double(distinct_wire) / wire : 0.0,
+      catalogue_preferred > 0 ? 100.0 * catalogue_off_track / catalogue_preferred
+                              : 0.0,
+      primaries,
+      primary_preferred > 0 ? 100.0 * primary_off_track / primary_preferred
+                            : 0.0,
+      primaries > 0 ? double(primary_tracks) / primaries : 0.0,
+      primaries > 0 ? double(primary_missing) / primaries : 0.0,
+      primary_common,
+      without.size());
+  for (size_t k = 0;
+       k < without.size()
+       && k < static_cast<size_t>(params_.offtrack_access_report);
+       k++) {
+    logger_->info(utl::DRT,
+                  9161,
+                  "BonnRoute pin without a primary path: {}.",
+                  without[k]);
+  }
+}
+
+void BonnRouteDR::reportAccessFailures() const
+{
+  std::vector<std::pair<int, int>> failed;
+  for (const Worker& w : workers_) {
+    failed.insert(failed.end(),
+                  w.access_failure_terms.begin(),
+                  w.access_failure_terms.end());
+  }
+  std::ranges::sort(failed);
+  std::vector<std::pair<std::pair<int, int>, int>> counted;
+  for (const auto& f : failed) {
+    if (!counted.empty() && counted.back().first == f) {
+      counted.back().second++;
+    } else {
+      counted.push_back({f, 1});
+    }
+  }
+  std::vector<std::string> pins;
+  for (const auto& [f, count] : counted) {
+    const NetData& net = nets_[f.first];
+    const Term& term = net.terms[f.second];
+    pins.push_back(fmt::format("{}: net {}, {} failed connects, primary {}, "
+                               "routed {}",
+                               termName(term),
+                               net.net->getName(),
+                               count,
+                               term.primary >= 0 ? 1 : 0,
+                               net.routed ? 1 : 0));
+  }
+  std::ranges::sort(pins);
+  std::vector<std::string> left;
+  int64_t left_without_primary = 0;
+  int64_t left_with_failure = 0;
+  for (const NetData& net : nets_) {
+    if (net.routed || net.skip) {
+      continue;
+    }
+    int without_primary = 0;
+    int with_failure = 0;
+    for (size_t t = 0; t < net.terms.size(); t++) {
+      const Term& term = net.terms[t];
+      without_primary += term.primary < 0
+                         && std::ranges::any_of(term.options,
+                                                [](const AccessOption& o) {
+                                                  return o.offtrack;
+                                                });
+      with_failure += std::ranges::binary_search(
+          failed, std::pair<int, int>(net.id, static_cast<int>(t)));
+    }
+    left_without_primary += without_primary > 0;
+    left_with_failure += with_failure > 0;
+    left.push_back(fmt::format("{}: {} pins, {} with catalogues and no "
+                               "primary path, {} with failed connects",
+                               net.net->getName(),
+                               net.terms.size(),
+                               without_primary,
+                               with_failure));
+  }
+  std::ranges::sort(left);
+  logger_->info(utl::DRT,
+                9162,
+                "BonnRoute access failures: {} pins in {} failed connects; "
+                "{} nets left to FlexDR, {} with a pin without a primary "
+                "path, {} with a pin of a failed connect.",
+                pins.size(),
+                failed.size(),
+                left.size(),
+                left_without_primary,
+                left_with_failure);
+  const size_t limit = static_cast<size_t>(params_.offtrack_access_report);
+  for (size_t k = 0; k < pins.size() && k < limit; k++) {
+    logger_->info(
+        utl::DRT, 9163, "BonnRoute pin of failed connects: {}.", pins[k]);
+  }
+  for (size_t k = 0; k < left.size() && k < limit; k++) {
+    logger_->info(utl::DRT, 9164, "BonnRoute net left to FlexDR: {}.", left[k]);
   }
 }
 
@@ -4669,6 +4902,9 @@ bool BonnRouteDR::connectWithoutOwnShapes(NetData& net,
     }
     if (std::ranges::find(valid[t], 1) == valid[t].end()) {
       worker.access_failures++;
+      if (params_.offtrack_access_report > 0) {
+        worker.access_failure_terms.emplace_back(net.id, t);
+      }
       return false;
     }
   }
@@ -7277,6 +7513,9 @@ void BonnRouteDR::main()
           regenerations,
           regenerated_paths,
           access_failures);
+      if (params_.offtrack_access_report > 0) {
+        reportAccessFailures();
+      }
     }
     logger_->report(
         "BonnRoute DR contact guard: {} nets with {} truncated pin contacts "

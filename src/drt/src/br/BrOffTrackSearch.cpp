@@ -8,6 +8,8 @@
 #include <cstdlib>
 #include <functional>
 #include <limits>
+#include <map>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -708,6 +710,132 @@ OffTrackResult OffTrackSearch::run(const OffTrackRequest& req)
                      return a.cost < b.cost;
                    });
   return res;
+}
+
+namespace {
+
+// Pieces per (layer, horizontal, line) as sorted disjoint intervals.
+using WireKey = std::tuple<int, bool, GeoCoord>;
+using Intervals = std::vector<std::pair<GeoCoord, GeoCoord>>;
+using WireSet = std::map<WireKey, Intervals>;
+
+Intervals mergedIntervals(Intervals in)
+{
+  std::sort(in.begin(), in.end());
+  Intervals out;
+  for (const auto& [lo, hi] : in) {
+    if (hi <= lo) {
+      continue;
+    }
+    if (!out.empty() && lo <= out.back().second) {
+      out.back().second = std::max(out.back().second, hi);
+    } else {
+      out.emplace_back(lo, hi);
+    }
+  }
+  return out;
+}
+
+WireSet wireSet(const std::vector<CatalogueWire>& path)
+{
+  WireSet raw;
+  for (const CatalogueWire& w : path) {
+    raw[{w.layer, w.horizontal, w.line}].emplace_back(std::min(w.lo, w.hi),
+                                                      std::max(w.lo, w.hi));
+  }
+  WireSet out;
+  for (auto& [key, intervals] : raw) {
+    Intervals merged = mergedIntervals(std::move(intervals));
+    if (!merged.empty()) {
+      out[key] = std::move(merged);
+    }
+  }
+  return out;
+}
+
+// Positive-length intersection of two interval lists.
+Intervals intersection(const Intervals& a, const Intervals& b)
+{
+  Intervals out;
+  size_t i = 0;
+  size_t j = 0;
+  while (i < a.size() && j < b.size()) {
+    const GeoCoord lo = std::max(a[i].first, b[j].first);
+    const GeoCoord hi = std::min(a[i].second, b[j].second);
+    if (lo < hi) {
+      out.emplace_back(lo, hi);
+    }
+    if (a[i].second < b[j].second) {
+      i++;
+    } else {
+      j++;
+    }
+  }
+  return out;
+}
+
+WireSet intersection(const WireSet& a, const WireSet& b)
+{
+  WireSet out;
+  for (const auto& [key, intervals] : a) {
+    const auto it = b.find(key);
+    if (it == b.end()) {
+      continue;
+    }
+    Intervals common = intersection(intervals, it->second);
+    if (!common.empty()) {
+      out[key] = std::move(common);
+    }
+  }
+  return out;
+}
+
+int64_t length(const WireSet& s)
+{
+  int64_t total = 0;
+  for (const auto& [key, intervals] : s) {
+    for (const auto& [lo, hi] : intervals) {
+      total += int64_t{hi} - lo;
+    }
+  }
+  return total;
+}
+
+}  // namespace
+
+CatalogueSharing catalogueSharing(
+    const std::vector<std::vector<CatalogueWire>>& paths)
+{
+  CatalogueSharing out;
+  std::vector<WireSet> sets;
+  sets.reserve(paths.size());
+  WireSet all;
+  for (const std::vector<CatalogueWire>& path : paths) {
+    sets.push_back(wireSet(path));
+    out.wire += length(sets.back());
+    for (const auto& [key, intervals] : sets.back()) {
+      Intervals& u = all[key];
+      u.insert(u.end(), intervals.begin(), intervals.end());
+    }
+  }
+  for (auto& [key, intervals] : all) {
+    intervals = mergedIntervals(std::move(intervals));
+  }
+  out.distinct_wire = length(all);
+  for (size_t i = 0; i < sets.size(); i++) {
+    for (size_t j = i + 1; j < sets.size(); j++) {
+      out.pairs++;
+      out.sharing_pairs += intersection(sets[i], sets[j]).empty() ? 0 : 1;
+    }
+  }
+  if (sets.size() >= 2) {
+    WireSet common = sets[0];
+    for (size_t i = 1; i < sets.size() && !common.empty(); i++) {
+      common = intersection(common, sets[i]);
+    }
+    out.common = !common.empty();
+  }
+  return out;
 }
 
 }  // namespace drt::br

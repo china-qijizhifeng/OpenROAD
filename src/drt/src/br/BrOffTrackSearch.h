@@ -259,4 +259,32 @@ class OffTrackSearch
   uint32_t epoch_ = 0;
 };
 
+// A wire piece of a catalogue path (one layer, axis-parallel): on the line
+// `line` (y if horizontal, else x) from lo to hi.
+struct CatalogueWire
+{
+  int layer = 0;
+  bool horizontal = true;
+  GeoCoord line = 0;
+  GeoCoord lo = 0;
+  GeoCoord hi = 0;
+};
+
+// How much wire the paths of one catalogue have in common. Two paths share
+// wire when pieces on one layer and line overlap with positive length (a
+// common point does not count). `common` is true when one piece of positive
+// length lies on every path (blocking it removes every option). Lengths are
+// sums over the paths (`wire`) and over the union (`distinct_wire`).
+struct CatalogueSharing
+{
+  int64_t pairs = 0;
+  int64_t sharing_pairs = 0;
+  bool common = false;
+  int64_t wire = 0;
+  int64_t distinct_wire = 0;
+};
+
+CatalogueSharing catalogueSharing(
+    const std::vector<std::vector<CatalogueWire>>& paths);
+
 }  // namespace drt::br
