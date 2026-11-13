@@ -719,6 +719,14 @@ void FastRouteCore::updateSlacks()
       estimator->estimateAllGlobalRouteParasitics(num_threads_);
     }
   }
+  // One required-time search over the whole timing graph, in parallel, before
+  // the per-net slack queries: each query would otherwise extend the
+  // backward search to its own level and dispatch that slice to the STA
+  // threads. Required times do not depend on the order of the search.
+  if (!is_incremental_grt_) {
+    sta_->ensureGraph();
+    sta_->findRequireds();
+  }
 
   resetWorstMetrics();
 
@@ -1682,6 +1690,14 @@ float FastRouteCore::CalculatePartialSlack()
   slacks.reserve(netCount());
   if (auto* estimator = service_registry_->find<est::ParasiticsService>()) {
     estimator->estimateAllGlobalRouteParasitics(num_threads_);
+  }
+  // One required-time search over the whole timing graph, in parallel, before
+  // the per-net slack queries: each query would otherwise extend the
+  // backward search to its own level and dispatch that slice to the STA
+  // threads. Required times do not depend on the order of the search.
+  if (!is_incremental_grt_) {
+    sta_->ensureGraph();
+    sta_->findRequireds();
   }
   for (const int& netID : net_ids_) {
     auto fr_net = nets_[netID];
