@@ -184,6 +184,17 @@ regression_test(
 )
 
 regression_test(
+    name = "bonnroute_incremental_keep",
+    check_log = False,
+    check_passfail = True,
+    data = [
+        ":regression_resources",
+        "ta_ap_aligned.def",
+        "ta_ap_aligned.route_guide",
+    ],
+)
+
+regression_test(
     name = "bonnroute_incremental_ndr",
     check_log = False,
     check_passfail = True,

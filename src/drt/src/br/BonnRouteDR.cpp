@@ -2240,6 +2240,34 @@ int BonnRouteDR::pinsWithoutContact(const NetData& net,
       }
     }
   }
+  if (net.keeps_input) {
+    // Incremental calls (Fig. 9): the kept pin-to-pin paths stay in the
+    // frNet and carry the contacts of the pins they join, by the same rule.
+    for (const auto& shape : net.net->getShapes()) {
+      if (shape->typeId() != frcPathSeg) {
+        continue;
+      }
+      const auto* seg = static_cast<const frPathSeg*>(shape.get());
+      const auto [b, e] = seg->getPoints();
+      if (seg->getBeginStyle() == frcTruncateEndStyle) {
+        add_pins(seg->getLayerNum(), b);
+      }
+      if (seg->getEndStyle() == frcTruncateEndStyle) {
+        add_pins(seg->getLayerNum(), e);
+      }
+    }
+    for (const auto& via : net.net->getVias()) {
+      const frViaDef* def = via->getViaDef();
+      const odb::Point o = via->getOrigin();
+      if (via->isBottomConnected()
+          || atAccessPoint(net, def->getLayer1Num(), o)) {
+        add_pins(def->getLayer1Num(), o);
+      }
+      if (via->isTopConnected() || atAccessPoint(net, def->getLayer2Num(), o)) {
+        add_pins(def->getLayer2Num(), o);
+      }
+    }
+  }
   int missing = 0;
   auto check = [&](const frBlockObject* pin) {
     if (std::ranges::find(contacted, pin) == contacted.end()) {

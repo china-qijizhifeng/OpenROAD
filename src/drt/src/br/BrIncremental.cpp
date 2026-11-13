@@ -1508,12 +1508,50 @@ void BonnRouteDR::routeIncremental(std::vector<odb::Rect>& regions)
       }
     }
   }
+  std::vector<int> routed_kept;
+  for (const auto& [id, c] : classified_) {
+    if (nets_[id].routed) {
+      routed_kept.push_back(id);
+    }
+  }
   writeNets();
   write_mask_.clear();
+  // Fig. 9 nets that an output guard of writeNets dropped: their pieces
+  // that were not kept are gone from the frNet, so FlexDR routes them from
+  // their guides; without guides they keep the kept pieces and the new pin
+  // stays unconnected.
+  int64_t unconnected_kept = restored;
+  for (const int id : routed_kept) {
+    NetData& data = nets_[id];
+    if (data.routed) {
+      continue;
+    }
+    frNet* fr = data.net;
+    if (!fr->hasGuides()) {
+      unconnected_kept++;
+      continue;
+    }
+    setReservations(data, false);
+    setInputShapes(data, false);
+    data.input_shapes.clear();
+    data.keeps_input = false;
+    fr->clearRoutes();
+    fr->setHasInitialRouting(false);
+    fr->setModified(true);
+  }
+  if (unconnected_kept > 0) {
+    logger_->warn(utl::DRT,
+                  9191,
+                  "BonnRoute incremental: {} nets with new pins keep their "
+                  "routing without connecting the new pins (no guides for "
+                  "FlexDR).",
+                  unconnected_kept);
+  }
   // Debug check: nets written in this call whose routing and pins are not
   // one component.
   int64_t disconnected = 0;
-  if (logger_->debugCheck(utl::DRT, "incremental", 1)) {
+  if (logger_->debugCheck(utl::DRT, "incremental", 1)
+      || params_.incremental_check > 0) {
     for (const int id : touched) {
       const NetData& data = nets_[id];
       if (!data.routed) {
@@ -1536,6 +1574,15 @@ void BonnRouteDR::routeIncremental(std::vector<odb::Rect>& regions)
         }
       }
     }
+  }
+  if (params_.incremental_check > 1
+      && (disconnected > 0 || unconnected_kept > 0)) {
+    logger_->error(utl::DRT,
+                   9192,
+                   "BonnRoute incremental: {} written nets are not connected, "
+                   "{} nets keep an unconnected new pin.",
+                   disconnected,
+                   unconnected_kept);
   }
   int64_t written = 0;
   int64_t left = 0;
@@ -1609,7 +1656,7 @@ void BonnRouteDR::routeIncremental(std::vector<odb::Rect>& regions)
         "first_pass_failed={} ripups={} written={} left_to_flexdr={} "
         "regions={} classified_nets={} complete_nets={} pieces={} kept={} "
         "reserved={} dropped={} discount_runs={} restored_unconnected={} "
-        "disconnected_written={}",
+        "disconnected_written={} unconnected_kept={}",
         sync_s,
         access_s,
         route_s,
@@ -1638,7 +1685,8 @@ void BonnRouteDR::routeIncremental(std::vector<odb::Rect>& regions)
         cstats.dropped,
         cstats.discount_runs,
         restored,
-        disconnected);
+        disconnected,
+        unconnected_kept);
   }
 }
 
