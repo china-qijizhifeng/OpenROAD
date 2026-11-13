@@ -28,10 +28,13 @@ bool collinear(const GridPoint& a, const GridPoint& b, const GridPoint& c)
 
 void normalize(std::vector<RunPoint>& r)
 {
+  // Scratch reused across calls on this thread (the swap below exchanges
+  // buffers; both keep their capacity).
+  thread_local std::vector<RunPoint> out;
   bool changed = true;
   while (changed) {
     changed = false;
-    std::vector<RunPoint> out;
+    out.clear();
     for (const RunPoint& q : r) {
       if (!out.empty() && out.back().p == q.p) {
         out.back().fixed = out.back().fixed || q.fixed;

@@ -158,6 +158,13 @@ class DestructiveBounding
   DestructiveBounding(const SelectionInput& in, const ConflictTable& conflicts)
       : in_(in), conflicts_(conflicts), n_(static_cast<int>(in.pins.size()))
   {
+    // One frame per search depth (a level assigns one pin, so depths
+    // 0 .. n), allocated once and reused by every node of that depth.
+    frames_.resize(n_ + 1);
+    for (Frame& f : frames_) {
+      f.reduced.resize(n_);
+      f.inc.resize(n_);
+    }
     min_individual_.resize(n_);
     for (int p = 0; p < n_; p++) {
       int64_t m = in_.weights.unassigned;
@@ -187,7 +194,7 @@ class DestructiveBounding
       next_ = std::numeric_limits<int64_t>::max();
       choice_.assign(n_, kOpen);
       track_count_.clear();
-      if (search(domains, 0)) {
+      if (search(domains, 0, 0)) {
         result.choice = choice_;
         result.cost = selectionCost(in_, choice_);
         result.optimal = true;
@@ -270,7 +277,9 @@ class DestructiveBounding
   }
 
   // `g`: exact cost of the assigned pins.
-  bool search(const std::vector<std::vector<int>>& domains, const int64_t g)
+  bool search(const std::vector<std::vector<int>>& domains,
+              const int64_t g,
+              const int depth)
   {
     nodes_++;
     if (nodes_ > in_.node_limit) {
@@ -289,8 +298,13 @@ class DestructiveBounding
     }
     // Reduce every open domain under the bound; an empty domain refutes
     // the node.
-    std::vector<std::vector<int>> reduced(n_);
-    std::vector<std::vector<int64_t>> inc(n_);
+    Frame& frame = frames_[depth];
+    std::vector<std::vector<int>>& reduced = frame.reduced;
+    std::vector<std::vector<int64_t>>& inc = frame.inc;
+    for (int p = 0; p < n_; p++) {
+      reduced[p].clear();
+      inc[p].clear();
+    }
     int best_pin = -1;
     for (int p = 0; p < n_; p++) {
       if (choice_[p] != kOpen) {
@@ -317,7 +331,8 @@ class DestructiveBounding
       }
     }
     const int p = best_pin;
-    std::vector<int> order(reduced[p].size());
+    std::vector<int>& order = frame.order;
+    order.resize(reduced[p].size());
     for (size_t k = 0; k < order.size(); k++) {
       order[k] = static_cast<int>(k);
     }
@@ -326,7 +341,7 @@ class DestructiveBounding
     });
     for (const int k : order) {
       assign(p, reduced[p][k]);
-      if (search(reduced, g + inc[p][k])) {
+      if (search(reduced, g + inc[p][k], depth + 1)) {
         return true;
       }
       unassign(p);
@@ -337,9 +352,19 @@ class DestructiveBounding
     return false;
   }
 
+  // Scratch of one search depth: reduced domains, their increments and the
+  // candidate order of the branching pin.
+  struct Frame
+  {
+    std::vector<std::vector<int>> reduced;
+    std::vector<std::vector<int64_t>> inc;
+    std::vector<int> order;
+  };
+
   const SelectionInput& in_;
   const ConflictTable& conflicts_;
   const int n_;
+  std::vector<Frame> frames_;
   std::vector<int64_t> min_individual_;
   std::vector<int> choice_;
   std::map<int64_t, int> track_count_;
