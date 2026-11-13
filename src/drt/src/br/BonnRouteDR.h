@@ -86,6 +86,12 @@ struct BonnRouteDRParams
   // yet. Nets still partial after the rip-up phase are removed and left to
   // FlexDR whole. 0: a failed net keeps nothing.
   bool keep_partial = false;
+  // Parallel rip-up (Sec. 4.4 / 5.1): before each pass of the serial rip-up
+  // queue, this many rounds of partition regions run the queued nets'
+  // rip-up sequences in parallel, victims resident in the region; each
+  // region gets the serial budget times its share of the queued nets. The
+  // serial loop handles the rest. 0: serial only.
+  int ripup_partitions = 0;
   // Off-track pin access: largest jog to a track, in pitches.
   int max_access_jog = 2;
   int max_access_options = 8;
@@ -993,6 +999,20 @@ class BonnRouteDR
   // this many vertices in the phase (0: unlimited).
   void routeRipupQueue(const std::vector<int>& failed,
                        int64_t settled_budget = 0);
+  // ripup_partitions: one round of region-parallel rip-up sequences over
+  // `queue` (pass `pass`); returns the settled vertices of the round.
+  int64_t parallelRipupRound(const std::vector<int>& queue,
+                             int pass,
+                             int round,
+                             int64_t settled_budget);
+  // Parallel rip-up rounds: rounds, sequences, nets routed, rollbacks,
+  // region budget stops, wall seconds.
+  int64_t parallel_ripup_rounds_ = 0;
+  int64_t parallel_ripup_sequences_ = 0;
+  int64_t parallel_ripup_routed_ = 0;
+  int64_t parallel_ripup_rollbacks_ = 0;
+  int64_t parallel_ripup_budget_stops_ = 0;
+  double parallel_ripup_seconds_ = 0;
   // try_plain: first try the connection without rip-up. The nets of the
   // rip-up queue have just failed that search, so their sequences start
   // with the rip-up mode search (which finds a legal path at no penalty
