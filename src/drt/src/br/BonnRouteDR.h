@@ -639,6 +639,7 @@ class BonnRouteDR
     PartialState progress;
     int64_t partial_commits = 0;
     int64_t partial_resumes = 0;
+    int64_t tail_partial_commits = 0;
     int64_t area_deferrals = 0;
     // Settled-vertex budget of the current connect (0: none), the settled
     // count at its start, and whether a search was skipped for it.
@@ -1101,6 +1102,13 @@ class BonnRouteDR
   void ripupNet(NetData& net, Worker* local = nullptr);
   // Removes the committed shapes of `net` from the routing space.
   void uncommitShapes(NetData& net, Worker* local);
+  // keep_partial: whether `progress` joined more terms than the net's
+  // committed partial routing (term 0 alone without one).
+  static bool progressAdds(const NetData& net, const PartialState& progress)
+  {
+    return progress.valid
+           && progress.joined > (net.partial ? net.partial_state.joined : 1);
+  }
   // keep_partial: commits `state` as the net's partial routing.
   void commitPartial(NetData& net, const PartialState& state, Worker* local);
   // Rip-up victims: nets reported by the distance rule checker as blocking

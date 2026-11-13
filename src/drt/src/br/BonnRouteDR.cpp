@@ -5792,6 +5792,8 @@ void BonnRouteDR::routeSpeculativeBatches(const std::vector<int>& order,
   std::vector<double> busy;
   std::vector<int64_t> settled;
   std::vector<char> over;
+  // keep_partial: progress of the failed attempts of the batch.
+  std::vector<PartialState> batch_progress;
   int64_t deferred_count = 0;
   std::vector<int> slots;
   std::vector<double> estimate;
@@ -5830,6 +5832,7 @@ void BonnRouteDR::routeSpeculativeBatches(const std::vector<int>& order,
     busy.assign(batch.size(), 0);
     settled.assign(batch.size(), 0);
     over.assign(batch.size(), 0);
+    batch_progress.assign(batch.size(), PartialState{});
     // Searches in dispatch order: by default the largest estimated effort
     // first, so a long search does not start last. Every search reads the
     // same routing space, so the order only changes the batch wall time.
@@ -5865,6 +5868,10 @@ void BonnRouteDR::routeSpeculativeBatches(const std::vector<int>& order,
       w.effort_exceeded = false;
       ok[k] = connect(nets_[batch[k]], false, w);
       over[k] = !ok[k] && w.effort_exceeded;
+      if (!ok[k] && params_.keep_partial
+          && progressAdds(nets_[batch[k]], w.progress)) {
+        batch_progress[k] = std::move(w.progress);
+      }
       w.effort_budget = 0;
       w.effort_exceeded = false;
       w.speculative = false;
@@ -5922,15 +5929,28 @@ void BonnRouteDR::routeSpeculativeBatches(const std::vector<int>& order,
       // partition_check: the decision and commit of the net, recorded on
       // the first worker (no search runs during the commits).
       Worker& commit_worker = workers_.front();
+      // keep_partial: a failed attempt that closed connections commits
+      // them like a route (checked against the batch's commits).
+      const bool partial = !ok[k] && batch_progress[k].valid;
+      const bool writes = ok[k] || partial;
       const br::AccessFootprintScope footprint_scope(
-          params_.partition_check && ok[k] ? &commit_worker.footprint
-                                           : nullptr);
-      if (params_.partition_check && ok[k]) {
+          params_.partition_check && writes ? &commit_worker.footprint
+                                            : nullptr);
+      if (params_.partition_check && writes) {
         beginFootprint(
             commit_worker, net, kPhaseTailCommit, netClippedTileBox(net));
         commit_worker.footprint.setStep(kStepCommit);
       }
-      if (!ok[k]) {
+      auto unrouted = [&]() {
+        if (over[k]) {
+          deferred.push_back(net.id);
+          deferred_count++;
+          outcome = 3;
+        } else {
+          failed.push_back(net.id);
+        }
+      };
+      if (!writes) {
         net.wires.clear();
         net.vias.clear();
         if (over[k]) {
@@ -5964,13 +5984,34 @@ void BonnRouteDR::routeSpeculativeBatches(const std::vector<int>& order,
             exact = true;
           }
         }
-        if (clash) {
+        if (clash && partial) {
+          net.wires.clear();
+          net.vias.clear();
+          net.pin_points.clear();
+          unrouted();
+        } else if (clash) {
           net.wires.clear();
           net.vias.clear();
           net.pin_points.clear();
           retry.push_back(net.id);
           conflicts++;
           outcome = 2;
+        } else if (partial) {
+          commitPartial(net, batch_progress[k], nullptr);
+          commit_worker.tail_partial_commits++;
+          odb::Rect box;
+          box.mergeInit();
+          for (const RShape& shape : net.shapes) {
+            box.merge(shape.rect);
+          }
+          if (!box.isInverted()) {
+            box.bloat(static_cast<int>(interaction_reach_), box);
+            committed_boxes.push_back(box);
+          }
+          unrouted();
+          if (outcome == 0) {
+            outcome = 4;
+          }
         } else {
           commitNet(net, nullptr);
           commit_worker.footprint.setStep(kStepRelease);
@@ -6161,6 +6202,12 @@ void BonnRouteDR::routeSpeculativePipeline(const std::vector<int>& order,
   std::vector<double> search_seconds(nets_.size(), 0);
   std::vector<int64_t> settled(nets_.size(), 0);
   std::vector<char> over(nets_.size(), 0);
+  // keep_partial (lookahead only): a failed attempt that closed connections
+  // is reported as found and commits them at its decision.
+  const bool tail_partial = params_.keep_partial && params_.tail_lookahead;
+  std::vector<char> route_found(nets_.size(), 0);
+  std::vector<char> partial_attempt(nets_.size(), 0);
+  std::vector<PartialState> tail_progress(tail_partial ? nets_.size() : 0);
   // Shapes of committed nets, bloated by the interaction distance.
   std::vector<odb::Rect> committed_box(nets_.size());
   std::vector<std::vector<RShape>> shapes(threads);
@@ -6190,6 +6237,12 @@ void BonnRouteDR::routeSpeculativePipeline(const std::vector<int>& order,
     w.effort_exceeded = false;
     const bool found = connect(nets_[id], false, w);
     over[id] = !found && w.effort_exceeded;
+    route_found[id] = found;
+    bool progress = false;
+    if (!found && tail_partial && progressAdds(nets_[id], w.progress)) {
+      tail_progress[id] = std::move(w.progress);
+      progress = true;
+    }
     w.effort_budget = 0;
     w.effort_exceeded = false;
     w.speculative = false;
@@ -6199,7 +6252,7 @@ void BonnRouteDR::routeSpeculativePipeline(const std::vector<int>& order,
     }
     search_seconds[id] = omp_get_wtime() - start;
     times[t].push_back(search_seconds[id]);
-    return found;
+    return found || progress;
   };
   hooks.decide = [&](const int id,
                      const bool found,
@@ -6217,6 +6270,8 @@ void BonnRouteDR::routeSpeculativePipeline(const std::vector<int>& order,
       beginFootprint(w, net, kPhaseTailCommit, {b[0], b[1], b[2], b[3]});
       w.footprint.setStep(kStepCommit);
     }
+    // keep_partial: found without a route = connections to commit.
+    const bool partial = found && !route_found[id];
     if (!found) {
       net.wires.clear();
       net.vias.clear();
@@ -6247,11 +6302,31 @@ void BonnRouteDR::routeSpeculativePipeline(const std::vector<int>& order,
           exact = true;
         }
       }
-      if (clash) {
+      if (clash && partial) {
+        net.wires.clear();
+        net.vias.clear();
+        net.pin_points.clear();
+        decision = Decision::kFailed;
+      } else if (clash) {
         net.wires.clear();
         net.vias.clear();
         net.pin_points.clear();
         decision = Decision::kConflict;
+      } else if (partial) {
+        // Committed for the batch (later decisions see it); the net stays
+        // unrouted (see the failed list below).
+        commitPartial(net, tail_progress[id], &w);
+        partial_attempt[id] = 1;
+        w.tail_partial_commits++;
+        odb::Rect box;
+        box.mergeInit();
+        for (const RShape& shape : net.shapes) {
+          box.merge(shape.rect);
+        }
+        if (!box.isInverted()) {
+          box.bloat(static_cast<int>(interaction_reach_), box);
+          committed_box[id] = box;
+        }
       } else {
         commitNet(net, &w);
         // Released and recomputed exactly inside the net's box.
@@ -6302,7 +6377,25 @@ void BonnRouteDR::routeSpeculativePipeline(const std::vector<int>& order,
   br::TailPipeline::Stats stats;
   if (params_.tail_lookahead) {
     br::TailLookahead lookahead(tailBatchPolicy());
-    stats = lookahead.run(order, boxes, threads, hooks, unrouted);
+    std::vector<br::TailLookahead::Attempt> attempts;
+    stats = lookahead.run(order,
+                          boxes,
+                          threads,
+                          hooks,
+                          unrouted,
+                          tail_partial ? &attempts : nullptr);
+    if (tail_partial) {
+      // Unrouted: failed attempts and partial commits, in (batch, position)
+      // order, as the barrier batches list them.
+      unrouted.clear();
+      for (const br::TailLookahead::Attempt& a : attempts) {
+        if (a.decision == br::TailPipeline::Decision::kFailed
+            || (a.decision == br::TailPipeline::Decision::kCommitted
+                && partial_attempt[a.net])) {
+          unrouted.push_back(a.net);
+        }
+      }
+    }
     if (params_.verbose && tailBatchPolicy().adaptive()) {
       logger_->info(utl::DRT,
                     9132,
@@ -6536,9 +6629,8 @@ void BonnRouteDR::routePartitions(const std::vector<int>& order,
         const bool connected = connect(net, false, w);
         // D1 S2: a failed net keeps the connections it closed, when it
         // joined more terms than before.
-        if (!connected && params_.keep_partial && w.progress.valid
-            && w.progress.joined
-                   > (net.partial ? net.partial_state.joined : 1)) {
+        if (!connected && params_.keep_partial
+            && progressAdds(net, w.progress)) {
           w.footprint.setStep(kStepCommit);
           commitPartial(net, w.progress, &w);
           w.partial_commits++;
@@ -7778,9 +7870,11 @@ void BonnRouteDR::main()
   if (params_.keep_partial) {
     int64_t commits = 0;
     int64_t resumes = 0;
+    int64_t tail_commits = 0;
     for (const Worker& w : workers_) {
       commits += w.partial_commits;
       resumes += w.partial_resumes;
+      tail_commits += w.tail_partial_commits;
     }
     int64_t removed = 0;
     int64_t completed = 0;
@@ -7796,9 +7890,11 @@ void BonnRouteDR::main()
     if (params_.verbose) {
       logger_->report(
           "BonnRoute DR partial routing: {} partial commits in the regions, "
-          "{} connects resumed a partial net; {} nets still partial at the "
-          "end, removed and left to FlexDR whole; {} nets routed.",
+          "{} in the tail, {} connects resumed a partial net; {} nets still "
+          "partial at the end, removed and left to FlexDR whole; {} nets "
+          "routed.",
           commits,
+          tail_commits,
           resumes,
           removed,
           completed);
