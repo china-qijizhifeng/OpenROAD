@@ -28,8 +28,11 @@
 // Concurrency (Sec. 5.1): each row is split at the global routing tile
 // borders into chunks with their own AVL tree, node pool and shared-cell
 // table. Threads that route in disjoint tile regions therefore never touch
-// the same tree. The configuration table is shared, append-only and locked
-// on insertion; writers memoise configuration transitions per thread.
+// the same tree. The configuration table is shared and append-only; its
+// index is split into shards by configuration hash, each with its own lock,
+// so that concurrent writers meet only on equal hash shards and on the
+// append of a new configuration; writers memoise configuration transitions
+// per thread.
 //
 // Wide shapes (ShapeClassTable::wide(), e.g. macro blockages and power
 // straps) interact over larger distances than all other shapes of their
@@ -41,7 +44,9 @@
 #pragma once
 
 #include <algorithm>
+#include <array>
 #include <atomic>
+#include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <memory>
@@ -124,8 +129,19 @@ class CellConfigurationTable
   {
     size_t operator()(const std::vector<CellShape>& v) const;
   };
-  std::mutex mutex_;
-  std::unordered_map<std::vector<CellShape>, uint32_t, Hash> index_;
+  // A configuration is looked up and added under the lock of its hash
+  // shard; ids are assigned under append_mutex_ (lock order: shard, then
+  // append). The id of a configuration depends on the arrival order; ids
+  // are handles only.
+  static constexpr size_t kShards = 256;
+  struct alignas(64) Shard
+  {
+    std::mutex mutex;
+    std::unordered_map<std::vector<CellShape>, uint32_t, Hash> index;
+  };
+  Shard& shardOf(const std::vector<CellShape>& shapes);
+  std::array<Shard, kShards> shards_;
+  std::mutex append_mutex_;
   AppendOnlyTable<CellConfiguration> table_;
 };
 

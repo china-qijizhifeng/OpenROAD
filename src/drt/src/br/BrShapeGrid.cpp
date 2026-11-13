@@ -50,11 +50,28 @@ CellConfigurationTable::CellConfigurationTable()
 
 void CellConfigurationTable::clear()
 {
-  std::lock_guard lock(mutex_);
+  for (Shard& shard : shards_) {
+    std::lock_guard lock(shard.mutex);
+    shard.index.clear();
+  }
+  const std::vector<CellShape> empty;
+  Shard& shard = shardOf(empty);
+  std::lock_guard lock(shard.mutex);
+  std::lock_guard append_lock(append_mutex_);
   table_.clear();
-  index_.clear();
   table_.append(CellConfiguration{});
-  index_.emplace(std::vector<CellShape>{}, 0);
+  shard.index.emplace(empty, 0);
+}
+
+CellConfigurationTable::Shard& CellConfigurationTable::shardOf(
+    const std::vector<CellShape>& shapes)
+{
+  // Finaliser of splitmix64: the shard index uses bits that the buckets of
+  // the shard's map do not use.
+  uint64_t h = Hash()(shapes);
+  h = (h ^ (h >> 30)) * 0xbf58476d1ce4e5b9ULL;
+  h = (h ^ (h >> 27)) * 0x94d049bb133111ebULL;
+  return shards_[(h >> 40) % kShards];
 }
 
 size_t CellConfigurationTable::Hash::operator()(
@@ -70,17 +87,22 @@ size_t CellConfigurationTable::Hash::operator()(
 uint32_t CellConfigurationTable::intern(std::vector<CellShape> shapes)
 {
   std::ranges::sort(shapes);
-  std::lock_guard lock(mutex_);
-  const auto it = index_.find(shapes);
-  if (it != index_.end()) {
+  Shard& shard = shardOf(shapes);
+  std::lock_guard lock(shard.mutex);
+  const auto it = shard.index.find(shapes);
+  if (it != shard.index.end()) {
     return it->second;
   }
   CellConfiguration c;
   c.shapes = shapes;
   c.has_owned = std::ranges::any_of(
       shapes, [](const CellShape& s) { return isOwned(s.type); });
-  const uint32_t id = static_cast<uint32_t>(table_.append(std::move(c)));
-  index_.emplace(std::move(shapes), id);
+  uint32_t id;
+  {
+    std::lock_guard append_lock(append_mutex_);
+    id = static_cast<uint32_t>(table_.append(std::move(c)));
+  }
+  shard.index.emplace(std::move(shapes), id);
   return id;
 }
 
