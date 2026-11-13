@@ -138,6 +138,12 @@ bool BonnRouteDRParams::set(const std::string& name, const double value)
     ripup_cost = v;
   } else if (name == "max_ripups") {
     max_ripups = v;
+  } else if (name == "critical_ripup_level") {
+    critical_ripup_level = std::clamp<int>(v, 1, br::kMaxRemovableLevel);
+  } else if (name == "first_pass_ripup_level") {
+    first_pass_ripup_level = std::clamp<int>(v, 1, br::kMaxRemovableLevel);
+  } else if (name == "region_ripup_effort") {
+    region_ripup_effort = std::max(0, v);
   } else if (name == "max_access_jog") {
     max_access_jog = v;
   } else if (name == "max_access_options") {
@@ -150,6 +156,8 @@ bool BonnRouteDRParams::set(const std::string& name, const double value)
     retry_dilation = v;
   } else if (name == "guide_dilation") {
     guide_dilation = std::max(0, v);
+  } else if (name == "corridor_cost") {
+    corridor_cost = std::max(0, v);
   } else if (name == "use_intervals") {
     use_intervals = v != 0;
   } else if (name == "ripup") {
@@ -3863,11 +3871,18 @@ void BonnRouteDR::buildRegion(const NetData& net,
 {
   region.reset();
   const int around = dilation + params_.guide_dilation;
+  // corridor_cost: the tiles around the guide and option tiles are the
+  // widened part of the area.
+  const bool priced = params_.corridor_cost > 0;
   auto allow = [&](int z, int tx, int ty) {
     for (int dz = -params_.layer_dilation; dz <= params_.layer_dilation; dz++) {
       for (int dx = -around; dx <= around; dx++) {
         for (int dy = -around; dy <= around; dy++) {
-          region.allow(z + dz, tx + dx, ty + dy);
+          if (priced && (dx != 0 || dy != 0)) {
+            region.allowWidened(z + dz, tx + dx, ty + dy);
+          } else {
+            region.allow(z + dz, tx + dx, ty + dy);
+          }
         }
       }
     }
@@ -4003,6 +4018,18 @@ bool BonnRouteDR::buildPathRegion(const NetData& net,
   if (found < 0) {
     return false;
   }
+  // corridor_cost: a cell beside the path is plain when its planar tile is
+  // a guide, source or target tile of the net on a layer within
+  // layer_dilation of the cell's layer (the rule of buildRegion).
+  auto plain = [&](const int zc, const int xc, const int yc) {
+    for (int dz = -params_.layer_dilation; dz <= params_.layer_dilation; dz++) {
+      const int64_t at = index(zc + dz, xc, yc);
+      if (at >= 0 && worker.tile_guide[at] == epoch) {
+        return true;
+      }
+    }
+    return false;
+  };
   br::Region& region = worker.region;
   region.reset();
   int steps = 0;
@@ -4028,7 +4055,14 @@ bool BonnRouteDR::buildPathRegion(const NetData& net,
     for (int dz = -params_.layer_dilation; dz <= params_.layer_dilation; dz++) {
       for (int dx = -around; dx <= around; dx++) {
         for (int dy = -around; dy <= around; dy++) {
-          region.allow(z + dz, x + dx, y + dy);
+          // corridor_cost: tiles beside the path are the widened part,
+          // unless they are tiles of the net themselves.
+          if (params_.corridor_cost > 0 && (dx != 0 || dy != 0)
+              && !plain(z + dz, x + dx, y + dy)) {
+            region.allowWidened(z + dz, x + dx, y + dy);
+          } else {
+            region.allow(z + dz, x + dx, y + dy);
+          }
         }
       }
     }
@@ -4287,7 +4321,7 @@ bool BonnRouteDR::connectWithoutOwnShapes(NetData& net,
   auto option_valid = [&](const AccessOption& opt) {
     const br::RipupLevel level
         = worker.reader.level(opt.vertex, br::kWire, net.wire_type);
-    bool ok = level == br::kLegal || (ripup && level <= br::kMaxRemovableLevel);
+    bool ok = level == br::kLegal || (ripup && level <= worker.max_ripup_level);
     if (ok && !ripup && opt.offtrack) {
       // Blockage-grid paths: every shape against earlier routed nets
       // (Sec. 4.4 "these paths are first checked for diff-net rule
@@ -4310,7 +4344,7 @@ bool BonnRouteDR::connectWithoutOwnShapes(NetData& net,
       const br::RipupLevel level
           = worker.reader.level(opt.vertex, br::kWire, net.wire_type);
       bool ok
-          = level == br::kLegal || (ripup && level <= br::kMaxRemovableLevel);
+          = level == br::kLegal || (ripup && level <= worker.max_ripup_level);
       if (ok && !ripup) {
         for (const OutWire& w : opt.wires) {
           if (shapeConflicts(wireShape(w), net.id, &worker)) {
@@ -4372,6 +4406,15 @@ bool BonnRouteDR::connectWithoutOwnShapes(NetData& net,
   const int retry = params_.retry_dilation + extra_dilation;
   worker.footprint.setStep(kStepSearch);
   if (ripup) {
+    // A region's rip-up sequence searches only inside the region.
+    if (worker.limit != nullptr) {
+      const br::TileBox box = netAreaTileBox(net, retry);
+      if (!worker.limit->contains(box)) {
+        worker.area_deferred = true;
+        return false;
+      }
+      worker.footprint.widen(box);
+    }
     return connectInRegion(net, retry, true, valid, worker);
   }
   if (!net.dilated_area) {
@@ -4433,6 +4476,7 @@ bool BonnRouteDR::connectInRegion(NetData& net,
   req.net = net.id;
   req.region = &worker.region;
   req.ripup = ripup;
+  req.max_ripup_level = worker.max_ripup_level;
   req.ripup_cost
       = static_cast<Cost>(params_.ripup_cost) * layers_[0].pitch * unit();
   req.discounts = net.discount_runs;
@@ -4474,6 +4518,7 @@ bool BonnRouteDR::connectInRegion(NetData& net,
   req.discount_rate = static_cast<Cost>(params_.discount_numerator) * unit()
                       / params_.discount_denominator;
   req.jog_low_tiles = jog_low_tiles_.empty() ? nullptr : &jog_low_tiles_;
+  req.corridor_cost_percent = params_.corridor_cost;
   req.use_intervals = params_.use_intervals;
   req.interval_via_property = params_.interval_via_property;
   req.interval_nearest_first = params_.interval_nearest_first;
@@ -4850,7 +4895,11 @@ bool BonnRouteDR::connectInRegion(NetData& net,
   if (ripup) {
     for (const size_t v : in_tree) {
       if (worker.reader.level(v, br::kWire, net.wire_type) != br::kLegal) {
-        grid_.bumpHistory(v);
+        if (worker.limit != nullptr) {
+          worker.history_bumps.push_back(v);
+        } else {
+          grid_.bumpHistory(v);
+        }
       }
     }
   }
@@ -5104,12 +5153,12 @@ int64_t BonnRouteDR::collapseBridges()
   return collapsed;
 }
 
-void BonnRouteDR::ripupNet(NetData& net)
+void BonnRouteDR::ripupNet(NetData& net, Worker* local)
 {
   // One exact fast-grid recomputation for all shapes of the net.
   br::FastGridBuilder::PendingRemovals pending;
   for (const RShape& s : net.shapes) {
-    changeShape(s, routedType(s.role), net.id, false, nullptr, &pending);
+    changeShape(s, routedType(s.role), net.id, false, local, &pending);
   }
   fast_builder_.flush(pending);
   net.shapes.clear();
@@ -6319,6 +6368,8 @@ void BonnRouteDR::routePartitions(const std::vector<int>& order,
     for (int r = 0; r < static_cast<int>(regions.size()); r++) {
       Worker& w = workers_[omp_get_thread_num()];
       const double region_start = omp_get_wtime();
+      const int64_t region_settled_start = w.settled;
+      w.region_ripup_settled = 0;
       const br::AccessFootprintScope footprint_scope(
           params_.partition_check ? &w.footprint : nullptr);
       const br::TileBox region{
@@ -6332,13 +6383,18 @@ void BonnRouteDR::routePartitions(const std::vector<int>& order,
         w.limit = &region;
         w.area_deferred = false;
         const bool connected = connect(net, false, w);
+        // D3: a failure inside the region gets a rip-up sequence there,
+        // which commits the net when it succeeds.
+        const bool by_ripup = !connected && !w.area_deferred
+                              && params_.region_ripup_effort > 0
+                              && regionRipup(net, w, region, region_settled_start);
         w.limit = nullptr;
         if (connected) {
           w.footprint.setStep(kStepCommit);
           commitNet(net, &w);
           w.footprint.setStep(kStepRelease);
           setReservations(net, false, &w);
-        } else {
+        } else if (!by_ripup) {
           net.wires.clear();
           net.vias.clear();
           (w.area_deferred ? region_again : region_failed)[r].push_back(id);
@@ -6350,6 +6406,13 @@ void BonnRouteDR::routePartitions(const std::vector<int>& order,
       busy[r] = omp_get_wtime() - region_start;
     }
     const double wall = omp_get_wtime() - wall_start;
+    // Rip-up history of the regions' sequences (Sec. 4.2).
+    for (Worker& w : workers_) {
+      for (const size_t v : w.history_bumps) {
+        grid_.bumpHistory(v);
+      }
+      w.history_bumps.clear();
+    }
     double busy_sum = 0;
     double busy_max = 0;
     for (const double b : busy) {
@@ -6431,22 +6494,22 @@ BonnRouteDR::SavedRouting BonnRouteDR::saveRouting(const NetData& net) const
   return saved;
 }
 
-void BonnRouteDR::restoreRouting(const SavedRouting& saved)
+void BonnRouteDR::restoreRouting(const SavedRouting& saved, Worker* local)
 {
   NetData& net = nets_[saved.net];
   if (net.routed) {
-    ripupNet(net);
+    ripupNet(net, local);
   }
   net.wires = saved.wires;
   net.vias = saved.vias;
   net.pin_points = saved.pin_points;
   for (size_t t = 0; t < net.terms.size(); t++) {
     net.terms[t].chosen = saved.chosen[t];
-    setReservation(net.terms[t], net.id, saved.reserved[t] != 0);
+    setReservation(net.terms[t], net.id, saved.reserved[t] != 0, local);
   }
-  setInputReservation(net, saved.input_reserved);
+  setInputReservation(net, saved.input_reserved, local);
   if (saved.was_routed) {
-    commitNet(net);
+    commitNet(net, local);
   } else {
     net.wires.clear();
     net.vias.clear();
@@ -6457,42 +6520,62 @@ bool BonnRouteDR::ripupSequence(const int id,
                                 const int depth,
                                 const int dilation,
                                 std::vector<SavedRouting>& journal,
-                                const bool try_plain)
+                                const bool try_plain,
+                                Worker& worker,
+                                RipupState& state,
+                                const br::TileBox* resident)
 {
   NetData& net = nets_[id];
-  Worker& worker = workers_.front();
+  Worker* local = resident != nullptr ? &worker : nullptr;
   journal.push_back(saveRouting(net));
   if (try_plain) {
     const double start = omp_get_wtime();
     const bool ok = connect(net, false, worker, dilation);
-    ripup_plain_seconds_ += omp_get_wtime() - start;
-    ripup_plain_connects_++;
+    state.plain_seconds += omp_get_wtime() - start;
+    state.plain_connects++;
     if (ok) {
-      commitNet(net);
-      setReservations(net, false);
+      commitNet(net, local);
+      setReservations(net, false, local);
       return true;
     }
   }
   if (depth >= params_.ripup_depth) {
-    sequence_outcome_ = kRipupDepth;
-    sequence_outcome_depth_ = depth;
+    state.outcome = kRipupDepth;
+    state.outcome_depth = depth;
     return false;
   }
   const double start = omp_get_wtime();
   const bool found = connect(net, true, worker, dilation);
-  ripup_mode_seconds_ += omp_get_wtime() - start;
-  ripup_mode_connects_++;
+  state.mode_seconds += omp_get_wtime() - start;
+  state.mode_connects++;
   if (!found) {
-    sequence_outcome_ = kRipupNoPath;
-    sequence_outcome_depth_ = depth;
+    state.outcome = kRipupNoPath;
+    state.outcome_depth = depth;
     return false;
   }
   std::vector<int> victims;
   collectVictims(net, victims);
   for (const int victim : victims) {
     if (nets_[victim].ripups >= params_.max_ripups) {
-      sequence_outcome_ = kRipupVictimLimit;
-      sequence_outcome_depth_ = depth;
+      state.outcome = kRipupVictimLimit;
+      state.outcome_depth = depth;
+      return false;
+    }
+    // Sec. 3.3: shapes above the pass's level stay (an access path or a
+    // post-processing shape of the new route can meet them).
+    if (shape_grid_.netRipupLevel(victim) > worker.max_ripup_level) {
+      state.outcome = kRipupVictimLevel;
+      state.outcome_depth = depth;
+      state.victim_level_failures++;
+      return false;
+    }
+    // Sec. 5.1: a region's sequence changes routing only inside the region.
+    if (resident != nullptr
+        && !resident->contains(
+            netAreaTileBox(nets_[victim], params_.retry_dilation))) {
+      state.outcome = kRipupVictimOutside;
+      state.outcome_depth = depth;
+      state.victim_outside_failures++;
       return false;
     }
   }
@@ -6500,29 +6583,83 @@ bool BonnRouteDR::ripupSequence(const int id,
   // again possibly with rip-up (Sec. 4.4).
   for (const int victim : victims) {
     journal.push_back(saveRouting(nets_[victim]));
-    ripupNet(nets_[victim]);
+    ripupNet(nets_[victim], local);
     nets_[victim].ripups++;
-    ripup_events_++;
+    state.events++;
+    state.victims_by_level[shape_grid_.netRipupLevel(victim)]++;
   }
-  commitNet(net);
-  setReservations(net, false);
+  commitNet(net, local);
+  setReservations(net, false, local);
   for (const int victim : victims) {
     if (!nets_[victim].routed
-        && !ripupSequence(victim, depth + 1, dilation, journal)) {
+        && !ripupSequence(victim,
+                          depth + 1,
+                          dilation,
+                          journal,
+                          true,
+                          worker,
+                          state,
+                          resident)) {
       return false;
     }
   }
   return true;
 }
 
+bool BonnRouteDR::regionRipup(NetData& net,
+                              Worker& worker,
+                              const br::TileBox& region,
+                              const int64_t region_settled_start)
+{
+  RipupState& state = worker.ripup;
+  // Budget from this region's own work only (deterministic).
+  const int64_t own
+      = worker.settled - region_settled_start - worker.region_ripup_settled;
+  if (worker.region_ripup_settled * 100 >= own * params_.region_ripup_effort) {
+    state.budget_skips++;
+    return false;
+  }
+  const int64_t settled_before = worker.settled;
+  const br::RipupLevel level = worker.max_ripup_level;
+  worker.max_ripup_level
+      = static_cast<br::RipupLevel>(params_.first_pass_ripup_level);
+  // The sequence may change routing anywhere in the region.
+  worker.footprint.widen(region);
+  std::vector<SavedRouting> journal;
+  state.outcome = kRipupNotStarted;
+  state.outcome_depth = 0;
+  state.sequences++;
+  const bool ok
+      = ripupSequence(net.id, 0, 0, journal, false, worker, state, &region);
+  if (ok) {
+    state.routed++;
+  } else {
+    // Sec. 4.4: a failed sequence restores the original situation.
+    for (auto it = journal.rbegin(); it != journal.rend(); ++it) {
+      restoreRouting(*it, &worker);
+    }
+    state.rollbacks++;
+  }
+  worker.max_ripup_level = level;
+  worker.area_deferred = false;
+  worker.region_ripup_settled += worker.settled - settled_before;
+  state.settled += worker.settled - settled_before;
+  return ok;
+}
+
+
 void BonnRouteDR::routeRipupQueue(const std::vector<int>& failed,
                                   const int64_t settled_budget)
 {
   std::vector<int> queue = failed;
   std::vector<SavedRouting> journal;
-  const Worker& worker = workers_.front();
+  Worker& worker = workers_.front();
   const int64_t start = worker.settled;
   for (int pass = 0; pass < params_.ripup_passes && !queue.empty(); pass++) {
+    // Sec. 4.4: later passes with higher ripup effort.
+    worker.max_ripup_level
+        = pass == 0 ? static_cast<br::RipupLevel>(params_.first_pass_ripup_level)
+                    : br::kMaxRemovableLevel;
     std::vector<int> unrouted;
     for (const int id : queue) {
       if (nets_[id].routed) {
@@ -6537,9 +6674,16 @@ void BonnRouteDR::routeRipupQueue(const std::vector<int>& failed,
         continue;
       }
       journal.clear();
-      sequence_outcome_ = kRipupNotStarted;
-      sequence_outcome_depth_ = 0;
-      if (ripupSequence(id, 0, pass, journal, false)) {
+      serial_ripup_.outcome = kRipupNotStarted;
+      serial_ripup_.outcome_depth = 0;
+      if (ripupSequence(id,
+                        0,
+                        pass,
+                        journal,
+                        false,
+                        worker,
+                        serial_ripup_,
+                        nullptr)) {
         continue;
       }
       // The step the net's own rip-up mode search failed at, before the
@@ -6550,17 +6694,18 @@ void BonnRouteDR::routeRipupQueue(const std::vector<int>& failed,
       for (auto it = journal.rbegin(); it != journal.rend(); ++it) {
         restoreRouting(*it);
       }
-      rollbacks_++;
+      serial_ripup_.rollbacks++;
       unrouted.push_back(id);
       // A failure below the net's own call is a victim's.
-      nets_[id].ripup_outcome = sequence_outcome_depth_ > 0
+      nets_[id].ripup_outcome = serial_ripup_.outcome_depth > 0
                                     ? uint8_t{kRipupVictimFailed}
-                                    : sequence_outcome_;
+                                    : serial_ripup_.outcome;
       nets_[id].left_step = step;
       nets_[id].left_term = term;
     }
     queue.swap(unrouted);
   }
+  worker.max_ripup_level = br::kMaxRemovableLevel;
   for (const int id : queue) {
     NetData& net = nets_[id];
     net.wires.clear();
@@ -6668,7 +6813,9 @@ void BonnRouteDR::reportLeftNets() const
       "depth",
       "no path with rip-up",
       "victim at its rip-up limit",
-      "victim not routed again"};
+      "victim not routed again",
+      "victim above the rip-up level",
+      "victim outside the region"};
   static constexpr std::array<const char*, kNumAccessBlocks> kBlocks{
       "no option",
       "feasible at the end",
@@ -6734,7 +6881,8 @@ void BonnRouteDR::reportLeftNets() const
       "reservations, {} by routed shapes, {} feasible at the end), {} no "
       "path, {} search budget, {} none; their rip-up sequence: {} not "
       "started, {} over the effort budget, {} no path with rip-up, {} victim "
-      "at its rip-up limit, {} victim not routed again, {} depth.",
+      "at its rip-up limit, {} victim not routed again, {} depth, {} victim "
+      "above the rip-up level, {} victim outside the region.",
       left,
       guard_contact,
       guard_on_track,
@@ -6753,7 +6901,9 @@ void BonnRouteDR::reportLeftNets() const
       by_outcome[kRipupNoPath],
       by_outcome[kRipupVictimLimit],
       by_outcome[kRipupVictimFailed],
-      by_outcome[kRipupDepth]);
+      by_outcome[kRipupDepth],
+      by_outcome[kRipupVictimLevel],
+      by_outcome[kRipupVictimOutside]);
 }
 
 void BonnRouteDR::writeNets()
@@ -7183,6 +7333,14 @@ void BonnRouteDR::main()
                   "use_intervals is ignored.");
     params_.use_intervals = false;
   }
+  if (params_.use_intervals && params_.corridor_cost > 0) {
+    // The interval search has no corridor price (BrCore.h).
+    logger_->warn(utl::DRT,
+                  9131,
+                  "BonnRoute: corridor_cost needs the vertex search "
+                  "(use_intervals 0); corridor_cost is ignored.");
+    params_.corridor_cost = 0;
+  }
   trace_connections_ = logger_->debugCheck(utl::DRT, "bonnroute_connect", 1);
   SetupPhases& phases = setup_phases_;
   utl::Timer phase_timer;
@@ -7324,6 +7482,15 @@ void BonnRouteDR::main()
           && (nets_[id].net->isClock() || nets_[id].wire_type != 0);
     (is_critical ? critical : regular).push_back(id);
   }
+  // Sec. 3.3: rip-up level of the critical nets, set before any of their
+  // shapes is committed; the parallel phases only read the level table.
+  if (params_.critical_ripup_level > 1 && !critical.empty()) {
+    shape_grid_.setNetRipupLevel(static_cast<int32_t>(nets_.size()) - 1, 1);
+    for (const int id : critical) {
+      shape_grid_.setNetRipupLevel(
+          id, static_cast<br::RipupLevel>(params_.critical_ripup_level));
+    }
+  }
   if (!critical.empty()) {
     routePartitions(critical, failed_first, 1, "critical-net partition");
   }
@@ -7333,6 +7500,41 @@ void BonnRouteDR::main()
     routeParallel(regular, failed_first);
   }
   const double parallel_time = timer.elapsed();
+  if (params_.region_ripup_effort > 0 && params_.verbose) {
+    RipupState total;
+    for (const Worker& w : workers_) {
+      const RipupState& s = w.ripup;
+      total.sequences += s.sequences;
+      total.routed += s.routed;
+      total.budget_skips += s.budget_skips;
+      total.events += s.events;
+      total.rollbacks += s.rollbacks;
+      total.victim_level_failures += s.victim_level_failures;
+      total.victim_outside_failures += s.victim_outside_failures;
+      total.mode_connects += s.mode_connects;
+      total.plain_connects += s.plain_connects;
+      total.mode_seconds += s.mode_seconds;
+      total.plain_seconds += s.plain_seconds;
+      total.settled += s.settled;
+    }
+    logger_->report(
+        "BonnRoute DR region rip-up: {} sequences, {} nets routed, {} rolled "
+        "back, {} over the region budget; {} rip-ups; failed at a victim "
+        "above the level {}, outside the region {}; {} connects with rip-up "
+        "{:.2f} thread-s, {} without {:.2f} thread-s; {} settled vertices.",
+        total.sequences,
+        total.routed,
+        total.rollbacks,
+        total.budget_skips,
+        total.events,
+        total.victim_level_failures,
+        total.victim_outside_failures,
+        total.mode_connects,
+        total.mode_seconds,
+        total.plain_connects,
+        total.plain_seconds,
+        total.settled);
+  }
   if (params_.partition_check) {
     reportFootprints();
   }
@@ -7386,13 +7588,26 @@ void BonnRouteDR::main()
           static_cast<int64_t>(before) - still,
           still,
           ripup_budget_skipped_,
-          ripup_events_,
-          rollbacks_,
+          serial_ripup_.events,
+          serial_ripup_.rollbacks,
           timer.elapsed() - ripup_start,
-          ripup_plain_connects_,
-          ripup_plain_seconds_,
-          ripup_mode_connects_,
-          ripup_mode_seconds_);
+          serial_ripup_.plain_connects,
+          serial_ripup_.plain_seconds,
+          serial_ripup_.mode_connects,
+          serial_ripup_.mode_seconds);
+      logger_->report(
+          "BonnRoute DR rip-up victims by level: 1: {}, 2: {}, 3: {}, 4: {}, "
+          "5: {}, 6: {}; critical_ripup_level {}, first_pass_ripup_level {}; "
+          "{} sequences failed at a victim above the pass's level.",
+          serial_ripup_.victims_by_level[1],
+          serial_ripup_.victims_by_level[2],
+          serial_ripup_.victims_by_level[3],
+          serial_ripup_.victims_by_level[4],
+          serial_ripup_.victims_by_level[5],
+          serial_ripup_.victims_by_level[6],
+          params_.critical_ripup_level,
+          params_.first_pass_ripup_level,
+          serial_ripup_.victim_level_failures);
     }
   }
   if (params_.collapse_bridges) {
@@ -7807,8 +8022,8 @@ void BonnRouteDR::main()
         settled,
         intervals,
         labels,
-        ripup_events_,
-        rollbacks_,
+        serial_ripup_.events,
+        serial_ripup_.rollbacks,
         path_region_searches,
         timer.elapsed());
     br::CleanupStats cleanup;

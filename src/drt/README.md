@@ -142,6 +142,9 @@ set_bonnroute_dr_param name value
 | `jog_factor_low` / `jog_low_utilization` | `0` / `50` | Vertex search: jogs cost `jog_factor_low` (0: off) in GCells whose global routing usage of the layer is at most `jog_low_utilization` percent of its capacity, `jog_factor` elsewhere (a wrong-way wire blocks the crossing tracks it uses). |
 | `ripup_cost` | `40` | Base rip-up penalty in pitches of the bottom routing layer. |
 | `max_ripups` | `3` | Maximum rip-ups per net. |
+| `critical_ripup_level` | `1` | Rip-up level (1..6) of the routed shapes of critical nets (clock and NDR nets, routed first); other nets have level 1. |
+| `first_pass_ripup_level` | `1` | The first rip-up pass removes routed shapes up to this level; later passes up to 6. A rip-up sequence whose victims include a net above the pass's level is rolled back. |
+| `region_ripup_effort` | `0` | A net whose connection fails inside its partition region gets a rip-up sequence there: victims at most `first_pass_ripup_level` whose area dilated by `retry_dilation` lies inside the region, rerouted there; the sequences of a region settle at most this percentage of the vertices its connections settled. A failed sequence is rolled back and the net goes on to the serial rip-up phase. `0`: no region sequences. |
 | `max_access_jog` | `2` | Maximum pin-to-track jog in pitches (access stubs, `offtrack_access 0`). |
 | `max_access_options` | `8` | Maximum access options (catalogue paths) retained per pin. |
 | `pin_cost` | `2` | Extra cost of a non-preferred access point, in pitches (access stubs). |
@@ -160,6 +163,7 @@ set_bonnroute_dr_param name value
 | `offtrack_from_access_points` | `1` | Start catalogue paths at the pin's OpenROAD access points. `0` starts anywhere on the pin, as in the paper; it is incompatible with the FlexDR clean-up, whose workers need every pin contact at an access point (the contact guard then leaves the affected nets to FlexDR). |
 | `layer_dilation` | `1` | Extra routing layers around a guide. |
 | `guide_dilation` | `0` | Width of the detailed routing corridor: the guide area of a net (its path regions and its whole area) includes this many tiles around the guide tiles. `0` keeps the global routing corridor. |
+| `corridor_cost` | `0` | Vertex search: wires and jogs in the tiles around the guide tiles (the `guide_dilation` and `retry_dilation` parts of the routing area) cost this percentage more than in the guide tiles. Vertex search only: with `use_intervals 1` it is set to 0 (DRT-9131). |
 | `retry_dilation` | `2` | A net whose connections fail in its guide area is routed again in the area dilated by this many tiles. A partition thread does so where the dilated area's tile box lies inside its region; otherwise the net continues in a later partition or the tail. |
 | `use_intervals` | `0` | Use vertex search by default; `1` selects interval label sets. |
 | `ripup` | `0` | Leave unresolved nets to FlexDR by default; `1` enables serial rip-up and rerouting. |
