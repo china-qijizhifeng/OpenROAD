@@ -267,6 +267,14 @@ struct BonnRouteDRParams
   // building the maze grid graph. The routing result equals that of the
   // full worker (bit-identical result files).
   bool cleanup_check_only_workers = true;
+  // Before FlexDR's iteration 0, run the connectivity check that otherwise
+  // follows iteration 0 over BonnRoute's nets (all are marked modified): it
+  // removes objects that are not on a connecting path (e.g. a pin-layer
+  // segment next to a via whose pad already touches the pin) and shrinks
+  // overshooting segments. Iteration 0 then checks the geometry FlexDR keeps;
+  // the Recheck markers of this check are dropped, since iteration 0 checks
+  // every tile.
+  bool cleanup_normalize_initial_routing = false;
   bool verbose = true;
   // Algorithm profile: 0 = 2013-improved (default), 1 = 2013-reimpl,
   // 2 = 2021 (2013-reimpl plus Ahrens et al., arXiv:2111.06169).

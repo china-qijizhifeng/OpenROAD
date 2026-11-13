@@ -104,6 +104,9 @@ class FlexDR
     // In the incremental iterations 0-2, a worker whose nets all carry
     // initial routing runs only the design-rule check.
     bool check_only_workers = false;
+    // Run the connectivity check over the nets with initial routing before
+    // iteration 0 and drop the Recheck markers it leaves.
+    bool normalize_initial_routing = false;
   };
   struct IterationProgress
   {
@@ -217,6 +220,9 @@ class FlexDR
   void reportIterationViolations() const;
   // Records the extended boxes of workers that changed the design in
   // changed_regions when it is not null.
+  // Connectivity check over the nets with initial routing before
+  // iteration 0; drops the Recheck markers it leaves.
+  void normalizeInitialRouting();
   void endWorkersBatch(
       std::vector<std::unique_ptr<FlexDRWorker>>& workers_batch,
       std::vector<odb::Rect>* changed_regions = nullptr);

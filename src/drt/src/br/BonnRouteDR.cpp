@@ -267,6 +267,8 @@ bool BonnRouteDRParams::set(const std::string& name, const double value)
     cleanup_incremental_iterations = std::clamp(v, 0, 2);
   } else if (name == "cleanup_check_only_workers") {
     cleanup_check_only_workers = v != 0;
+  } else if (name == "cleanup_normalize_initial_routing") {
+    cleanup_normalize_initial_routing = v != 0;
   } else if (name == "verbose") {
     verbose = v != 0;
   } else {
