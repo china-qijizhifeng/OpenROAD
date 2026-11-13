@@ -80,6 +80,12 @@ struct BonnRouteDRParams
   // this percentage of the vertices its connections settled. 0: none (the
   // serial rip-up phase handles every failed net).
   int region_ripup_effort = 0;
+  // D1 S2 (design/D1-connection-unit.md): a net whose connection fails in
+  // a partition region keeps the connections it closed (committed, its
+  // reservations stay active); later stages route only the terms not joined
+  // yet. Nets still partial after the rip-up phase are removed and left to
+  // FlexDR whole. 0: a failed net keeps nothing.
+  bool keep_partial = false;
   // Off-track pin access: largest jog to a track, in pitches.
   int max_access_jog = 2;
   int max_access_options = 8;
@@ -510,6 +516,21 @@ class BonnRouteDR
     kAccessFixed,         // blockages or pins of other nets
     kNumAccessBlocks
   };
+  // D1 S2: the connections a net closed so far, from which connect
+  // resumes: joined terms (term 0 always), terms whose access path is part
+  // of a post-processed connection, chosen access options, track vertices
+  // that carry metal (sources of later connections), and the geometry.
+  struct PartialState
+  {
+    bool valid = false;
+    int joined = 0;
+    std::vector<char> connected;
+    std::vector<char> consumed;
+    std::vector<int> chosen;
+    std::vector<size_t> tree;
+    std::vector<OutWire> wires;
+    std::vector<OutVia> vias;
+  };
   struct NetData
   {
     frNet* net = nullptr;
@@ -547,6 +568,9 @@ class BonnRouteDR
     int64_t hpwl = 0;
     // Wire type (Sec. 3.2): 0 = default rule, else the net's NDR.
     int wire_type = 0;
+    // keep_partial: shapes holds the committed shapes of partial_state.
+    bool partial = false;
+    PartialState partial_state;
   };
 
   // partition_check (Sec. 5.1): the steps of a net's unit of work, the
@@ -610,6 +634,11 @@ class BonnRouteDR
     RipupState ripup;
     int64_t region_ripup_settled = 0;
     std::vector<size_t> history_bumps;
+    // keep_partial: progress of the last failed connectInRegion, partial
+    // commits of the regions, connects that resumed a partial net.
+    PartialState progress;
+    int64_t partial_commits = 0;
+    int64_t partial_resumes = 0;
     int64_t area_deferrals = 0;
     // Settled-vertex budget of the current connect (0: none), the settled
     // count at its start, and whether a search was skipped for it.
@@ -672,6 +701,8 @@ class BonnRouteDR
     std::vector<int> chosen;
     std::vector<char> reserved;
     bool input_reserved;
+    bool was_partial = false;
+    PartialState partial_state;
   };
 
   void buildTrackGraph();
@@ -1068,6 +1099,10 @@ class BonnRouteDR
                         bool shifted,
                         std::vector<std::array<int, 4>>& regions) const;
   void ripupNet(NetData& net, Worker* local = nullptr);
+  // Removes the committed shapes of `net` from the routing space.
+  void uncommitShapes(NetData& net, Worker* local);
+  // keep_partial: commits `state` as the net's partial routing.
+  void commitPartial(NetData& net, const PartialState& state, Worker* local);
   // Rip-up victims: nets reported by the distance rule checker as blocking
   // the net's new shapes (Sec. 3.4, 4.2).
   void collectVictims(const NetData& net, std::vector<int>& victims) const;

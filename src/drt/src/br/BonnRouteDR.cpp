@@ -144,6 +144,8 @@ bool BonnRouteDRParams::set(const std::string& name, const double value)
     first_pass_ripup_level = std::clamp<int>(v, 1, br::kMaxRemovableLevel);
   } else if (name == "region_ripup_effort") {
     region_ripup_effort = std::max(0, v);
+  } else if (name == "keep_partial") {
+    keep_partial = v != 0;
   } else if (name == "max_access_jog") {
     max_access_jog = v;
   } else if (name == "max_access_options") {
@@ -1285,6 +1287,12 @@ void BonnRouteDR::ownShapes(
   if (net.input_reserved) {
     for (const RShape& s : net.input_reservation) {
       add(s, br::ShapeType::kReservation);
+    }
+  }
+  // D1 S2: the shapes of the connections the net closed so far.
+  if (net.partial) {
+    for (const RShape& s : net.shapes) {
+      add(s, routedType(s.role));
     }
   }
 }
@@ -4339,6 +4347,11 @@ bool BonnRouteDR::connectWithoutOwnShapes(NetData& net,
   for (int t = 0; t < num_terms; t++) {
     const Term& term = net.terms[t];
     valid[t].assign(term.options.size(), 0);
+    // D1 S2: a joined term keeps its chosen access path.
+    if (net.partial && net.partial_state.connected[t]) {
+      valid[t][net.partial_state.chosen[t]] = 1;
+      continue;
+    }
     int feasible = 0;
     for (size_t o = 0; o < term.options.size(); o++) {
       const AccessOption& opt = term.options[o];
@@ -4455,11 +4468,20 @@ bool BonnRouteDR::connectInRegion(NetData& net,
                                   const std::vector<std::vector<char>>& valid,
                                   Worker& worker)
 {
-  net.wires.clear();
-  net.vias.clear();
+  // D1 S2: a partial net resumes from the connections it closed.
+  const bool resume = net.partial;
+  worker.progress.valid = false;
+  if (resume) {
+    net.wires = net.partial_state.wires;
+    net.vias = net.partial_state.vias;
+    worker.partial_resumes++;
+  } else {
+    net.wires.clear();
+    net.vias.clear();
+  }
   net.pin_points.clear();
-  for (Term& term : net.terms) {
-    term.chosen = -1;
+  for (size_t t = 0; t < net.terms.size(); t++) {
+    net.terms[t].chosen = resume ? net.partial_state.chosen[t] : -1;
   }
   // Effort budget of a speculative tail attempt (tail_defer_settled):
   // checked before each search, so an attempt settles at most the budget
@@ -4581,10 +4603,21 @@ bool BonnRouteDR::connectInRegion(NetData& net,
   connected[0] = 1;
   // Terms whose access path is part of a post-processed connection.
   std::vector<char> consumed(num_terms, 0);
-  for (size_t o = 0; o < net.terms[0].options.size(); o++) {
-    if (valid[0][o]) {
-      sources.emplace_back(net.terms[0].options[o].vertex,
-                           net.terms[0].options[o].cost);
+  if (resume) {
+    connected = net.partial_state.connected;
+    consumed = net.partial_state.consumed;
+    for (const size_t v : net.partial_state.tree) {
+      if (in_tree.insert(v).second) {
+        tree.push_back(v);
+        sources.emplace_back(v, 0);
+      }
+    }
+  } else {
+    for (size_t o = 0; o < net.terms[0].options.size(); o++) {
+      if (valid[0][o]) {
+        sources.emplace_back(net.terms[0].options[o].vertex,
+                             net.terms[0].options[o].cost);
+      }
     }
   }
   auto in_region = [&](size_t v) {
@@ -4750,7 +4783,33 @@ bool BonnRouteDR::connectInRegion(NetData& net,
     return res;
   };
   bool full_region = false;
-  int remaining = num_terms - 1;
+  int remaining = static_cast<int>(
+      std::ranges::count(connected, static_cast<char>(0)));
+  // D1 S2: on failure the progress of this call (connections closed so
+  // far) is kept for the caller.
+  bool succeeded = false;
+  struct OnExit
+  {
+    std::function<void()> f;
+    ~OnExit() { f(); }
+  };
+  const OnExit keep_progress{[&]() {
+    if (succeeded || !params_.keep_partial) {
+      return;
+    }
+    PartialState& p = worker.progress;
+    p.valid = true;
+    p.joined = static_cast<int>(std::ranges::count(connected, char{1}));
+    p.connected = connected;
+    p.consumed = consumed;
+    p.tree = tree;
+    p.chosen.clear();
+    for (const Term& term : net.terms) {
+      p.chosen.push_back(term.chosen);
+    }
+    p.wires = net.wires;
+    p.vias = net.vias;
+  }};
   while (remaining > 0) {
     if (over_budget()) {
       return false;
@@ -4909,6 +4968,7 @@ bool BonnRouteDR::connectInRegion(NetData& net,
       }
     }
   }
+  succeeded = true;
   return true;
 }
 
@@ -4966,8 +5026,45 @@ void BonnRouteDR::logSearchStatistics(const NetData& net,
       net.terms.size());
 }
 
+void BonnRouteDR::uncommitShapes(NetData& net, Worker* local)
+{
+  // One exact fast-grid recomputation for all shapes of the net.
+  br::FastGridBuilder::PendingRemovals pending;
+  for (const RShape& s : net.shapes) {
+    changeShape(s, routedType(s.role), net.id, false, local, &pending);
+  }
+  fast_builder_.flush(pending);
+  net.shapes.clear();
+}
+
+void BonnRouteDR::commitPartial(NetData& net,
+                                const PartialState& state,
+                                Worker* local)
+{
+  if (net.partial) {
+    uncommitShapes(net, local);
+  }
+  net.partial_state = state;
+  net.partial = true;
+  net.routed = false;
+  net.wires = state.wires;
+  net.vias = state.vias;
+  shapesOf(net, net.shapes);
+  for (const RShape& s : net.shapes) {
+    changeShape(s, routedType(s.role), net.id, true, local);
+  }
+  net.wires.clear();
+  net.vias.clear();
+}
+
 void BonnRouteDR::commitNet(NetData& net, Worker* local)
 {
+  // D1 S2: the whole net replaces the shapes of its partial routing.
+  if (net.partial) {
+    uncommitShapes(net, local);
+    net.partial = false;
+    net.partial_state = PartialState{};
+  }
   shapesOf(net, net.shapes);
   for (const RShape& s : net.shapes) {
     changeShape(s, routedType(s.role), net.id, true, local);
@@ -5161,16 +5258,12 @@ int64_t BonnRouteDR::collapseBridges()
 
 void BonnRouteDR::ripupNet(NetData& net, Worker* local)
 {
-  // One exact fast-grid recomputation for all shapes of the net.
-  br::FastGridBuilder::PendingRemovals pending;
-  for (const RShape& s : net.shapes) {
-    changeShape(s, routedType(s.role), net.id, false, local, &pending);
-  }
-  fast_builder_.flush(pending);
-  net.shapes.clear();
+  uncommitShapes(net, local);
   net.wires.clear();
   net.vias.clear();
   net.routed = false;
+  net.partial = false;
+  net.partial_state = PartialState{};
 }
 
 void BonnRouteDR::collectVictims(const NetData& net,
@@ -6441,6 +6534,15 @@ void BonnRouteDR::routePartitions(const std::vector<int>& order,
         w.limit = &region;
         w.area_deferred = false;
         const bool connected = connect(net, false, w);
+        // D1 S2: a failed net keeps the connections it closed, when it
+        // joined more terms than before.
+        if (!connected && params_.keep_partial && w.progress.valid
+            && w.progress.joined
+                   > (net.partial ? net.partial_state.joined : 1)) {
+          w.footprint.setStep(kStepCommit);
+          commitPartial(net, w.progress, &w);
+          w.partial_commits++;
+        }
         // D3: a failure inside the region gets a rip-up sequence there,
         // which commits the net when it succeeds.
         const bool by_ripup = !connected && !w.area_deferred
@@ -6549,13 +6651,15 @@ BonnRouteDR::SavedRouting BonnRouteDR::saveRouting(const NetData& net) const
     saved.chosen.push_back(term.chosen);
     saved.reserved.push_back(term.reservation_active);
   }
+  saved.was_partial = net.partial;
+  saved.partial_state = net.partial_state;
   return saved;
 }
 
 void BonnRouteDR::restoreRouting(const SavedRouting& saved, Worker* local)
 {
   NetData& net = nets_[saved.net];
-  if (net.routed) {
+  if (net.routed || net.partial) {
     ripupNet(net, local);
   }
   net.wires = saved.wires;
@@ -6571,6 +6675,9 @@ void BonnRouteDR::restoreRouting(const SavedRouting& saved, Worker* local)
   } else {
     net.wires.clear();
     net.vias.clear();
+    if (saved.was_partial) {
+      commitPartial(net, saved.partial_state, local);
+    }
   }
 }
 
@@ -7666,6 +7773,35 @@ void BonnRouteDR::main()
           params_.critical_ripup_level,
           params_.first_pass_ripup_level,
           serial_ripup_.victim_level_failures);
+    }
+  }
+  if (params_.keep_partial) {
+    int64_t commits = 0;
+    int64_t resumes = 0;
+    for (const Worker& w : workers_) {
+      commits += w.partial_commits;
+      resumes += w.partial_resumes;
+    }
+    int64_t removed = 0;
+    int64_t completed = 0;
+    for (NetData& net : nets_) {
+      if (net.partial && !net.routed) {
+        ripupNet(net);
+        removed++;
+      }
+    }
+    for (const NetData& net : nets_) {
+      completed += net.routed && !net.skip;
+    }
+    if (params_.verbose) {
+      logger_->report(
+          "BonnRoute DR partial routing: {} partial commits in the regions, "
+          "{} connects resumed a partial net; {} nets still partial at the "
+          "end, removed and left to FlexDR whole; {} nets routed.",
+          commits,
+          resumes,
+          removed,
+          completed);
     }
   }
   if (params_.collapse_bridges) {

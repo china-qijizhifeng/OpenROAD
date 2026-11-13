@@ -145,6 +145,7 @@ set_bonnroute_dr_param name value
 | `critical_ripup_level` | `1` | Rip-up level (1..6) of the routed shapes of critical nets (clock and NDR nets, routed first); other nets have level 1. |
 | `first_pass_ripup_level` | `1` | The first rip-up pass removes routed shapes up to this level; later passes up to 6. A rip-up sequence whose victims include a net above the pass's level is rolled back. |
 | `region_ripup_effort` | `0` | A net whose connection fails inside its partition region gets a rip-up sequence there: victims at most `first_pass_ripup_level` whose area dilated by `retry_dilation` lies inside the region, rerouted there; the sequences of a region settle at most this percentage of the vertices its connections settled. A failed sequence is rolled back and the net goes on to the serial rip-up phase. `0`: no region sequences. |
+| `keep_partial` | `0` | A net whose connection fails in a partition region keeps the connections it closed (committed; its reservations stay active); every later stage (dilated retry, tail, rip-up) routes only the terms not joined yet. Nets still partial after the rip-up phase are removed and left to FlexDR whole. |
 | `max_access_jog` | `2` | Maximum pin-to-track jog in pitches (access stubs, `offtrack_access 0`). |
 | `max_access_options` | `8` | Maximum access options (catalogue paths) retained per pin. |
 | `pin_cost` | `2` | Extra cost of a non-preferred access point, in pitches (access stubs). |
