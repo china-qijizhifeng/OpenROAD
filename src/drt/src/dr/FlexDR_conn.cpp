@@ -466,7 +466,10 @@ void FlexDRConnectivityChecker::finish(
       if (netRouteObjs[i]->typeId() == frcPathSeg) {
         auto victimPathSeg = static_cast<frPathSeg*>(netRouteObjs[i]);
         // negative rule
-        addMarker(net, victimPathSeg->getLayerNum(), victimPathSeg->getBBox());
+        addMarker(net,
+                  victimPathSeg->getLayerNum(),
+                  victimPathSeg->getBBox(),
+                  RecheckAction::kRemoveSegment);
         if (save_updates_) {
           drUpdate update(drUpdate::REMOVE_FROM_NET);
           update.setNet(victimPathSeg->getNet());
@@ -479,7 +482,10 @@ void FlexDRConnectivityChecker::finish(
         auto victimVia = static_cast<frVia*>(netRouteObjs[i]);
         // negative rule
         odb::Rect bbox = victimVia->getLayer1BBox();
-        addMarker(net, victimVia->getViaDef()->getLayer1Num(), bbox);
+        addMarker(net,
+                  victimVia->getViaDef()->getLayer1Num(),
+                  bbox,
+                  RecheckAction::kRemoveVia);
 
         frVia* via = static_cast<frVia*>(netRouteObjs[i]);
         if (save_updates_) {
@@ -663,7 +669,10 @@ void FlexDRConnectivityChecker::finish(
     // shrink segment
     if (bp < minPt || maxPt < ep) {
       // negative rule
-      addMarker(net, ps->getLayerNum(), ps->getBBox());
+      addMarker(net,
+                ps->getLayerNum(),
+                ps->getBBox(),
+                RecheckAction::kShrinkSegment);
       if (save_updates_) {
         drUpdate update(drUpdate::REMOVE_FROM_RQ);
         update.setNet(ps->getNet());
@@ -719,7 +728,10 @@ void FlexDRConnectivityChecker::finish(
     lNum = obj->getLayerNum();
     if (validPoints.find(std::make_pair(origin, lNum)) == validPoints.end()) {
       // negative rule
-      addMarker(net, obj->getLayerNum(), obj->getBBox());
+      addMarker(net,
+                obj->getLayerNum(),
+                obj->getBBox(),
+                RecheckAction::kRemovePatch);
       if (save_updates_) {
         drUpdate update(drUpdate::REMOVE_FROM_NET);
         update.setNet(obj->getNet());
@@ -1158,8 +1170,11 @@ void FlexDRConnectivityChecker::merge_commit(
 }
 void FlexDRConnectivityChecker::addMarker(frNet* net,
                                           frLayerNum lNum,
-                                          const odb::Rect& bbox)
+                                          const odb::Rect& bbox,
+                                          const RecheckAction action)
 {
+  recheck_markers_[static_cast<int>(action)][net->hasInitialRouting() ? 1
+                                                                       : 0]++;
   auto regionQuery = getRegionQuery();
   auto marker = std::make_unique<frMarker>();
   marker->setBBox(bbox);
@@ -1181,6 +1196,7 @@ void FlexDRConnectivityChecker::addMarker(frNet* net,
 void FlexDRConnectivityChecker::check(int iter)
 {
   ProfileTask profile("checkConnectivity");
+  const double check_start = omp_get_wtime();
   bool isWrong = false;
 
   int batchSize = 1 << 17;  // 128k
@@ -1204,11 +1220,16 @@ void FlexDRConnectivityChecker::check(int iter)
   if (batches[0].empty()) {
     batches.clear();
   }
+  size_t numCheckedNets = 0;
+  for (const auto& batch : batches) {
+    numCheckedNets += batch.size();
+  }
 
   const int numLayers = getTech()->getLayers().size();
   omp_set_num_threads(router_cfg_->MAX_THREADS);
   for (auto& batch : batches) {
     ProfileTask profile("batch");
+    const double batch_start = omp_get_wtime();
     // prefix a = all batch
     // net->figs
     std::vector<NetRouteObjs> aNetRouteObjs(batchSize);
@@ -1259,6 +1280,8 @@ void FlexDRConnectivityChecker::check(int iter)
     }
     exception.rethrow();
     init_parallel.done();
+    const double merge_start = omp_get_wtime();
+    phase_seconds_.init_parallel += merge_start - batch_start;
     ProfileTask merge_serial("merge-serial");
 
     // sequential - writes to the db
@@ -1292,6 +1315,8 @@ void FlexDRConnectivityChecker::check(int iter)
     std::vector<char> status(batchSize, false);
 
     merge_serial.done();
+    const double astar_start = omp_get_wtime();
+    phase_seconds_.merge_serial += astar_start - merge_start;
     ProfileTask astar_parallel("astar-parallel");
 
 // parallel
@@ -1325,6 +1350,8 @@ void FlexDRConnectivityChecker::check(int iter)
     }
     exception.rethrow();
     astar_parallel.done();
+    const double finish_start = omp_get_wtime();
+    phase_seconds_.astar_parallel += finish_start - astar_start;
     ProfileTask finish_serial("finish-serial");
 
     // sequential
@@ -1359,7 +1386,25 @@ void FlexDRConnectivityChecker::check(int iter)
         // release lock
       }
     }
+    phase_seconds_.finish_serial += omp_get_wtime() - finish_start;
   }
+  phase_seconds_.total = omp_get_wtime() - check_start;
+  debugPrint(logger_,
+             utl::DRT,
+             "bonnroute_recheck",
+             1,
+             "recheck iter {} nets {} remove_segment {} {} remove_via {} {} "
+             "shrink_segment {} {} remove_patch {} {}",
+             iter,
+             numCheckedNets,
+             recheck_markers_[0][0],
+             recheck_markers_[0][1],
+             recheck_markers_[1][0],
+             recheck_markers_[1][1],
+             recheck_markers_[2][0],
+             recheck_markers_[2][1],
+             recheck_markers_[3][0],
+             recheck_markers_[3][1]);
 
   if (isWrong) {
     if (graphics_) {

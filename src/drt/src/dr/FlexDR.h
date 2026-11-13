@@ -194,6 +194,20 @@ class FlexDR
   InitialRoutingCleanup initial_routing_cleanup_;
   // Workers of the current iteration that ran only the design-rule check.
   int num_check_only_workers_{0};
+  // Measurement M9 (debug group bonnroute_cleanup), per iteration of the
+  // optimization flow: worker counts by end() and wall seconds of the
+  // worker creation, the parallel batches and the serial batch ends.
+  struct IterationCleanupStatistics
+  {
+    int workers = 0;
+    int workers_without_markers = 0;
+    int workers_without_nets = 0;
+    int workers_with_only_initial_routing = 0;
+    double create_seconds = 0;
+    double batch_seconds = 0;
+    double end_batch_seconds = 0;
+  };
+  IterationCleanupStatistics cleanup_statistics_;
 
   // others
   void initFromTA();
@@ -394,6 +408,13 @@ class FlexDRWorker
     check_only_without_reroutable_nets_ = in;
   }
   bool isCheckOnly() const { return check_only_; }
+  // Measurement M9: init found no net to route; init found only nets with
+  // initial routing (the check-only condition without its switch).
+  bool isSkippedWithoutNets() const { return skipped_without_nets_; }
+  bool hasOnlyNetsWithInitialRouting() const
+  {
+    return only_nets_with_initial_routing_;
+  }
   void setFollowGuide(bool in) { followGuide_ = in; }
   void setCost(frUInt4 drcCostIn,
                frUInt4 markerCostIn,
@@ -593,6 +614,8 @@ class FlexDRWorker
   bool skipRouting_{false};
   bool check_only_without_reroutable_nets_{false};
   bool check_only_{false};
+  bool skipped_without_nets_{false};
+  bool only_nets_with_initial_routing_{false};
   RipUpMode ripupMode_{RipUpMode::DRC};
   // drNetOrderingEnum netOrderingMode;
   frUInt4 workerDRCCost_{0};

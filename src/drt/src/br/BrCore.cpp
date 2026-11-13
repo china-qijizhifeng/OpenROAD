@@ -464,6 +464,9 @@ SearchResult PathSearch::run(const SearchRequest& request)
     push(Item{c + futureCost(z, x, y), c, i, j, 0, static_cast<int8_t>(z), 0});
   }
 
+  // The continuation pushed by the last popped run label (statistics only).
+  bool continuation_pushed = false;
+  Item continuation{};
   while (!heap_.empty()) {
     if (labels_.overflow()) {
       result.aborted = true;
@@ -471,6 +474,16 @@ SearchResult PathSearch::run(const SearchRequest& request)
     }
     const Item item = pop();
     result.heap_pops++;
+    if (continuation_pushed && item.key == continuation.key
+        && item.g == continuation.g && item.i == continuation.i
+        && item.j == continuation.j && item.z == continuation.z
+        && item.dir == continuation.dir) {
+      result.run_continuations++;
+    }
+    continuation_pushed = false;
+    if (item.dir == 1 || item.dir == -1) {
+      result.run_label_pops++;
+    }
     const int z = item.z;
     const int i = item.i;
     const int j = item.j;
@@ -553,13 +566,15 @@ SearchResult PathSearch::run(const SearchRequest& request)
     next.dist = ng;
     next.parent = d > 0 ? kFromLower : kFromHigher;
     const auto [x, y] = layer.point(i, j2);
-    push(Item{ng + futureCost(z, x, y),
-              ng,
-              i,
-              j2,
-              0,
-              static_cast<int8_t>(z),
-              static_cast<int8_t>(d)});
+    continuation = Item{ng + futureCost(z, x, y),
+                        ng,
+                        i,
+                        j2,
+                        0,
+                        static_cast<int8_t>(z),
+                        static_cast<int8_t>(d)};
+    continuation_pushed = true;
+    push(continuation);
   }
   result.fast_grid_queries = counters_.fast_grid;
   result.checker_queries = counters_.checker;

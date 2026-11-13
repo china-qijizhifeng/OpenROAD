@@ -4691,6 +4691,7 @@ bool BonnRouteDR::connectInRegion(NetData& net,
     worker.fast_grid_queries += res.fast_grid_queries;
     worker.checker_queries += res.checker_queries;
     worker.aborted_searches += res.aborted;
+    logSearchStatistics(net, worker, req, res, path_region, dilation, ripup);
     return res;
   };
   bool full_region = false;
@@ -4850,6 +4851,60 @@ bool BonnRouteDR::connectInRegion(NetData& net,
     }
   }
   return true;
+}
+
+void BonnRouteDR::logSearchStatistics(const NetData& net,
+                                      const Worker& worker,
+                                      const br::SearchRequest& request,
+                                      const br::SearchResult& result,
+                                      const bool path_region,
+                                      const int dilation,
+                                      const bool ripup) const
+{
+  if (!logger_->debugCheck(utl::DRT, "bonnroute_search", 1)) {
+    return;
+  }
+  // Mode: tail (speculative with an effort budget), tail-unbudgeted
+  // (speculative without one: the deferred pass), serial-ripup (a search
+  // that may rip up), region (any other: partitions and the rip-up phase's
+  // plain connects); the stage follows from the next stage summary line.
+  const char* mode = worker.speculative
+                         ? (worker.effort_budget > 0 ? "tail"
+                                                     : "tail-unbudgeted")
+                         : (ripup ? "serial-ripup" : "region");
+  const br::Region& region = *request.region;
+  logger_->debug(
+      utl::DRT,
+      "bonnroute_search",
+      "search net {} worker {} mode {} level {} dilation {} found {} "
+      "aborted {} settled {} pops {} pushes {} fast_grid {} checker {} "
+      "run_pops {} run_continuations {} sources {} targets {} target_boxes "
+      "{} potential {} region_layer_tiles {} region_box {} {} {} {} terms "
+      "{}",
+      net.id,
+      &worker - workers_.data(),
+      mode,
+      path_region ? "path" : "full",
+      dilation,
+      result.found ? 1 : 0,
+      result.aborted ? 1 : 0,
+      result.settled,
+      result.heap_pops,
+      result.heap_pushes,
+      result.fast_grid_queries,
+      result.checker_queries,
+      result.run_label_pops,
+      result.run_continuations,
+      request.sources.size(),
+      request.targets.size(),
+      request.target_boxes.size(),
+      request.future_cost != nullptr ? 1 : 0,
+      region.touched.size(),
+      region.bx_lo,
+      region.by_lo,
+      region.bx_hi,
+      region.by_hi,
+      net.terms.size());
 }
 
 void BonnRouteDR::commitNet(NetData& net, Worker* local)

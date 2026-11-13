@@ -823,6 +823,15 @@ class BonnRouteDR
                        bool ripup,
                        const std::vector<std::vector<char>>& valid,
                        Worker& worker);
+  // Measurement M5 (debug group bonnroute_search): one line per search of
+  // connectInRegion; statistics only.
+  void logSearchStatistics(const NetData& net,
+                           const Worker& worker,
+                           const br::SearchRequest& request,
+                           const br::SearchResult& result,
+                           bool path_region,
+                           int dilation,
+                           bool ripup) const;
   void buildRegion(const NetData& net, int dilation, br::Region& region);
   void buildGuideTiles(NetData& net);
   // Region of the guide path from the routed component to the nearest
