@@ -109,6 +109,10 @@ class FlexDR
     // Run the connectivity check over the nets with initial routing before
     // iteration 0 and drop the Recheck markers it leaves.
     bool normalize_initial_routing = false;
+    // In the marker-driven grid iterations, workers of later checkerboard
+    // batches start ahead of their batch on idle threads; the results equal
+    // those of the batch loop (FlexDR::runGridWorkersAhead).
+    bool start_grid_workers_ahead = false;
   };
   struct IterationProgress
   {
@@ -257,12 +261,14 @@ class FlexDR
   // same workers run, each on the design state its batch starts from, and
   // the results are written back in the same order.  Workers of later
   // batches start ahead of their batch on idle threads.  Returns the number
-  // of workers without markers in their DRC box at the start of their batch.
+  // of workers without markers in their DRC box at the start of their batch;
+  // with skip_unaffected they leave the progress total, as the batch loop
+  // erases them, otherwise they count as workers that ran without markers.
   int runGridWorkersAhead(std::vector<GridWorkerSlot>& slots,
                           int num_batches,
                           const SearchRepairArgs& args,
                           IterationProgress& iter_prog,
-                          bool shape_regions,
+                          bool skip_unaffected,
                           std::vector<odb::Rect>* changed_regions);
   // markers_only: only markers in the worker's DRC box count (repair
   // iterations after BonnRoute's incremental routing).

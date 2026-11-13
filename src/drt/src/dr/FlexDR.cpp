@@ -973,7 +973,10 @@ void FlexDR::endWorkersBatch(
 //    the running batch has read the design, so end() never changes what a
 //    worker of the same batch reads.
 //  - Which workers of a batch run is decided when every earlier batch is
-//    written back, on the design state the batch loop decides on.
+//    written back, on the design state the batch loop decides on: the
+//    workers with a marker in their DRC box.  From iteration 2 on a worker
+//    without one skips its routing and writes nothing (FlexDRWorker::main,
+//    FlexDRWorker::end), so it needs no run.
 //  - A worker of a later batch may start ahead on an idle thread.  When its
 //    batch starts, its design-read fingerprint is compared with the
 //    fingerprint on the design state of that moment: equal means it read
@@ -987,7 +990,7 @@ int FlexDR::runGridWorkersAhead(std::vector<GridWorkerSlot>& slots,
                                 const int num_batches,
                                 const SearchRepairArgs& args,
                                 IterationProgress& iter_prog,
-                                const bool shape_regions,
+                                const bool skip_unaffected,
                                 std::vector<odb::Rect>* changed_regions)
 {
   enum class State
@@ -1041,7 +1044,7 @@ int FlexDR::runGridWorkersAhead(std::vector<GridWorkerSlot>& slots,
     }
   }
 
-  const int num_markers_at_start = getDesign()->getTopBlock()->getNumMarkers();
+  int num_markers_at_batch_start = 0;  // for the progress lines
   std::mutex mutex;
   std::condition_variable wake;
   // Everything below is read and written with the mutex held.
@@ -1072,7 +1075,7 @@ int FlexDR::runGridWorkersAhead(std::vector<GridWorkerSlot>& slots,
                                                markers);
     states[i].num_markers = markers.size();
     if (slots[i].batch > current_batch && states[i].state == State::kWaiting
-        && states[i].num_markers > 0) {
+        && states[i].num_markers > 0) {  // a Recheck marker counts
       marked_later_slots.insert(i);
     } else {
       marked_later_slots.erase(i);
@@ -1088,7 +1091,7 @@ int FlexDR::runGridWorkersAhead(std::vector<GridWorkerSlot>& slots,
   };
   const auto report_progress = [&]() {
     if (router_cfg_->VERBOSE > 0) {
-      printIterationProgress(logger_, iter_prog, num_markers_at_start);
+      printIterationProgress(logger_, iter_prog, num_markers_at_batch_start);
     }
   };
   // Needs: every earlier batch is ended and no worker reads the design.
@@ -1096,13 +1099,20 @@ int FlexDR::runGridWorkersAhead(std::vector<GridWorkerSlot>& slots,
     current_batch = batch;
     reads_pending = 0;
     batch_queue = {};
+    num_markers_at_batch_start = getDesign()->getTopBlock()->getNumMarkers();
     for (int i = front; i < batch_end[batch]; i++) {
       Slot& state = states[i];
-      marked_later_slots.erase(i);
       const bool started = state.state != State::kWaiting;
-      if (!isAffectedByChanges(*slots[i].worker, true, shape_regions)) {
+      count_markers(i);
+      if (state.num_markers == 0) {
         num_unaffected_workers++;
-        iter_prog.total_num_workers--;
+        if (skip_unaffected) {
+          iter_prog.total_num_workers--;
+        } else {
+          cleanup_statistics_.workers++;
+          cleanup_statistics_.workers_without_markers++;
+          report_progress();
+        }
         if (started) {
           num_dropped++;
           discard(i);
@@ -2020,8 +2030,9 @@ void FlexDR::optimizationFlow(const SearchRepairArgs& args,
   // The debug group bonnroute_cleanup_batch_barrier keeps the batch loop,
   // for timing comparisons inside one binary.
   const bool start_ahead
-      = skip_unaffected && marker_cleanup && markers_only && iter_ > 0
-        && graphics_ == nullptr
+      = initial_routing_cleanup_.start_grid_workers_ahead && markers_only
+        && iter_ >= 2 && !dist_on_ && graphics_ == nullptr
+        && (!skip_unaffected || marker_cleanup)
         && !logger_->debugCheck(DRT, "bonnroute_cleanup_batch_barrier", 1);
   if (start_ahead) {
     std::vector<GridWorkerSlot> slots;
@@ -2040,7 +2051,7 @@ void FlexDR::optimizationFlow(const SearchRepairArgs& args,
     workers.clear();
     const double batch_start = omp_get_wtime();
     num_unaffected_workers = runGridWorkersAhead(
-        slots, num_batches, args, iter_prog, marker_cleanup, changed_regions);
+        slots, num_batches, args, iter_prog, skip_unaffected, changed_regions);
     cleanup_statistics_.batch_seconds += omp_get_wtime() - batch_start;
   }
   // parallel execution
