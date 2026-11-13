@@ -399,6 +399,12 @@ void CUGR::updateNetSlacks(const std::vector<int>& net_indices)
       updateReroutedParasitics(*estimator);
     }
   }
+  // One required-time search over the whole timing graph, in parallel, before
+  // the per-net slack queries: each query would otherwise extend the
+  // backward search to its own level and dispatch that slice to the STA
+  // threads. Required times do not depend on the order of the search.
+  sta_->ensureGraph();
+  sta_->findRequireds();
   // Query every net: the critical threshold is a percentile over all nets.
   for (const auto& net : gr_nets_) {
     if (net == nullptr) {
@@ -506,6 +512,12 @@ void CUGR::setInitialNetSlacks(const std::vector<int>& net_indices)
     refreshNetSlacks(net_indices);
     return;
   }
+  // One required-time search over the whole timing graph, in parallel, before
+  // the per-net slack queries: each query would otherwise extend the
+  // backward search to its own level and dispatch that slice to the STA
+  // threads. Required times do not depend on the order of the search.
+  sta_->ensureGraph();
+  sta_->findRequireds();
   for (const auto& net : gr_nets_) {
     if (net == nullptr) {
       continue;

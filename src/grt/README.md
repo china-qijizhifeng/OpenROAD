@@ -209,6 +209,21 @@ set_macro_extension extension
 | ----- | ----- |
 | `extension` | Number of `GCells` added to the blockage boundaries from macros. The default `GCell` size is 15 `M3` pitches. |
 
+### Set Global Routing Thread Limit
+
+Global routing (FastRoute and BonnRoute GR) uses at most `limit` of the
+threads set by `set_thread_count` (default 8). The routing does not depend
+on the number of threads; more threads mostly add synchronisation and
+kernel time to these short parallel steps.
+
+```tcl
+set_global_routing_thread_limit limit
+```
+
+| Argument Name | Description |
+| ----- | ----- |
+| `limit` | Largest number of global routing threads, a positive integer. |
+
 ### Set Global Routing Layer Adjustment
 
 The `set_global_routing_layer_adjustment` command sets routing resource

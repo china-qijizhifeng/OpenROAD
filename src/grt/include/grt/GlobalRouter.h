@@ -188,6 +188,10 @@ class GlobalRouter
     skip_large_fanout_ = skip_large_fanout;
   };
   void setNumThreads(int num_threads);
+  // Global routing (FastRoute, BonnRoute GR and the parallel regions they
+  // open) uses at most this many threads of the requested count; 0: all.
+  void setThreadLimit(int limit);
+  int threadLimit() const { return thread_limit_; }
 
   void setInfiniteCapacity(bool infinite_capacity);
 
@@ -668,6 +672,8 @@ class GlobalRouter
   bool resistance_aware_{false};
   int snapshot_batched_width_{0};
   int num_threads_;
+  int requested_threads_{1};
+  int thread_limit_{8};
   std::vector<int> vertical_capacities_;
   std::vector<int> horizontal_capacities_;
   int macro_extension_;

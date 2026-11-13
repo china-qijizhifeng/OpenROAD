@@ -13,6 +13,7 @@
 #include <cstdio>
 #include <map>
 #include <random>
+#include <thread>
 #include <tuple>
 #include <utility>
 #include <vector>
@@ -481,12 +482,93 @@ int runCase(std::mt19937& rng, const int case_id, const bool long_case = false)
   return fails;
 }
 
+// Configuration table under concurrent writers: every thread interns the
+// same configurations in its own order; equal configurations get one id in
+// all threads, different ones different ids, the table holds each exactly
+// once with its sorted shapes, and the empty configuration keeps id 0.
+int concurrentIntern()
+{
+  const int threads = 16;
+  const int count = 20000;
+  std::vector<std::vector<CellShape>> configs(count);
+  for (int k = 0; k < count; k++) {
+    // 1..3 shapes; the first one makes the configuration unique.
+    CellShape a;
+    a.xlo = k % 251;
+    a.ylo = k / 251;
+    a.xhi = a.xlo + 10;
+    a.yhi = a.ylo + 10;
+    a.cls = static_cast<ClassId>(k % 7);
+    a.type = k % 3 == 0 ? ShapeType::kBlockage : ShapeType::kPin;
+    configs[k].push_back(a);
+    for (int extra = 0; extra < k % 3; extra++) {
+      CellShape b = a;
+      b.xlo -= 5 + extra;
+      b.line_end_ends = static_cast<uint8_t>(extra + 1);
+      configs[k].push_back(b);
+    }
+  }
+  CellConfigurationTable table;
+  std::vector<std::vector<uint32_t>> ids(threads,
+                                         std::vector<uint32_t>(count, 0));
+  std::vector<std::thread> pool;
+  for (int t = 0; t < threads; t++) {
+    pool.emplace_back([&, t] {
+      std::mt19937 order_rng(977 + t);
+      std::vector<int> order(count);
+      for (int k = 0; k < count; k++) {
+        order[k] = k;
+      }
+      std::shuffle(order.begin(), order.end(), order_rng);
+      for (const int k : order) {
+        // Shapes in reverse order: intern sorts them.
+        std::vector<CellShape> shapes(configs[k].rbegin(), configs[k].rend());
+        ids[t][k] = table.intern(std::move(shapes));
+      }
+    });
+  }
+  for (std::thread& t : pool) {
+    t.join();
+  }
+  int fails = 0;
+  std::vector<int> seen(count + 1, 0);
+  for (int k = 0; k < count; k++) {
+    const uint32_t id = ids[0][k];
+    for (int t = 1; t < threads; t++) {
+      fails += ids[t][k] != id;
+    }
+    if (id == 0 || id > static_cast<uint32_t>(count)) {
+      fails++;
+      continue;
+    }
+    seen[id]++;
+    std::vector<CellShape> sorted = configs[k];
+    std::sort(sorted.begin(), sorted.end());
+    fails += table[id].shapes != sorted;
+    fails += table[id].has_owned != (k % 3 != 0);
+  }
+  for (int id = 1; id <= count; id++) {
+    fails += seen[id] != 1;
+  }
+  fails += table.size() != static_cast<size_t>(count) + 1;
+  fails += table.intern({}) != 0;
+  fails += !table[0].shapes.empty();
+  table.clear();
+  fails += table.size() != 1;
+  fails += table.intern({}) != 0;
+  fails += table.intern(configs[5]) != 1;
+  if (fails != 0) {
+    std::printf("concurrent intern: %d failures\n", fails);
+  }
+  return fails;
+}
+
 }  // namespace
 
 int main()
 {
   std::mt19937 rng(20261111);
-  int fails = 0;
+  int fails = concurrentIntern();
   const int cases = 300;
   for (int c = 0; c < cases && fails < 10; c++) {
     fails += runCase(rng, c);

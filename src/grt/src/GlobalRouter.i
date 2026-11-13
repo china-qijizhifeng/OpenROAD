@@ -246,6 +246,12 @@ set_bonnroute_param(const char* name, double value)
 }
 
 void
+set_thread_limit(int limit)
+{
+  getGlobalRouter()->setThreadLimit(limit);
+}
+
+void
 set_skip_large_fanout(int skip_large_fanout)
 {
   getGlobalRouter()->setSkipLargeFanoutNets(skip_large_fanout);
