@@ -45,6 +45,8 @@
 #include <stdexcept>
 #include <vector>
 
+#include "br/BrBusyThreads.h"
+
 namespace drt::br {
 
 class TailPipeline
@@ -96,6 +98,9 @@ class TailPipeline
     // included).
     int64_t smallest_batch = 0;
     int64_t largest_batch = 0;
+    // TailLookahead: wall seconds by the number of threads inside a search
+    // or decision.
+    BusyThreads::Seconds busy_threads{};
   };
 
   TailPipeline(int batch, int retry_delay)
@@ -217,18 +222,28 @@ class TailPipeline
 // starts, so the search reads the state of the commits of batches <= k.
 // D6: size of the speculative batches. Batch k holds every retry of batch
 // k-1 first, then fresh nets of the queue up to size(k) in total. size(0) =
-// size(1) = max; size(k+1) follows the conflict share of batch k-1 (the last
-// batch decided when batch k is formed, so the size of the next batch is
-// known while batch k is decided, as TailLookahead's R3 needs): above
-// high_percent conflicts per attempt it halves, below low_percent it
-// doubles, within [min, max]. min 0 or >= max: every batch has max nets.
+// size(1) = the start size (start, clamped to [min, max]; 0: max);
+// size(k+1) follows the conflict share of batch k-1 (the last batch decided
+// when batch k is formed, so the size of the next batch is known while
+// batch k is decided, as TailLookahead's R3 needs): above high_percent
+// conflicts per attempt it halves, below low_percent it doubles, within
+// [min, max]. min 0 or >= max: every batch has max nets. A start below max
+// lets the batches grow while conflicts are rare (tail_batch_max).
 struct TailBatchPolicy
 {
   int max = 32;
   int min = 0;
   int high_percent = 50;
   int low_percent = 20;
+  int start = 0;
   bool adaptive() const { return min > 0 && min < max; }
+  int startSize() const
+  {
+    if (!adaptive() || start <= 0) {
+      return max;
+    }
+    return std::clamp(start, min, max);
+  }
   int next(int size, int64_t attempts, int64_t conflicts) const
   {
     if (!adaptive() || attempts <= 0) {
@@ -257,8 +272,12 @@ class TailBatchSizes
   {
     while (static_cast<int>(sizes_.size()) <= k) {
       const int j = static_cast<int>(sizes_.size());
-      if (j < 2 || !policy_.adaptive()) {
+      if (!policy_.adaptive()) {
         sizes_.push_back(max_);
+        continue;
+      }
+      if (j < 2) {
+        sizes_.push_back(policy_.startSize());
         continue;
       }
       if (static_cast<int>(outcomes_.size()) < j - 1) {
@@ -283,6 +302,77 @@ class TailBatchSizes
   int max_;
   std::vector<int> sizes_;
   std::vector<std::pair<int64_t, int64_t>> outcomes_;
+};
+
+// Outcomes of one speculative tail pass (log statistics only). Every
+// attempt is decided once: a complete route committed, a partial commit
+// (keep_partial: its connections stay, the net stays unrouted), a conflict
+// (searched again in a later batch) or failed. The unrouted nets, partial
+// commits and failed attempts, go to the deferred pass (over the effort
+// budget) or to the rip-up phase.
+struct TailOutcomes
+{
+  int64_t attempts = 0;
+  int64_t complete = 0;
+  int64_t partial = 0;
+  int64_t conflicts = 0;
+  int64_t failed = 0;
+  int64_t deferred = 0;
+  int64_t deferred_partial = 0;
+  int64_t to_ripup = 0;
+  int64_t to_ripup_partial = 0;
+
+  void decided(const TailPipeline::Decision decision, const bool partial_commit)
+  {
+    attempts++;
+    switch (decision) {
+      case TailPipeline::Decision::kCommitted:
+        (partial_commit ? partial : complete)++;
+        break;
+      case TailPipeline::Decision::kConflict:
+        conflicts++;
+        break;
+      case TailPipeline::Decision::kFailed:
+        failed++;
+        break;
+    }
+  }
+  void unrouted(const bool over_budget, const bool partial_commit)
+  {
+    if (over_budget) {
+      deferred++;
+      deferred_partial += partial_commit;
+    } else {
+      to_ripup++;
+      to_ripup_partial += partial_commit;
+    }
+  }
+  // Failed attempts (no route) that go to the rip-up phase.
+  int64_t failedToRipup() const { return to_ripup - to_ripup_partial; }
+  // Every attempt has one outcome; every unrouted net (partial commit or
+  // failed attempt) goes to exactly one of the deferred pass and the
+  // rip-up phase.
+  bool conserved() const
+  {
+    const int64_t counts[] = {attempts,
+                              complete,
+                              partial,
+                              conflicts,
+                              failed,
+                              deferred,
+                              deferred_partial,
+                              to_ripup,
+                              to_ripup_partial};
+    for (const int64_t c : counts) {
+      if (c < 0) {
+        return false;
+      }
+    }
+    return attempts == complete + partial + conflicts + failed
+           && partial + failed == deferred + to_ripup
+           && deferred_partial + to_ripup_partial == partial
+           && deferred_partial <= deferred && to_ripup_partial <= to_ripup;
+  }
 };
 
 class TailLookahead

@@ -293,6 +293,9 @@ struct LookaheadInstance
   int batch_min = 0;
   int high_percent = 50;
   int low_percent = 20;
+  // Size of the first two batches when adaptive (0: batch); below batch the
+  // sizes can grow (tail_batch_max).
+  int batch_start = 0;
   uint64_t salt;
   int found_modulus;     // a route is missing when route % found_modulus == 0
   int conflict_modulus;  // routes conflict when mix % conflict_modulus == 0
@@ -320,16 +323,24 @@ struct LookaheadOutcome
 };
 
 // D6 size rule, written independently of TailBatchPolicy: size(0) = size(1)
-// = batch; size(k) from size(k-1) and the attempts and conflicts of batch
-// k-2.
+// = batch, or batch_start (within [batch_min, batch]) when adaptive; size(k)
+// from size(k-1) and the attempts and conflicts of batch k-2.
 int referenceSize(const LookaheadInstance& in,
                   const std::vector<int>& sizes,
                   const std::vector<std::pair<int, int>>& outcomes)
 {
   const size_t k = sizes.size();
   const bool adaptive = in.batch_min > 0 && in.batch_min < in.batch;
-  if (k < 2 || !adaptive) {
+  if (!adaptive) {
     return in.batch;
+  }
+  if (k < 2) {
+    if (in.batch_start <= 0) {
+      return in.batch;
+    }
+    return in.batch_start < in.batch_min   ? in.batch_min
+           : in.batch_start > in.batch ? in.batch
+                                       : in.batch_start;
   }
   const int previous = sizes[k - 1];
   const auto [attempts, conflicts] = outcomes[k - 2];
@@ -601,7 +612,11 @@ LookaheadOutcome lookaheadScheduled(const LookaheadInstance& in,
                   AttemptList& list,
                   std::vector<int>& deferred) {
     TailLookahead lookahead(drt::br::TailBatchPolicy{
-        in.batch, in.batch_min, in.high_percent, in.low_percent});
+        in.batch,
+        in.batch_min,
+        in.high_percent,
+        in.low_percent,
+        in.batch_start});
     std::vector<int> unrouted;
     std::vector<TailLookahead::Attempt> attempts;
     const TailLookahead::Stats stats
@@ -613,12 +628,22 @@ LookaheadOutcome lookaheadScheduled(const LookaheadInstance& in,
     }
     // As routeSpeculativePipeline: unrouted nets over the budget are
     // deferred, the others failed; the attempt counter already advanced.
+    drt::br::TailOutcomes tally;
+    for (const TailLookahead::Attempt& a : attempts) {
+      tally.decided(a.decision, false);
+    }
     for (const int n : unrouted) {
-      if (budget && overBudget(in, n, attempt[n] - 1)) {
+      const bool over = budget && overBudget(in, n, attempt[n] - 1);
+      tally.unrouted(over, false);
+      if (over) {
         deferred.push_back(n);
       } else {
         out.failed.push_back(n);
       }
+    }
+    if (!tally.conserved() || tally.attempts != stats.attempts
+        || tally.failed != stats.failed) {
+      out.violations++;
     }
   };
   pass(in.order, out.main_pass, out.deferred);
@@ -657,6 +682,12 @@ LookaheadInstance randomLookaheadInstance(std::mt19937_64& rng)
     in.batch_min = uniform(1, in.batch);
     in.high_percent = uniform(0, 100);
     in.low_percent = uniform(0, in.high_percent);
+    // Half of the adaptive cases start small and can grow; a few start
+    // outside [batch_min, batch] (clamped).
+    if (rng() % 2 == 0) {
+      in.batch_start = rng() % 8 == 0 ? uniform(1, in.batch + 8)
+                                      : uniform(in.batch_min, in.batch);
+    }
   }
   in.salt = rng();
   in.found_modulus = uniform(2, 16);
@@ -670,7 +701,8 @@ LookaheadInstance randomLookaheadInstance(std::mt19937_64& rng)
 int runLookaheadCases(const int cases,
                       int64_t& attempts,
                       int64_t& early,
-                      int64_t& varied)
+                      int64_t& varied,
+                      int64_t& grown)
 {
   std::mt19937_64 rng(20261113);
   int failures = 0;
@@ -680,6 +712,11 @@ int runLookaheadCases(const int cases,
     // Cases whose batch sizes changed during a pass.
     varied += std::ranges::any_of(
         ref.sizes, [&](const int s) { return s != in.batch; });
+    // Cases whose batches grew above the start size.
+    if (!ref.sizes.empty() && ref.sizes.front() < in.batch) {
+      grown += std::ranges::any_of(
+          ref.sizes, [&](const int s) { return s > ref.sizes.front(); });
+    }
     // Thread counts 1-8, each in a quarter of the cases.
     for (const int threads : {1 + c % 8, 1 + (c + 4) % 8}) {
       const LookaheadOutcome got = lookaheadScheduled(in, threads, rng());
@@ -714,6 +751,83 @@ int runLookaheadCases(const int cases,
     }
     attempts += static_cast<int64_t>(ref.main_pass.size()
                                      + ref.deferred_pass.size());
+  }
+  return failures;
+}
+
+// Tail outcome statistics (TailOutcomes): random passes with partial
+// commits (keep_partial) and an effort budget, counted independently. The
+// previous count "failed - deferred" goes negative once partial commits are
+// deferred (swerv: "-211 without a route"); failedToRipup() never does.
+// Returns the number of failing cases.
+int runOutcomeCases(const int cases, int64_t& old_negative)
+{
+  std::mt19937_64 rng(20261114);
+  int failures = 0;
+  for (int c = 0; c < cases; c++) {
+    drt::br::TailOutcomes tally;
+    int64_t complete = 0, partial = 0, conflicts = 0, failed = 0;
+    int64_t deferred = 0, deferred_partial = 0, ripup = 0, ripup_partial = 0;
+    const int n = static_cast<int>(rng() % 300);
+    const int partial_share = static_cast<int>(rng() % 60);
+    const int over_share = static_cast<int>(rng() % 100);
+    for (int i = 0; i < n; i++) {
+      const int r = static_cast<int>(rng() % 100);
+      Decision d = r < 50 ? Decision::kCommitted
+                   : r < 75 ? Decision::kConflict
+                            : Decision::kFailed;
+      const bool is_partial
+          = d == Decision::kCommitted
+            && static_cast<int>(rng() % 100) < partial_share;
+      tally.decided(d, is_partial);
+      if (d == Decision::kConflict) {
+        conflicts++;
+        continue;
+      }
+      if (d == Decision::kCommitted && !is_partial) {
+        complete++;
+        continue;
+      }
+      (is_partial ? partial : failed)++;
+      const bool over = static_cast<int>(rng() % 100) < over_share;
+      tally.unrouted(over, is_partial);
+      if (over) {
+        deferred++;
+        deferred_partial += is_partial;
+      } else {
+        ripup++;
+        ripup_partial += is_partial;
+      }
+    }
+    const bool equal = tally.attempts == n && tally.complete == complete
+                       && tally.partial == partial
+                       && tally.conflicts == conflicts
+                       && tally.failed == failed && tally.deferred == deferred
+                       && tally.deferred_partial == deferred_partial
+                       && tally.to_ripup == ripup
+                       && tally.to_ripup_partial == ripup_partial
+                       && tally.failedToRipup() == ripup - ripup_partial
+                       && tally.failedToRipup() >= 0;
+    // Broken counts must not pass the conservation check.
+    drt::br::TailOutcomes moved = tally;
+    moved.complete++;
+    moved.partial--;
+    drt::br::TailOutcomes lost = tally;
+    lost.to_ripup++;
+    drt::br::TailOutcomes twice = tally;
+    twice.deferred++;
+    const bool detects = !lost.conserved() && !twice.conserved()
+                         && (tally.partial == 0 || !moved.conserved());
+    if (!equal || !tally.conserved() || !detects) {
+      failures++;
+      std::printf("outcome case %d: counts %s, conserved %d, detects %d\n",
+                  c,
+                  equal ? "equal" : "DIFF",
+                  tally.conserved() ? 1 : 0,
+                  detects ? 1 : 0);
+    }
+    // The previous log count: failed decisions minus every deferred net.
+    old_negative += failed - deferred < 0;
   }
   return failures;
 }
@@ -767,20 +881,33 @@ int main(int argc, char** argv)
   int64_t lookahead_attempts = 0;
   int64_t early = 0;
   int64_t varied = 0;
-  const int lookahead_failures
-      = runLookaheadCases(lookahead_cases, lookahead_attempts, early, varied);
+  int64_t grown = 0;
+  const int lookahead_failures = runLookaheadCases(
+      lookahead_cases, lookahead_attempts, early, varied, grown);
   std::printf(
       "tail lookahead: %d cases x 2 thread counts (1-8), %lld attempts, "
-      "%lld searches started early, %lld cases with adaptive batch sizes, "
-      "%d failures\n",
+      "%lld searches started early, %lld cases with adaptive batch sizes "
+      "(%lld grew above their start size), %d failures\n",
       lookahead_cases,
       static_cast<long long>(lookahead_attempts),
       static_cast<long long>(early),
       static_cast<long long>(varied),
+      static_cast<long long>(grown),
       lookahead_failures);
+  int64_t old_negative = 0;
+  const int outcome_failures = runOutcomeCases(20000, old_negative);
+  std::printf(
+      "tail outcomes: 20000 random passes with partial commits, %d failures; "
+      "the previous count \"failed - deferred\" is negative in %lld of "
+      "them\n",
+      outcome_failures,
+      static_cast<long long>(old_negative));
   // The lookahead must actually start searches early on these instances,
   // and batch sizes must actually change in some of them.
   const bool exercised
-      = lookahead_cases == 0 || (early > 0 && varied > 0);
-  return failures == 0 && lookahead_failures == 0 && exercised ? 0 : 1;
+      = lookahead_cases == 0 || (early > 0 && varied > 0 && grown > 0);
+  return failures == 0 && lookahead_failures == 0 && outcome_failures == 0
+                 && old_negative > 0 && exercised
+             ? 0
+             : 1;
 }

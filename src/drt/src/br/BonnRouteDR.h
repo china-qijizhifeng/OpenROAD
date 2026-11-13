@@ -11,6 +11,7 @@
 #include <array>
 #include <atomic>
 #include <cstdint>
+#include <fstream>
 #include <memory>
 #include <string>
 #include <unordered_map>
@@ -28,6 +29,7 @@
 #include "br/BrPotentialOracle.h"
 #include "br/BrSameNetRules.h"
 #include "br/BrShapeGrid.h"
+#include "br/BrBusyThreads.h"
 #include "br/BrOrderedBoxSchedule.h"
 #include "br/BrTailPipeline.h"
 #include "br/BrWireModel.h"
@@ -110,6 +112,16 @@ struct BonnRouteDRParams
   bool ripup_boxes = false;
   int ripup_box_margin = 4;
   int ripup_box_chunk = 64;
+  // ripup_box_chunk_retry: a sequence that failed at the limit of its box
+  // with the margin runs again with 4 x the margin in the same chunk, after
+  // the chunk's first sequences (in their order), scheduled by the larger
+  // box; 0: in the next chunk. ripup_box_order: a chunk's sequences run in
+  // layers of pairwise disjoint boxes (OrderedBoxSchedule::
+  // disjointLayerOrder, layers formed in queue order), so a chain of waiting
+  // sequences holds at most one sequence per layer; 0: queue order. Both
+  // change the serial order the results equal, not their determinism.
+  bool ripup_box_chunk_retry = false;
+  bool ripup_box_order = false;
   // Off-track pin access: largest jog to a track, in pitches.
   int max_access_jog = 2;
   int max_access_options = 8;
@@ -157,6 +169,13 @@ struct BonnRouteDRParams
   int tail_batch_min = 0;
   int tail_batch_high = 50;
   int tail_batch_low = 20;
+  // D6 growth: above tail_batch, batches start at tail_batch nets and grow
+  // up to tail_batch_max under the same rule (doubling below
+  // tail_batch_low percent conflicts, halving above tail_batch_high, never
+  // below tail_batch_min or, with tail_batch_min 0, tail_batch). The
+  // deferred pass starts at tail_deferred_batch. 0, or at most the start
+  // size: no growth.
+  int tail_batch_max = 0;
   // Threads of the speculative batches; 0 uses all router threads. The
   // batch results do not depend on it (a check of that determinism).
   int tail_threads = 0;
@@ -374,6 +393,15 @@ struct BonnRouteDRParams
   // Effort budget of that phase in percent of the vertices settled by the
   // parallel phases (0: unlimited).
   int final_ripup_effort = 10;
+  // The base of that budget leaves out the vertices settled by speculative
+  // tail attempts decided as conflicts (searched again in a later batch), so
+  // larger tail batches (tail_batch_max) do not lengthen the serial rip-up
+  // phase by their re-searches. 0: every settled vertex counts.
+  bool ripup_effort_conflicts_excluded = false;
+  // A fixed budget of that phase in settled vertices, in place of the
+  // percentage (for comparisons at an equal budget, e.g. the budget a
+  // default run logged in DRT-9136). 0: final_ripup_effort.
+  int64_t final_ripup_budget = 0;
   // Skip that phase when more than this percentage of the nets failed.
   int final_ripup_max_share = 2;
   // Catalogue paths start at the pin's OpenROAD access points (1) or
@@ -447,6 +475,13 @@ struct BonnRouteDRParams
   // report how far beyond the net's core tile box each step reaches. The
   // routing is unchanged.
   bool partition_check = false;
+  // Debug (dependency replay): with partition_check, write per region net
+  // (partitions) and per rip-up box task the seconds, the schedule box and
+  // the accessed tiles per structure, layer and read / write (tile boxes for
+  // region nets, tiles for rip-up tasks) and the nets a rip-up task changed
+  // to $RESULTS_DIR/bonnroute_dependency_trace.txt. Setting it sets
+  // partition_check. The routing is unchanged.
+  bool dependency_trace = false;
   // Ahrens et al., arXiv:2111.06169, Sec. 5.2 incremental routing: a
   // detailed_route -bonnroute call on a design that already carries routing
   // (the antenna-repair ECO) routes the nets that need routing against the
@@ -832,6 +867,9 @@ class BonnRouteDR
     int64_t partial_commits = 0;
     int64_t partial_resumes = 0;
     int64_t tail_partial_commits = 0;
+    // Vertices settled by this worker's tail searches whose attempt was
+    // decided as a conflict (ripup_effort_conflicts_excluded).
+    int64_t conflict_settled = 0;
     int64_t area_deferrals = 0;
     // Settled-vertex budget of the current connect (0: none), the settled
     // count at its start, and whether a search was skipped for it.
@@ -1223,6 +1261,10 @@ class BonnRouteDR
   void routeParallel(const std::vector<int>& order, std::vector<int>& failed);
   // D6: the batch size policy of the speculative tail.
   br::TailBatchPolicy tailBatchPolicy() const;
+  // DRT-9134 line of one tail pass; DRT-9135 when the counts are not
+  // conserved.
+  void reportTailOutcomes(const std::string& stage,
+                          const br::TailOutcomes& outcomes) const;
   // settled_budget: stop starting sequences once the serial worker settled
   // this many vertices in the phase (0: unlimited).
   void routeRipupQueue(const std::vector<int>& failed,
@@ -1256,12 +1298,24 @@ class BonnRouteDR
     std::array<int64_t, kRipupBoxSteps> sequences{};
     std::array<int64_t, kRipupBoxSteps> routed{};
     int64_t widened = 0;
+    // ripup_box_chunk_retry: sequences run again in their own chunk.
+    int64_t retried_in_chunk = 0;
     int64_t longest_chain = 0;
+    // Sum of the chunks' longest chains (tasks) and critical paths (s).
+    int64_t chain_sum = 0;
+    double critical_path = 0;
     double wall = 0;
     double busy = 0;
     double capacity = 0;
+    br::BusyThreads::Seconds busy_threads{};
   };
   RipupBoxStats ripup_box_stats_;
+  // dependency_trace: the accesses of a footprint as trace text (tiles when
+  // `tiles`, else tile boxes), and the trace file.
+  static std::string traceAccesses(const br::AccessFootprint& footprint,
+                                   bool tiles);
+  void writeTrace(const std::vector<std::string>& lines);
+  std::unique_ptr<std::ofstream> dependency_trace_out_;
   // try_plain: first try the connection without rip-up. The nets of the
   // rip-up queue have just failed that search, so their sequences start
   // with the rip-up mode search (which finds a legal path at no penalty
