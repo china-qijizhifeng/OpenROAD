@@ -985,9 +985,14 @@ void FlexDR::endWorkersBatch(
 //    fingerprint on the design state of that moment: equal means it read
 //    exactly what it reads in the batch loop, so its result is kept; a
 //    different one stops it and a fresh worker runs in the batch.
-// Start order: workers of the running batch first, most markers first (the
-// order of the starts does not enter the results); then workers of later
-// batches whose overlapping earlier workers are all written back.
+//  - When a result is written, the workers started ahead whose extended box
+//    intersects the writer's are compared the same way at once; a worker
+//    that read something else is stopped and may start ahead again.
+// Start order (it does not enter the results): workers of the running batch,
+// most markers first; then workers of later batches whose overlapping
+// earlier workers are all written back; then the other workers of later
+// batches.  The last group pays off when the overlapping earlier worker
+// ends with more markers than it started with and writes nothing.
 int FlexDR::runGridWorkersAhead(std::vector<GridWorkerSlot>& slots,
                                 const int num_batches,
                                 const SearchRepairArgs& args,
@@ -1060,8 +1065,10 @@ int FlexDR::runGridWorkersAhead(std::vector<GridWorkerSlot>& slots,
   bool no_worker_ahead = false;  // until the next result is written back
   int num_unaffected_workers = 0;
   int num_started_ahead = 0;
+  int num_started_before_neighbours = 0;
   int num_kept = 0;
   int num_rerun = 0;
+  int num_restarted_ahead = 0;
   int num_dropped = 0;
   std::priority_queue<std::pair<int, int>> batch_queue;  // markers, -slot
   std::vector<std::unique_ptr<FlexDRWorker>> discarded_workers;
@@ -1153,9 +1160,22 @@ int FlexDR::runGridWorkersAhead(std::vector<GridWorkerSlot>& slots,
           slots[front].worker.reset();
           states[front].state = State::kEnded;
           for (const int other : states[front].overlaps) {
-            if (slots[other].batch > current_batch) {
-              count_markers(other);
+            if (slots[other].batch <= current_batch) {
+              continue;
             }
+            Slot& ahead = states[other];
+            if ((ahead.state == State::kRunning
+                 || ahead.state == State::kDone)
+                && ahead.fingerprint
+                       != slots[other].worker->getDesignReadFingerprint(
+                           getDesign())) {
+              num_restarted_ahead++;
+              discard(other);
+              slots[other].worker = createWorker(
+                  slots[other].x_offset, slots[other].y_offset, args);
+              ahead.state = State::kWaiting;
+            }
+            count_markers(other);
           }
           wrote = true;
         }
@@ -1179,10 +1199,12 @@ int FlexDR::runGridWorkersAhead(std::vector<GridWorkerSlot>& slots,
     if (no_worker_ahead) {
       return -1;
     }
+    int before_neighbours = -1;
     for (const int i : marked_later_slots) {
       // An overlapping worker of an earlier batch that is still to write
-      // its result back changes what this worker reads.
-      const bool blocked
+      // its result back changes what this worker reads, unless it ends
+      // with more markers than it started with.
+      const bool neighbours_pending
           = std::ranges::any_of(states[i].overlaps, [&](const int other) {
               if (slots[other].batch >= slots[i].batch
                   || states[other].state == State::kEnded) {
@@ -1192,9 +1214,16 @@ int FlexDR::runGridWorkersAhead(std::vector<GridWorkerSlot>& slots,
                          ? states[other].runs_in_batch
                          : states[other].num_markers > 0;
             });
-      if (!blocked) {
+      if (!neighbours_pending) {
         return i;
       }
+      if (before_neighbours < 0) {
+        before_neighbours = i;
+      }
+    }
+    if (before_neighbours >= 0) {
+      num_started_before_neighbours++;
+      return before_neighbours;
     }
     no_worker_ahead = true;
     return -1;
@@ -1265,14 +1294,17 @@ int FlexDR::runGridWorkersAhead(std::vector<GridWorkerSlot>& slots,
              "bonnroute_cleanup",
              1,
              "grid workers ahead: iteration {} slots {} batches {} started "
-             "ahead {} kept {} run again {} dropped without markers {}",
+             "ahead {} kept {} run again {} dropped without markers {} "
+             "started before neighbours {} restarted ahead {}",
              iter_,
              num_slots,
              num_batches,
              num_started_ahead,
              num_kept,
              num_rerun,
-             num_dropped);
+             num_dropped,
+             num_started_before_neighbours,
+             num_restarted_ahead);
   return num_unaffected_workers;
 }
 
