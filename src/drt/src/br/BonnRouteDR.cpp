@@ -9562,6 +9562,15 @@ void BonnRouteDR::fillIoPinArea(
   std::vector<std::pair<frLayerNum, odb::Rect>> wires;
   std::vector<std::pair<frLayerNum, odb::Rect>> pads;
   std::vector<std::pair<frLayerNum, odb::Point>> anchors;
+  // Via origins first (anchors[0, via_anchors)), then wire ends.
+  for (const auto& via : net->getVias()) {
+    const frViaDef* def = via->getViaDef();
+    pads.emplace_back(def->getLayer1Num(), via->getLayer1BBox());
+    pads.emplace_back(def->getLayer2Num(), via->getLayer2BBox());
+    anchors.emplace_back(def->getLayer1Num(), via->getOrigin());
+    anchors.emplace_back(def->getLayer2Num(), via->getOrigin());
+  }
+  const size_t via_anchors = anchors.size();
   for (const auto& shape : net->getShapes()) {
     if (shape->typeId() != frcPathSeg) {
       continue;
@@ -9572,13 +9581,7 @@ void BonnRouteDR::fillIoPinArea(
     anchors.emplace_back(seg->getLayerNum(), b);
     anchors.emplace_back(seg->getLayerNum(), e);
   }
-  for (const auto& via : net->getVias()) {
-    const frViaDef* def = via->getViaDef();
-    pads.emplace_back(def->getLayer1Num(), via->getLayer1BBox());
-    pads.emplace_back(def->getLayer2Num(), via->getLayer2BBox());
-    anchors.emplace_back(def->getLayer1Num(), via->getOrigin());
-    anchors.emplace_back(def->getLayer2Num(), via->getOrigin());
-  }
+
   for (const auto& patch : net->getPatchWires()) {
     metal.emplace_back(patch->getLayerNum(), patch->getBBox());
   }
@@ -9629,16 +9632,40 @@ void BonnRouteDR::fillIoPinArea(
     for (const size_t k : group) {
       req.group.push_back(on_layer[k]);
     }
+    if (logger_->debugCheck(utl::DRT, "bonnroute_io_pin", 1)) {
+      std::string pieces;
+      for (const br::Box& b : req.group) {
+        pieces += fmt::format(" {},{},{},{}", b.xlo, b.ylo, b.xhi, b.yhi);
+      }
+      logger_->debug(utl::DRT,
+                     "bonnroute_io_pin",
+                     "io pin piece net {} pin {} {} {} {} area {} pieces{}",
+                     net->getName(),
+                     box.xMin(),
+                     box.yMin(),
+                     box.xMax(),
+                     box.yMax(),
+                     br::unionArea(req.group),
+                     pieces);
+    }
     if (br::unionArea(req.group) >= same_net_rules_[z].min_area) {
       continue;
     }
     io_pin_below_++;
-    // Anchor: a via origin or wire end on this layer inside the pin.
+    // Anchor: a via origin on this layer inside the pin, else a wire end
+    // there. FlexDR keeps a patch only at a via origin or wire end that
+    // remains; a pin-layer access wire next to the via is removed by its
+    // connectivity check, so via origins come first.
     const std::pair<frLayerNum, odb::Point>* anchor = nullptr;
-    for (const auto& a : anchors) {
-      if (a.first == layer && box.intersects(a.second)) {
-        anchor = &a;
-        break;
+    for (const bool via_origin : {true, false}) {
+      for (size_t k = 0; k < anchors.size() && anchor == nullptr; k++) {
+        const auto& a = anchors[k];
+        if ((k >= via_anchors) == via_origin) {
+          continue;
+        }
+        if (a.first == layer && box.intersects(a.second)) {
+          anchor = &a;
+        }
       }
     }
     if (anchor == nullptr) {
