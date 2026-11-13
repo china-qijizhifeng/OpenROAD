@@ -196,7 +196,7 @@ set_bonnroute_dr_param name value
 | `spread_from_extra_space` | `1` | With `spreading 1`, spread a net where BonnRoute global routing assigned it extra space (`set_bonnroute_param extra_space 1`, Section 2.1); designs without that information use the GCell congestion tiles. |
 | `spread_cost` / `spread_utilization` | `1` / `70` | Spreading cost in pitches of the bottom layer; utilization threshold in percent. |
 | `cleanup_incremental_iterations` | `2` | FlexDR clean-up: how many of FlexDR's incremental iterations 1 and 2 follow iteration 0 (which routes the nets BonnRoute left and checks every tile). Incremental iterations reroute only nets without BonnRoute routing and keep every BonnRoute net fixed; iteration 3, the first that rips up nets at violations, follows the last one. Range `0`–`2`. Fewer incremental iterations pay off when few nets are left to FlexDR; designs with many left nets clean up faster with both. |
-| `cleanup_check_only_workers` | `0` | FlexDR clean-up, incremental iterations 0–2: a worker whose nets all carry BonnRoute's routing has no net to reroute and runs only the design-rule check (with FlexDR's patches), without the maze grid graph. The result equals the full worker's. |
+| `cleanup_check_only_workers` | `1` | FlexDR clean-up, incremental iterations 0–2: a worker whose nets all carry BonnRoute's routing has no net to reroute and runs only the design-rule check (with FlexDR's patches), without the maze grid graph. The result equals the full worker's. |
 | `verbose` | `1` | Print coverage and search statistics. |
 
 The interval search maintains reduced-distance label envelopes on tracks,
