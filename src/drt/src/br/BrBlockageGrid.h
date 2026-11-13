@@ -35,9 +35,18 @@ namespace drt::br {
 // [c_min, c_max] is the maximal run of Hanan lines around i whose
 // consecutive gaps are below 4 tau. The sentinels -inf and inf only bound
 // these runs; they generate no coordinates themselves.
+//
+// Hanan grid on a coarse lattice: with `grid_unit` > 0, tau <= grid_unit and
+// every Hanan line a multiple of grid_unit, the result is the sorted, unique
+// Hanan lines. Distinct lines are then at least one grid unit, hence at
+// least tau, apart, so every path of the Hanan grid is tau-feasible, and the
+// Hanan grid contains a shortest obstacle-avoiding path for any positive
+// axis weights; that path is a shortest tau-feasible path. Theorem 3.2's
+// extra lines at multiples of tau add no shorter path in this case.
 std::vector<GeoCoord> blockageGridCoordinates(
     const std::vector<GeoCoord>& hanan,
-    GeoCoord tau);
+    GeoCoord tau,
+    GeoCoord grid_unit = 0);
 
 // One layer of a multi-layer blockage grid.
 struct BlockageGridLayer
@@ -65,6 +74,10 @@ struct BlockageGridInput
   // target points, the search window.
   std::vector<GridPoint> points;
   std::vector<Box> borders;
+  // The lattice all coordinates are on (the manufacturing grid), 0 if
+  // unknown; see blockageGridCoordinates. Used only when every layer's tau
+  // is at most this unit; otherwise all layers keep Algorithm 3.
+  GeoCoord grid_unit = 0;
 };
 
 // Builds the coordinates of each wiring layer (Sec. 3.8: "we have a
@@ -72,7 +85,7 @@ struct BlockageGridInput
 // by blockages of neighboring layers."):
 //   H_z = borders of the blockages of wiring layers z - 1, z, z + 1 and of
 //         the via layers z - 1 | z and z | z + 1, plus `points`/`borders`;
-//   X_z = Algorithm 3 (H_z, tau_z), separately for x and y;
+//   X_z = Algorithm 3 (H_z, tau_z, grid_unit), separately for x and y;
 //   via layer z | z + 1 grid = X_z u X_{z+1};
 //   final wiring layer grid = X_{z-1} u X_z u X_{z+1}
 // so every via-layer vertex is a vertex of both wiring layers it connects.

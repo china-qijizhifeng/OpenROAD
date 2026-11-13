@@ -223,6 +223,47 @@ struct BonnRouteDRParams
   // rules (Sec. 3.7). `offtrack_notch_tau` adds notch spacing + width.
   int offtrack_tau = 0;
   bool offtrack_notch_tau = false;
+  // Blockage grid of a catalogue search: the Hanan lines alone, and one
+  // search state per grid vertex, where tau is at most the manufacturing
+  // grid (every coordinate is on that grid, so any two lines are at least
+  // tau apart and every Hanan-grid path is tau-feasible). 0 keeps
+  // Algorithm 3's lines at multiples of tau and the five direction states.
+  bool offtrack_hanan_grid = true;
+  // Among catalogue paths of equal cost, prefer the least preferred-
+  // direction wire off the tracks of the search layers (lexicographic
+  // tie-break; path costs unchanged): paths jog onto a track at the access
+  // point instead of running beside the tracks. 0: ties resolve by the
+  // search order.
+  bool offtrack_on_track_ties = true;
+  // D10: catalogues per pin class instead of per circuit class. The key of
+  // a pin holds only its own search inputs that are equal between
+  // instances of a master (local frame): master, pin, access points with
+  // their vias and preferred marks, the instance's own shapes and the
+  // tracks within the pin's search reach. Each class's catalogue is
+  // generated at its first pin; every other pin maps it, keeps the paths
+  // legal at the member, and generates its own catalogue when fewer than
+  // min(offtrack_regenerate, catalogue size) remain. Selection per
+  // instance. Needs access_classes.
+  bool offtrack_pin_classes = false;
+  // M3 statistics (verbose log, results unchanged): circuit classes with
+  // one signature component left out, pin-key classes, and the blockage
+  // grid lines of both grids.
+  bool offtrack_access_stats = false;
+  // D10 sampled comparison: every n-th member pin also generates its own
+  // catalogue, compared with the mapped one (0: off; results unchanged).
+  int offtrack_catalogue_sample = 0;
+  // Access report (verbose log, results unchanged): wire sharing of the
+  // catalogues and off-track wire and blocked tracks of the primary paths
+  // after setup; pins without a primary path, pins of failed connects
+  // (no feasible access option) and nets left to FlexDR, each listed up to
+  // this many lines (0: off).
+  int offtrack_access_report = 0;
+  // With offtrack_hanan_grid: an instance whose selection leaves a pin with
+  // a catalogue unassigned recomputes its catalogues on the Algorithm 3
+  // grid (five states, no on-track ties) and solves again; the result that
+  // assigns more pins is kept (ties: the Hanan one). 0: Hanan catalogues
+  // only.
+  bool offtrack_algorithm3_fallback = true;
   // Reuse a circuit class's catalogues and conflict-free solution for all
   // its instances; 0 solves every instance separately.
   bool access_classes = true;
@@ -660,6 +701,8 @@ class BonnRouteDR
     // connect() calls that failed because a pin had no feasible access
     // option even after dynamic generation.
     int64_t access_failures = 0;
+    // (net, term) of each such failure (offtrack_access_report only).
+    std::vector<std::pair<int, int>> access_failure_terms;
     int64_t regenerated_paths = 0;
     int64_t searches = 0;
     int64_t path_region_searches = 0;
@@ -718,6 +761,33 @@ class BonnRouteDR
     int64_t empty_rejected = 0;
     int64_t macro_pins = 0;
     int64_t member_regenerated = 0;
+    // offtrack_algorithm3_fallback: instances with a pin without a primary
+    // path on the Hanan grid, and those whose Algorithm 3 catalogues assign
+    // more pins.
+    int64_t fallback_instances = 0;
+    int64_t fallback_improved = 0;
+    // D10 pin classes: classes, mapped paths of member pins and those
+    // illegal at the member.
+    int64_t pin_classes = 0;
+    int64_t mapped_options = 0;
+    int64_t mapped_dropped = 0;
+    // Sampled comparison of a member pin's mapped catalogue with the one
+    // generated at the member: sampled pins, equal (target, cost) sets,
+    // pins whose whole search environment equals the representative's
+    // (and of those, related by a translation, and their unequal sets).
+    int64_t sample_pins = 0;
+    int64_t sample_equal = 0;
+    int64_t sample_mapped_only = 0;  // (target, cost) only in the mapped
+    int64_t sample_own_only = 0;     // (target, cost) only in the own
+    int64_t sample_same_environment = 0;
+    int64_t sample_same_environment_translated = 0;
+    int64_t sample_same_environment_translated_unequal = 0;
+    // M3 (c): blockage-grid lines and vertices inside the window with the
+    // grid in use and with the other grid (Hanan / Algorithm 3).
+    int64_t grid_lines = 0;
+    int64_t grid_lines_other = 0;
+    int64_t grid_vertices_other = 0;
+    int64_t search_states = 0;
     std::vector<std::string> empty_examples;
     // Thread seconds of the catalogue steps besides the search: on-track
     // targets, obstacle collection, blockage grid, exact path checks, and
@@ -772,6 +842,11 @@ class BonnRouteDR
   void buildSameNetRules();
   // pre_skip: net skip flags before buildAccess.
   void buildOffTrackAccess(const std::vector<char>& pre_skip);
+  // offtrack_access_report: the catalogues and primary paths after setup,
+  // and the access failures and left nets after routing.
+  void reportOffTrackAccess() const;
+  void reportAccessFailures() const;
+  std::string termName(const Term& term) const;
   // Rectangles of the pin on its access layer (the lowest routing layer
   // that is a track layer or directly below the lowest one).
   // A start of catalogue paths: an access point with its up via, if any.
@@ -839,7 +914,8 @@ class BonnRouteDR
                          const Worker* worker,
                          std::vector<AccessOption>& out,
                          AccessStats& stats,
-                         int extra_radius = 0) const;
+                         int extra_radius = 0,
+                         bool algorithm3 = false) const;
   void candidateOf(const AccessOption& option,
                    int net,
                    br::AccessCandidate& candidate) const;

@@ -123,6 +123,30 @@ void testAlgorithm3(std::mt19937& rng)
     for (const GeoCoord x : b) {
       CHECK(std::binary_search(got.begin(), got.end(), x), "hanan line lost");
     }
+    // On a lattice of unit g >= tau: the sorted, unique Hanan lines; off
+    // it, Algorithm 3.
+    {
+      const GeoCoord g = tau + static_cast<GeoCoord>(rng() % 3);
+      std::vector<GeoCoord> on_grid;
+      for (const GeoCoord x : b) {
+        on_grid.push_back(x * g);
+      }
+      std::vector<GeoCoord> hanan = on_grid;
+      std::sort(hanan.begin(), hanan.end());
+      hanan.erase(std::unique(hanan.begin(), hanan.end()), hanan.end());
+      CHECK(blockageGridCoordinates(on_grid, tau, g) == hanan,
+            "hanan lines on the grid");
+      CHECK(blockageGridCoordinates(on_grid, g + 1, g)
+                == algorithm3Literal(on_grid, g + 1),
+            "tau above the grid unit keeps Algorithm 3");
+      if (g > 1) {
+        std::vector<GeoCoord> off_grid = on_grid;
+        off_grid.push_back(on_grid.front() + 1);
+        CHECK(blockageGridCoordinates(off_grid, tau, g)
+                  == algorithm3Literal(off_grid, tau),
+              "a line off the grid keeps Algorithm 3");
+      }
+    }
     std::vector<GeoCoord> u = b;
     std::sort(u.begin(), u.end());
     u.erase(std::unique(u.begin(), u.end()), u.end());
@@ -276,10 +300,16 @@ int64_t bruteForce(const Instance& in, const Box& dom)
   return kInf;
 }
 
+// With `grid_unit` > 0 the blockage grid is the Hanan grid where
+// blockageGridCoordinates allows it; `merge` sets merge_direction_states.
 OffTrackRequest makeRequest(const Instance& in,
-                            std::vector<BlockageGridLayer>& grid)
+                            std::vector<BlockageGridLayer>& grid,
+                            const GeoCoord grid_unit = 0,
+                            const bool merge = false,
+                            const std::vector<RouteNode>& extra_targets = {})
 {
   BlockageGridInput gin;
+  gin.grid_unit = grid_unit;
   for (const auto& l : in.layers) {
     // points_only is valid where vias into the layer exist only at points.
     gin.layers.push_back(
@@ -289,6 +319,9 @@ OffTrackRequest makeRequest(const Instance& in,
     gin.via_blockages.push_back(in.via_obstacles);
   }
   gin.points = {in.s.p, in.t.p};
+  for (const RouteNode& t : extra_targets) {
+    gin.points.push_back(t.p);
+  }
   grid = buildBlockageGrid(gin);
   OffTrackRequest req;
   req.window = {-1000000, -1000000, 1000000, 1000000};
@@ -303,9 +336,14 @@ OffTrackRequest makeRequest(const Instance& in,
   }
   req.sources.push_back({in.s.layer, {in.s.p.x, in.s.p.y, in.s.p.x, in.s.p.y}});
   req.targets.push_back({in.t.layer, in.t.p, 0});
+  for (const RouteNode& t : extra_targets) {
+    req.targets.push_back(
+        {t.layer, t.p, static_cast<int>(req.targets.size())});
+  }
   req.via_cost = in.via_cost;
   req.via_allowed
       = [&in](int, const GridPoint& p) { return !viaBlocked(in, p); };
+  req.merge_direction_states = merge;
   return req;
 }
 
@@ -543,6 +581,238 @@ void reportVertexGrowth()
                 gs[0].numVertices(),
                 gs[0].numVertices() / nn);
   }
+}
+
+// ---------------------------------------------------------------------------
+// D9: all coordinates on a lattice of unit g and tau <= g. The Hanan grid
+// (blockageGridCoordinates with grid_unit g) with one state per vertex
+// (merge_direction_states) gives the brute-force distance, returns
+// tau-feasible paths, and every target's cost equals that of Algorithm 3
+// with five states. A tau above g keeps Algorithm 3 (same checks).
+void testHananGrid(std::mt19937& rng, const int layers, const int count)
+{
+  int equal = 0;
+  int unreachable = 0;
+  int bad_paths = 0;
+  int hanan_cases = 0;
+  int single_state_runs = 0;
+  int target_checks = 0;
+  int64_t vertices_hanan = 0;
+  int64_t vertices_alg3 = 0;
+  int64_t states_hanan = 0;
+  int64_t states_alg3 = 0;
+  int64_t settled_hanan = 0;
+  int64_t settled_alg3 = 0;
+  OffTrackSearch search;
+  for (int it = 0; it < count; it++) {
+    const GeoCoord g = 1 + static_cast<GeoCoord>(rng() % 3);
+    // A tau above the unit on all layers, or (two layers) on one of them:
+    // then every layer keeps Algorithm 3.
+    const bool coarse_tau = rng() % 8 == 0;
+    const int coarse_layer
+        = coarse_tau ? (layers > 1 && rng() % 2 == 0
+                            ? static_cast<int>(rng() % layers)
+                            : -1)
+                     : -2;
+    Instance in;
+    const int size = 16 + static_cast<int>(rng() % 16);
+    auto scaled = [g](std::vector<Box> boxes) {
+      for (Box& b : boxes) {
+        b = {b.xlo * g, b.ylo * g, b.xhi * g, b.yhi * g};
+      }
+      return boxes;
+    };
+    for (int z = 0; z < layers; z++) {
+      Instance::Layer l;
+      l.tau = coarse_layer == -1 || coarse_layer == z
+                  ? g + 1 + static_cast<GeoCoord>(rng() % 3)
+                  : 1 + static_cast<GeoCoord>(rng() % g);
+      l.obstacles = scaled(randomBoxes(rng, static_cast<int>(rng() % 9), size, 8));
+      l.wires = layers == 1 || z == 1 || rng() % 3 != 0;
+      if (rng() % 2 == 0) {
+        const int64_t jog = 1 + static_cast<int64_t>(rng() % 4);
+        (rng() % 2 == 0 ? l.cost_x : l.cost_y) = jog;
+      }
+      in.layers.push_back(l);
+    }
+    if (layers > 1) {
+      in.via_obstacles
+          = scaled(randomBoxes(rng, static_cast<int>(rng() % 4), size, 6));
+      in.via_cost = static_cast<int64_t>(rng() % 6);
+    }
+    auto point = [&](const int z) {
+      std::vector<Box> unit_obs;
+      for (const Box& b : in.layers[z].obstacles) {
+        unit_obs.push_back({b.xlo / g, b.ylo / g, b.xhi / g, b.yhi / g});
+      }
+      const GridPoint p = freePoint(rng, unit_obs, size);
+      return GridPoint{p.x * g, p.y * g};
+    };
+    in.s.layer = static_cast<int>(rng() % layers);
+    in.t.layer = static_cast<int>(rng() % layers);
+    in.s.p = point(in.s.layer);
+    in.t.p = point(in.t.layer);
+    if (layers > 1 && !in.layers[0].wires && rng() % 2 == 0) {
+      in.via_points = {in.s.p, in.t.p};
+    }
+    std::vector<RouteNode> extra;
+    for (int k = 0; k < 5; k++) {
+      const int z = static_cast<int>(rng() % layers);
+      extra.push_back({z, point(z)});
+    }
+    std::vector<BlockageGridLayer> grid_hanan;
+    std::vector<BlockageGridLayer> grid_alg3;
+    const OffTrackRequest hanan = makeRequest(in, grid_hanan, g, true, extra);
+    const OffTrackRequest alg3 = makeRequest(in, grid_alg3, 0, false, extra);
+    if (coarse_tau) {
+      bool same = grid_hanan.size() == grid_alg3.size();
+      for (size_t z = 0; same && z < grid_hanan.size(); z++) {
+        same = grid_hanan[z].xs == grid_alg3[z].xs
+               && grid_hanan[z].ys == grid_alg3[z].ys;
+      }
+      CHECK(same, "hanan it=%d: tau above the unit changed the grid", it);
+    }
+    const OffTrackResult rh = search.run(hanan);
+    const OffTrackResult ra = search.run(alg3);
+    hanan_cases += !coarse_tau;
+    single_state_runs += rh.states == rh.grid_vertices;
+    if (!coarse_tau) {
+      CHECK(rh.states == rh.grid_vertices,
+            "hanan it=%d: %lld states for %lld vertices",
+            it,
+            static_cast<long long>(rh.states),
+            static_cast<long long>(rh.grid_vertices));
+      CHECK(rh.grid_vertices <= ra.grid_vertices,
+            "hanan it=%d: more vertices than Algorithm 3",
+            it);
+    }
+    vertices_hanan += rh.grid_vertices;
+    vertices_alg3 += ra.grid_vertices;
+    states_hanan += rh.states;
+    states_alg3 += ra.states;
+    settled_hanan += rh.settled;
+    settled_alg3 += ra.settled;
+    // Every target id: equal cost (or unreached in both).
+    std::vector<int64_t> cost_h(extra.size() + 1, kInf);
+    std::vector<int64_t> cost_a(extra.size() + 1, kInf);
+    for (const OffTrackPath& p : rh.paths) {
+      cost_h[p.target_id] = p.cost;
+    }
+    for (const OffTrackPath& p : ra.paths) {
+      cost_a[p.target_id] = p.cost;
+    }
+    for (size_t k = 0; k < cost_h.size(); k++) {
+      CHECK(cost_h[k] == cost_a[k],
+            "hanan it=%d target %zu: %lld vs Algorithm 3 %lld",
+            it,
+            k,
+            static_cast<long long>(cost_h[k] == kInf ? -1 : cost_h[k]),
+            static_cast<long long>(cost_a[k] == kInf ? -1 : cost_a[k]));
+      target_checks++;
+    }
+    for (const OffTrackPath& p : rh.paths) {
+      if (p.target_id != 0) {
+        continue;
+      }
+      if (verifyPath(in, p) != p.cost) {
+        bad_paths++;
+      }
+    }
+    int tmax = 1;
+    for (const auto& l : in.layers) {
+      tmax = std::max(tmax, l.tau);
+    }
+    const GeoCoord margin = 4 * tmax + 4;
+    const Box dom{-margin,
+                  -margin,
+                  (size + 8) * g + margin,
+                  (size + 8) * g + margin};
+    const int64_t brute = bruteForce(in, dom);
+    CHECK(cost_h[0] == brute,
+          "hanan layers=%d it=%d g=%d G=%lld brute=%lld",
+          layers,
+          it,
+          g,
+          static_cast<long long>(cost_h[0] == kInf ? -1 : cost_h[0]),
+          static_cast<long long>(brute == kInf ? -1 : brute));
+    equal += cost_h[0] == brute;
+    unreachable += brute == kInf;
+  }
+  CHECK(bad_paths == 0, "%d returned Hanan paths not tau-feasible", bad_paths);
+  std::printf(
+      "hanan grid (%d layer%s): %d/%d instances == brute force (%d without "
+      "path, %d with tau <= grid unit, %d single-state runs), %d target "
+      "costs equal to Algorithm 3, %d infeasible paths; grid vertices %.1f%%, "
+      "states %.1f%%, settled %.1f%% of Algorithm 3\n",
+      layers,
+      layers > 1 ? "s" : "",
+      equal,
+      count,
+      unreachable,
+      hanan_cases,
+      single_state_runs,
+      target_checks,
+      bad_paths,
+      100.0 * vertices_hanan / std::max<int64_t>(1, vertices_alg3),
+      100.0 * states_hanan / std::max<int64_t>(1, states_alg3),
+      100.0 * settled_hanan / std::max<int64_t>(1, settled_alg3));
+}
+
+// An on-track-only layer needs its tracks as grid lines: with them the
+// Hanan grid finds the path along a track that holds no point (52); the
+// grid without them (Hanan or Algorithm 3) only has the detour around the
+// wall on the lower layer (80).
+void testHananTrackLines()
+{
+  const std::vector<GeoCoord> tracks{6, 30};
+  auto run = [&](const GeoCoord grid_unit, const bool track_lines) {
+    BlockageGridInput gin;
+    gin.grid_unit = grid_unit;
+    gin.layers.push_back({1, {{10, -20, 30, 20}}});
+    gin.layers.push_back({1, {}});
+    gin.via_blockages.push_back({});
+    gin.points = {{0, 0}, {40, 0}};
+    const Box window{-50, -50, 90, 90};
+    gin.borders.push_back(window);
+    if (track_lines) {
+      for (const GeoCoord y : tracks) {
+        gin.borders.push_back({window.xlo, y, window.xhi, y});
+      }
+    }
+    const std::vector<BlockageGridLayer> grid = buildBlockageGrid(gin);
+    OffTrackRequest req;
+    for (int z = 0; z < 2; z++) {
+      OffTrackLayer l;
+      l.grid = grid[z];
+      l.obstacles = gin.layers[z].blockages;
+      if (z == 1) {
+        l.tracks = &tracks;
+        l.horizontal = true;
+      }
+      req.layers.push_back(l);
+    }
+    req.window = window;
+    req.sources.push_back({0, {0, 0, 0, 0}});
+    req.targets.push_back({0, {40, 0}, 0});
+    req.via_allowed = [](int, const GridPoint&) { return true; };
+    OffTrackSearch search;
+    const OffTrackResult res = search.run(req);
+    return res.paths.empty() ? int64_t{-1} : res.paths.front().cost;
+  };
+  const int64_t with_lines = run(1, true);
+  const int64_t hanan_without = run(1, false);
+  const int64_t alg3_without = run(0, false);
+  CHECK(with_lines == 52, "track lines: %lld", static_cast<long long>(with_lines));
+  CHECK(hanan_without == 80 && alg3_without == 80,
+        "without track lines: %lld / %lld",
+        static_cast<long long>(hanan_without),
+        static_cast<long long>(alg3_without));
+  std::printf(
+      "hanan grid with track lines of an on-track-only layer: cost %lld "
+      "(without them: Hanan %lld, Algorithm 3 %lld)\n",
+      static_cast<long long>(with_lines),
+      static_cast<long long>(hanan_without),
+      static_cast<long long>(alg3_without));
 }
 
 // ---------------------------------------------------------------------------
@@ -1992,6 +2262,11 @@ void testSearchMatchesReference(std::mt19937& rng)
   OffTrackSearch search;
   ReferenceOffTrackSearch reference;
   int cases = 0;
+  int merged_runs = 0;
+  int merged_equal_costs = 0;
+  int tie_checks = 0;
+  int64_t tie_off_track = 0;
+  int64_t plain_off_track = 0;
   int with_paths = 0;
   int64_t paths = 0;
   int64_t settled = 0;
@@ -2121,8 +2396,153 @@ void testSearchMatchesReference(std::mt19937& rng)
       }
       ref_req.arc_filter = track_filter;
     }
+    // The reference has five states per grid vertex.
+    req.merge_direction_states = false;
     const OffTrackResult got = search.run(req);
     const OffTrackResult want = reference.run(ref_req);
+    // Merged direction states (where the grid allows them): the same
+    // distances. Without a target limit every target id has the same cost;
+    // with one, the costs of the reached target vertices are equal (the
+    // vertex settled at a tied limit cost may differ).
+    req.merge_direction_states = true;
+    const OffTrackResult merged = search.run(req);
+    merged_runs += merged.states == merged.grid_vertices;
+    {
+      std::vector<std::pair<int, int64_t>> a;
+      std::vector<std::pair<int, int64_t>> b;
+      for (const OffTrackPath& p : merged.paths) {
+        a.emplace_back(p.target_id, p.cost);
+      }
+      for (const OffTrackPath& p : want.paths) {
+        b.emplace_back(p.target_id, p.cost);
+      }
+      std::sort(a.begin(), a.end());
+      std::sort(b.begin(), b.end());
+      if (req.max_targets > 0) {
+        // Every target vertex closer than the largest reached cost L is
+        // reached in both; at L the tie may resolve to other vertices.
+        int64_t limit_a = -1;
+        int64_t limit_b = -1;
+        for (const auto& e : a) {
+          limit_a = std::max(limit_a, e.second);
+        }
+        for (const auto& e : b) {
+          limit_b = std::max(limit_b, e.second);
+        }
+        CHECK(limit_a == limit_b,
+              "merged it=%d: limit cost %lld vs %lld",
+              it,
+              static_cast<long long>(limit_a),
+              static_cast<long long>(limit_b));
+        std::erase_if(a, [&](const auto& e) { return e.second >= limit_a; });
+        std::erase_if(b, [&](const auto& e) { return e.second >= limit_b; });
+      }
+      merged_equal_costs += a == b;
+      CHECK(a == b,
+            "merged it=%d layers=%d mode=%d: %zu vs %zu (target, cost)",
+            it,
+            layers,
+            mode,
+            a.size(),
+            b.size());
+    }
+    // On-track ties (five states and merged): the cost of every target id
+    // equals the plain search's, and each path has at most the off-track
+    // preferred-direction length of the plain search's path to that
+    // target (without a target limit, where both reach the same ids; tau
+    // >= 1 as in BonnRouteDR: with tau 0, zero-length turn arcs repeat
+    // nodes and the path's corner nodes are not all kept).
+    bool positive_tau = true;
+    for (const BlockageGridInput::Layer& l : gin.layers) {
+      positive_tau = positive_tau && l.tau >= 1;
+    }
+    if (req.max_targets == 0 && positive_tau) {
+      auto off_track = [&](const OffTrackPath& p) {
+        int64_t len = 0;
+        for (size_t q = 0; q + 1 < p.nodes.size(); q++) {
+          const RouteNode& u = p.nodes[q];
+          const RouteNode& v = p.nodes[q + 1];
+          if (u.layer != v.layer || u.p == v.p) {
+            continue;
+          }
+          const bool along_x = u.p.y == v.p.y;
+          CHECK(along_x || u.p.x == v.p.x, "segment not axis-parallel");
+          const std::vector<GeoCoord>& t = tracks[u.layer];
+          if (along_x == static_cast<bool>(horizontal[u.layer])
+              && !std::binary_search(
+                  t.begin(), t.end(), along_x ? u.p.y : u.p.x)) {
+            len += std::abs(int64_t{u.p.x} - v.p.x)
+                   + std::abs(int64_t{u.p.y} - v.p.y);
+          }
+        }
+        return len;
+      };
+      for (const bool merge : {false, true}) {
+        OffTrackRequest plain = req;
+        plain.merge_direction_states = merge;
+        for (int z = 0; z < layers; z++) {
+          plain.layers[z].horizontal = horizontal[z];
+        }
+        OffTrackRequest tie = plain;
+        tie.on_track_ties = true;
+        for (int z = 0; z < layers; z++) {
+          tie.layers[z].tie_tracks = &tracks[z];
+        }
+        const OffTrackResult rp = search.run(plain);
+        const OffTrackResult rt = search.run(tie);
+        // Target id -1 occurs several times; ids >= 0 are unique.
+        std::map<int, std::pair<int64_t, int64_t>> by_id;
+        for (const OffTrackPath& p : rp.paths) {
+          by_id[p.target_id] = {p.cost, off_track(p)};
+        }
+        bool ok = rp.paths.size() == rt.paths.size();
+        for (const OffTrackPath& p : rt.paths) {
+          if (p.target_id < 0) {
+            continue;
+          }
+          const auto f = by_id.find(p.target_id);
+          ok = ok && f != by_id.end() && f->second.first == p.cost
+               && off_track(p) <= f->second.second;
+          tie_off_track += off_track(p);
+          if (f != by_id.end()) {
+            plain_off_track += f->second.second;
+          }
+        }
+        tie_checks += ok;
+        CHECK(ok, "on-track ties it=%d merge=%d mode=%d", it, merge, mode);
+        if (!ok && failures <= 4) {
+          for (int z = 0; z < layers; z++) {
+            std::printf("  layer %d wires %d points_only %d horizontal %d tau %d cost %lld/%lld tracks", z,
+                        req.layers[z].wires ? 1 : 0, gin.layers[z].points_only ? 1 : 0,
+                        horizontal[z] ? 1 : 0, gin.layers[z].tau,
+                        static_cast<long long>(req.layers[z].cost_x),
+                        static_cast<long long>(req.layers[z].cost_y));
+            for (const GeoCoord t : tracks[z]) {
+              std::printf(" %d", t);
+            }
+            std::printf("\n");
+          }
+          for (const OffTrackPath& p : rp.paths) {
+            std::printf("  plain %d cost %lld off %lld:", p.target_id,
+                        static_cast<long long>(p.cost),
+                        static_cast<long long>(off_track(p)));
+            for (const RouteNode& n : p.nodes) {
+              std::printf(" %d/%d,%d", n.layer, n.p.x, n.p.y);
+            }
+            std::printf("\n");
+          }
+          for (const OffTrackPath& p : rt.paths) {
+            std::printf("  tie %d cost %lld off %lld:", p.target_id,
+                        static_cast<long long>(p.cost),
+                        static_cast<long long>(off_track(p)));
+            for (const RouteNode& n : p.nodes) {
+              std::printf(" %d/%d,%d", n.layer, n.p.x, n.p.y);
+            }
+            std::printf("\n");
+          }
+        }
+      }
+    }
     cases++;
     with_paths += !want.paths.empty();
     paths += static_cast<int64_t>(want.paths.size());
@@ -2152,11 +2572,19 @@ void testSearchMatchesReference(std::mt19937& rng)
   }
   std::printf(
       "search == reference: %d requests (%d with paths, %lld paths, %lld "
-      "settled states)\n",
+      "settled states); merged direction states: %d runs with one state per "
+      "vertex, %d cost checks equal; on-track ties: %d runs with equal costs "
+      "and no more off-track preferred wire per path (%lld vs %lld in "
+      "total)\n",
       cases,
       with_paths,
       static_cast<long long>(paths),
-      static_cast<long long>(settled));
+      static_cast<long long>(settled),
+      merged_runs,
+      merged_equal_costs,
+      tie_checks,
+      static_cast<long long>(tie_off_track),
+      static_cast<long long>(plain_off_track));
 }
 
 // BonnRouteDR::choosePrimaries skips candidate shape pairs whose gap in x
@@ -2217,6 +2645,83 @@ void testConflictReachFilter(std::mt19937& rng)
       violations);
 }
 
+// catalogueSharing against brute force: every piece split into unit edges
+// (layer, horizontal, line, start); shared wire = a common unit edge.
+void testCatalogueSharing(std::mt19937& rng)
+{
+  using Edge = std::tuple<int, bool, GeoCoord, GeoCoord>;
+  int catalogues = 0;
+  int sharing = 0;
+  for (int c = 0; c < 3000; c++) {
+    const int num_paths = test::randomInt(rng, 0, 8);
+    std::vector<std::vector<CatalogueWire>> paths(num_paths);
+    std::vector<std::set<Edge>> edges(num_paths);
+    for (int k = 0; k < num_paths; k++) {
+      const int pieces = test::randomInt(rng, 0, 5);
+      for (int q = 0; q < pieces; q++) {
+        CatalogueWire w;
+        w.layer = test::randomInt(rng, 0, 1);
+        w.horizontal = rng() % 2 == 0;
+        w.line = test::randomInt(rng, 0, 4);
+        const GeoCoord a = test::randomInt(rng, 0, 12);
+        const GeoCoord b = test::randomInt(rng, 0, 12);
+        // Pieces in either direction, some of zero length.
+        w.lo = rng() % 2 == 0 ? a : b;
+        w.hi = w.lo == a ? b : a;
+        paths[k].push_back(w);
+        for (GeoCoord x = std::min(a, b); x < std::max(a, b); x++) {
+          edges[k].insert({w.layer, w.horizontal, w.line, x});
+        }
+      }
+    }
+    int64_t pairs = 0;
+    int64_t sharing_pairs = 0;
+    int64_t wire = 0;
+    std::set<Edge> all;
+    for (int i = 0; i < num_paths; i++) {
+      wire += static_cast<int64_t>(edges[i].size());
+      all.insert(edges[i].begin(), edges[i].end());
+      for (int j = i + 1; j < num_paths; j++) {
+        pairs++;
+        sharing_pairs += std::ranges::any_of(
+            edges[i], [&](const Edge& e) { return edges[j].count(e) > 0; });
+      }
+    }
+    bool common = false;
+    if (num_paths >= 2) {
+      for (const Edge& e : edges[0]) {
+        common = common || std::ranges::all_of(edges, [&](const auto& set) {
+                   return set.count(e) > 0;
+                 });
+      }
+    }
+    const CatalogueSharing got = catalogueSharing(paths);
+    CHECK(got.pairs == pairs && got.sharing_pairs == sharing_pairs
+              && got.common == common && got.wire == wire
+              && got.distinct_wire == static_cast<int64_t>(all.size()),
+          "catalogue %d: pairs %lld/%lld sharing %lld/%lld common %d/%d wire "
+          "%lld/%lld distinct %lld/%zu",
+          c,
+          static_cast<long long>(got.pairs),
+          static_cast<long long>(pairs),
+          static_cast<long long>(got.sharing_pairs),
+          static_cast<long long>(sharing_pairs),
+          got.common ? 1 : 0,
+          common ? 1 : 0,
+          static_cast<long long>(got.wire),
+          static_cast<long long>(wire),
+          static_cast<long long>(got.distinct_wire),
+          all.size());
+    catalogues++;
+    sharing += common ? 1 : 0;
+  }
+  std::printf(
+      "catalogue sharing: %d random catalogues equal the unit-edge brute "
+      "force (%d with a piece on every path)\n",
+      catalogues,
+      sharing);
+}
+
 }  // namespace
 
 int main()
@@ -2227,6 +2732,9 @@ int main()
   testTheorem(rng, 1, 3000);
   testTheorem(rng, 2, 1000);
   reportVertexGrowth();
+  testHananGrid(rng, 1, 1500);
+  testHananGrid(rng, 2, 800);
+  testHananTrackLines();
   testSameNetMapping(rng);
   testSelection(rng);
   testSignatures(rng);
@@ -2236,6 +2744,7 @@ int main()
   testSourceCosts(rng);
   testSearchMatchesReference(rng);
   testConflictReachFilter(rng);
+  testCatalogueSharing(rng);
   const double secs
       = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0)
             .count();

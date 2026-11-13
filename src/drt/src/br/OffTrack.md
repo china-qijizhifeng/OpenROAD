@@ -67,6 +67,84 @@ with a line-by-line transcription on 4000 random inputs.
 - Per axis at most 4 m^2 + m coordinates for m distinct Hanan lines; the test
   asserts this bound and reports the growth (`vertex growth` table).
 
+## Hanan grid when tau is at most the manufacturing grid (D9)
+
+Algorithm 3 adds lines at multiples of tau so that some shortest path has
+every segment at least tau long (Theorem 3.2). With `offtrack_hanan_grid 1`
+(default) `BlockageGridInput::grid_unit` is the manufacturing grid, and
+`blockageGridCoordinates` returns the sorted, unique Hanan lines when tau is
+at most the grid unit and every Hanan line is on the grid; otherwise it runs
+Algorithm 3.
+
+- Why it suffices: obstacles are rounded outward to the grid, and access
+  points, targets and the window are on it, so two distinct lines are at
+  least one grid unit, hence at least tau, apart. Every path of the Hanan
+  grid is tau-feasible, and the Hanan grid contains a shortest
+  obstacle-avoiding path for positive axis weights; that path is a shortest
+  tau-feasible path.
+- One state per vertex: `OffTrackRequest::merge_direction_states` lets the
+  search use one state per grid vertex with arcs to the four neighbours
+  when there is no arc filter and, on every layer with wires, consecutive
+  grid lines inside the window are at least tau apart. A path of that graph
+  is a tau-feasible grid path, and every path of G is one of its paths, so
+  the distances are those of G. The incoming-direction states serve only
+  the tau constraint (the cost model has no bend cost).
+- Same costs, other paths: among paths of equal cost the returned one may
+  differ; with a target limit, the target vertex settled at a tied limit
+  cost may differ. `testHananGrid` compares the Hanan grid with one state
+  against the brute force and against Algorithm 3 with five states (cost of
+  every target), on lattices of unit 1-3 with tau up to the unit, and with
+  tau above it (Algorithm 3 kept); `testSearchMatchesReference` compares the
+  merged search with the five-state reference on its 6000 requests.
+- `offtrack_hanan_grid 0` restores Algorithm 3 and five states.
+
+## Ties among equal-cost paths: onto the track first
+
+With the jog factor, a jog to the track at the access point followed by
+on-track wire costs as much as preferred-direction wire beside the tracks
+followed by a jog at the target; the search order decides between them.
+With one state per vertex A* settles the preferred-direction prefix first
+(its f stays constant while a jog raises f), so most catalogue paths ran
+off track at the access point's coordinate and shared that prefix; on ibex
+38 fewer pins got a primary path and 12 more nets were left to FlexDR.
+
+`OffTrackRequest::on_track_ties` (`offtrack_on_track_ties 1`, default)
+minimises (cost, preferred-direction wire off the tracks) lexicographically:
+labels hold cost * scale + off-track length, with scale above every simple
+path's off-track length in the window, and the future cost is scaled.
+Costs and reached targets are those of the plain search.
+`testSearchMatchesReference` checks equal costs and no more off-track wire per
+path than the plain search, with five and with merged states. On generated
+sky130-like access situations (`opus-kit/offtrack/AccessShape.cpp`) the share
+of preferred-direction catalogue wire off the tracks is 94% with Algorithm
+3, 78% on the Hanan grid, and 6% with the tie-break.
+
+## Pins without a primary path
+
+The selection of an instance (`choosePrimaries`) leaves a pin unassigned
+when each of its catalogue paths conflicts with the other pins' choices or
+with earlier reservations. Such a pin keeps no reservation; other nets may
+route over its access area, and its connects later fail for want of a
+feasible access option. On ibex_sky130hd every such pin is B1 of
+sky130_fd_sc_hd__a222oi_1 (55 pins with Algorithm 3, 93 on the Hanan grid:
+the catalogue targets and costs are equal, the equal-cost paths differ), and
+the left nets with such a pin are the left-net difference between the two
+grids (`offtrack_access_report`).
+
+Larger catalogues (`max_access_options 16`), a larger radius
+(`offtrack_radius 3`) and a catalogue regenerated at setup against the
+instance's reservations leave the count unchanged: the instance's pins
+have no complete conflict-free assignment among these paths. The
+instances that fail with Algorithm 3 are a subset of those that fail on
+the Hanan grid.
+
+With `offtrack_algorithm3_fallback 1` (default; with `offtrack_hanan_grid 1`) an
+instance whose selection leaves a pin with a catalogue unassigned
+recomputes its catalogues on the Algorithm 3 grid (five states, no
+on-track ties: the paths of `offtrack_hanan_grid 0`), solves again and
+keeps the result that assigns more pins. A top-level pin without a legal
+path does the same. DRT-9165 counts the instances and those that improve.
+
 ## Multi-layer blockage grid
 
 Section 3.8: "we have a blockage grid for each wiring and via layer.
@@ -241,6 +319,41 @@ their own.
   `BonnRoute DR access digest` and `routing digest` fingerprint the
   catalogues, primaries and reservations after setup and the routing
   before writeNets, for comparing runs.
+
+## Catalogues per pin class (D10)
+
+With `offtrack_pin_classes 1` the unit of reuse is one pin instead of one
+instance with all its pins.
+
+- Key of a pin (instance's local frame, as the circuit signature): master
+  and pin index; the pin's access points with their vias and, with
+  `offtrack_preferred_access_points 1`, their preferred marks; the shapes of
+  the instance itself (pins and obstructions, marked same net as the pin or
+  not) and the tracks of the two lowest track layers within the pin's search
+  reach (access-point box plus `offtrack_radius` + 3 pitches + 2 tau); the
+  via models and the catalogue parameters. Other pins' preferred marks and
+  connections, neighbours and power shapes are not in the key.
+- Catalogues: each class's catalogue is generated at its first pin (instance
+  order) in that pin's own surroundings, in parallel. Then, in parallel per
+  instance and before any reservation, every other pin maps the catalogue
+  (`map_option`), keeps the paths `optionLegal` at the member, and generates
+  its own catalogue when the mapping fails or fewer than
+  min(`offtrack_regenerate`, catalogue size) paths remain; the instance's
+  conflict-free selection follows. In instance order each instance keeps its
+  selection where the primary paths are legal against earlier reservations,
+  else re-solves on its legal paths, and reserves.
+- Legality equals the circuit-class flow: every kept path is checked at the
+  member. Completeness: paths blocked at the representative by its own
+  neighbours are missing at members unless they regenerate.
+- `offtrack_catalogue_sample n` checks every n-th member pin against a
+  catalogue generated at the member: equal (target, cost) sets, sets with
+  mapped-only or own-only entries, and pins whose whole surroundings within
+  the reach equal the representative's (all shapes, labelled); for those
+  related by a translation the sets must be equal.
+- `offtrack_access_stats 1` (M3) logs the circuit classes with one signature
+  component left out (net groups, preferred marks, shapes not of the
+  instance, tracks), the pin-key classes, and the blockage-grid lines and
+  vertices inside the windows with the grid in use and with the other grid.
 
 ## Conflict-free solution by destructive bounding
 

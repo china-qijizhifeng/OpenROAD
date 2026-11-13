@@ -65,6 +65,9 @@ struct OffTrackLayer
   // per grid line once; it equals an arc_filter with the same rule.
   const std::vector<GeoCoord>* tracks = nullptr;
   bool horizontal = true;
+  // Track lines of the layer for the tie-break (OffTrackRequest::
+  // on_track_ties), sorted; preferred direction as `horizontal`.
+  const std::vector<GeoCoord>* tie_tracks = nullptr;
 };
 
 struct OffTrackSource
@@ -112,6 +115,21 @@ struct OffTrackRequest
   int max_targets = 0;
   // Use the admissible future cost (A*); false = plain Dijkstra.
   bool future_cost = true;
+  // One state per grid vertex instead of five where that keeps every
+  // distance: no arc_filter, and on every layer with wires consecutive grid
+  // lines inside the window are at least tau apart (e.g. a Hanan grid on
+  // the manufacturing grid with tau the grid unit). Then every arc between
+  // neighbouring grid vertices is a tau-feasible segment, the incoming
+  // direction restricts no arc, and the search relaxes the four neighbours
+  // of each vertex. Distances are those of G; among paths of equal cost the
+  // returned one may differ.
+  bool merge_direction_states = true;
+  // Among paths of equal cost, prefer the least preferred-direction wire
+  // off the tracks (`tie_tracks` of each layer): the search minimises
+  // (cost, off-track preferred length) lexicographically, so path costs
+  // and the reached targets' costs are those of the plain search; the
+  // returned paths reach the tracks as early as their cost allows.
+  bool on_track_ties = false;
 };
 
 struct OffTrackPath
@@ -127,7 +145,8 @@ struct OffTrackResult
   // At most one (shortest) path per reached target, in increasing cost.
   std::vector<OffTrackPath> paths;
   int64_t grid_vertices = 0;  // blockage-grid vertices inside the window
-  int64_t states = 0;         // vertices of G (5 per grid vertex)
+  // Vertices of G: 5 per grid vertex, 1 with merged direction states.
+  int64_t states = 0;
   int64_t settled = 0;
   int64_t arcs = 0;
 };
@@ -155,6 +174,8 @@ struct OffTrackResult
 // (BonnRouteOffTrackTest keeps that formulation and compares results on
 // random requests). A window with 2^32 / 5 or more grid vertices is not
 // searched (no paths; grid_vertices reports its size).
+// With `merge_direction_states` and a grid that allows it, G has one state
+// per grid vertex with arcs to the four neighbours (see the request).
 class OffTrackSearch
 {
  public:
@@ -198,6 +219,9 @@ class OffTrackSearch
     // On-track-only layers: lines on which planar arcs may start.
     std::vector<char> row_on_track;
     std::vector<char> col_on_track;
+    // Tie-break: preferred-direction lines off the tie tracks (rows if the
+    // layer is horizontal, else columns); empty without tie tracks.
+    std::vector<char> line_off_track;
     // Future cost terms per target layer t: l1 distance of each line to
     // the nearest target coordinate of layer t (index t * nx + ix).
     std::vector<int64_t> near_x;
@@ -234,5 +258,33 @@ class OffTrackSearch
   std::vector<int32_t> target_first_;
   uint32_t epoch_ = 0;
 };
+
+// A wire piece of a catalogue path (one layer, axis-parallel): on the line
+// `line` (y if horizontal, else x) from lo to hi.
+struct CatalogueWire
+{
+  int layer = 0;
+  bool horizontal = true;
+  GeoCoord line = 0;
+  GeoCoord lo = 0;
+  GeoCoord hi = 0;
+};
+
+// How much wire the paths of one catalogue have in common. Two paths share
+// wire when pieces on one layer and line overlap with positive length (a
+// common point does not count). `common` is true when one piece of positive
+// length lies on every path (blocking it removes every option). Lengths are
+// sums over the paths (`wire`) and over the union (`distinct_wire`).
+struct CatalogueSharing
+{
+  int64_t pairs = 0;
+  int64_t sharing_pairs = 0;
+  bool common = false;
+  int64_t wire = 0;
+  int64_t distinct_wire = 0;
+};
+
+CatalogueSharing catalogueSharing(
+    const std::vector<std::vector<CatalogueWire>>& paths);
 
 }  // namespace drt::br
