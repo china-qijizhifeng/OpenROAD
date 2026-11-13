@@ -66,6 +66,13 @@ struct BonnRouteDRParams
   // Rip-up penalty per vertex, in pitches of the bottom layer.
   int ripup_cost = 40;
   int max_ripups = 3;
+  // Sec. 3.3 / 4.4: rip-up level of the routed shapes of critical nets
+  // (clock and NDR nets, routed first; critical_nets); other nets have
+  // level 1. A rip-up sequence of the first pass removes shapes up to
+  // first_pass_ripup_level, later passes up to 6 ("higher ripup effort").
+  // Defaults 1 and 1: every routed shape is removable in every pass.
+  int critical_ripup_level = 1;
+  int first_pass_ripup_level = 1;
   // Off-track pin access: largest jog to a track, in pitches.
   int max_access_jog = 2;
   int max_access_options = 8;
@@ -417,6 +424,7 @@ class BonnRouteDR
     kRipupNoPath,        // no path in rip-up mode (LeftStep says why)
     kRipupVictimLimit,   // a victim was ripped up max_ripups times already
     kRipupVictimFailed,  // a victim could not be routed again
+    kRipupVictimLevel,   // a victim above the pass's rip-up level
     kNumRipupOutcomes
   };
   enum LeftGuard : uint8_t
@@ -527,6 +535,8 @@ class BonnRouteDR
     // area_deferred, and the net continues in a later partition or the tail.
     const br::TileBox* limit = nullptr;
     bool area_deferred = false;
+    // Rip-up mode: shapes up to this rip-up level may be removed.
+    br::RipupLevel max_ripup_level = br::kMaxRemovableLevel;
     int64_t area_deferrals = 0;
     // Settled-vertex budget of the current connect (0: none), the settled
     // count at its start, and whether a search was skipped for it.
@@ -1087,6 +1097,10 @@ class BonnRouteDR
   AccessStats access_stats_;
   // Statistics.
   int64_t ripup_events_ = 0;
+  // Victims ripped up, by their rip-up level (index 1..6).
+  std::array<int64_t, br::kMaxRemovableLevel + 1> victims_by_level_{};
+  // Rip-up sequences that failed at a victim above the pass's level.
+  int64_t victim_level_failures_ = 0;
   int64_t rollbacks_ = 0;
   int64_t ripup_budget_skipped_ = 0;
   // Rip-up phase effort: connections without and with rip-up (time, count).

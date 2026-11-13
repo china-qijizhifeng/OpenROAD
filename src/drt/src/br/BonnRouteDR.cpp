@@ -137,6 +137,10 @@ bool BonnRouteDRParams::set(const std::string& name, const double value)
     ripup_cost = v;
   } else if (name == "max_ripups") {
     max_ripups = v;
+  } else if (name == "critical_ripup_level") {
+    critical_ripup_level = std::clamp<int>(v, 1, br::kMaxRemovableLevel);
+  } else if (name == "first_pass_ripup_level") {
+    first_pass_ripup_level = std::clamp<int>(v, 1, br::kMaxRemovableLevel);
   } else if (name == "max_access_jog") {
     max_access_jog = v;
   } else if (name == "max_access_options") {
@@ -4259,7 +4263,7 @@ bool BonnRouteDR::connectWithoutOwnShapes(NetData& net,
   auto option_valid = [&](const AccessOption& opt) {
     const br::RipupLevel level
         = worker.reader.level(opt.vertex, br::kWire, net.wire_type);
-    bool ok = level == br::kLegal || (ripup && level <= br::kMaxRemovableLevel);
+    bool ok = level == br::kLegal || (ripup && level <= worker.max_ripup_level);
     if (ok && !ripup && opt.offtrack) {
       // Blockage-grid paths: every shape against earlier routed nets
       // (Sec. 4.4 "these paths are first checked for diff-net rule
@@ -4282,7 +4286,7 @@ bool BonnRouteDR::connectWithoutOwnShapes(NetData& net,
       const br::RipupLevel level
           = worker.reader.level(opt.vertex, br::kWire, net.wire_type);
       bool ok
-          = level == br::kLegal || (ripup && level <= br::kMaxRemovableLevel);
+          = level == br::kLegal || (ripup && level <= worker.max_ripup_level);
       if (ok && !ripup) {
         for (const OutWire& w : opt.wires) {
           if (shapeConflicts(wireShape(w), net.id, &worker)) {
@@ -4405,6 +4409,7 @@ bool BonnRouteDR::connectInRegion(NetData& net,
   req.net = net.id;
   req.region = &worker.region;
   req.ripup = ripup;
+  req.max_ripup_level = worker.max_ripup_level;
   req.ripup_cost
       = static_cast<Cost>(params_.ripup_cost) * layers_[0].pitch * unit();
   req.discounts = net.discount_runs;
@@ -6347,6 +6352,14 @@ bool BonnRouteDR::ripupSequence(const int id,
       sequence_outcome_depth_ = depth;
       return false;
     }
+    // Sec. 3.3: shapes above the pass's level stay (an access path or a
+    // post-processing shape of the new route can meet them).
+    if (shape_grid_.netRipupLevel(victim) > worker.max_ripup_level) {
+      sequence_outcome_ = kRipupVictimLevel;
+      sequence_outcome_depth_ = depth;
+      victim_level_failures_++;
+      return false;
+    }
   }
   // Remove the victims, add the new route, then reconnect the victims,
   // again possibly with rip-up (Sec. 4.4).
@@ -6355,6 +6368,7 @@ bool BonnRouteDR::ripupSequence(const int id,
     ripupNet(nets_[victim]);
     nets_[victim].ripups++;
     ripup_events_++;
+    victims_by_level_[shape_grid_.netRipupLevel(victim)]++;
   }
   commitNet(net);
   setReservations(net, false);
@@ -6372,9 +6386,13 @@ void BonnRouteDR::routeRipupQueue(const std::vector<int>& failed,
 {
   std::vector<int> queue = failed;
   std::vector<SavedRouting> journal;
-  const Worker& worker = workers_.front();
+  Worker& worker = workers_.front();
   const int64_t start = worker.settled;
   for (int pass = 0; pass < params_.ripup_passes && !queue.empty(); pass++) {
+    // Sec. 4.4: later passes with higher ripup effort.
+    worker.max_ripup_level
+        = pass == 0 ? static_cast<br::RipupLevel>(params_.first_pass_ripup_level)
+                    : br::kMaxRemovableLevel;
     std::vector<int> unrouted;
     for (const int id : queue) {
       if (nets_[id].routed) {
@@ -6413,6 +6431,7 @@ void BonnRouteDR::routeRipupQueue(const std::vector<int>& failed,
     }
     queue.swap(unrouted);
   }
+  worker.max_ripup_level = br::kMaxRemovableLevel;
   for (const int id : queue) {
     NetData& net = nets_[id];
     net.wires.clear();
@@ -6520,7 +6539,8 @@ void BonnRouteDR::reportLeftNets() const
       "depth",
       "no path with rip-up",
       "victim at its rip-up limit",
-      "victim not routed again"};
+      "victim not routed again",
+      "victim above the rip-up level"};
   static constexpr std::array<const char*, kNumAccessBlocks> kBlocks{
       "no option",
       "feasible at the end",
@@ -6582,7 +6602,8 @@ void BonnRouteDR::reportLeftNets() const
       "reservations, {} by routed shapes, {} feasible at the end), {} no "
       "path, {} search budget, {} none; their rip-up sequence: {} not "
       "started, {} over the effort budget, {} no path with rip-up, {} victim "
-      "at its rip-up limit, {} victim not routed again, {} depth.",
+      "at its rip-up limit, {} victim not routed again, {} depth, {} victim "
+      "above the rip-up level.",
       left,
       guard_contact,
       guard_on_track,
@@ -6600,7 +6621,8 @@ void BonnRouteDR::reportLeftNets() const
       by_outcome[kRipupNoPath],
       by_outcome[kRipupVictimLimit],
       by_outcome[kRipupVictimFailed],
-      by_outcome[kRipupDepth]);
+      by_outcome[kRipupDepth],
+      by_outcome[kRipupVictimLevel]);
 }
 
 void BonnRouteDR::writeNets()
@@ -7167,6 +7189,15 @@ void BonnRouteDR::main()
           && (nets_[id].net->isClock() || nets_[id].wire_type != 0);
     (is_critical ? critical : regular).push_back(id);
   }
+  // Sec. 3.3: rip-up level of the critical nets, set before any of their
+  // shapes is committed; the parallel phases only read the level table.
+  if (params_.critical_ripup_level > 1 && !critical.empty()) {
+    shape_grid_.setNetRipupLevel(static_cast<int32_t>(nets_.size()) - 1, 1);
+    for (const int id : critical) {
+      shape_grid_.setNetRipupLevel(
+          id, static_cast<br::RipupLevel>(params_.critical_ripup_level));
+    }
+  }
   if (!critical.empty()) {
     routePartitions(critical, failed_first, 1, "critical-net partition");
   }
@@ -7236,6 +7267,19 @@ void BonnRouteDR::main()
           ripup_plain_seconds_,
           ripup_mode_connects_,
           ripup_mode_seconds_);
+      logger_->report(
+          "BonnRoute DR rip-up victims by level: 1: {}, 2: {}, 3: {}, 4: {}, "
+          "5: {}, 6: {}; critical_ripup_level {}, first_pass_ripup_level {}; "
+          "{} sequences failed at a victim above the pass's level.",
+          victims_by_level_[1],
+          victims_by_level_[2],
+          victims_by_level_[3],
+          victims_by_level_[4],
+          victims_by_level_[5],
+          victims_by_level_[6],
+          params_.critical_ripup_level,
+          params_.first_pass_ripup_level,
+          victim_level_failures_);
     }
   }
   if (params_.collapse_bridges) {

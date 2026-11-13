@@ -142,6 +142,8 @@ set_bonnroute_dr_param name value
 | `jog_factor_low` / `jog_low_utilization` | `0` / `50` | Vertex search: jogs cost `jog_factor_low` (0: off) in GCells whose global routing usage of the layer is at most `jog_low_utilization` percent of its capacity, `jog_factor` elsewhere (a wrong-way wire blocks the crossing tracks it uses). |
 | `ripup_cost` | `40` | Base rip-up penalty in pitches of the bottom routing layer. |
 | `max_ripups` | `3` | Maximum rip-ups per net. |
+| `critical_ripup_level` | `1` | Rip-up level (1..6) of the routed shapes of critical nets (clock and NDR nets, routed first); other nets have level 1. |
+| `first_pass_ripup_level` | `1` | The first rip-up pass removes routed shapes up to this level; later passes up to 6. A rip-up sequence whose victims include a net above the pass's level is rolled back. |
 | `max_access_jog` | `2` | Maximum pin-to-track jog in pitches (access stubs, `offtrack_access 0`). |
 | `max_access_options` | `8` | Maximum access options (catalogue paths) retained per pin. |
 | `pin_cost` | `2` | Extra cost of a non-preferred access point, in pitches (access stubs). |
