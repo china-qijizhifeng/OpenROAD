@@ -197,6 +197,10 @@ struct BonnRouteDRParams
   // the rip-up phase (most deferred nets have no route: jpeg 37 of 39).
   // 0: no budget.
   int tail_deferred_settled = 0;
+  // Batch size of the deferred pass. Its searches are long and few of them
+  // end with a route, so larger batches cost few conflicts and fewer
+  // barriers. 0: tail_batch.
+  int tail_deferred_batch = 0;
   // Sec. 5.1: a critical net routing step before the partitions; clock
   // nets are routed first, serially, on the whole chip.
   bool critical_nets = true;
