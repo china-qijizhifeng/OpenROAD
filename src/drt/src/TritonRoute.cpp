@@ -871,6 +871,16 @@ void TritonRoute::ta(const TrackAssignmentNets nets)
   }
 }
 
+bool TritonRoute::techHasAntennaRules() const
+{
+  for (odb::dbTechLayer* layer : db_->getTech()->getLayers()) {
+    if (layer->hasDefaultAntennaRule()) {
+      return true;
+    }
+  }
+  return false;
+}
+
 void TritonRoute::prepareBonnRouteFallbacks(std::vector<odb::Rect>& regions)
 {
   frBlock* block = getDesign()->getTopBlock();
@@ -1385,15 +1395,30 @@ int TritonRoute::main()
       ta();
     }
     if (run_bonnroute) {
+      // The routing space stays for the incremental calls only where the
+      // flow's antenna loop can call detailed_route again: technologies
+      // with antenna rules. Elsewhere it is freed before FlexDR's clean-up
+      // (a later incremental call builds it from the design).
+      const bool keep = bonnroute_params_->incremental
+                        && bonnroute_params_->incremental_resident
+                        && techHasAntennaRules();
+      BonnRouteDRParams first_params = *bonnroute_params_;
+      first_params.incremental_resident = keep;
       auto bonnroute
           = std::make_unique<BonnRouteDR>(getDesign(),
                                           logger_,
                                           router_cfg_.get(),
-                                          *bonnroute_params_,
+                                          first_params,
                                           db_->getChip()->getBlock());
       bonnroute->main();
-      if (bonnroute_params_->incremental
-          && bonnroute_params_->incremental_resident) {
+      if (bonnroute_params_->incremental && bonnroute_params_->verbose) {
+        logger_->report(
+            "BonnRoute incremental: routing space {} after the first route "
+            "(antenna rules in the technology: {}).",
+            keep ? "kept" : "freed",
+            techHasAntennaRules() ? "yes" : "no");
+      }
+      if (keep) {
         bonnroute->keepRoutingSpace();
         bonnroute_dr_ = std::move(bonnroute);
       } else {
