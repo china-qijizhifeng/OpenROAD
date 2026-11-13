@@ -553,6 +553,12 @@ class BonnRouteDR
     double potential_seconds = 0;
     int64_t potential_checks = 0;
     int64_t potential_mismatches = 0;
+    // potential_check: pops and settled vertices of the checked searches
+    // with the potential and of their pi_H repetitions (same state).
+    int64_t potential_check_pops = 0;
+    int64_t potential_check_settled = 0;
+    int64_t potential_check_plain_pops = 0;
+    int64_t potential_check_plain_settled = 0;
     // Guide path of the last buildPathRegion: planar tile steps minus the
     // tile distance of its ends.
     int path_detour = 0;

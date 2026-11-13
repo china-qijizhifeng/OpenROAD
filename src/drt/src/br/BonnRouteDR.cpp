@@ -4709,6 +4709,10 @@ bool BonnRouteDR::connectInRegion(NetData& net,
                                          : worker.search->run(req);
       req.future_cost = oracle;
       worker.potential_checks++;
+      worker.potential_check_pops += res.heap_pops;
+      worker.potential_check_settled += res.settled;
+      worker.potential_check_plain_pops += plain.heap_pops;
+      worker.potential_check_plain_settled += plain.settled;
       if (plain.found != res.found || (res.found && plain.cost != res.cost)) {
         worker.potential_mismatches++;
       }
@@ -7748,10 +7752,18 @@ void BonnRouteDR::main()
       int64_t fallbacks = 0;
       int64_t checks = 0;
       int64_t mismatches = 0;
+      int64_t check_pops = 0;
+      int64_t check_settled = 0;
+      int64_t check_plain_pops = 0;
+      int64_t check_plain_settled = 0;
       for (const Worker& w : workers_) {
         fallbacks += w.potential_fallbacks;
         checks += w.potential_checks;
         mismatches += w.potential_mismatches;
+        check_pops += w.potential_check_pops;
+        check_settled += w.potential_check_settled;
+        check_plain_pops += w.potential_check_plain_pops;
+        check_plain_settled += w.potential_check_plain_settled;
         for (int m = 0; m < 3; m++) {
           prepares[m] += w.potential.prepares(
               static_cast<br::PotentialOracle::Model>(m));
@@ -7795,6 +7807,17 @@ void BonnRouteDR::main()
           fallbacks,
           mismatches,
           checks);
+      if (checks > 0) {
+        logger_->report(
+            "BonnRoute DR: potential check: {} searches repeated with pi_H in "
+            "the same state; heap pops {} with the potential, {} with pi_H; "
+            "settled vertices {} with the potential, {} with pi_H.",
+            checks,
+            check_pops,
+            check_plain_pops,
+            check_settled,
+            check_plain_settled);
+      }
     }
     if (params_.spreading && extra_space_nets_ > 0) {
       logger_->report(
