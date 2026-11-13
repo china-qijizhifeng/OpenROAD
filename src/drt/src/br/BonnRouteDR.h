@@ -182,6 +182,12 @@ struct BonnRouteDRParams
   // deferred to a final pass of the stage without a budget, so it does not
   // hold up the batches. 0 disables the budget.
   int tail_defer_settled = 300000;
+  // Staged budgets: the first pass of a tail stage gives every net this
+  // smaller budget, so a batch (whose wall time is its longest search)
+  // holds short searches only; the nets over it are searched again in a
+  // second pass with tail_defer_settled. 0, or a value at or above
+  // tail_defer_settled: one pass with tail_defer_settled.
+  int tail_first_settled = 0;
   // The final pass of the stage for the deferred nets. 0 hands them to the
   // rip-up phase instead (final_ripup), whose rip-up mode search finds a
   // legal path at no penalty when one exists and does not exhaust the area

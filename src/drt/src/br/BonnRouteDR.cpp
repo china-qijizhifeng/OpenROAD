@@ -242,6 +242,8 @@ bool BonnRouteDRParams::set(const std::string& name, const double value)
     tail_deferred_settled = std::max(0, v);
   } else if (name == "tail_defer_settled") {
     tail_defer_settled = std::max(0, v);
+  } else if (name == "tail_first_settled") {
+    tail_first_settled = std::max(0, v);
   } else if (name == "partitions") {
     partitions = v != 0;
   } else if (name == "partition_regions") {
@@ -7111,10 +7113,28 @@ void BonnRouteDR::routeSpeculative(const std::vector<int>& order,
   std::vector<int> none;
   const int64_t budget = params_.tail_defer_settled;
   const bool scheduled = params_.tail_lookahead || params_.tail_pipeline;
-  if (scheduled) {
-    routeSpeculativePipeline(order, failed, deferred, stage, threads, budget);
+  auto pass = [&](const std::vector<int>& nets,
+                  std::vector<int>& over,
+                  const std::string& name,
+                  const int64_t settled) {
+    if (scheduled) {
+      routeSpeculativePipeline(nets, failed, over, name, threads, settled);
+    } else {
+      routeSpeculativeBatches(nets, failed, over, name, threads, settled);
+    }
+  };
+  const int64_t first = params_.tail_first_settled;
+  if (first > 0 && (budget == 0 || first < budget)) {
+    // Staged budgets: short searches first, the nets over the first budget
+    // again with the stage's budget, in net order.
+    std::vector<int> longer;
+    pass(order, longer, stage, first);
+    if (longer.empty()) {
+      return;
+    }
+    pass(longer, deferred, std::string(stage) + " long searches", budget);
   } else {
-    routeSpeculativeBatches(order, failed, deferred, stage, threads, budget);
+    pass(order, deferred, stage, budget);
   }
   if (deferred.empty()) {
     return;
