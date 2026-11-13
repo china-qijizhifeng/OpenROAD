@@ -123,7 +123,7 @@ struct BonnRouteDRParams
   // belong to the next batch and whose boxes no undecided net of the
   // current batch can still write. Results equal the barrier version for
   // every thread count. Takes precedence over tail_pipeline.
-  bool tail_lookahead = false;
+  bool tail_lookahead = true;
   // Settled vertices a net may use in its speculative tail attempt; a net
   // that needs more (almost always one without a route, left to FlexDR) is
   // deferred to a final pass of the stage without a budget, so it does not

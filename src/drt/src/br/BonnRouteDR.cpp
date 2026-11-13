@@ -89,7 +89,7 @@ void BonnRouteDRParams::applyProfile(const int which)
     tail_batch = 32;
     tail_order = true;
     tail_pipeline = false;
-    tail_lookahead = false;
+    tail_lookahead = true;
     tail_retry_delay = 1;
     tail_defer_settled = 300000;
     potential = 0;
