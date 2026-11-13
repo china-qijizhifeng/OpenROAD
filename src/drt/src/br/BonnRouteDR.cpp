@@ -348,6 +348,10 @@ bool BonnRouteDRParams::set(const std::string& name, const double value)
     planar_first = v != 0;
   } else if (name == "cleanup_normalize_initial_routing") {
     cleanup_normalize_initial_routing = v != 0;
+  } else if (name == "cleanup_grid_workers_ahead") {
+    cleanup_grid_workers_ahead = v != 0;
+  } else if (name == "cleanup_reroutes_per_net") {
+    cleanup_reroutes_per_net = std::clamp(v, 0, 16);
   } else if (name == "left_net_track_assignment") {
     left_net_track_assignment = v != 0;
   } else if (name == "incremental") {
@@ -362,6 +366,8 @@ bool BonnRouteDRParams::set(const std::string& name, const double value)
     incremental_potential = std::clamp(v, 0, 4);
   } else if (name == "incremental_ripup") {
     incremental_ripup = v != 0;
+  } else if (name == "incremental_diode_node") {
+    incremental_diode_node = v != 0;
   } else if (name == "incremental_check") {
     incremental_check = std::clamp(v, 0, 2);
   } else if (name == "verbose") {
@@ -2402,7 +2408,7 @@ bool BonnRouteDR::viaCheckClean(frBlockObject* term,
   return true;
 }
 
-void BonnRouteDR::buildPinViaLegality()
+void BonnRouteDR::buildPinViaLegality(const std::vector<int>* only)
 {
   // Every lower vertex of a search via whose bottom pad overlaps a pin shape
   // of the net. Approved as is: an access point whose FlexPA via definitions
@@ -2454,7 +2460,19 @@ void BonnRouteDR::buildPinViaLegality()
   int64_t approved = 0;
   const int num_fr = static_cast<int>(z_of_fr_.size());
   std::vector<frRect> shapes;
-  for (int n = 0; n < static_cast<int>(nets_.size()); n++) {
+  std::vector<int> ids;
+  if (only != nullptr) {
+    ids = *only;
+    for (const int n : ids) {
+      nets_[n].forbidden_pin_vias.clear();
+    }
+  } else {
+    ids.resize(nets_.size());
+    for (int n = 0; n < static_cast<int>(nets_.size()); n++) {
+      ids[n] = n;
+    }
+  }
+  for (const int n : ids) {
     NetData& data = nets_[n];
     if (data.skip) {
       continue;
@@ -5226,10 +5244,12 @@ void BonnRouteDR::buildRegion(const NetData& net,
     for (int dz = -params_.layer_dilation; dz <= params_.layer_dilation; dz++) {
       for (int dx = -around; dx <= around; dx++) {
         for (int dy = -around; dy <= around; dy++) {
-          if (priced && (dx != 0 || dy != 0)) {
-            region.allowWidened(z + dz, tx + dx, ty + dy);
-          } else {
-            region.allow(z + dz, tx + dx, ty + dy);
+          if (net.max_layer < 0 || z + dz <= net.max_layer) {
+            if (priced && (dx != 0 || dy != 0)) {
+              region.allowWidened(z + dz, tx + dx, ty + dy);
+            } else {
+              region.allow(z + dz, tx + dx, ty + dy);
+            }
           }
         }
       }
@@ -5403,13 +5423,15 @@ bool BonnRouteDR::buildPathRegion(const NetData& net,
     for (int dz = -params_.layer_dilation; dz <= params_.layer_dilation; dz++) {
       for (int dx = -around; dx <= around; dx++) {
         for (int dy = -around; dy <= around; dy++) {
-          // corridor_cost: tiles beside the path are the widened part,
-          // unless they are tiles of the net themselves.
-          if (params_.corridor_cost > 0 && (dx != 0 || dy != 0)
-              && !plain(z + dz, x + dx, y + dy)) {
-            region.allowWidened(z + dz, x + dx, y + dy);
-          } else {
-            region.allow(z + dz, x + dx, y + dy);
+          if (net.max_layer < 0 || z + dz <= net.max_layer) {
+            // corridor_cost: tiles beside the path are the widened part,
+            // unless they are tiles of the net themselves.
+            if (params_.corridor_cost > 0 && (dx != 0 || dy != 0)
+                && !plain(z + dz, x + dx, y + dy)) {
+              region.allowWidened(z + dz, x + dx, y + dy);
+            } else {
+              region.allow(z + dz, x + dx, y + dy);
+            }
           }
         }
       }

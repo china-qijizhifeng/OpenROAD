@@ -30,6 +30,7 @@
 #include <utility>
 #include <vector>
 
+#include "ant/AntennaChecker.hh"
 #include "br/BonnRouteDR.h"
 #include "br/BrIncrementalCore.h"
 #include "db/obj/frBTerm.h"
@@ -1281,6 +1282,437 @@ void BonnRouteDR::mergeKeptComponents(NetData& net,
       net.terms, [](const Term& term) { return term.options.empty(); });
 }
 
+namespace {
+
+// Union-find over items (layer, rect, node): items of one layer that touch
+// join their nodes.
+struct LayerItem
+{
+  frLayerNum layer;
+  odb::Rect rect;
+  int node;
+};
+
+std::vector<int> joinTouching(std::vector<LayerItem>& items, const int nodes)
+{
+  std::vector<int> parent(nodes);
+  for (int k = 0; k < nodes; k++) {
+    parent[k] = k;
+  }
+  auto find = [&](int x) {
+    while (parent[x] != x) {
+      parent[x] = parent[parent[x]];
+      x = parent[x];
+    }
+    return x;
+  };
+  std::ranges::sort(items, [](const LayerItem& a, const LayerItem& b) {
+    return std::make_pair(a.layer, a.rect.xMin())
+           < std::make_pair(b.layer, b.rect.xMin());
+  });
+  for (size_t a = 0; a < items.size(); a++) {
+    for (size_t b = a + 1; b < items.size() && items[b].layer == items[a].layer
+                           && items[b].rect.xMin() <= items[a].rect.xMax();
+         b++) {
+      if (items[a].rect.intersects(items[b].rect)) {
+        parent[find(items[a].node)] = find(items[b].node);
+      }
+    }
+  }
+  for (int k = 0; k < nodes; k++) {
+    parent[k] = find(k);
+  }
+  return parent;
+}
+
+bool isAntennaCell(const frInstTerm* it)
+{
+  return it != nullptr
+         && it->getInst()->getMaster()->getMasterType()
+                == odb::dbMasterType::CORE_ANTENNACELL;
+}
+
+}  // namespace
+
+void BonnRouteDR::antennaViolationsOf(
+    const std::vector<int>& ids,
+    std::unordered_map<int, std::vector<GateViolation>>& out) const
+{
+  if (block_ == nullptr || ids.empty() || layers_.empty()) {
+    return;
+  }
+  ant::AntennaChecker checker(block_->getDb(), logger_);
+  const int num_fr = static_cast<int>(z_of_fr_.size());
+  for (const int id : ids) {
+    odb::dbNet* db_net = block_->findNet(nets_[id].net->getName().c_str());
+    if (db_net == nullptr) {
+      continue;
+    }
+    const ant::NetCheck check = checker.checkNet(db_net);
+    for (const ant::PinCheck& pin : check.pins) {
+      int z_min = -1;
+      for (const ant::LayerCheck& l : pin.layers) {
+        if (!l.violated || l.layer == nullptr) {
+          continue;
+        }
+        // Track layer at or below the violating layer (cut layers: the
+        // routing layer below; layers below the track graph: 0).
+        const frLayer* fl = design_->getTech()->getLayer(l.layer->getName());
+        int z = 0;
+        for (int fr = fl != nullptr
+                          ? std::min<int>(fl->getLayerNum(), num_fr - 1)
+                          : -1;
+             fr >= 0;
+             fr--) {
+          if (z_of_fr_[fr] >= 0) {
+            z = z_of_fr_[fr];
+            break;
+          }
+        }
+        z_min = z_min < 0 ? z : std::min(z_min, z);
+      }
+      if (z_min >= 0 && pin.gate != nullptr) {
+        out[id].push_back({pin.gate->getInst()->getName(),
+                           pin.gate->getMTerm()->getName(),
+                           z_min});
+      }
+    }
+  }
+}
+
+bool BonnRouteDR::planDiodeConnection(
+    const NetData& net,
+    const InputClassification& c,
+    const std::vector<GateViolation>* violations,
+    DiodeConnection& out) const
+{
+  out = DiodeConnection{};
+  const int num_terms = static_cast<int>(net.terms.size());
+  if (!params_.incremental_diode_node || layers_.empty()
+      || static_cast<int>(c.term_label.size()) != num_terms) {
+    return false;
+  }
+  std::unordered_set<int> kept_labels;
+  for (size_t v = 0; v < c.pieces.size(); v++) {
+    if (c.kept[v]) {
+      kept_labels.insert(c.piece_label[v]);
+    }
+  }
+  // One kept component joins every pin but the new diodes.
+  std::unordered_set<int> components;
+  std::vector<int> lone;
+  for (int t = 0; t < num_terms; t++) {
+    if (kept_labels.contains(c.term_label[t])) {
+      components.insert(c.term_label[t]);
+    } else {
+      lone.push_back(t);
+    }
+  }
+  if (components.size() != 1 || lone.empty()) {
+    return false;
+  }
+  auto center = [](const frInstTerm* it) {
+    const odb::Rect r = it->getBBox();
+    return odb::Point((r.xMin() + r.xMax()) / 2, (r.yMin() + r.yMax()) / 2);
+  };
+  for (const int t : lone) {
+    const frInstTerm* diode = net.terms[t].inst_term;
+    if (!isAntennaCell(diode) || net.terms[t].options.empty()) {
+      return false;
+    }
+    // The gate the diode serves: the nearest other pin (repair_antennas
+    // places the diode next to it).
+    int best = -1;
+    int64_t best_d = 0;
+    for (int g = 0; g < num_terms; g++) {
+      const frInstTerm* it = net.terms[g].inst_term;
+      if (!kept_labels.contains(c.term_label[g]) || it == nullptr
+          || isAntennaCell(it)) {
+        continue;
+      }
+      // With checker results, only violating gates are candidates.
+      if (violations != nullptr && !violations->empty()
+          && std::ranges::none_of(*violations, [&](const GateViolation& v) {
+               return v.inst == it->getInst()->getName()
+                      && v.term == it->getTerm()->getName();
+             })) {
+        continue;
+      }
+      const int64_t d
+          = odb::Point::manhattanDistance(center(it), center(diode));
+      if (best < 0 || d < best_d) {
+        best = g;
+        best_d = d;
+      }
+    }
+    if (best < 0) {
+      return false;
+    }
+    const frInstTerm* gate = net.terms[best].inst_term;
+    out.pairs.emplace_back(diode, gate);
+    for (const AccessOption& o : net.terms[best].options) {
+      out.gate_options.push_back(o);
+    }
+    out.gate_options_by_pair.push_back(net.terms[best].options);
+    int cap = 0;
+    bool checked = false;
+    if (violations != nullptr) {
+      for (const GateViolation& v : *violations) {
+        if (v.inst == gate->getInst()->getName()
+            && v.term == gate->getTerm()->getName()) {
+          cap = checked ? std::min(cap, v.z) : v.z;
+          checked = true;
+        }
+      }
+    }
+    out.start_cap.push_back(cap);
+    out.from_checker.push_back(checked);
+  }
+  return true;
+}
+
+void BonnRouteDR::diodeTargets(const InputClassification& c,
+                               DiodeConnection& dc,
+                               const int cap) const
+{
+  dc.targets.clear();
+  const frLayerNum top_fr = layers_[cap].fr;
+  const int num_fr = static_cast<int>(z_of_fr_.size());
+  auto z_of = [&](const frLayerNum fr) {
+    return fr >= 0 && fr < num_fr ? z_of_fr_[fr] : -1;
+  };
+  // Kept pieces on the layers at or below the cap, joined to a gate pin
+  // through such metal: the gate's node at that layer.
+  const int num_pieces = static_cast<int>(c.pieces.size());
+  std::vector<char> low(num_pieces, 0);
+  std::vector<LayerItem> items;
+  for (int v = 0; v < num_pieces; v++) {
+    const InputPiece& piece = c.pieces[v];
+    low[v]
+        = c.kept[v] && std::ranges::all_of(piece.shapes, [&](const RShape& s) {
+            return s.layer <= top_fr;
+          });
+    if (low[v]) {
+      for (const RShape& s : piece.shapes) {
+        items.push_back({s.layer, s.rect, v});
+      }
+    }
+  }
+  std::vector<frRect> rects;
+  const int num_gates = static_cast<int>(dc.pairs.size());
+  for (int k = 0; k < num_gates; k++) {
+    rects.clear();
+    dc.pairs[k].second->getShapes(rects);
+    for (const frRect& r : rects) {
+      if (r.getLayerNum() <= top_fr) {
+        items.push_back({r.getLayerNum(), r.getBBox(), num_pieces + k});
+      }
+    }
+  }
+  const std::vector<int> root = joinTouching(items, num_pieces + num_gates);
+  std::unordered_set<int> gate_roots;
+  for (int k = 0; k < num_gates; k++) {
+    gate_roots.insert(root[num_pieces + k]);
+  }
+  auto add_point = [&](const int z, const odb::Point& p) {
+    const br::TrackLayer& l = graph_.layers[z];
+    const frCoord cross = l.horizontal ? p.y() : p.x();
+    const frCoord along = l.horizontal ? p.x() : p.y();
+    auto track = std::ranges::lower_bound(l.tracks, cross);
+    auto pos = std::ranges::lower_bound(l.positions, along);
+    if (track != l.tracks.end() && *track == cross && pos != l.positions.end()
+        && *pos == along) {
+      dc.targets.insert(
+          graph_.vertex(z,
+                        static_cast<int>(track - l.tracks.begin()),
+                        static_cast<int>(pos - l.positions.begin())));
+    }
+  };
+  for (int v = 0; v < num_pieces; v++) {
+    if (!low[v] || !gate_roots.contains(root[v])) {
+      continue;
+    }
+    const InputPiece& piece = c.pieces[v];
+    if (piece.kind == 0 && piece.obj->typeId() == frcPathSeg) {
+      const auto* seg = static_cast<const frPathSeg*>(piece.obj);
+      const int z = z_of(seg->getLayerNum());
+      if (z < 0 || z > cap) {
+        continue;
+      }
+      const br::TrackLayer& l = graph_.layers[z];
+      const auto [b, e] = seg->getPoints();
+      const bool horizontal = b == e ? l.horizontal : b.y() == e.y();
+      if (horizontal != l.horizontal) {
+        continue;
+      }
+      const frCoord cross = horizontal ? b.y() : b.x();
+      auto track = std::ranges::lower_bound(l.tracks, cross);
+      if (track == l.tracks.end() || *track != cross) {
+        continue;
+      }
+      const frCoord lo
+          = horizontal ? std::min(b.x(), e.x()) : std::min(b.y(), e.y());
+      const frCoord hi
+          = horizontal ? std::max(b.x(), e.x()) : std::max(b.y(), e.y());
+      for (auto j = std::ranges::lower_bound(l.positions, lo);
+           j != l.positions.end() && *j <= hi;
+           ++j) {
+        dc.targets.insert(
+            graph_.vertex(z,
+                          static_cast<int>(track - l.tracks.begin()),
+                          static_cast<int>(j - l.positions.begin())));
+      }
+    } else if (piece.kind == 1) {
+      const auto* via = static_cast<const frVia*>(piece.obj);
+      for (const frLayerNum fr : {via->getViaDef()->getLayer1Num(),
+                                  via->getViaDef()->getLayer2Num()}) {
+        const int z = z_of(fr);
+        if (z >= 0 && z <= cap) {
+          add_point(z, via->getOrigin());
+        }
+      }
+    }
+  }
+  for (const AccessOption& o : dc.gate_options) {
+    if (o.z <= cap) {
+      dc.targets.insert(o.vertex);
+    }
+  }
+}
+
+bool BonnRouteDR::routeDiodeNet(const int id,
+                                const InputClassification& c,
+                                DiodeConnection& dc)
+{
+  NetData& net = nets_[id];
+  Worker& worker = workers_.front();
+  const std::vector<Term> all = net.terms;
+  std::unordered_set<const frInstTerm*> diodes;
+  for (const auto& [diode, gate] : dc.pairs) {
+    diodes.insert(diode);
+  }
+  int merged = -1;
+  for (size_t t = 0; t < all.size(); t++) {
+    if (!diodes.contains(all[t].inst_term)) {
+      merged = static_cast<int>(t);
+    }
+  }
+  std::vector<OutWire> wires;
+  std::vector<OutVia> vias;
+  std::vector<std::pair<frLayerNum, odb::Point>> pin_points;
+  dc.achieved.assign(dc.pairs.size(), -1);
+  auto restore = [&]() {
+    net.terms = all;
+    net.max_layer = -1;
+  };
+  for (size_t k = 0; k < dc.pairs.size(); k++) {
+    int d = -1;
+    for (size_t t = 0; t < all.size(); t++) {
+      if (all[t].inst_term == dc.pairs[k].first) {
+        d = static_cast<int>(t);
+      }
+    }
+    if (merged < 0 || d < 0) {
+      restore();
+      return false;
+    }
+    bool ok = false;
+    for (int cap = dc.start_cap[k]; cap < graph_.numLayers() && !ok; cap++) {
+      DiodeConnection one;
+      one.pairs = {dc.pairs[k]};
+      one.gate_options = dc.gate_options_by_pair[k];
+      diodeTargets(c, one, cap);
+      Term target = all[merged];
+      std::erase_if(target.options, [&](const AccessOption& o) {
+        return !one.targets.contains(o.vertex);
+      });
+      Term source = all[d];
+      std::erase_if(source.options,
+                    [&](const AccessOption& o) { return o.z > cap; });
+      if (target.options.empty() || source.options.empty()) {
+        continue;
+      }
+      net.terms = {std::move(target), std::move(source)};
+      net.max_layer = cap;
+      ok = connect(net, false, worker);
+      if (ok) {
+        dc.achieved[k] = cap;
+      }
+    }
+    if (!ok) {
+      net.terms = {all[merged], all[d]};
+      net.max_layer = -1;
+      ok = connect(net, false, worker);
+    }
+    if (!ok) {
+      restore();
+      net.wires.clear();
+      net.vias.clear();
+      return false;
+    }
+    wires.insert(wires.end(), net.wires.begin(), net.wires.end());
+    vias.insert(vias.end(), net.vias.begin(), net.vias.end());
+    pin_points.insert(
+        pin_points.end(), net.pin_points.begin(), net.pin_points.end());
+  }
+  restore();
+  net.wires = std::move(wires);
+  net.vias = std::move(vias);
+  net.pin_points = std::move(pin_points);
+  commitNet(net);
+  setReservations(net, false);
+  return true;
+}
+
+bool BonnRouteDR::joinedOnLowLayers(const frNet* net,
+                                    const frInstTerm* a,
+                                    const frInstTerm* b,
+                                    const int cap) const
+{
+  if (layers_.empty() || cap < 0) {
+    return false;
+  }
+  const frLayerNum top_fr = layers_[cap].fr;
+  std::vector<LayerItem> items;
+  int nodes = 0;
+  for (const auto& shape : net->getShapes()) {
+    if (shape->getLayerNum() <= top_fr) {
+      items.push_back({shape->getLayerNum(), shape->getBBox(), nodes});
+    }
+    nodes++;
+  }
+  for (const auto& patch : net->getPatchWires()) {
+    if (patch->getLayerNum() <= top_fr) {
+      items.push_back({patch->getLayerNum(), patch->getBBox(), nodes});
+    }
+    nodes++;
+  }
+  for (const auto& via : net->getVias()) {
+    const frViaDef* def = via->getViaDef();
+    if (def->getLayer1Num() <= top_fr) {
+      items.push_back({def->getLayer1Num(), via->getLayer1BBox(), nodes});
+    }
+    if (def->getLayer2Num() <= top_fr) {
+      items.push_back({def->getLayer2Num(), via->getLayer2BBox(), nodes});
+    }
+    nodes++;
+  }
+  std::vector<frRect> rects;
+  const int node_a = nodes++;
+  const int node_b = nodes++;
+  for (const auto& [it, node] : {std::pair{a, node_a}, std::pair{b, node_b}}) {
+    rects.clear();
+    it->getShapes(rects);
+    for (const frRect& r : rects) {
+      if (r.getLayerNum() <= top_fr) {
+        items.push_back({r.getLayerNum(), r.getBBox(), node});
+      }
+    }
+  }
+  const std::vector<int> root = joinTouching(items, nodes);
+  return root[node_a] == root[node_b];
+}
+
 bool BonnRouteDR::prepareVictim(const int id)
 {
   if (!incremental_active_) {
@@ -1290,7 +1722,14 @@ bool BonnRouteDR::prepareVictim(const int id)
   if (net.dead || net.keeps_input || victim_changed_insts_ == nullptr) {
     return false;
   }
-  return prepareNet(net, *victim_changed_insts_);
+  if (!prepareNet(net, *victim_changed_insts_)) {
+    return false;
+  }
+  if (params_.planar_first) {
+    const std::vector<int> one{id};
+    buildPinViaLegality(&one);
+  }
+  return true;
 }
 
 void BonnRouteDR::routeIncremental(std::vector<odb::Rect>& regions)
@@ -1415,6 +1854,12 @@ void BonnRouteDR::routeIncremental(std::vector<odb::Rect>& regions)
       not_prepared.push_back(id);
     }
   }
+  // incremental_diode_node: violating gates and layers of the kept nets
+  // from the antenna checker (the odb routing of the previous call).
+  std::unordered_map<int, std::vector<GateViolation>> gate_violations;
+  if (params_.incremental_diode_node) {
+    antennaViolationsOf(keep_work, gate_violations);
+  }
   for (const int id : keep_work) {
     NetData& data = nets_[id];
     if (!prepareNet(data, stats.changed_insts)) {
@@ -1427,8 +1872,17 @@ void BonnRouteDR::routeIncremental(std::vector<odb::Rect>& regions)
       continue;
     }
     const InputClassification& c = classified_.at(id);
+    DiodeConnection dc;
+    auto gv = gate_violations.find(id);
+    const bool diode = planDiodeConnection(
+        data, c, gv != gate_violations.end() ? &gv->second : nullptr, dc);
     applyClassification(data, c, cstats);
     mergeKeptComponents(data, c);
+    if (diode) {
+      // Routed by routeDiodeNet, one diode at a time.
+      diode_connections_.emplace(id, std::move(dc));
+      continue;
+    }
     order.push_back(id);
   }
   // The batch boxes of routeParallel use the halo of each net's own shapes
@@ -1436,12 +1890,46 @@ void BonnRouteDR::routeIncremental(std::vector<odb::Rect>& regions)
   for (const int id : order) {
     nets_[id].wide_shapes = netHasWideShapes(nets_[id]);
   }
+  // planar_first (C5): the nets prepared in this call get the forbidden
+  // via positions of their (possibly new) pins, as the first call's nets.
+  if (params_.planar_first) {
+    std::vector<int> prepared = order;
+    for (const auto& [id, dc] : diode_connections_) {
+      prepared.push_back(id);
+    }
+    std::ranges::sort(prepared);
+    buildPinViaLegality(&prepared);
+  }
   const double access_s = timer.elapsed() - sync_s;
   std::ranges::stable_sort(
       order, [&](int a, int b) { return nets_[a].hpwl < nets_[b].hpwl; });
   const int64_t ripups_before = serial_ripup_.events;
   std::vector<int> failed;
   routeParallel(order, failed);
+  // incremental_diode_node: nets with new diodes, serially, each diode
+  // against its own gate's node.
+  int64_t diode_fallbacks = 0;
+  int64_t diode_cap_raises = 0;
+  int64_t diodes_checker = 0;
+  {
+    std::vector<int> diode_ids;
+    for (const auto& [id, dc] : diode_connections_) {
+      diode_ids.push_back(id);
+    }
+    std::ranges::sort(diode_ids);
+    for (const int id : diode_ids) {
+      DiodeConnection& dc = diode_connections_.at(id);
+      if (!routeDiodeNet(id, classified_.at(id), dc)) {
+        failed.push_back(id);
+        continue;
+      }
+      for (size_t k = 0; k < dc.pairs.size(); k++) {
+        diode_fallbacks += dc.achieved[k] < 0;
+        diode_cap_raises += dc.achieved[k] > dc.start_cap[k];
+        diodes_checker += dc.from_checker[k];
+      }
+    }
+  }
   const int64_t first_failed = static_cast<int64_t>(failed.size());
   // Sec. 4.4 / arXiv:2111.06169 Sec. 5.2: the few nets of an incremental
   // call that fail get rip-up sequences in every profile; a net left to
@@ -1575,6 +2063,47 @@ void BonnRouteDR::routeIncremental(std::vector<odb::Rect>& regions)
       }
     }
   }
+  // incremental_diode_node: written diodes on their gate's node.
+  int64_t diodes_on_node = 0;
+  int64_t diodes_off_node = 0;
+  // Restricted connections: joined to the gate at or below the cap
+  // (counted per cap layer); unrestricted ones: counted apart.
+  int64_t diodes_unrestricted = 0;
+  std::vector<int64_t> diodes_by_cap(graph_.numLayers(), 0);
+  for (const auto& [id, dc] : diode_connections_) {
+    const NetData& data = nets_[id];
+    if (!data.routed) {
+      continue;
+    }
+    for (size_t k = 0; k < dc.pairs.size() && k < dc.achieved.size(); k++) {
+      const auto& [diode, gate] = dc.pairs[k];
+      const int cap = dc.achieved[k];
+      if (cap < 0) {
+        diodes_unrestricted++;
+      } else if (joinedOnLowLayers(data.net, diode, gate, cap)) {
+        diodes_on_node++;
+        diodes_by_cap[cap]++;
+      } else {
+        diodes_off_node++;
+      }
+    }
+  }
+  if (params_.incremental_check > 1 && diodes_off_node > 0) {
+    logger_->error(utl::DRT,
+                   9193,
+                   "BonnRoute incremental: {} diodes connected under a layer "
+                   "cap are not on their gate's node at that layer.",
+                   diodes_off_node);
+  }
+  std::string by_cap;
+  for (size_t z = 0; z < diodes_by_cap.size(); z++) {
+    if (diodes_by_cap[z] > 0) {
+      by_cap += fmt::format("{}{}:{}",
+                            by_cap.empty() ? "" : "/",
+                            layers_[z].layer->getName(),
+                            diodes_by_cap[z]);
+    }
+  }
   if (params_.incremental_check > 1
       && (disconnected > 0 || unconnected_kept > 0)) {
     logger_->error(utl::DRT,
@@ -1632,6 +2161,11 @@ void BonnRouteDR::routeIncremental(std::vector<odb::Rect>& regions)
   left += not_prepared.size();
   regions.insert(
       regions.end(), stats.inst_regions.begin(), stats.inst_regions.end());
+  for (auto& [id, dc] : diode_connections_) {
+    nets_[id].max_layer = -1;
+  }
+  const int64_t diode_nets = static_cast<int64_t>(diode_connections_.size());
+  diode_connections_.clear();
   for (NetData& data : nets_) {
     if (data.prepared) {
       setReservations(data, false);
@@ -1656,7 +2190,10 @@ void BonnRouteDR::routeIncremental(std::vector<odb::Rect>& regions)
         "first_pass_failed={} ripups={} written={} left_to_flexdr={} "
         "regions={} classified_nets={} complete_nets={} pieces={} kept={} "
         "reserved={} dropped={} discount_runs={} restored_unconnected={} "
-        "disconnected_written={} unconnected_kept={}",
+        "disconnected_written={} unconnected_kept={} diode_nets={} "
+        "diodes_checker={} diode_cap_raises={} diode_fallbacks={} "
+        "diodes_on_node={} "
+        "diodes_off_node={} diodes_unrestricted={} diodes_by_cap={}",
         sync_s,
         access_s,
         route_s,
@@ -1686,7 +2223,15 @@ void BonnRouteDR::routeIncremental(std::vector<odb::Rect>& regions)
         cstats.discount_runs,
         restored,
         disconnected,
-        unconnected_kept);
+        unconnected_kept,
+        diode_nets,
+        diodes_checker,
+        diode_cap_raises,
+        diode_fallbacks,
+        diodes_on_node,
+        diodes_off_node,
+        diodes_unrestricted,
+        by_cap.empty() ? "-" : by_cap);
   }
 }
 

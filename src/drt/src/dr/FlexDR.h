@@ -3,6 +3,8 @@
 
 #pragma once
 
+#include <atomic>
+#include <chrono>
 #include <cstdint>
 #include <deque>
 #include <list>
@@ -107,6 +109,13 @@ class FlexDR
     // Run the connectivity check over the nets with initial routing before
     // iteration 0 and drop the Recheck markers it leaves.
     bool normalize_initial_routing = false;
+    // In the marker-driven grid iterations, workers of later checkerboard
+    // batches start ahead of their batch on idle threads; the results equal
+    // those of the batch loop (FlexDR::runGridWorkersAhead).
+    bool start_grid_workers_ahead = false;
+    // Reroutes of one net per worker (mazeEndIter) in the iterations 3 to
+    // 16 when nets carry initial routing; 0 keeps the strategy's value.
+    int reroutes_per_net = 0;
   };
   struct IterationProgress
   {
@@ -240,6 +249,30 @@ class FlexDR
   void endWorkersBatch(
       std::vector<std::unique_ptr<FlexDRWorker>>& workers_batch,
       std::vector<odb::Rect>* changed_regions = nullptr);
+  // Writes one worker's result back and updates the iteration counters.
+  void endWorker(FlexDRWorker& worker, std::vector<odb::Rect>* changed_regions);
+  // The grid workers of one marker-driven clean-up iteration, in the order
+  // of optimizationFlow (batch by batch, creation order inside a batch).
+  struct GridWorkerSlot
+  {
+    std::unique_ptr<FlexDRWorker> worker;
+    int x_offset = 0;
+    int y_offset = 0;
+    int batch = 0;
+  };
+  // Runs the slots with the results of optimizationFlow's batch loop: the
+  // same workers run, each on the design state its batch starts from, and
+  // the results are written back in the same order.  Workers of later
+  // batches start ahead of their batch on idle threads.  Returns the number
+  // of workers without markers in their DRC box at the start of their batch;
+  // with skip_unaffected they leave the progress total, as the batch loop
+  // erases them, otherwise they count as workers that ran without markers.
+  int runGridWorkersAhead(std::vector<GridWorkerSlot>& slots,
+                          int num_batches,
+                          const SearchRepairArgs& args,
+                          IterationProgress& iter_prog,
+                          bool skip_unaffected,
+                          std::vector<odb::Rect>* changed_regions);
   // markers_only: only markers in the worker's DRC box count (repair
   // iterations after BonnRoute's incremental routing).
   // shape_regions: the changed regions are shapes, instance boxes and gcell
@@ -257,6 +290,12 @@ class FlexDR
       IterationProgress& iter_prog);
   odb::Rect getDRVBBox(const odb::Rect& drv_rect) const;
   std::vector<odb::Rect> getOffGuideWorkerBoxes(frMarker* marker) const;
+  // Runs a stubborn-tiles batch; per cluster, a worker created after the first
+  // worker that ended with zero markers is skipped or stopped.  Returns the
+  // indices of the workers that ran to the end, ascending.
+  std::vector<int> runStubbornWorkersUntilClean(
+      std::vector<std::unique_ptr<FlexDRWorker>>& workers_batch,
+      IterationProgress& iter_prog);
   void stubbornTilesFlow(const SearchRepairArgs& args,
                          IterationProgress& iter_prog);
   void guideTilesFlow(const SearchRepairArgs& args,
@@ -537,7 +576,29 @@ class FlexDRWorker
   frUInt4 getWorkerDRCCost() const { return workerDRCCost_; }
   int getWorkerId() const { return worker_id_; }
   // others
+  // main() is mainRead() followed by mainRoute().
   int main(frDesign* design);
+  // Copies what the worker reads of the design state that detailed routing
+  // changes: the markers in the DRC box and the routed objects in the
+  // extended box (with the guides of their nets).
+  void mainRead(frDesign* design);
+  // Builds nets, grid graph and design-rule checker from the copies and
+  // routes.  Of the design it reads only state that stays fixed during
+  // detailed routing (technology, track patterns, fixed shapes, pins, net
+  // attributes), so it may run while end() of other workers writes routed
+  // objects and markers.
+  int mainRoute();
+  // Fingerprint of what mainRead() reads of the routed objects and markers:
+  // the objects in query order with their identity and every field the
+  // worker copies.  Two equal fingerprints mean mainRead() builds the same
+  // worker from both design states.
+  uint64_t getDesignReadFingerprint(const frDesign* design) const;
+  // The worker stops routing at its next route-queue entry once *stop_request
+  // is true; a stopped worker is discarded.
+  void setStopRequest(const std::atomic<bool>* stop_request)
+  {
+    stop_request_ = stop_request;
+  }
   void distributedMain(frDesign* design);
   void writeUpdates(const std::string& file_name);
   void updateDesign(frDesign* design);
@@ -579,6 +640,17 @@ class FlexDRWorker
   }
   frCoord getHalfViaEncArea(frMIdx z, bool isLayer1, frNonDefaultRule* ndr);
   bool isSkipRouting() const { return skipRouting_; }
+  // Stubborn tiles: *first_clean holds the lowest creation index of a worker
+  // of this worker's cluster that ended with zero markers.  The worker stops
+  // routing as soon as that index is below its own; a stopped worker is
+  // discarded.  A null pointer detaches the worker from the shared index.
+  void setFirstCleanCreationIndex(const std::atomic<int>* first_clean,
+                                  int creation_index)
+  {
+    first_clean_ = first_clean;
+    creation_index_ = creation_index;
+  }
+  bool isStopped() const { return stopped_; }
 
   enum ModCostType
   {
@@ -624,6 +696,22 @@ class FlexDRWorker
   bool followGuide_{false};
   bool needRecheck_{false};
   bool skipRouting_{false};
+  const std::atomic<int>* first_clean_{nullptr};
+  int creation_index_{0};
+  const std::atomic<bool>* stop_request_{nullptr};
+  bool stopped_{false};
+  std::chrono::high_resolution_clock::time_point main_start_time_;
+  // The routed objects and guides read by mainRead(), until initNets() turns
+  // them into the worker's nets.
+  struct DesignNetObjects
+  {
+    frOrderedIdSet<frNet*> nets;
+    frOrderedIdMap<frNet*, std::vector<std::unique_ptr<drConnFig>>> route_objs;
+    frOrderedIdMap<frNet*, std::vector<std::unique_ptr<drConnFig>>> ext_objs;
+    frOrderedIdMap<frNet*, std::vector<frRect>> orig_guides;
+    frOrderedIdMap<frNet*, std::vector<frRect>> guides;
+  };
+  std::unique_ptr<DesignNetObjects> design_net_objects_;
   bool check_only_without_reroutable_nets_{false};
   bool check_only_{false};
   bool skipped_without_nets_{false};
@@ -676,6 +764,7 @@ class FlexDRWorker
   // init
   void init(const frDesign* design);
   void initNets(const frDesign* design);
+  void readDesignNetObjects(const frDesign* design);
   void initRipUpNetsFromMarkers();
   void initNetObjs(
       const frDesign* design,

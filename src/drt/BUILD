@@ -249,6 +249,7 @@ cc_library(
         ":base_types",
         ":bonnroute_core",
         ":pin_access_service",
+        "//src/ant",
         "//src/grt:bonnroute_extra_space",
         "//src/dst",
         "//src/odb/src/db",

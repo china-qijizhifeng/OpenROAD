@@ -283,6 +283,9 @@ class TritonRoute : public PinAccessService
   };
   void ta(TrackAssignmentNets nets = TrackAssignmentNets::kAll);
   void prepareBonnRouteFallbacks(std::vector<odb::Rect>& regions);
+  // Some layer of the technology has an antenna rule (check_antennas /
+  // repair_antennas can follow detailed routing).
+  bool techHasAntennaRules() const;
   void dr();
   void applyUpdates(const std::vector<std::vector<drUpdate>>& updates);
   void getDRCMarkers(std::list<std::unique_ptr<frMarker>>& markers,
