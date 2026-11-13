@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
+#include <cstdint>
 #include <iostream>
 #include <iterator>
 #include <limits>
@@ -1595,16 +1596,29 @@ void FlexDRWorker::initRipUpNetsFromMarkers()
   }
 }
 
+void FlexDRWorker::readDesignNetObjects(const frDesign* design)
+{
+  design_net_objects_ = std::make_unique<DesignNetObjects>();
+  initNetObjs(design,
+              design_net_objects_->nets,
+              design_net_objects_->route_objs,
+              design_net_objects_->ext_objs,
+              design_net_objects_->orig_guides,
+              design_net_objects_->guides);
+}
+
 void FlexDRWorker::initNets(const frDesign* design)
 {
-  frOrderedIdSet<frNet*> nets;
-  frOrderedIdMap<frNet*, std::vector<std::unique_ptr<drConnFig>>> netRouteObjs;
-  frOrderedIdMap<frNet*, std::vector<std::unique_ptr<drConnFig>>> netExtObjs;
-  frOrderedIdMap<frNet*, std::vector<frRect>> netOrigGuides;
-  frOrderedIdMap<frNet*, std::vector<frRect>> netGuides;
-  // get lock
-  initNetObjs(design, nets, netRouteObjs, netExtObjs, netOrigGuides, netGuides);
-  // release lock
+  if (design_net_objects_ == nullptr) {
+    readDesignNetObjects(design);
+  }
+  const std::unique_ptr<DesignNetObjects> objects
+      = std::move(design_net_objects_);
+  auto& nets = objects->nets;
+  auto& netRouteObjs = objects->route_objs;
+  auto& netExtObjs = objects->ext_objs;
+  auto& netOrigGuides = objects->orig_guides;
+  auto& netGuides = objects->guides;
   if (isInitDR()) {
     initNets_initDR(
         design, nets, netRouteObjs, netExtObjs, netOrigGuides, netGuides);
@@ -3264,6 +3278,113 @@ void FlexDRWorker::initMazeCost_boundary_helper(drNet* net, bool isAddPathCost)
   }
 }
 
+namespace {
+
+void mixFingerprint(uint64_t& fingerprint, const uint64_t value)
+{
+  fingerprint ^= value + 0x9e3779b97f4a7c15ULL + (fingerprint << 6)
+                 + (fingerprint >> 2);
+  fingerprint *= 0xff51afd7ed558ccdULL;
+  fingerprint ^= fingerprint >> 33;
+}
+
+void mixFingerprint(uint64_t& fingerprint, const void* pointer)
+{
+  mixFingerprint(fingerprint,
+                 static_cast<uint64_t>(reinterpret_cast<uintptr_t>(pointer)));
+}
+
+void mixFingerprint(uint64_t& fingerprint, const odb::Point& point)
+{
+  mixFingerprint(fingerprint, static_cast<uint64_t>(point.x()));
+  mixFingerprint(fingerprint, static_cast<uint64_t>(point.y()));
+}
+
+void mixFingerprint(uint64_t& fingerprint, const odb::Rect& rect)
+{
+  mixFingerprint(fingerprint, rect.ll());
+  mixFingerprint(fingerprint, rect.ur());
+}
+
+}  // namespace
+
+// Covers the two design queries of a worker whose answers change during
+// detailed routing, both made by mainRead(): the markers of initMarkers()
+// and the routed objects of initNetObjs().  The other queries (guides,
+// global-routing pins, fixed shapes) read state that end() leaves alone.
+uint64_t FlexDRWorker::getDesignReadFingerprint(const frDesign* design) const
+{
+  uint64_t fingerprint = 0;
+  std::vector<frMarker*> markers;
+  design->getRegionQuery()->queryMarker(getDrcBox(), markers);
+  mixFingerprint(fingerprint, static_cast<uint64_t>(markers.size()));
+  for (const frMarker* marker : markers) {
+    // The fields of frMarker's copy constructor.
+    mixFingerprint(fingerprint, marker);
+    mixFingerprint(fingerprint, marker->getConstraint());
+    mixFingerprint(fingerprint, marker->getBBox());
+    mixFingerprint(fingerprint, static_cast<uint64_t>(marker->getLayerNum()));
+    mixFingerprint(fingerprint,
+                   static_cast<uint64_t>(marker->getSrcs().size()));
+    for (const frBlockObject* source : marker->getSrcs()) {
+      mixFingerprint(fingerprint, source);
+    }
+    mixFingerprint(fingerprint,
+                   static_cast<uint64_t>((marker->hasDir() ? 2 : 0)
+                                         + (marker->isH() ? 1 : 0)));
+  }
+  std::vector<frBlockObject*> objects;
+  design->getRegionQuery()->queryDRObj(getExtBox(), objects);
+  mixFingerprint(fingerprint, static_cast<uint64_t>(objects.size()));
+  for (const frBlockObject* object : objects) {
+    mixFingerprint(fingerprint, object);
+    mixFingerprint(fingerprint, static_cast<uint64_t>(object->typeId()));
+    if (object->typeId() == frcPathSeg) {
+      const auto* path_seg = static_cast<const frPathSeg*>(object);
+      const frSegStyle& style = path_seg->getStyle();
+      mixFingerprint(fingerprint, path_seg->getNet());
+      mixFingerprint(fingerprint,
+                     static_cast<uint64_t>(path_seg->getLayerNum()));
+      mixFingerprint(fingerprint, path_seg->getBeginPoint());
+      mixFingerprint(fingerprint, path_seg->getEndPoint());
+      mixFingerprint(
+          fingerprint,
+          static_cast<uint64_t>(static_cast<frEndStyleEnum>(
+              style.getBeginStyle())));
+      mixFingerprint(
+          fingerprint,
+          static_cast<uint64_t>(static_cast<frEndStyleEnum>(
+              style.getEndStyle())));
+      mixFingerprint(fingerprint, static_cast<uint64_t>(style.getBeginExt()));
+      mixFingerprint(fingerprint, static_cast<uint64_t>(style.getEndExt()));
+      mixFingerprint(fingerprint, static_cast<uint64_t>(style.getWidth()));
+      mixFingerprint(fingerprint,
+                     static_cast<uint64_t>((path_seg->isTapered() ? 2 : 0)
+                                           + (path_seg->isApPathSeg() ? 1
+                                                                      : 0)));
+      mixFingerprint(fingerprint, path_seg->getApLoc());
+    } else if (object->typeId() == frcVia) {
+      const auto* via = static_cast<const frVia*>(object);
+      mixFingerprint(fingerprint, via->getNet());
+      mixFingerprint(fingerprint, via->getViaDef());
+      mixFingerprint(fingerprint, via->getOrigin());
+      mixFingerprint(fingerprint,
+                     static_cast<uint64_t>((via->isTapered() ? 8 : 0)
+                                           + (via->isBottomConnected() ? 4 : 0)
+                                           + (via->isTopConnected() ? 2 : 0)
+                                           + (via->isLonely() ? 1 : 0)));
+    } else if (object->typeId() == frcPatchWire) {
+      const auto* patch_wire = static_cast<const frPatchWire*>(object);
+      mixFingerprint(fingerprint, patch_wire->getNet());
+      mixFingerprint(fingerprint,
+                     static_cast<uint64_t>(patch_wire->getLayerNum()));
+      mixFingerprint(fingerprint, patch_wire->getOrigin());
+      mixFingerprint(fingerprint, patch_wire->getOffsetBox());
+    }
+  }
+  return fingerprint;
+}
+
 void FlexDRWorker::initMarkers(const frDesign* design)
 {
   std::vector<frMarker*> result;
@@ -3294,10 +3415,23 @@ void FlexDRWorker::init(const frDesign* design)
       && (getRipupMode() == RipUpMode::ALL
           || getRipupMode() == RipUpMode::INCR)) {
     skipRouting_ = true;
+    skipped_without_nets_ = true;
     return;
   }
-  initGridGraph(design);
-  initMazeIdx();
+  only_nets_with_initial_routing_
+      = std::ranges::all_of(nets_, [](const auto& net) {
+          return net->getFrNet()->hasInitialRouting();
+        });
+  // Incremental mode reroutes only nets without initial routing
+  // (route_queue_init_queue, canRipup); without such a net the route queue
+  // stays empty and the worker's result is its design-rule check.
+  check_only_ = check_only_without_reroutable_nets_
+                && getRipupMode() == RipUpMode::INCR
+                && only_nets_with_initial_routing_;
+  if (!check_only_) {
+    initGridGraph(design);
+    initMazeIdx();
+  }
   std::unique_ptr<FlexGCWorker> gcWorker = std::make_unique<FlexGCWorker>(
       design->getTech(), logger_, router_cfg_, this);
   gcWorker->setExtBox(getExtBox());
@@ -3305,7 +3439,9 @@ void FlexDRWorker::init(const frDesign* design)
   gcWorker->init(design);
   gcWorker->setEnableSurgicalFix(true);
   setGCWorker(std::move(gcWorker));
-  initMazeCost(design);
+  if (!check_only_) {
+    initMazeCost(design);
+  }
 }
 
 frCoord FlexDRWorker::snapCoordToManufacturingGrid(const frCoord coord,

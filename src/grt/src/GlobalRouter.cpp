@@ -3,6 +3,8 @@
 
 #include "grt/GlobalRouter.h"
 
+#include <omp.h>
+
 #include <algorithm>
 #include <array>
 #include <chrono>
@@ -117,14 +119,49 @@ GlobalRouter::GlobalRouter(utl::Logger* logger,
 
 void GlobalRouter::setNumThreads(int num_threads)
 {
-  num_threads_ = num_threads;
+  requested_threads_ = std::max(1, num_threads);
+  num_threads_ = thread_limit_ > 0
+                     ? std::min(requested_threads_, thread_limit_)
+                     : requested_threads_;
   fastroute_->setNumThreads(num_threads_);
+  cugr_->setNumThreads(num_threads_);
+}
+
+void GlobalRouter::setThreadLimit(const int limit)
+{
+  thread_limit_ = std::max(0, limit);
+  setNumThreads(requested_threads_);
+}
+
+void GlobalRouter::setBonnRoute(const bool enabled)
+{
+  cugr_->setBonnRoute(enabled);
+}
+
+bool GlobalRouter::isBonnRoute() const
+{
+  return cugr_->isBonnRoute();
+}
+
+bool GlobalRouter::setBonnRouteParam(const char* name, const double value)
+{
+  return cugr_->setBonnRouteParam(name, value);
 }
 
 void GlobalRouter::setSnapshotBatchedWidth(int snapshot_batched_width)
 {
   snapshot_batched_width_ = snapshot_batched_width;
   fastroute_->setSnapshotBatchedWidth(snapshot_batched_width_);
+}
+
+void GlobalRouter::setIncrementalPartialParasitics(const bool incremental)
+{
+  fastroute_->setIncrementalPartialParasitics(incremental);
+}
+
+bool GlobalRouter::getIncrementalPartialParasitics() const
+{
+  return fastroute_->getIncrementalPartialParasitics();
 }
 
 int GlobalRouter::getSnapshotBatchedWidth() const
@@ -351,6 +388,11 @@ NetRouteMap GlobalRouter::getPartialRoutes()
   return net_routes;
 }
 
+bool GlobalRouter::partialRoutesAreFastRouteRoutes() const
+{
+  return !is_incremental_ && !use_cugr_ && routes_.empty();
+}
+
 void GlobalRouter::ensureEngineSelected()
 {
   if (engine_selected_) {
@@ -504,6 +546,42 @@ void GlobalRouter::reportIncrementalCongestion()
 void GlobalRouter::globalRoute(bool save_guides)
 {
   utl::Timer timer;
+  // Parallel regions without an explicit team size (BonnRoute GR capacity
+  // estimation) use num_threads_ as well; the previous default is restored.
+  struct OmpThreads
+  {
+    explicit OmpThreads(const int threads) : saved(omp_get_max_threads())
+    {
+      omp_set_num_threads(threads);
+    }
+    ~OmpThreads() { omp_set_num_threads(saved); }
+    int saved;
+  } omp_threads(std::max(1, num_threads_));
+  // OpenSTA's parallel search, which global routing starts through net
+  // slacks and clock nets, uses the same limit for the call; the STA thread
+  // count set by set_thread_count is restored afterwards.
+  struct StaThreads
+  {
+    StaThreads(sta::dbSta* sta, const int threads) : sta(sta)
+    {
+      if (sta != nullptr) {
+        saved = static_cast<int>(sta->threadCount());
+        if (threads < saved) {
+          sta->setThreadCount(threads);
+        }
+      }
+    }
+    ~StaThreads()
+    {
+      if (sta != nullptr && static_cast<int>(sta->threadCount()) != saved) {
+        sta->setThreadCount(saved);
+      }
+    }
+    StaThreads(const StaThreads&) = delete;
+    StaThreads& operator=(const StaThreads&) = delete;
+    sta::dbSta* sta;
+    int saved{1};
+  } sta_threads(sta_, std::max(1, num_threads_));
   bool has_routable_nets = false;
 
   for (auto net : db_->getChip()->getBlock()->getNets()) {
@@ -531,11 +609,21 @@ void GlobalRouter::globalRoute(bool save_guides)
     getMinMaxLayer(min_layer, max_layer);
 
     if (use_cugr_) {
+      utl::Timer init_timer;
       std::vector<Net*> nets = initCUGR(min_layer, max_layer);
       if (verbose_) {
         reportResources();
       }
+      const double init_time = init_timer.elapsed();
+      utl::Timer route_timer;
       findRoutingCugr(nets, /*incremental=*/false);
+      if (verbose_ && cugr_->isBonnRoute()) {
+        logger_->report(
+            "BonnRoute GR shell timing: GlobalRouter init {:.3f}s, route and "
+            "export {:.3f}s.",
+            init_time,
+            route_timer.elapsed());
+      }
     } else {
       std::vector<Net*> nets = initFastRoute(min_layer, max_layer);
       // Capture the initial Steiner-tree wirelength per net for the detour
@@ -566,6 +654,7 @@ void GlobalRouter::globalRoute(bool save_guides)
 
 void GlobalRouter::finishGlobalRouting(bool save_guides)
 {
+  utl::Timer congestion_timer;
   updateDbCongestion();
   saveCongestion();
   congestion_accepted_ = allow_congestion_ || use_cugr_;
@@ -573,6 +662,8 @@ void GlobalRouter::finishGlobalRouting(bool save_guides)
   if (verbose_) {
     reportCongestion();
   }
+  const double congestion_time = congestion_timer.elapsed();
+  utl::Timer wirelength_timer;
   computeWirelength();
   if (verbose_) {
     logger_->info(GRT, 14, "Routed nets: {}", routes_.size());
@@ -581,6 +672,8 @@ void GlobalRouter::finishGlobalRouting(bool save_guides)
   if (!routes_.empty() && hasInitialSteinerWirelengths()) {
     computeDetourMetrics();
   }
+  const double wirelength_time = wirelength_timer.elapsed();
+  utl::Timer guides_timer;
   if (save_guides) {
     std::vector<odb::dbNet*> nets;
     nets.reserve(block_->getNets().size());
@@ -588,6 +681,14 @@ void GlobalRouter::finishGlobalRouting(bool save_guides)
       nets.push_back(db_net);
     }
     saveGuides(nets);
+  }
+  if (verbose_ && use_cugr_ && cugr_->isBonnRoute()) {
+    logger_->report(
+        "BonnRoute GR shell timing: congestion export and report {:.3f}s, "
+        "wirelength {:.3f}s, guides {:.3f}s.",
+        congestion_time,
+        wirelength_time,
+        guides_timer.elapsed());
   }
 
   if (is_congested_) {
@@ -799,6 +900,8 @@ int GlobalRouter::repairAntennas(odb::dbMTerm* diode_mterm,
     nets_to_repair.push_back(db_net);
   }
 
+  const bool keep_wires
+      = keep_detailed_wires_ && haveDetailedRoutes(nets_to_repair);
   if (haveDetailedRoutes(nets_to_repair) && iterations != 1) {
     logger_->warn(GRT,
                   121,
@@ -866,6 +969,7 @@ int GlobalRouter::repairAntennas(odb::dbMTerm* diode_mterm,
       updateDbCongestion();
     }
     if (violations && !jumper_only) {
+      keeping_detailed_wires_ = keep_wires;
       IncrementalGRoute incr_groute(this, block_);
       repair_antennas_->repairAntennas(diode_mterm);
       total_diodes_count_ += repair_antennas_->getDiodesCount();
@@ -886,6 +990,7 @@ int GlobalRouter::repairAntennas(odb::dbMTerm* diode_mterm,
         add_moved_nets(rerouted);
       }
     }
+    keeping_detailed_wires_ = false;
     repair_antennas_->clearViolations();
     itr++;
   }
@@ -1217,6 +1322,13 @@ void GlobalRouter::updateDirtyNets(std::vector<Net*>& dirty_nets)
   for (odb::dbNet* db_net : dirty_nets_) {
     Net* net = db_net_map_[db_net];
     updateNetPins(net);
+    if (keeping_detailed_wires_ && db_net->getWire() != nullptr) {
+      // -keep_detailed_wires: the net keeps its detailed wires and its
+      // guides; detailed routing connects the new diode.
+      net->setDirtyNet(false);
+      net->clearLastPinPositions();
+      continue;
+    }
     destroyNetWire(net);
     std::string pins_not_covered;
     // compare new positions with last positions & add on vector
@@ -4306,6 +4418,13 @@ odb::Rect GlobalRouter::globalRoutingToBox(const GSegment& route)
   const auto [init_x, final_x] = std::minmax(route.init_x, route.final_x);
   const auto [init_y, final_y] = std::minmax(route.init_y, route.final_y);
 
+  // With BonnRoute's gcell_scale, CUGR's gcells are larger than the tile
+  // and route points also come from the tile grid (pins, local nets): a
+  // guide is the union of the CUGR gcells holding its end points, so it
+  // never ends inside a gcell of the detailed router's (CUGR's) grid.
+  if (use_cugr_ && cugr_->getGridlineSize() > grid_->getTileSize()) {
+    return cugr_->gcellUnion(init_x, init_y, final_x, final_y);
+  }
   int llX = init_x - (grid_->getTileSize() / 2);
   int llY = init_y - (grid_->getTileSize() / 2);
   int urX = final_x + (grid_->getTileSize() / 2);
@@ -4860,6 +4979,9 @@ int GlobalRouter::computeNetWirelength(odb::dbNet* db_net)
   const GRoute& route = iter->second;
   int net_wl = 0;
   for (const GSegment& segment : route) {
+    if (segment.is_pin_bridge) {
+      continue;
+    }
     const int segment_wl = std::abs(segment.final_x - segment.init_x)
                            + std::abs(segment.final_y - segment.init_y);
     if (segment_wl > 0) {
@@ -7452,7 +7574,15 @@ std::vector<Net*> GlobalRouter::updateDirtyRoutesCugr(bool save_guides)
     updateNetPins(net);
     // Stale detailed wires (post-detailed-route repair) must go: the
     // reroute and its guides supersede them, and the antenna checker
-    // must not read them. No-op for nets without wires.
+    // must not read them. No-op for nets without wires. With
+    // -keep_detailed_wires the nets that got diodes keep their wires and
+    // guides; detailed routing connects the diodes.
+    if (keeping_detailed_wires_ && db_net->getWire() != nullptr) {
+      net->setDirtyNet(false);
+      net->clearLastPinPositions();
+      cugr_->markNetStale(db_net);
+      continue;
+    }
     destroyNetWire(net);
     // Journal-restored nets get their pre-change routing back from the odb
     // guides instead of a reroute; a failed restore forces the reroute.

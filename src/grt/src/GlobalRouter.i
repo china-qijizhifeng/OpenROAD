@@ -132,6 +132,12 @@ set_allow_congestion(bool allowCongestion)
 }
 
 void
+set_keep_detailed_wires(bool keep)
+{
+  getGlobalRouter()->setKeepDetailedWires(keep);
+}
+
+void
 set_resistance_aware(bool resistance_aware)
 {
   getGlobalRouter()->setResistanceAware(resistance_aware);
@@ -159,6 +165,18 @@ int
 get_snapshot_batched_width()
 {
   return getGlobalRouter()->getSnapshotBatchedWidth();
+}
+
+void
+set_incremental_partial_parasitics(bool incremental)
+{
+  getGlobalRouter()->setIncrementalPartialParasitics(incremental);
+}
+
+bool
+get_incremental_partial_parasitics()
+{
+  return getGlobalRouter()->getIncrementalPartialParasitics();
 }
 
 int
@@ -207,6 +225,30 @@ bool
 is_use_cugr()
 {
   return getGlobalRouter()->isUseCUGR();
+}
+
+void
+set_bonnroute(bool enabled)
+{
+  getGlobalRouter()->setBonnRoute(enabled);
+}
+
+bool
+is_bonnroute()
+{
+  return getGlobalRouter()->isBonnRoute();
+}
+
+bool
+set_bonnroute_param(const char* name, double value)
+{
+  return getGlobalRouter()->setBonnRouteParam(name, value);
+}
+
+void
+set_thread_limit(int limit)
+{
+  getGlobalRouter()->setThreadLimit(limit);
 }
 
 void

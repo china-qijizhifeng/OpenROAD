@@ -48,6 +48,20 @@ cc_library(
     deps = ["//src/odb/src/db"],
 )
 
+# Extra space of BonnRoute global routing for detailed routing (odb
+# property format, header only).
+cc_library(
+    name = "bonnroute_extra_space",
+    hdrs = ["include/grt/BonnRouteExtraSpace.h"],
+    includes = [
+        "include",
+    ],
+    visibility = [
+        "//src/drt:__subpackages__",
+        "//src/grt:__subpackages__",
+    ],
+)
+
 cc_library(
     name = "route_pt",
     hdrs = ["include/grt/RoutePt.h"],
@@ -99,30 +113,41 @@ cc_library(
 cc_library(
     name = "cugr",
     srcs = [
+        "src/cugr/src/BonnRoute.cpp",
+        "src/cugr/src/BonnRouteCapacity.cpp",
+        "src/cugr/src/BonnRouteResources.cpp",
         "src/cugr/src/CUGR.cpp",
         "src/cugr/src/Design.cpp",
-        "src/cugr/src/Design.h",
         "src/cugr/src/GRNet.cpp",
-        "src/cugr/src/GRNet.h",
         "src/cugr/src/GRTree.cpp",
-        "src/cugr/src/GRTree.h",
         "src/cugr/src/GeoTypes.cpp",
-        "src/cugr/src/GeoTypes.h",
         "src/cugr/src/GridGraph.cpp",
-        "src/cugr/src/GridGraph.h",
         "src/cugr/src/Layers.cpp",
-        "src/cugr/src/Layers.h",
         "src/cugr/src/MazeRoute.cpp",
         "src/cugr/src/MazeRoute.h",
         "src/cugr/src/Netlist.cpp",
-        "src/cugr/src/Netlist.h",
         "src/cugr/src/PatternRoute.cpp",
         "src/cugr/src/PatternRoute.h",
+    ],
+    # The internal headers are public so that //src/grt/test unit tests
+    # can exercise BonnRoute on a GridGraph.
+    hdrs = [
+        "src/cugr/include/CUGR.h",
+        "src/cugr/src/BonnRoute.h",
+        "src/cugr/src/BonnRouteCapacity.h",
+        "src/cugr/src/BonnRouteResources.h",
+        "src/cugr/src/Design.h",
+        "src/cugr/src/GRNet.h",
+        "src/cugr/src/GRTree.h",
+        "src/cugr/src/GeoTypes.h",
+        "src/cugr/src/GridGraph.h",
+        "src/cugr/src/Layers.h",
+        "src/cugr/src/Netlist.h",
         "src/cugr/src/geo.h",
         "src/cugr/src/robin_hood.h",
     ],
-    hdrs = [
-        "src/cugr/include/CUGR.h",
+    copts = [
+        "-fopenmp",
     ],
     includes = [
         "include",
@@ -131,6 +156,7 @@ cc_library(
         "src/cugr/src",
     ],
     deps = [
+        ":bonnroute_extra_space",
         ":abstract-cugr",
         ":groute",
         "//src/dbSta",
@@ -140,6 +166,7 @@ cc_library(
         "//src/sta:opensta_lib",
         "//src/stt",
         "//src/utl",
+        "@openmp",
     ],
 )
 

@@ -1,11 +1,165 @@
 # SPDX-License-Identifier: BSD-3-Clause
 # Copyright (c) 2022-2025, The OpenROAD Authors
 
+load("@rules_cc//cc:cc_binary.bzl", "cc_binary")
 load("@rules_cc//cc:cc_test.bzl", "cc_test")
 load("@rules_python//python:defs.bzl", "py_library", "py_test")
 load("//test:regression.bzl", "doc_check_test", "regression_test")
 
 package(features = ["layering_check"])
+
+cc_test(
+    name = "bonnroute_core_test",
+    size = "small",
+    srcs = ["BonnRouteCoreTest.cpp"],
+    deps = ["//src/drt:bonnroute_core"],
+)
+
+cc_test(
+    name = "bonnroute_incremental_test",
+    size = "small",
+    srcs = ["BonnRouteIncrementalTest.cpp"],
+    deps = ["//src/drt:bonnroute_core"],
+)
+
+cc_test(
+    name = "bonnroute_potential_test",
+    size = "medium",
+    srcs = ["BonnRoutePotentialTest.cpp"],
+    deps = ["//src/drt:bonnroute_core"],
+)
+
+cc_test(
+    name = "bonnroute_offtrack_test",
+    size = "medium",
+    srcs = [
+        "BonnRouteOffTrackTest.cpp",
+        "BonnRouteRoutingSpaceTestUtil.h",
+    ],
+    deps = ["//src/drt:bonnroute_core"],
+)
+
+cc_test(
+    name = "bonnroute_fixed_shapes_test",
+    size = "small",
+    srcs = [
+        "BonnRouteFixedShapesTest.cpp",
+        "BonnRouteRoutingSpaceTestUtil.h",
+    ],
+    deps = ["//src/drt:bonnroute_core"],
+)
+
+cc_binary(
+    name = "bonnroute_offtrack_bench",
+    testonly = True,
+    srcs = ["BonnRouteOffTrackBench.cpp"],
+    deps = ["//src/drt:bonnroute_core"],
+)
+
+cc_test(
+    name = "bonnroute_wire_model_test",
+    size = "small",
+    srcs = [
+        "BonnRouteRoutingSpaceTestUtil.h",
+        "BonnRouteWireModelTest.cpp",
+    ],
+    deps = ["//src/drt:bonnroute_core"],
+)
+
+cc_test(
+    name = "bonnroute_shape_grid_test",
+    size = "small",
+    srcs = [
+        "BonnRouteRoutingSpaceTestUtil.h",
+        "BonnRouteShapeGridTest.cpp",
+    ],
+    deps = ["//src/drt:bonnroute_core"],
+)
+
+cc_test(
+    name = "bonnroute_distance_rules_test",
+    size = "small",
+    srcs = [
+        "BonnRouteDistanceRulesTest.cpp",
+        "BonnRouteRoutingSpaceTestUtil.h",
+    ],
+    deps = ["//src/drt:bonnroute_core"],
+)
+
+cc_test(
+    name = "bonnroute_fast_grid_test",
+    size = "small",
+    srcs = [
+        "BonnRouteFastGridTest.cpp",
+        "BonnRouteRoutingSpaceTestUtil.h",
+    ],
+    deps = ["//src/drt:bonnroute_core"],
+)
+
+cc_test(
+    name = "bonnroute_fast_grid_dense_test",
+    size = "small",
+    srcs = [
+        "BonnRouteFastGridDenseTest.cpp",
+        "BonnRouteRoutingSpaceTestUtil.h",
+    ],
+    deps = ["//src/drt:bonnroute_core"],
+)
+
+cc_test(
+    name = "bonnroute_search_queue_test",
+    size = "small",
+    srcs = ["BonnRouteSearchQueueTest.cpp"],
+    deps = ["//src/drt:bonnroute_core"],
+)
+
+cc_test(
+    name = "bonnroute_access_footprint_test",
+    size = "small",
+    srcs = [
+        "BonnRouteAccessFootprintTest.cpp",
+        "BonnRouteRoutingSpaceTestUtil.h",
+    ],
+    deps = ["//src/drt:bonnroute_core"],
+)
+
+cc_test(
+    name = "bonnroute_partition_test",
+    size = "small",
+    srcs = [
+        "BonnRoutePartitionTest.cpp",
+        "BonnRouteRoutingSpaceTestUtil.h",
+    ],
+    deps = ["//src/drt:bonnroute_core"],
+)
+
+cc_test(
+    name = "bonnroute_ordered_box_schedule_test",
+    size = "small",
+    srcs = ["BonnRouteOrderedBoxScheduleTest.cpp"],
+    deps = ["//src/drt:bonnroute_core"],
+)
+
+cc_test(
+    name = "bonnroute_tail_pipeline_test",
+    size = "small",
+    srcs = ["BonnRouteTailPipelineTest.cpp"],
+    deps = ["//src/drt:bonnroute_core"],
+)
+
+# Measurements of the routing-space data structures on random instances.
+cc_binary(
+    name = "bonnroute_routing_space_bench",
+    testonly = True,
+    srcs = [
+        "BonnRouteRoutingSpaceBench.cpp",
+        "BonnRouteRoutingSpaceTestUtil.h",
+    ],
+    deps = [
+        "//src/drt:bonnroute_core",
+        "@boost.geometry",
+    ],
+)
 
 exports_files(
     [
@@ -41,6 +195,39 @@ COMPULSORY_TESTS = [
 
 PASSFAIL_TESTS = [
 ]
+
+regression_test(
+    name = "bonnroute_incremental_fallback",
+    check_log = False,
+    check_passfail = True,
+    data = [
+        ":regression_resources",
+        "ta_ap_aligned.def",
+        "ta_ap_aligned.route_guide",
+    ],
+)
+
+regression_test(
+    name = "bonnroute_incremental_keep",
+    check_log = False,
+    check_passfail = True,
+    data = [
+        ":regression_resources",
+        "ta_ap_aligned.def",
+        "ta_ap_aligned.route_guide",
+    ],
+)
+
+regression_test(
+    name = "bonnroute_incremental_ndr",
+    check_log = False,
+    check_passfail = True,
+    data = [
+        ":regression_resources",
+        "ta_ap_aligned.def",
+        "ta_ap_aligned.route_guide",
+    ],
+)
 
 ALL_TESTS = COMPULSORY_TESTS + PASSFAIL_TESTS
 
@@ -140,6 +327,31 @@ filegroup(
     for test_name in ALL_TESTS
 ]
 
+# BonnRoute DR end-to-end regressions: pass/fail on the last log line (the
+# log carries timings, so it is not compared with a golden file).
+BONNROUTE_TCL_TESTS = [
+    "bonnroute_port_contact",
+]
+
+[
+    filegroup(
+        name = test_name + "_resources",
+        srcs = [":regression_resources"] + glob([test_name + ".*"]),
+    )
+    for test_name in BONNROUTE_TCL_TESTS
+]
+
+[
+    regression_test(
+        name = test_name,
+        size = "small",
+        check_log = False,
+        check_passfail = True,
+        data = [":" + test_name + "_resources"],
+    )
+    for test_name in BONNROUTE_TCL_TESTS
+]
+
 py_library(
     name = "helpers",
     srcs = [
@@ -165,6 +377,28 @@ py_library(
     )
     for test_name in PY_TESTS
 ]
+
+cc_test(
+    name = "bonnroute_lef58_diff_test",
+    size = "medium",
+    srcs = [
+        "BonnRouteLef58DiffTest.cpp",
+        "fixture.cpp",
+        "fixture.h",
+    ],
+    includes = [
+        "../src",
+    ],
+    deps = [
+        "//src/drt:base_types",
+        "//src/drt:bonnroute_core",
+        "//src/drt:drt_impl",
+        "//src/odb/src/db",
+        "//src/utl",
+        "@googletest//:gtest",
+        "@googletest//:gtest_main",
+    ],
+)
 
 test_suite(
     name = "gc_test",

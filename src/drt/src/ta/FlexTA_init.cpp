@@ -594,6 +594,10 @@ void FlexTAWorker::initIroutes()
     result.clear();
     regionQuery->queryGuide(getExtBox(), lNum, result);
     for (auto& [boostb, guide] : result) {
+      if ((nets_without_initial_routing_only_ || unrouted_nets_only_)
+          && guide->getNet()->hasInitialRouting()) {
+        continue;
+      }
       initIroute(guide);
     }
   }
@@ -739,6 +743,9 @@ void FlexTAWorker::initFixedObjs()
       continue;
     }
     width = layer->getWidth();
+    if (nets_without_initial_routing_only_) {
+      initInitialRoutingObjs(layerNum);
+    }
     getRegionQuery()->query(getExtBox(), layerNum, result);
     for (auto& [bounds, obj] : result) {
       bounds.bloat(-1, box);
@@ -919,6 +926,39 @@ frCoord FlexTAWorker::initFixedObjs_calcOBSBloatDistVia(const frViaDef* viaDef,
     bloatDist += viaWidth / 2;
   }
   return bloatDist;
+}
+
+void FlexTAWorker::initInitialRoutingObjs(const frLayerNum layerNum)
+{
+  // Wires, vias and patches of nets with initial routing cost like the
+  // wires of a special net (owner net, minimum spacing plus half a width).
+  frRegionQuery::Objects<frBlockObject> result;
+  getRegionQuery()->queryDRObj(getExtBox(), layerNum, result);
+  for (auto& [bounds, obj] : result) {
+    frNet* net = nullptr;
+    switch (obj->typeId()) {
+      case frcPathSeg:
+        net = static_cast<frPathSeg*>(obj)->getNet();
+        break;
+      case frcVia:
+        net = static_cast<frVia*>(obj)->getNet();
+        break;
+      case frcPatchWire:
+        net = static_cast<frPatchWire*>(obj)->getNet();
+        break;
+      default:
+        break;
+    }
+    if (net == nullptr || !net->hasInitialRouting()) {
+      continue;
+    }
+    odb::Rect box;
+    bounds.bloat(-1, box);
+    initFixedObjs_helper(box,
+                         initFixedObjs_calcBloatDist(obj, layerNum, bounds),
+                         layerNum,
+                         net);
+  }
 }
 
 frCoord FlexTAWorker::initFixedObjs_calcBloatDist(frBlockObject* obj,

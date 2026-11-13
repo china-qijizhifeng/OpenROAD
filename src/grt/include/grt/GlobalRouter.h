@@ -156,10 +156,16 @@ class GlobalRouter
   void setCongestionReportFile(const char* file_name);
   void setGridOrigin(int x, int y);
   void setAllowCongestion(bool allow_congestion);
+  // repair_antennas -keep_detailed_wires: diode-only repairs of a detailed
+  // routing keep the repaired nets' detailed wires; the next detailed_route
+  // connects the diodes (BonnRoute incremental routing, arXiv:2111.06169).
+  void setKeepDetailedWires(bool keep) { keep_detailed_wires_ = keep; }
   void setResistanceAware(bool resistance_aware);
   void setCUGRViaDemand(bool enabled);
   void setResAwareNetsPercentage(float percentage);
   void setSnapshotBatchedWidth(int snapshot_batched_width);
+  void setIncrementalPartialParasitics(bool incremental);
+  bool getIncrementalPartialParasitics() const;
   int getSnapshotBatchedWidth() const;
   int getSnapshotBatchCount() const;
   bool isResistanceAware() { return resistance_aware_; };
@@ -172,11 +178,20 @@ class GlobalRouter
     engine_selected_ = true;
   };
   bool isUseCUGR() const { return use_cugr_; };
+  // BonnRoute resource sharing inside the CUGR engine (implies CUGR).
+  void setBonnRoute(bool enabled);
+  bool isBonnRoute() const;
+  // Returns false for an unknown parameter name.
+  bool setBonnRouteParam(const char* name, double value);
   void setSkipLargeFanoutNets(int skip_large_fanout)
   {
     skip_large_fanout_ = skip_large_fanout;
   };
   void setNumThreads(int num_threads);
+  // Global routing (FastRoute, BonnRoute GR and the parallel regions they
+  // open) uses at most this many threads of the requested count; 0: all.
+  void setThreadLimit(int limit);
+  int threadLimit() const { return thread_limit_; }
 
   void setInfiniteCapacity(bool infinite_capacity);
 
@@ -216,6 +231,10 @@ class GlobalRouter
   void saveCongestion();
   NetRouteMap& getRoutes();
   NetRouteMap getPartialRoutes();
+  // True while getPartialRoutes() returns FastRoute's current route of every
+  // FastRoute net, i.e. during a FastRoute run of global_route that is not
+  // incremental.
+  bool partialRoutesAreFastRouteRoutes() const;
   Net* getNet(odb::dbNet* db_net);
   int getTileSize() const;
   bool isNonLeafClock(odb::dbNet* db_net);
@@ -647,9 +666,14 @@ class GlobalRouter
   int congestion_iterations_{50};
   int congestion_report_iter_step_;
   bool allow_congestion_;
+  bool keep_detailed_wires_{false};
+  // Set while repairAntennas updates the routes of nets with new diodes.
+  bool keeping_detailed_wires_{false};
   bool resistance_aware_{false};
   int snapshot_batched_width_{0};
   int num_threads_;
+  int requested_threads_{1};
+  int thread_limit_{8};
   std::vector<int> vertical_capacities_;
   std::vector<int> horizontal_capacities_;
   int macro_extension_;

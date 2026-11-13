@@ -2,9 +2,11 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
 #include <fstream>
 #include <functional>
 #include <iostream>
@@ -24,6 +26,7 @@
 #include <vector>
 
 #include "AbstractCugrRenderer.h"
+#include "BonnRoute.h"
 #include "Design.h"
 #include "GRNet.h"
 #include "GRTree.h"
@@ -36,6 +39,7 @@
 #include "db_sta/dbSta.hh"
 #include "est/ParasiticsService.h"
 #include "geo.h"
+#include "grt/BonnRouteExtraSpace.h"
 #include "grt/GRoute.h"
 #include "odb/PtrSetMap.h"
 #include "odb/db.h"
@@ -50,6 +54,27 @@
 using utl::GRT;
 
 namespace grt {
+
+namespace {
+// Wall-clock laps for the BonnRoute GR timing reports.
+class StageClock
+{
+ public:
+  // Seconds since the previous lap (or construction).
+  double lap()
+  {
+    const std::chrono::steady_clock::time_point now
+        = std::chrono::steady_clock::now();
+    const double seconds = std::chrono::duration<double>(now - mark_).count();
+    mark_ = now;
+    return seconds;
+  }
+
+ private:
+  std::chrono::steady_clock::time_point mark_
+      = std::chrono::steady_clock::now();
+};
+}  // namespace
 
 // Sentinel demoteNonCriticalNets writes on non-critical nets; not a slack.
 constexpr float kDemotedSlack = std::numeric_limits<float>::max();
@@ -143,7 +168,8 @@ std::shared_ptr<GRTreeNode> splitEdgeAt(const std::shared_ptr<GRTreeNode>& tree,
       return;
     }
     for (const auto& c : node->getChildren()) {
-      if (edgePassesThrough(*node, *c, point)) {
+      // A pin link is no wire; nothing to split.
+      if (!c->isPinLink() && edgePassesThrough(*node, *c, point)) {
         parent = node;
         child = c;
         return;
@@ -239,9 +265,14 @@ void rerootAt(const std::shared_ptr<GRTreeNode>& tree,
 {
   std::vector<std::shared_ptr<GRTreeNode>> path;
   findPath(tree, node, path);
+  // Each edge keeps its kind (wire/via or pin link) when reversed.
+  std::vector<int> pins;
+  for (size_t i = 1; i < path.size(); ++i) {
+    pins.push_back(path[i]->getLinkPin());
+  }
   for (size_t i = 0; i + 1 < path.size(); ++i) {
     path[i]->removeChild(path[i + 1]);
-    path[i + 1]->addChild(path[i]);
+    path[i + 1]->addChild(path[i], pins[i]);
   }
 }
 
@@ -281,7 +312,10 @@ void CUGR::init(const int min_routing_layer,
                 const odb::PtrSet<odb::dbNet>& clock_nets)
 {
   clear();
+  StageClock clock;
   constants_.min_routing_layer = min_routing_layer - 1;
+  constants_.gcell_scale
+      = bonnroute_ && bonnroute_params_ ? bonnroute_params_->gcell_scale : 1;
   design_ = std::make_unique<Design>(db_,
                                      logger_,
                                      constants_,
@@ -289,7 +323,9 @@ void CUGR::init(const int min_routing_layer,
                                      max_routing_layer,
                                      clock_nets,
                                      verbose_);
+  const double design_time = clock.lap();
   grid_graph_ = std::make_unique<GridGraph>(design_.get(), constants_, logger_);
+  const double grid_graph_time = clock.lap();
   debugPrint(logger_,
              GRT,
              "report",
@@ -313,6 +349,14 @@ void CUGR::init(const int min_routing_layer,
     net_indices_.push_back(index);
     db_net_map_[base_net.getDbNet()] = gr_nets_.back().get();
     index++;
+  }
+  if (bonnroute_ && verbose_) {
+    logger_->report(
+        "BonnRoute GR shell timing: CUGR init design {:.3f}s, grid graph "
+        "{:.3f}s, nets {:.3f}s.",
+        design_time,
+        grid_graph_time,
+        clock.lap());
   }
 }
 
@@ -355,6 +399,12 @@ void CUGR::updateNetSlacks(const std::vector<int>& net_indices)
       updateReroutedParasitics(*estimator);
     }
   }
+  // One required-time search over the whole timing graph, in parallel, before
+  // the per-net slack queries: each query would otherwise extend the
+  // backward search to its own level and dispatch that slice to the STA
+  // threads. Required times do not depend on the order of the search.
+  sta_->ensureGraph();
+  sta_->findRequireds();
   // Query every net: the critical threshold is a percentile over all nets.
   for (const auto& net : gr_nets_) {
     if (net == nullptr) {
@@ -462,6 +512,12 @@ void CUGR::setInitialNetSlacks(const std::vector<int>& net_indices)
     refreshNetSlacks(net_indices);
     return;
   }
+  // One required-time search over the whole timing graph, in parallel, before
+  // the per-net slack queries: each query would otherwise extend the
+  // backward search to its own level and dispatch that slice to the STA
+  // threads. Required times do not depend on the order of the search.
+  sta_->ensureGraph();
+  sta_->findRequireds();
   for (const auto& net : gr_nets_) {
     if (net == nullptr) {
       continue;
@@ -743,6 +799,65 @@ void CUGR::patternRoute(std::vector<int>& net_indices)
     }
     grid_graph_->addTreeUsage(gr_nets_[net_index]->getRoutingTree(),
                               gr_nets_[net_index]->getNdrCosts());
+  }
+  debugNetTopology(CugrStage::patternRoute, 0);
+}
+
+bool CUGR::setBonnRouteParam(const std::string& name, const double value)
+{
+  if (!bonnroute_params_) {
+    bonnroute_params_ = std::make_unique<BonnRouteParams>();
+  }
+  return bonnroute_params_->set(name, value);
+}
+
+void CUGR::bonnRoute(std::vector<int>& net_indices)
+{
+  if (verbose_) {
+    logger_->report(
+        "Stage 1: BonnRoute resource sharing (profile {}).",
+        bonnroute_params_ ? bonnroute_params_->profileName() : "2013-improved");
+  }
+  if (critical_nets_percentage_ != 0) {
+    setInitialNetSlacks(net_indices);
+  }
+  if (!bonnroute_params_) {
+    bonnroute_params_ = std::make_unique<BonnRouteParams>();
+  }
+  BonnRouteParams params = *bonnroute_params_;
+  params.verbose = params.verbose && verbose_;
+  if (params.threads <= 1) {
+    params.threads = std::max(1, num_threads_);
+  }
+  std::vector<int> sorted = net_indices;
+  std::ranges::sort(sorted);
+  std::vector<GRNet*> nets;
+  for (const int net_index : sorted) {
+    GRNet* net = gr_nets_[net_index].get();
+    if (net == nullptr || net->getNumPins() < 2) {
+      continue;
+    }
+    nets.push_back(net);
+  }
+  BonnRouteGlobal router(grid_graph_.get(), nets, params, logger_);
+  router.run();
+  bonnroute_cugr_capacity_ = router.cugrCapacity();
+  bonnroute_space_.clear();
+  for (const BonnRouteGlobal::NetSpace& space : router.extraSpace()) {
+    bonnroute_space_.push_back(
+        {space.net, space.tree, bonnroute::encodeExtraSpace(space.edges)});
+  }
+  // Nets without a BonnRoute tree fall back to pattern routing.
+  for (GRNet* net : nets) {
+    if (net->getRoutingTree() != nullptr) {
+      continue;
+    }
+    PatternRoute pattern_route(
+        net, grid_graph_.get(), stt_builder_, constants_, logger_);
+    pattern_route.constructSteinerTree();
+    pattern_route.constructRoutingDAG();
+    pattern_route.run();
+    grid_graph_->addTreeUsage(net->getRoutingTree(), net->getNdrCosts());
   }
   debugNetTopology(CugrStage::patternRoute, 0);
 }
@@ -1040,31 +1155,63 @@ std::vector<odb::dbNet*> CUGR::route(bool incremental)
     incremental_candidates_ = net_indices;
   }
 
-  patternRoute(net_indices);
-
-  if (!incremental) {
-    // Stage 2: resistance-aware re-route of the critical nets (full route
-    // only, not congestion-gated; it ignores the congested set).
-    patternRouteResAware(net_indices);
+  const bool use_bonnroute = bonnroute_ && !incremental;
+  StageClock clock;
+  double bonnroute_time = 0.0;
+  double congested_time = 0.0;
+  double maze_time = 0.0;
+  double rrr_time = 0.0;
+  size_t congested_after_bonnroute = 0;
+  if (use_bonnroute) {
+    // Stages 1-3 replaced by resource sharing, rounding and re-choosing;
+    // the CUGR maze stages below clean up the remaining overflow.
+    bonnRoute(net_indices);
+    bonnroute_time = clock.lap();
     updateCongestedNets(net_indices);
-  }
+    congested_time += clock.lap();
+    congested_after_bonnroute = net_indices.size();
+  } else {
+    patternRoute(net_indices);
 
-  patternRouteWithDetours(net_indices);
-  if (!incremental) {
-    updateCongestedNets(net_indices);
+    if (!incremental) {
+      // Stage 2: resistance-aware re-route of the critical nets (full route
+      // only, not congestion-gated; it ignores the congested set).
+      patternRouteResAware(net_indices);
+      updateCongestedNets(net_indices);
+    }
+
+    patternRouteWithDetours(net_indices);
+    if (!incremental) {
+      updateCongestedNets(net_indices);
+    }
   }
 
   debugPass("stage 3");
-  if (verbose_ && !net_indices.empty()) {
-    logger_->report("Stage 4: Maze routing on sparsified graph.");
-  }
-  mazeRoute(net_indices, CugrStage::mazeRoute, /* iteration */ 0, {});
-  debugPass("stage 4");
-  if (!incremental) {
-    updateCongestedNets(net_indices);
-  }
+  // maze_cleanup=0 keeps the BonnRoute result exactly: no CUGR maze stage
+  // and no iterative rip-up and reroute.
+  const bool cugr_cleanup
+      = !use_bonnroute || !bonnroute_params_ || bonnroute_params_->maze_cleanup;
+  if (cugr_cleanup) {
+    if (verbose_ && !net_indices.empty()) {
+      logger_->report("Stage 4: Maze routing on sparsified graph.");
+    }
+    clock.lap();
+    mazeRoute(net_indices, CugrStage::mazeRoute, /* iteration */ 0, {});
+    debugPass("stage 4");
+    maze_time = clock.lap();
+    if (!incremental) {
+      updateCongestedNets(net_indices);
+    }
+    congested_time += clock.lap();
 
-  iterativeRRR(net_indices, {});
+    iterativeRRR(net_indices, {});
+    rrr_time = clock.lap();
+  } else if (verbose_) {
+    logger_->report(
+        "BonnRoute: CUGR clean-up disabled; {} nets remain on overflowed "
+        "edges.",
+        net_indices.size());
+  }
   // The relief's moves need new routes and guides in GlobalRouter too.
   std::vector<odb::dbNet*> moved;
   if (incremental) {
@@ -1073,7 +1220,22 @@ std::vector<odb::dbNet*> CUGR::route(bool incremental)
     }
   }
 
+  clock.lap();
   printStatistics();
+  reportBonnRouteCapacityOverflow();
+  exportBonnRouteExtraSpace(incremental, net_indices);
+  if (use_bonnroute && verbose_) {
+    logger_->report(
+        "BonnRoute GR shell timing: route BonnRoute {:.3f}s, congested nets "
+        "{:.3f}s ({} nets after BonnRoute), maze {:.3f}s, rip-up and reroute "
+        "{:.3f}s, statistics and exports {:.3f}s.",
+        bonnroute_time,
+        congested_time,
+        congested_after_bonnroute,
+        maze_time,
+        rrr_time,
+        clock.lap());
+  }
 
   if (incremental) {
     incremental_routing_ = false;
@@ -1673,16 +1835,77 @@ int CUGR::gridlineCenter(const int dimension, const int index) const
          + design_->getGridlineSize() / 2;
 }
 
+std::array<int, 2> CUGR::pinBridgeLayers(const GRNet* net) const
+{
+  // Lowest routable layer of each preferred direction in the net's range:
+  // layers below the minimum routing layer only take via-access guides.
+  std::array<int, 2> layers{-1, -1};
+  const int low
+      = std::max(constants_.min_routing_layer, net->getLayerRange().min_layer);
+  const int high = std::min(net->getLayerRange().max_layer,
+                            grid_graph_->getNumLayers() - 1);
+  for (int l = low; l <= high; l++) {
+    int& slot
+        = layers[grid_graph_->getLayerDirection(l) == MetalLayer::H ? 0 : 1];
+    if (slot < 0) {
+      slot = l;
+    }
+  }
+  for (int& slot : layers) {
+    if (slot < 0) {
+      slot = std::max(0, low);
+    }
+  }
+  return layers;
+}
+
 void CUGR::buildNetRoute(const GRNet* net, GRoute& route) const
 {
   const auto& routing_tree = net->getRoutingTree();
   if (!routing_tree) {
     return;
   }
+  const std::array<int, 2> bridge = pinBridgeLayers(net);
 
   GRTreeNode::preorder(
       routing_tree, [&](const std::shared_ptr<GRTreeNode>& node) {
         for (const auto& child : node->getChildren()) {
+          if (child->isPinLink()) {
+            // The pin's metal joins the two cells. A bridge keeps the
+            // segment route connected for GRT's checks and the guides; it
+            // is flagged so wirelength reports leave it out.
+            const std::vector<GRPoint> path
+                = pinLinkPath(*node, *child, bridge[0], bridge[1]);
+            for (size_t i = 0; i + 1 < path.size(); i++) {
+              const GRPoint& a = path[i];
+              const GRPoint& b = path[i + 1];
+              if (a.getLayerIdx() == b.getLayerIdx()) {
+                const auto [min_x, max_x] = std::minmax({a.x(), b.x()});
+                const auto [min_y, max_y] = std::minmax({a.y(), b.y()});
+                route.emplace_back(gridlineCenter(0, min_x),
+                                   gridlineCenter(1, min_y),
+                                   a.getLayerIdx() + 1,
+                                   gridlineCenter(0, max_x),
+                                   gridlineCenter(1, max_y),
+                                   a.getLayerIdx() + 1,
+                                   false);
+                route.back().setIs3DRoute(true);
+                route.back().is_pin_bridge = true;
+              } else {
+                const auto [bottom, top]
+                    = std::minmax({a.getLayerIdx(), b.getLayerIdx()});
+                const int x = gridlineCenter(0, a.x());
+                const int y = gridlineCenter(1, a.y());
+                for (int layer_idx = bottom; layer_idx < top; layer_idx++) {
+                  route.emplace_back(
+                      x, y, layer_idx + 1, x, y, layer_idx + 2, true);
+                  route.back().setIs3DRoute(true);
+                  route.back().is_pin_bridge = true;
+                }
+              }
+            }
+            continue;
+          }
           if (node->getLayerIdx() == child->getLayerIdx()) {
             // Degenerate tree edges (same gcell and layer) would become
             // zero-length segments, which segmentIsLine rejects.
@@ -1807,10 +2030,30 @@ void CUGR::getGuides(const GRNet* net,
   if (!routing_tree) {
     return;
   }
+  const std::array<int, 2> bridge = pinBridgeLayers(net);
   // 0. Basic guides
   GRTreeNode::preorder(
       routing_tree, [&](const std::shared_ptr<GRTreeNode>& node) {
         for (const auto& child : node->getChildren()) {
+          if (child->isPinLink()) {
+            // Bridge over the pin's metal, as in buildNetRoute.
+            const std::vector<GRPoint> path
+                = pinLinkPath(*node, *child, bridge[0], bridge[1]);
+            for (size_t i = 0; i + 1 < path.size(); i++) {
+              const GRPoint& a = path[i];
+              const GRPoint& b = path[i + 1];
+              const auto [low, high]
+                  = std::minmax({a.getLayerIdx(), b.getLayerIdx()});
+              for (int layer_idx = low; layer_idx <= high; layer_idx++) {
+                guides.emplace_back(layer_idx,
+                                    BoxT(std::min(a.x(), b.x()),
+                                         std::min(a.y(), b.y()),
+                                         std::max(a.x(), b.x()),
+                                         std::max(a.y(), b.y())));
+              }
+            }
+            continue;
+          }
           if (node->getLayerIdx() == child->getLayerIdx()) {
             guides.emplace_back(node->getLayerIdx(),
                                 BoxT(std::min(node->x(), child->x()),
@@ -1885,6 +2128,9 @@ void CUGR::getGuides(const GRNet* net,
   GRTreeNode::preorder(
       routing_tree, [&](const std::shared_ptr<GRTreeNode>& node) {
         for (const auto& child : node->getChildren()) {
+          if (child->isPinLink()) {
+            continue;
+          }
           if (node->getLayerIdx() == child->getLayerIdx()) {
             double wire_patch_threshold = constants_.wire_patch_threshold;
             const int direction
@@ -1925,6 +2171,83 @@ void CUGR::getGuides(const GRNet* net,
       });
 }
 
+// grt/BonnRouteExtraSpace.h: the extra space of BonnRoute's trees as
+// odb properties for detailed routing. Every routed net loses an old
+// property; a net keeps the new one only if its tree is still the one
+// BonnRoute committed (CUGR's clean-up may have rerouted it).
+void CUGR::exportBonnRouteExtraSpace(const bool incremental,
+                                     const std::vector<int>& net_indices)
+{
+  auto clear = [](odb::dbNet* db_net) {
+    if (odb::dbStringProperty* prop
+        = odb::dbStringProperty::find(db_net, bonnroute::kExtraSpaceProperty)) {
+      odb::dbProperty::destroy(prop);
+    }
+  };
+  if (incremental) {
+    for (const int index : net_indices) {
+      if (gr_nets_[index] != nullptr) {
+        clear(gr_nets_[index]->getDbNet());
+      }
+    }
+    return;
+  }
+  for (const auto& net : gr_nets_) {
+    if (net != nullptr) {
+      clear(net->getDbNet());
+    }
+  }
+  int exported = 0;
+  int rerouted = 0;
+  for (const BonnRouteSpace& space : bonnroute_space_) {
+    if (space.net->getRoutingTree() != space.tree) {
+      rerouted++;
+      continue;
+    }
+    odb::dbStringProperty::create(space.net->getDbNet(),
+                                  bonnroute::kExtraSpaceProperty,
+                                  space.encoded.c_str());
+    exported++;
+  }
+  if (verbose_ && !bonnroute_space_.empty()) {
+    logger_->report(
+        "BonnRoute extra space exported for {} nets ({} rerouted by the "
+        "clean-up keep none).",
+        exported,
+        rerouted);
+  }
+  bonnroute_space_.clear();
+}
+
+void CUGR::reportBonnRouteCapacityOverflow() const
+{
+  if (!verbose_ || bonnroute_cugr_capacity_.empty()) {
+    return;
+  }
+  // With the Sec. 2.5 capacity model the congestion report measures
+  // overflow against the estimate; this line adds CUGR's capacity model for
+  // comparisons with runs that use it.
+  double estimated = 0.0;
+  double cugr = 0.0;
+  for (int l = constants_.min_routing_layer; l < grid_graph_->getNumLayers();
+       l++) {
+    for (int x = 0; x < grid_graph_->getXSize(); x++) {
+      for (int y = 0; y < grid_graph_->getYSize(); y++) {
+        const GraphEdge edge = grid_graph_->getEdge(l, x, y);
+        const double reference
+            = bonnroute_cugr_capacity_[grid_graph_->edgeFlatIndex(l, x, y)];
+        estimated += std::max(0.0, edge.demand - std::max(edge.capacity, 0.0));
+        cugr += std::max(0.0, edge.demand - std::max(reference, 0.0));
+      }
+    }
+  }
+  logger_->report(
+      "BonnRoute final overflow: estimated capacity {:.2f}, CUGR capacity "
+      "{:.2f}.",
+      estimated,
+      cugr);
+}
+
 void CUGR::printStatistics() const
 {
   if (!verbose_) {
@@ -1943,6 +2266,9 @@ void CUGR::printStatistics() const
     GRTreeNode::preorder(
         net->getRoutingTree(), [&](const std::shared_ptr<GRTreeNode>& node) {
           for (const auto& child : node->getChildren()) {
+            if (child->isPinLink()) {
+              continue;
+            }
             if (node->getLayerIdx() == child->getLayerIdx()) {
               const int direction
                   = grid_graph_->getLayerDirection(node->getLayerIdx());
@@ -2166,6 +2492,40 @@ void CUGR::reportCongestion() const
                "Sub-min-layer via demand (inert): {:.2f} tracks",
                submin_via);
   }
+}
+
+int CUGR::getGridlineSize() const
+{
+  return design_ ? design_->getGridlineSize() : 0;
+}
+
+odb::Rect CUGR::gcellUnion(const int x0,
+                           const int y0,
+                           const int x1,
+                           const int y1) const
+{
+  // Index of the gcell whose lower gridline is the last one <= v.
+  auto cell = [&](const int dimension, const int v) {
+    int lo = 0;
+    int hi = grid_graph_->getSize(dimension) - 1;
+    while (lo < hi) {
+      const int mid = (lo + hi + 1) / 2;
+      if (grid_graph_->getGridline(dimension, mid) <= v) {
+        lo = mid;
+      } else {
+        hi = mid - 1;
+      }
+    }
+    return lo;
+  };
+  const int cx0 = cell(0, std::min(x0, x1));
+  const int cx1 = cell(0, std::max(x0, x1));
+  const int cy0 = cell(1, std::min(y0, y1));
+  const int cy1 = cell(1, std::max(y0, y1));
+  return {grid_graph_->getGridline(0, cx0),
+          grid_graph_->getGridline(1, cy0),
+          grid_graph_->getGridline(0, cx1 + 1),
+          grid_graph_->getGridline(1, cy1 + 1)};
 }
 
 void CUGR::updateDbCongestion()
@@ -2708,6 +3068,9 @@ void CUGR::saveCongestion()
     GRTreeNode::preorder(
         gr_net->getRoutingTree(), [&](const std::shared_ptr<GRTreeNode>& node) {
           for (const auto& child : node->getChildren()) {
+            if (child->isPinLink()) {
+              continue;
+            }
             if (node->getLayerIdx() == child->getLayerIdx()) {
               const int l = node->getLayerIdx();
               const int dir = grid_graph_->getLayerDirection(l);

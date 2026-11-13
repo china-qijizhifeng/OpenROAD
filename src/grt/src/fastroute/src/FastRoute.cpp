@@ -2210,6 +2210,10 @@ NetRouteMap FastRouteCore::run()
   }
 
   resetSnapshotBatchStats();
+  // Parasitics estimated before this run describe other routes.
+  resetPartialRouteParasitics();
+  partial_parasitics_update_count_ = 0;
+  partial_route_changed_in_run_.clear();
   has_non_soft_ndr_nets_ = hasNonSoftNdrNets();
 
   RunTimings timings;

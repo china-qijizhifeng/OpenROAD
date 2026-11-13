@@ -1,6 +1,18 @@
 # SPDX-License-Identifier: BSD-3-Clause
 # Copyright (c) 2019-2025, The OpenROAD Authors
 
+sta::define_cmd_args "set_global_routing_thread_limit" { limit }
+
+proc set_global_routing_thread_limit { args } {
+  sta::parse_key_args "set_global_routing_thread_limit" args \
+    keys {} \
+    flags {}
+  sta::check_argc_eq1 "set_global_routing_thread_limit" $args
+  set limit [lindex $args 0]
+  sta::check_positive_integer "limit" $limit
+  grt::set_thread_limit $limit
+}
+
 sta::define_cmd_args "set_global_routing_layer_adjustment" { layer adj }
 
 proc set_global_routing_layer_adjustment { args } {
@@ -154,6 +166,7 @@ sta::define_cmd_args "global_route" {[-guide_file out_file] \
                                   [-start_incremental] \
                                   [-end_incremental] \
                                   [-use_cugr] \
+                                  [-bonnroute] \
                                   [-resistance_aware] \
                                   [-infinite_cap]
 }
@@ -166,7 +179,7 @@ proc global_route { args } {
           -skip_large_fanout_nets -snapshot_batched_width
          } \
     flags {-allow_congestion -resistance_aware -infinite_cap -verbose -start_incremental \
-          -end_incremental -use_cugr}
+          -end_incremental -use_cugr -bonnroute}
 
   sta::check_argc_eq0 "global_route" $args
 
@@ -185,7 +198,10 @@ proc global_route { args } {
   set is_inc_end [info exists flags(-end_incremental)]
   set is_incremental_bracket [expr { $is_inc_start || $is_inc_end }]
   if { !$is_incremental_bracket } {
-    grt::set_use_cugr [info exists flags(-use_cugr)]
+    set use_bonnroute [info exists flags(-bonnroute)]
+    # BonnRoute runs inside the CUGR engine.
+    grt::set_use_cugr [expr { [info exists flags(-use_cugr)] || $use_bonnroute }]
+    grt::set_bonnroute $use_bonnroute
   }
 
   grt::set_verbose [info exists flags(-verbose)]
@@ -206,7 +222,7 @@ proc global_route { args } {
     set iterations $keys(-congestion_iterations)
     sta::check_positive_integer "-congestion_iterations" $iterations
     grt::set_congestion_iterations $iterations
-  } elseif { [info exists flags(-use_cugr)] } {
+  } elseif { [info exists flags(-use_cugr)] || [info exists flags(-bonnroute)] } {
     # CUGR's rip-up and re-route loop saturates around iteration 5, and
     # each iteration runs a full 3D maze pass, so the default budget is
     # tighter than FastRoute's 50.
@@ -287,11 +303,13 @@ sta::define_cmd_args "repair_antennas" { diode_cell \
                                          [-ratio_margin ratio_margin] \
                                          [-jumper_only] \
                                          [-diode_only] \
-                                         [-allow_congestion]}
+                                         [-allow_congestion] \
+                                         [-keep_detailed_wires]}
 
 proc repair_antennas { args } {
   sta::parse_key_args "repair_antennas" args \
-    keys {-iterations -ratio_margin} flags {-jumper_only -diode_only -allow_congestion}
+    keys {-iterations -ratio_margin} \
+    flags {-jumper_only -diode_only -allow_congestion -keep_detailed_wires}
   if { [ord::get_db_block] == "NULL" } {
     utl::error GRT 104 "No design block found."
   }
@@ -336,6 +354,7 @@ proc repair_antennas { args } {
 
     set jumper_only [info exists flags(-jumper_only)]
     set diode_only [info exists flags(-diode_only)]
+    grt::set_keep_detailed_wires [info exists flags(-keep_detailed_wires)]
 
     if { $jumper_only && $diode_only } {
       utl::error GRT 294 "jumper_only and diode_only are mutually exclusive."
@@ -760,4 +779,17 @@ proc have_detailed_route { block } {
 }
 
 # grt namespace end
+}
+
+sta::define_cmd_args "set_bonnroute_param" { name value }
+
+proc set_bonnroute_param { args } {
+  sta::parse_key_args "set_bonnroute_param" args keys {} flags {}
+  if { [llength $args] != 2 } {
+    utl::error GRT 762 "set_bonnroute_param requires a name and a value."
+  }
+  lassign $args name value
+  if { ![grt::set_bonnroute_param $name $value] } {
+    utl::error GRT 761 "Unknown BonnRoute parameter $name."
+  }
 }

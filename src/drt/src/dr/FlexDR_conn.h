@@ -3,6 +3,8 @@
 
 #pragma once
 
+#include <array>
+#include <cstdint>
 #include <map>
 #include <set>
 #include <tuple>
@@ -39,8 +41,28 @@ class FlexDRConnectivityChecker
                             AbstractDRGraphics* graphics,
                             bool save_updates = false);
   void check(int iter = -1);
+  // Wall seconds of check()'s phases (measurement M9).
+  struct PhaseSeconds
+  {
+    double init_parallel = 0;
+    double merge_serial = 0;
+    double astar_parallel = 0;
+    double finish_serial = 0;
+    double total = 0;
+  };
+  const PhaseSeconds& phaseSeconds() const { return phase_seconds_; }
 
  private:
+  // The four corrections of finish() that add a Recheck marker
+  // (measurement M4 (a), debug group bonnroute_recheck).
+  enum class RecheckAction
+  {
+    kRemoveSegment = 0,
+    kRemoveVia = 1,
+    kShrinkSegment = 2,
+    kRemovePatch = 3,
+  };
+  static constexpr int kNumRecheckActions = 4;
   using NetRouteObjs = std::vector<frConnFig*>;
   // layer -> track -> indices of NetRouteObjs
   using PathSegsByLayerAndTrack
@@ -137,7 +159,10 @@ class FlexDRConnectivityChecker
                              const PathSegsByLayerAndTrackId& vertVictims,
                              const SpansByLayerAndTrackId& horzNewSegSpans,
                              const SpansByLayerAndTrackId& vertNewSegSpans);
-  void addMarker(frNet* net, frLayerNum lNum, const odb::Rect& bbox);
+  void addMarker(frNet* net,
+                 frLayerNum lNum,
+                 const odb::Rect& bbox,
+                 RecheckAction action);
   void handleOverlaps_perform(NetRouteObjs& netRouteObjs,
                               const std::vector<int>& indices,
                               std::vector<int>& victims,
@@ -186,6 +211,9 @@ class FlexDRConnectivityChecker
   RouterConfiguration* router_cfg_;
   AbstractDRGraphics* graphics_;
   bool save_updates_;
+  // Recheck markers per action, of nets without / with initial routing.
+  std::array<std::array<int64_t, 2>, kNumRecheckActions> recheck_markers_{};
+  PhaseSeconds phase_seconds_;
 };
 
 }  // namespace drt

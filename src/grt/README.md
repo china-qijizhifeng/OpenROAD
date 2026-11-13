@@ -31,6 +31,7 @@ global_route
     [-start_incremental]
     [-end_incremental]
     [-use_cugr]
+    [-bonnroute]
     [-resistance_aware]
     [-res_aware_nets_percentage percent]
     [-infinite_cap]
@@ -52,10 +53,126 @@ global_route
 | `-start_incremental` | This flag initializes the GRT listener to get the net modified. The default is false. |
 | `-end_incremental` | This flag run incremental GRT with the nets modified. The default is false. |
 | `-use_cugr` | This flag run GRT using CUGR as the router solver. NOTE: this is not ready for production. |
+| `-bonnroute` | Run the experimental BonnRoute resource-sharing engine on CUGR's grid, followed by CUGR congestion cleanup by default. |
 | `-resistance_aware` | This flag enables resistance-aware layer assignment and 3D routing. NOTE: this is not ready for production. |
 | `-res_aware_nets_percentage` | Set the percentage of resistance-aware nets (e.g. `-res_aware_nets_percentage 100` (for 100%)). The default value is `15` with resistance-aware enabled and `0` otherwise, and the allowed values are floats between `[0, 100]`. |
 | `-infinite_cap` | Enables "infinite" gcell capacity for testing purpose. NOTE: this is not recommended for production flows. |
 | `-snapshot_batched_width` | Set the semantic width of snapshot-batched routing (max batches per wave). The default is `0`, preserving the non-batched behavior. Set a positive integer to enable batched routing; allowed values are integers `[1, MAX_INT]`. Execution width still follows `set_thread_count`. NOTE: this is not recommended for production flows; it is intended for exploration and research projects. |
+
+### BonnRoute Parameters
+
+Set BonnRoute global routing parameters before `global_route -bonnroute`.
+Unknown names are errors.
+
+```tcl
+set_bonnroute_param name value
+```
+
+This implementation follows the path-composition and resource-sharing framework
+of Gester et al., *BonnRoute: Algorithms and Data Structures for Fast and Good
+VLSI Routing*, TODAES 18(2), 2013, Sections 2.1–2.5.
+
+| Name | Default | Meaning |
+| ----- | ----- | ----- |
+| `phases` | `125` | Number of resource-sharing phases. |
+| `epsilon` | `1.0` | Exponential price update factor. |
+| `reuse_tolerance` | `0.1` | Allowed cost growth relative to the previous oracle value and the objective-based reuse bound. |
+| `objective_slack` | `0.05` | Slack above the congestion-free objective used for the objective resource bound. |
+| `wire_weight`, `via_weight` | `0.5`, `4.0` | Objective cost per M2 pitch of wire and per via. |
+| `margin`, `margin_ratio` | `3`, `0.25` | Expansion of each net's search bounding box. A failed search retries on the full grid. |
+| `min_capacity` | `0.25` | Capacity floor for normalizing blocked-edge usage. |
+| `batch_size` | `128` | Number of nets using a frozen price vector before ordered updates. Set to `1` for sequential Algorithm 2 updates. |
+| `threads` | OpenROAD thread count | Number of parallel oracle workers. |
+| `seed` | `1` | Randomized-rounding seed. |
+| `repair_passes` | `8` | Candidate re-selection passes after rounding. |
+| `pin_sets` | `1` | Represent each pin by the cells of its access points (its shape cells if it has none), joined by zero-cost pin connections (Sections 2.1–2.2); `0` uses CUGR's pre-selected cell. |
+| `capacity_model` | `1` | Edge capacities: `1` estimates them as in Section 2.5; `0` keeps CUGR's capacity model. |
+| `profile` | `0` | Algorithm profile, also set by `set_bonnroute_profile`: `0` = `2013-improved`, `1` = `2013-reimpl`, `2` = `2021` (GR as `2013-reimpl`; see the drt documentation). |
+| `goal_orientation` | `1` | Goal-oriented Dijkstra in the oracle (Section 2.2); `0` plain Dijkstra. |
+| `landmarks` | `0` | Landmarks of the ALT bound combined with the l1 bound; `2013-reimpl` uses `8`, as Section 2.2 describes. |
+| `concurrent_prices` | `0` | Barrier-free concurrent price updates (Section 2.3, `2013-reimpl`); results then vary between runs. `0` uses deterministic frozen-price batches of `batch_size` nets. |
+| `gcell_scale` | `1` | Experimental: merge this many GCells per GR tile in each direction (the paper's tiles hold 50 to 100 wires). |
+| `capacity_single_tile` | `1` | Route nets whose pins share one gcell inside that gcell first and remove the track-graph vertices they use. |
+| `capacity_intra_tile` | `1` | Reduce capacities by the in-gcell Steiner length of the other nets. |
+| `capacity_stacked_vias` | `1` | Reduce intermediate-layer capacities by the statistical loss from stacked vias. |
+| `capacity_blockage_extension` | `1.0` | Blockage extension along the tracks, in units of the wire keep-out across them. |
+| `capacity_single_tile_layers`, `capacity_single_tile_margin` | `2`, `0.25` | Layers above the lowest routable one, and the gcell growth fraction, available to single-gcell nets. |
+| `full_graph` | `0` | Search the whole grid instead of the expanded bounding box. |
+| `maze_cleanup` | `1` | Run CUGR maze routing and iterative rip-up and reroute after BonnRoute. |
+| `extra_space` | `0` (`1` in profiles `2013-reimpl` and `2021`) | Extra space assignment s(n, e) with the power and yield resources (Section 2.1, Fig. 1). |
+| `extra_space_step`, `extra_space_max` | `0.5`, `2.0` | Grid of extra-space values in tracks: 0, step, ..., max. |
+| `power_target`, `yield_target` | `1.0`, `1.0` | Bound of the power / yield resource as a multiple of its congestion-free value without extra space; a value `<= 0` drops the resource. |
+| `coupling_fraction` | `0.5` | Share of a wire's capacitance per length that couples to the neighbor wires at minimum spacing. |
+| `resource_adapt` | `1` | Raise a power / yield bound when that resource's load exceeds the larger of 1 and the largest edge load (checked after phase 1 and every 25 phases). |
+| `verbose` | `1` | Print resource-sharing and oracle-cost diagnostics. |
+
+For an experiment with full-grid searches, sequential price updates and no
+CUGR maze cleanup:
+
+```tcl
+set_bonnroute_param full_graph 1
+set_bonnroute_param batch_size 1
+set_bonnroute_param maze_cleanup 0
+global_route -bonnroute -allow_congestion -guide_file bonnroute.guide
+```
+
+These settings isolate more of the resource-sharing algorithm, but do not
+reproduce every feature of the paper. Resources are wire edges with CUGR's
+via-pad demand plus a wirelength/via objective.
+
+With `extra_space 1` a net may take extra space s >= 0 (in tracks) next to
+its wire on each edge it uses: the edge then carries w(n, e) + s, where w is
+the net's NDR factor. Two more resources follow Fig. 1 of the paper, both
+convex and decreasing in s: power, the wire's switched capacitance (ground
+capacitance plus coupling to both neighbors, inversely proportional to the
+gap pitch - width + s * pitch / 2), and yield loss, the critical area of
+shorts to both neighbors (x0^2 / gap for a defect density proportional to
+x0^2 / x^3) plus that of opens (x0^2 / (2 width)). The capacitance per
+length is odb's area capacitance times the width plus twice its edge
+capacitance (the LEF `CPERSQDIST` / `EDGECAPACITANCE` values, or what
+`set_layer_rc` stores, which keeps the whole wire capacitance in the area
+term), split by `coupling_fraction` into coupling and ground; x0 is the smallest
+width or gap of the routing layers; all nets have activity 1. The oracle
+prices each wire edge with the s that minimizes its cost, in closed form on
+the grid of s values, and the candidate keeps s through rounding and
+re-choosing. The power and yield bounds start at their targets times the
+congestion-free value and are adapted as described for `resource_adapt`.
+After rounding, the extra space of each edge is scaled down to the capacity
+left after all wires; CUGR's demand holds the wires only. Detailed routing
+reads the result from the net property defined in
+`include/grt/BonnRouteExtraSpace.h`; nets that CUGR's clean-up reroutes keep
+no extra space.
+
+A pin's cells are joined at zero cost, so branches of one net can attach to
+different cells of the same pin. The routing tree keeps such a connection as
+a pin link that carries no demand; the exported route and guides bridge it on
+the lowest routable horizontal and vertical layers so that they stay
+connected, and GRT's wirelength report leaves the bridge out.
+
+With `capacity_model 1` the edge capacities (in tracks) count the usable
+track-graph vertices between the gcell centers after blockage extension,
+minus the vertices of single-gcell nets routed in their gcell, minus the
+in-gcell Steiner length of the other nets, minus the expected excess loss of
+stacked vias on intermediate layers over CUGR's linear via-pad demand; the
+via-stack counts come from the congestion-free oracle pass. The user layer
+adjustment is applied afterwards as for CUGR's capacities. They replace
+CUGR's capacities for the whole run, so the congestion report measures
+overflow against them; `BonnRoute final overflow` also reports the overflow
+against CUGR's capacity model. The estimator (`BonnRouteCapacity.h`) takes
+plain grid, track, blockage and pin data, so other global routers can use it.
+The single-gcell routes come from a shortest-path router on the track graph
+rather than BonnRoute's detailed router.
+
+The reuse bound
+preserves an oracle approximation factor only when that factor is valid for
+the selected graph and cost model; the paper's approximation theorem has not
+been established for this adapter. Report cleanup settings alongside quality
+and timing measurements.
+
+See the [paper-fidelity notes](../drt/BonnRouteFidelity.md) for the pin and
+capacity models, DR execution differences, and limits of the performance
+comparisons. The current configuration is a partial implementation combined
+with CUGR and FlexDR; its timings do not measure a complete paper reproduction.
 
 ### Set Routing Layers
 
@@ -91,6 +208,21 @@ set_macro_extension extension
 | Argument Name | Description |
 | ----- | ----- |
 | `extension` | Number of `GCells` added to the blockage boundaries from macros. The default `GCell` size is 15 `M3` pitches. |
+
+### Set Global Routing Thread Limit
+
+Global routing (FastRoute and BonnRoute GR) uses at most `limit` of the
+threads set by `set_thread_count` (default 8). The routing does not depend
+on the number of threads; more threads mostly add synchronisation and
+kernel time to these short parallel steps.
+
+```tcl
+set_global_routing_thread_limit limit
+```
+
+| Argument Name | Description |
+| ----- | ----- |
+| `limit` | Largest number of global routing threads, a positive integer. |
 
 ### Set Global Routing Layer Adjustment
 
@@ -219,6 +351,7 @@ repair_antennas
     [-ratio_margin margin]
     [-jumper_only]
     [-diode_only]
+    [-keep_detailed_wires]
 ```
 
 #### Options
@@ -230,6 +363,7 @@ repair_antennas
 | `-ratio_margin` | Add a margin to the antenna ratios. The default value is `0`, and the allowed values are integers `[0, 100]`. |
 | `-jumper_only` | Fix antenna violations using jumper insertion only, without inserting diodes. Mutually exclusive with `-diode_only`. |
 | `-diode_only` | Fix antenna violations using diode insertion only, without inserting jumpers. Mutually exclusive with `-jumper_only`. |
+| `-keep_detailed_wires` | On a detailed routing, the nets that receive diodes keep their detailed wires and guides instead of being routed again; the next `detailed_route` connects the diodes. Off by default (the wires are removed and the nets routed again). Used with `detailed_route -bonnroute` incremental routing (`set_bonnroute_dr_param incremental 1`), which keeps legal pin-to-pin paths and routes the diode connections (Ahrens et al., arXiv:2111.06169, Section 5.2). |
 
 
 ### Draw Route Segments

@@ -262,10 +262,55 @@ regression_test(
 )
 
 regression_test(
+    name = "critical_nets_partial_parasitics",
+    check_log = False,
+    check_passfail = True,
+    data = [":test_resources"],
+)
+
+regression_test(
     name = "congestion_report_file_cugr",
     check_log = False,
     check_passfail = True,
     data = [":test_resources"],
+)
+
+cc_test(
+    name = "TestBonnRouteCapacity",
+    size = "small",
+    srcs = ["cpp/TestBonnRouteCapacity.cpp"],
+    deps = [
+        "//src/grt:cugr",
+        "//src/odb/src/db",
+        "@googletest//:gtest",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
+    name = "TestBonnRouteResources",
+    size = "small",
+    srcs = ["cpp/TestBonnRouteResources.cpp"],
+    deps = [
+        "//src/grt:bonnroute_extra_space",
+        "//src/grt:cugr",
+        "@googletest//:gtest",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
+    name = "TestBonnRouteModels",
+    size = "small",
+    srcs = ["cpp/TestBonnRouteModels.cpp"],
+    deps = [
+        "//src/grt:bonnroute_extra_space",
+        "//src/grt:cugr",
+        "//src/odb/src/db",
+        "//src/utl",
+        "@googletest//:gtest",
+        "@googletest//:gtest_main",
+    ],
 )
 
 cc_test(
@@ -349,6 +394,17 @@ cc_test(
         "//src/stt",
         "//src/tst:db_fixture",
         "//src/utl",
+        "@googletest//:gtest",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
+    name = "bonnroute_partial_parasitics_test",
+    size = "small",
+    srcs = ["cpp/TestPartialParasitics.cpp"],
+    deps = [
+        "//src/grt:fastroute",
         "@googletest//:gtest",
         "@googletest//:gtest_main",
     ],

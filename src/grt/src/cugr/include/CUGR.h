@@ -47,6 +47,7 @@ class Design;
 class GridGraph;
 class GRNet;
 class GRTreeNode;
+struct BonnRouteParams;
 class BoxT;
 class PointT;
 
@@ -87,6 +88,9 @@ struct Constants
   double congestion_gate_penalty = 4.0;
 
   bool write_heatmap = false;
+
+  // BonnRoute gcell_scale: gcells of this many default tiles per side.
+  int gcell_scale = 1;
 };
 
 class CUGR
@@ -156,6 +160,17 @@ class CUGR
     congestion_iterations_ = iterations;
   }
   void setVerbose(bool verbose) { verbose_ = verbose; }
+  // BonnRoute resource-sharing global routing replaces the pattern stages of
+  // a full (non-incremental) route; see BonnRoute.h.
+  void setBonnRoute(bool enabled) { bonnroute_ = enabled; }
+  // Side of a CUGR gcell in DBU (0 before init).
+  int getGridlineSize() const;
+  // Union of the CUGR gcells that contain (x0, y0) and (x1, y1).
+  odb::Rect gcellUnion(int x0, int y0, int x1, int y1) const;
+  bool isBonnRoute() const { return bonnroute_; }
+  // Returns false for an unknown parameter name.
+  bool setBonnRouteParam(const std::string& name, double value);
+  void setNumThreads(int threads) { num_threads_ = threads; }
   void updateNet(odb::dbNet* net);
   void removeNet(odb::dbNet* net);
   // Transfer removed net tree ownership to preserved net without removing
@@ -268,6 +283,12 @@ class CUGR
                            double threshold = 1.0);
 
   void patternRoute(std::vector<int>& net_indices);
+  void bonnRoute(std::vector<int>& net_indices);
+  void reportBonnRouteCapacityOverflow() const;
+  void exportBonnRouteExtraSpace(bool incremental,
+                                 const std::vector<int>& net_indices);
+  // Layers (horizontal, vertical) of the bridges exported for pin links.
+  std::array<int, 2> pinBridgeLayers(const GRNet* net) const;
   // Re-route the critical nets on real 3D-tree resistance, right after the
   // neutral first PatternRoute.
   void patternRouteResAware(std::vector<int>& net_indices);
@@ -418,6 +439,20 @@ class CUGR
   float critical_nets_percentage_ = 10;
   int congestion_iterations_ = 5;
   bool verbose_ = true;
+  bool bonnroute_ = false;
+  int num_threads_ = 1;
+  std::unique_ptr<BonnRouteParams> bonnroute_params_;
+  // CUGR's edge capacities before BonnRoute's Sec. 2.5 estimate replaced
+  // them (GridGraph::edgeFlatIndex order); empty otherwise.
+  std::vector<double> bonnroute_cugr_capacity_;
+  // Extra space of the BonnRoute trees, encoded, until the end of route().
+  struct BonnRouteSpace
+  {
+    GRNet* net;
+    std::shared_ptr<GRTreeNode> tree;
+    std::string encoded;
+  };
+  std::vector<BonnRouteSpace> bonnroute_space_;
 
   // Suppresses the global parasitics re-estimate during incremental routing.
   bool incremental_routing_ = false;

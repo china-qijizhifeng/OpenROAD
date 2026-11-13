@@ -52,6 +52,8 @@ class FlexDR;
 class FlexPA;
 class FlexTA;
 class FlexDRWorker;
+struct BonnRouteDRParams;
+class BonnRouteDR;
 class drUpdate;
 struct frDebugSettings;
 struct FlexDRViaData;
@@ -224,6 +226,14 @@ class TritonRoute : public PinAccessService
     return incremental_changed_regions_;
   }
 
+  // BonnRoute detailed routing before FlexDR (detailed_route -bonnroute).
+  void setBonnRoute(bool enabled) { bonnroute_ = enabled; }
+  // Returns false for an unknown parameter name.
+  bool setBonnRouteParam(const char* name, double value);
+  // During a BonnRoute incremental call (arXiv:2111.06169 Sec. 5.2) FlexDR
+  // only checks the changed regions and repairs markers.
+  bool isBonnRouteCleanup() const { return bonnroute_cleanup_; }
+
  private:
   std::unique_ptr<frDesign> design_;
   std::unique_ptr<frDebugSettings> debug_;
@@ -237,6 +247,11 @@ class TritonRoute : public PinAccessService
   int num_drvs_{-1};
   dst::Distributed* dist_{nullptr};
   bool distributed_{false};
+  bool bonnroute_{false};
+  std::unique_ptr<BonnRouteDRParams> bonnroute_params_;
+  // BonnRoute routing space kept across detailed_route calls (incremental).
+  std::unique_ptr<BonnRouteDR> bonnroute_dr_;
+  bool bonnroute_cleanup_{false};
   std::string dist_ip_;
   uint16_t dist_port_{0};
   std::string shared_volume_;
@@ -256,7 +271,21 @@ class TritonRoute : public PinAccessService
 
   void initDesign();
   void initGraphics();
-  void ta();
+  // The nets track assignment assigns: all nets; the nets BonnRoute's first
+  // routing left (left_net_track_assignment), with that routing as
+  // obstacles; the unrouted nets of an incremental call
+  // (prepareBonnRouteFallbacks), in panels clipped to their guides.
+  enum class TrackAssignmentNets
+  {
+    kAll,
+    kLeftByBonnRoute,
+    kIncrementalFallback
+  };
+  void ta(TrackAssignmentNets nets = TrackAssignmentNets::kAll);
+  void prepareBonnRouteFallbacks(std::vector<odb::Rect>& regions);
+  // Some layer of the technology has an antenna rule (check_antennas /
+  // repair_antennas can follow detailed routing).
+  bool techHasAntennaRules() const;
   void dr();
   void applyUpdates(const std::vector<std::vector<drUpdate>>& updates);
   void getDRCMarkers(std::list<std::unique_ptr<frMarker>>& markers,
