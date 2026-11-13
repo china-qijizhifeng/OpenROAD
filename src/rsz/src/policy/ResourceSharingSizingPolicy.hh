@@ -4,6 +4,7 @@
 #pragma once
 
 #include <array>
+#include <memory>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -20,6 +21,9 @@ class TimingArc;
 }  // namespace sta
 
 namespace rsz {
+
+class RebufferPlannerPool;
+struct RebufferTreePlan;
 
 // Settings of the RS_SIZING phase.  Values come from the environment variable
 // RSZ_RS_SIZING_OPTIONS ("name=value name=value ..."), read once per run.
@@ -82,6 +86,18 @@ struct ResourceSharingSizingConfig
   // An iteration is undone, and the phase stops, when its TNS gain per power
   // increase is below this fraction of the first kept iteration's.
   double min_efficiency_ratio = 0.5;
+  // Buffering round after the sizing rounds of each iteration: nets whose
+  // driver has negative slack and whose largest wire-arc weight is at least
+  // buffer_weight_ratio of the largest arc weight get a buffer tree planned
+  // from frozen timing (all nets in parallel) and applied in one batch.
+  bool buffering = true;
+  double buffer_weight_ratio = 1e-2;
+  int max_buffer_nets = 4000;
+  int buffer_max_fanout = 20;
+  // Serial: the Rebuffer of LEGACY's BufferMove on each net in criticality
+  // order (one incremental timing update per net).  Parallel: tree plans from
+  // frozen timing on the worker threads, applied in one batch.
+  bool serial_buffering = true;
 };
 
 // RS_SIZING: gate sizing (and Vt choice among swappable cells) by the
@@ -205,7 +221,9 @@ class ResourceSharingSizingPolicy : public OptimizationPolicy
   };
 
   void readConfig();
-  void collectSizableGates();
+  // Fills sizable_gates_; with rescale, also the area and leakage scales of
+  // the power proxy (once per run, so new buffers do not change the scale).
+  void collectSizableGates(bool rescale);
   double clockPeriod() const;
   // Vertices in increasing level order.
   void buildLevelOrder();
@@ -239,6 +257,11 @@ class ResourceSharingSizingPolicy : public OptimizationPolicy
                    const CandidateCell& candidate,
                    bool& feasible) const;
   int runRound(std::vector<sta::Instance*>& gates);
+  // Plans buffer trees for the critical nets in parallel and applies the
+  // improving ones; returns the number of inserted buffers.
+  int runBufferRound();
+  // Largest weight (times period) of the wire arcs out of a driver vertex.
+  double netCriticality(sta::Vertex* driver_vertex) const;
   double powerOf(sta::LibertyCell* cell);
   double designPower();
   const sta::Pvt* pvtOf(const sta::Instance* instance) const;
@@ -279,6 +302,9 @@ class ResourceSharingSizingPolicy : public OptimizationPolicy
   double seconds_oracle_{0.0};
   double seconds_apply_{0.0};
   double seconds_timing_{0.0};
+  double seconds_buffering_{0.0};
+  int buffers_inserted_{0};
+  std::unique_ptr<RebufferPlannerPool> planners_;
 };
 
 }  // namespace rsz

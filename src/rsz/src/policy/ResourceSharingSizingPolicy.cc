@@ -17,6 +17,8 @@
 #include <vector>
 
 #include "OptimizerTypes.hh"
+#include "Rebuffer.hh"
+#include "RebufferPlannerPool.hh"
 #include "db_sta/dbNetwork.hh"
 #include "db_sta/dbSta.hh"
 #include "est/EstimateParasitics.h"
@@ -117,6 +119,243 @@ ResourceSharingSizingPolicy::ResourceSharingSizingPolicy(
 
 ResourceSharingSizingPolicy::~ResourceSharingSizingPolicy() = default;
 
+double ResourceSharingSizingPolicy::netCriticality(
+    sta::Vertex* driver_vertex) const
+{
+  double criticality = 0.0;
+  sta::VertexOutEdgeIterator edges(driver_vertex, graph_);
+  while (edges.hasNext()) {
+    sta::Edge* edge = edges.next();
+    if (!edge->isWire()) {
+      continue;
+    }
+    for (const sta::TimingArc* arc : edge->timingArcSet()->arcs()) {
+      const float delay = sta::delayAsFloat(
+          graph_->arcDelay(edge, const_cast<sta::TimingArc*>(arc), dcalc_ap_));
+      criticality = std::max(
+          criticality,
+          arcWeight(edge, arc, driver_vertex, edge->to(graph_), delay)
+              * period_);
+    }
+  }
+  return criticality;
+}
+
+int ResourceSharingSizingPolicy::runBufferRound()
+{
+  const auto start = std::chrono::steady_clock::now();
+  sta_->findRequireds();
+  struct BufferJob
+  {
+    const sta::Pin* driver_pin{nullptr};
+    const sta::Pin* target_load_pin{nullptr};
+    BufferedNetPtr net;
+    double criticality{0.0};
+  };
+  // Candidate nets: violating, critical, small fanout, bufferable.
+  std::vector<BufferJob> jobs;
+  for (sta::Vertex* vertex : level_order_) {
+    const sta::Pin* pin = vertex->pin();
+    if (!network_->isDriver(pin) || vertex->isBidirectDriver()) {
+      continue;
+    }
+    const sta::Instance* instance = network_->instance(pin);
+    if (network_->isTopInstance(instance)
+        || network_->libertyCell(instance) == nullptr
+        || sta_->isClock(pin, sta_->cmdMode())) {
+      continue;
+    }
+    if (sta::delayAsFloat(sta_->slack(vertex, max_)) >= 0.0f) {
+      continue;
+    }
+    const double criticality = netCriticality(vertex);
+    if (criticality < rs_config_.buffer_weight_ratio) {
+      continue;
+    }
+    int fanout = 0;
+    const sta::Pin* worst_load = nullptr;
+    float worst_slack = std::numeric_limits<float>::infinity();
+    sta::VertexOutEdgeIterator edges(vertex, graph_);
+    while (edges.hasNext()) {
+      sta::Edge* edge = edges.next();
+      if (!edge->isWire()) {
+        continue;
+      }
+      ++fanout;
+      sta::Vertex* load = edge->to(graph_);
+      const float slack = sta::delayAsFloat(sta_->slack(load, max_));
+      if (slack < worst_slack) {
+        worst_slack = slack;
+        worst_load = load->pin();
+      }
+    }
+    if (fanout < 1 || fanout >= rs_config_.buffer_max_fanout
+        || worst_load == nullptr || !resizer_.okToBufferNet(pin)) {
+      continue;
+    }
+    jobs.push_back({.driver_pin = pin,
+                    .target_load_pin = worst_load,
+                    .net = nullptr,
+                    .criticality = criticality});
+  }
+  std::stable_sort(
+      jobs.begin(), jobs.end(), [](const BufferJob& a, const BufferJob& b) {
+        return a.criticality > b.criticality;
+      });
+  if (static_cast<int>(jobs.size()) > rs_config_.max_buffer_nets) {
+    jobs.resize(rs_config_.max_buffer_nets);
+  }
+  Rebuffer& rebuffer = resizer_.rebuffer();
+  if (rs_config_.serial_buffering) {
+    rebuffer.init();
+    rebuffer.initOnCorner(sta_->cmdScene());
+    std::unordered_set<const sta::Net*> touched;
+    int inserted = 0;
+    int improved = 0;
+    for (const BufferJob& job : jobs) {
+      const sta::Net* net = network_->net(job.driver_pin);
+      if (net == nullptr || touched.contains(net)) {
+        continue;
+      }
+      // The driver may have lost its violation to an earlier tree.
+      sta::Vertex* vertex = graph_->pinDrvrVertex(job.driver_pin);
+      if (vertex == nullptr
+          || sta::delayAsFloat(sta_->slack(vertex, max_)) >= 0.0f) {
+        continue;
+      }
+      const int count = rebuffer.rebufferPin(job.driver_pin);
+      if (count > 0) {
+        touched.insert(net);
+        inserted += count;
+        ++improved;
+      }
+    }
+    if (inserted > 0) {
+      estimate_parasitics_->updateParasitics();
+      sta_->findDelays();
+    }
+    logger_->info(RSZ,
+                  3309,
+                  "RS_SIZING buffering: {} candidate nets, {} rebuffered, {} "
+                  "buffers inserted.",
+                  jobs.size(),
+                  improved,
+                  inserted);
+    seconds_buffering_ += secondsSince(start);
+    return inserted;
+  }
+  // Main thread: nets as BufferedNets on the planner corner.
+  sta::Scene* scene = sta_->cmdScene();
+  rebuffer.initForPlanning(scene);
+  if (planners_ == nullptr) {
+    planners_ = std::make_unique<RebufferPlannerPool>(resizer_);
+  }
+  planners_->reset(scene, thread_pool_->threadCount());
+  std::vector<BufferJob> ready;
+  for (BufferJob& job : jobs) {
+    job.net = rebuffer.makeBufferedNet(job.driver_pin);
+    if (job.net != nullptr) {
+      ready.push_back(std::move(job));
+    }
+  }
+  // Workers: plan from the frozen required times.
+  struct BufferChoice
+  {
+    bool valid{false};
+    int plans{0};
+    int plans_with_buffers{0};
+    float best_gain{-std::numeric_limits<float>::infinity()};
+    RebufferTreePlan plan;
+  };
+  RebufferPlannerPool& pool = *planners_;
+  const std::vector<BufferChoice> choices = thread_pool_->parallelMap(
+      ready, [this, &pool](const BufferJob& job) {
+        BufferChoice choice;
+        const RebufferPlannerPool::Lease lease(pool);
+        std::vector<RebufferTreePlan> plans
+            = lease.planner().makeRebufferTreePlans(
+                job.driver_pin, job.net, job.target_load_pin, 4);
+        choice.plans = static_cast<int>(plans.size());
+        for (RebufferTreePlan& plan : plans) {
+          if (plan.buffer_count > 0) {
+            ++choice.plans_with_buffers;
+            choice.best_gain = std::max(choice.best_gain, plan.driver_slack_gain);
+          }
+          if (plan.buffer_count == 0 || plan.driver_slack_gain <= 0.0f) {
+            continue;
+          }
+          bool dont_touch_behind_buffer = false;
+          for (const BufferTreeLoadPath& load_path : plan.load_paths) {
+            for (const BufferTreePathStage& stage : load_path.stages) {
+              if (stage.type == BufferTreeStageType::kBuffer
+                  && resizer_.dontTouch(load_path.load_pin)) {
+                dont_touch_behind_buffer = true;
+              }
+            }
+          }
+          if (dont_touch_behind_buffer) {
+            continue;
+          }
+          if (!choice.valid
+              || plan.driver_slack_gain > choice.plan.driver_slack_gain) {
+            choice.plan = std::move(plan);
+            choice.valid = true;
+          }
+        }
+        return choice;
+      });
+  // Main thread: apply, one tree per net and none on a net that a tree
+  // already changed.
+  std::unordered_set<const sta::Net*> touched_nets;
+  int inserted = 0;
+  int plans = 0;
+  int plans_with_buffers = 0;
+  int valid = 0;
+  float best_gain = -std::numeric_limits<float>::infinity();
+  for (const BufferChoice& choice : choices) {
+    plans += choice.plans;
+    plans_with_buffers += choice.plans_with_buffers;
+    valid += choice.valid ? 1 : 0;
+    best_gain = std::max(best_gain, choice.best_gain);
+  }
+  for (size_t i = 0; i < choices.size(); ++i) {
+    if (!choices[i].valid) {
+      continue;
+    }
+    const sta::Net* net = network_->net(ready[i].driver_pin);
+    if (net == nullptr || touched_nets.contains(net)) {
+      continue;
+    }
+    const int count
+        = rebuffer.applyRebufferTreePlan(choices[i].plan, "rs_buffer");
+    if (count > 0) {
+      touched_nets.insert(net);
+      inserted += count;
+    }
+  }
+  planners_->reset(scene, 0);
+  if (inserted > 0) {
+    estimate_parasitics_->updateParasitics();
+    sta_->findDelays();
+  }
+  logger_->info(RSZ,
+                3308,
+                "RS_SIZING buffering: {} candidate nets, {} planned, {} plans "
+                "({} with buffers, best gain {}), {} improving, {} buffers "
+                "inserted.",
+                jobs.size(),
+                ready.size(),
+                plans,
+                plans_with_buffers,
+                std::isfinite(best_gain)
+                    ? sta::delayAsString(best_gain, 3, sta_)
+                    : std::string("-"),
+                valid,
+                inserted);
+  seconds_buffering_ += secondsSince(start);
+  return inserted;
+}
+
 void ResourceSharingSizingPolicy::readConfig()
 {
   rs_config_ = ResourceSharingSizingConfig{};
@@ -180,6 +419,16 @@ void ResourceSharingSizingPolicy::readConfig()
       rs_config_.critical_weight_ratio = number;
     } else if (key == "min_efficiency_ratio") {
       rs_config_.min_efficiency_ratio = number;
+    } else if (key == "buffering") {
+      rs_config_.buffering = number != 0.0;
+    } else if (key == "buffer_weight_ratio") {
+      rs_config_.buffer_weight_ratio = number;
+    } else if (key == "max_buffer_nets") {
+      rs_config_.max_buffer_nets = static_cast<int>(number);
+    } else if (key == "serial_buffering") {
+      rs_config_.serial_buffering = number != 0.0;
+    } else if (key == "buffer_max_fanout") {
+      rs_config_.buffer_max_fanout = static_cast<int>(number);
     } else if (key == "check_weights") {
       rs_config_.check_weights = number != 0.0;
     } else {
@@ -249,7 +498,7 @@ double ResourceSharingSizingPolicy::designPower()
   return power;
 }
 
-void ResourceSharingSizingPolicy::collectSizableGates()
+void ResourceSharingSizingPolicy::collectSizableGates(const bool rescale)
 {
   sizable_gates_.clear();
   sta_->ensureClkNetwork(sta_->cmdMode());
@@ -296,9 +545,11 @@ void ResourceSharingSizingPolicy::collectSizableGates()
     sizable_gates_.push_back(instance);
   }
   // Area and leakage each contribute one unit for the initial design.
-  area_scale_ = area_sum > 0.0 ? 1.0 / area_sum : 0.0;
-  leakage_scale_ = leakage_sum > 0.0 ? 1.0 / leakage_sum : 0.0;
-  power_cache_.clear();
+  if (rescale) {
+    area_scale_ = area_sum > 0.0 ? 1.0 / area_sum : 0.0;
+    leakage_scale_ = leakage_sum > 0.0 ? 1.0 / leakage_sum : 0.0;
+    power_cache_.clear();
+  }
 }
 
 double ResourceSharingSizingPolicy::arcLogWeight(sta::Vertex* from,
@@ -618,9 +869,22 @@ void ResourceSharingSizingPolicy::updateLagrangeMultipliers(
 
 void ResourceSharingSizingPolicy::normalizeLagrangeMultipliers()
 {
+  // The clock tree carries the flow of every path; normalize by the largest
+  // multiplier on data arcs so data-path criticalities spread over [0, 1].
   double largest = 0.0;
-  for (const double multiplier : arc_multipliers_) {
-    largest = std::max(largest, multiplier);
+  for (sta::Vertex* vertex : level_order_) {
+    if (sta_->isClock(vertex->pin(), sta_->cmdMode())) {
+      continue;
+    }
+    sta::VertexOutEdgeIterator edges(vertex, graph_);
+    while (edges.hasNext()) {
+      const size_t edge_base = 4 * static_cast<size_t>(graph_->id(edges.next()));
+      for (size_t slot = 0; slot < 4; ++slot) {
+        if (edge_base + slot < arc_multipliers_.size()) {
+          largest = std::max(largest, arc_multipliers_[edge_base + slot]);
+        }
+      }
+    }
   }
   if (largest <= 0.0) {
     return;
@@ -1298,7 +1562,7 @@ void ResourceSharingSizingPolicy::iterate()
     markRunComplete(true);
     return;
   }
-  collectSizableGates();
+  collectSizableGates(true);
   power_budget_ = rs_config_.power_budget_ratio * designPower();
   logger_->info(RSZ,
                 3303,
@@ -1316,6 +1580,9 @@ void ResourceSharingSizingPolicy::iterate()
         == ResourceSharingSizingConfig::Multipliers::kLagrangian;
   for (int iteration = 0; iteration < rs_config_.iterations; ++iteration) {
     auto weights_start = std::chrono::steady_clock::now();
+    if (iteration > 0) {
+      collectSizableGates(false);
+    }
     buildLevelOrder();
     if (lagrangian) {
       updateLagrangeMultipliers(iteration);
@@ -1335,10 +1602,20 @@ void ResourceSharingSizingPolicy::iterate()
     const std::vector<double>& backward = rs_config_.accumulate_weights
                                               ? log_backward_mean_
                                               : log_backward_;
+    // Shift by the most critical data vertex; the clock tree carries the
+    // weight of every path.
     log_weight_shift_ = kNegativeInfinity;
-    for (size_t i = 0; i < forward.size(); ++i) {
-      if (forward[i] != kNegativeInfinity && backward[i] != kNegativeInfinity) {
-        log_weight_shift_ = std::max(log_weight_shift_, forward[i] + backward[i]);
+    for (sta::Vertex* vertex : level_order_) {
+      if (sta_->isClock(vertex->pin(), sta_->cmdMode())) {
+        continue;
+      }
+      const size_t base = 2 * static_cast<size_t>(graph_->id(vertex));
+      for (size_t rf = 0; rf < 2 && base + rf < forward.size(); ++rf) {
+        if (forward[base + rf] != kNegativeInfinity
+            && backward[base + rf] != kNegativeInfinity) {
+          log_weight_shift_ = std::max(
+              log_weight_shift_, forward[base + rf] + backward[base + rf]);
+        }
       }
     }
     if (!lagrangian && log_weight_shift_ == kNegativeInfinity) {
@@ -1363,6 +1640,11 @@ void ResourceSharingSizingPolicy::iterate()
          round < rs_config_.rounds_per_iteration && !gates.empty();
          ++round) {
       resized += runRound(gates);
+    }
+    if (rs_config_.buffering) {
+      const int inserted = runBufferRound();
+      buffers_inserted_ += inserted;
+      resized += inserted;
     }
     auto timing_start = std::chrono::steady_clock::now();
     sta_->findRequireds();
@@ -1423,14 +1705,17 @@ void ResourceSharingSizingPolicy::iterate()
   }
   logger_->info(RSZ,
                 3305,
-                "RS_SIZING: resized {} gates; seconds: weights {:.2f} "
-                "snapshots {:.2f} oracle {:.2f} apply {:.2f} timing {:.2f}.",
+                "RS_SIZING: resized {} gates (buffers {}); seconds: weights "
+                "{:.2f} snapshots {:.2f} oracle {:.2f} apply {:.2f} timing "
+                "{:.2f} buffering {:.2f}.",
                 total_resized,
+                buffers_inserted_,
                 seconds_weights_,
                 seconds_snapshots_,
                 seconds_oracle_,
                 seconds_apply_,
-                seconds_timing_);
+                seconds_timing_,
+                seconds_buffering_);
   markRunComplete(true);
 }
 
