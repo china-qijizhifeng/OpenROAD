@@ -393,6 +393,17 @@ cc_test(
 )
 
 cc_test(
+    name = "bonnroute_partial_parasitics_test",
+    size = "small",
+    srcs = ["cpp/TestPartialParasitics.cpp"],
+    deps = [
+        "//src/grt:fastroute",
+        "@googletest//:gtest",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
     name = "TestResistanceMode",
     size = "small",
     srcs = ["cpp/TestResistanceMode.cpp"],

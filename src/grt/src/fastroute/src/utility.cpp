@@ -5,6 +5,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
+#include <cstring>
 #include <limits>
 #include <map>
 #include <ostream>
@@ -33,6 +34,7 @@
 namespace grt {
 
 using utl::GRT;
+using utl::Timer;
 
 void FastRouteCore::printEdge(const int netID, const int edgeID)
 {
@@ -706,6 +708,10 @@ void FastRouteCore::setIncrementalGrt(bool is_incremental)
 // nets to use the resistance-aware strategy
 void FastRouteCore::updateSlacks()
 {
+  // The estimate below covers every net; the next partial slack update
+  // estimates every net again.
+  resetPartialRouteParasitics();
+
   // Check if liberty file was loaded before calculating slack
   if (sta_->getDbNetwork()->defaultLibertyLibrary() == nullptr
       || !enable_resistance_aware_) {
@@ -1674,6 +1680,7 @@ void FastRouteCore::StNetOrder()
   };
   // sort by slack after congestion sort
   std::ranges::stable_sort(tree_order_cong_, compareSlack);
+  traceNetOrder();
 }
 
 float FastRouteCore::CalculatePartialSlack()
@@ -1681,7 +1688,7 @@ float FastRouteCore::CalculatePartialSlack()
   std::vector<float> slacks;
   slacks.reserve(netCount());
   if (auto* estimator = service_registry_->find<est::ParasiticsService>()) {
-    estimator->estimateAllGlobalRouteParasitics(num_threads_);
+    updatePartialRouteParasitics(*estimator);
   }
   for (const int& netID : net_ids_) {
     auto fr_net = nets_[netID];
@@ -1690,6 +1697,7 @@ float FastRouteCore::CalculatePartialSlack()
     slacks.push_back(slack);
     fr_net->setSlack(slack);
   }
+  tracePartialSlacks();
 
   std::ranges::stable_sort(slacks);
 
@@ -1716,6 +1724,241 @@ float FastRouteCore::CalculatePartialSlack()
 float FastRouteCore::getNetSlack(odb::dbNet* net)
 {
   return sta_->slack(net, sta::MinMax::max());
+}
+
+void PlanarRouteKeys::clear()
+{
+  values.clear();
+  begin.clear();
+}
+
+size_t PlanarRouteKeys::keySize(const size_t position) const
+{
+  return begin[position + 1] - begin[position];
+}
+
+bool PlanarRouteKeys::sameKey(const PlanarRouteKeys& other,
+                              const size_t position) const
+{
+  const size_t size = keySize(position);
+  return size == other.keySize(position)
+         && std::equal(values.begin() + begin[position],
+                       values.begin() + begin[position] + size,
+                       other.values.begin() + other.begin[position]);
+}
+
+void appendPlanarRouteKey(const StTree& tree,
+                          const int min_layer,
+                          std::vector<int>& values)
+{
+  values.push_back(min_layer);
+  for (const TreeEdge& edge : tree.edges) {
+    // getPlanarRoute() skips the edges without length.
+    if (edge.len <= 0) {
+      continue;
+    }
+    const Route& route = edge.route;
+    // getPlanarRoute() reads grids[0 .. routelen] and grids[1].
+    const int last = std::min(std::max(route.routelen, 1),
+                              static_cast<int>(route.grids.size()) - 1);
+    values.push_back(route.routelen);
+    values.push_back(last);
+    for (int i = 0; i <= last; i++) {
+      values.push_back(route.grids[i].x);
+      values.push_back(route.grids[i].y);
+    }
+  }
+}
+
+void FastRouteCore::makePlanarRouteKeys(PlanarRouteKeys& keys) const
+{
+  keys.clear();
+  keys.begin.reserve(net_ids_.size() + 1);
+  for (const int net_id : net_ids_) {
+    keys.begin.push_back(keys.values.size());
+    appendPlanarRouteKey(
+        sttrees_[net_id], nets_[net_id]->getMinLayer(), keys.values);
+  }
+  keys.begin.push_back(keys.values.size());
+}
+
+void FastRouteCore::resetPartialRouteParasitics()
+{
+  planar_route_keys_valid_ = false;
+}
+
+void FastRouteCore::updatePartialRouteParasitics(
+    est::ParasiticsService& estimator)
+{
+  const bool trace = logger_->debugCheck(GRT, "partial_parasitics", 1);
+  // The keys describe the 2D routes of a non-incremental run.
+  const bool use_keys = trace && !is_3d_step_ && !is_incremental_grt_;
+  Timer timer;
+  std::vector<size_t> changed;
+  bool have_previous_keys = false;
+  if (use_keys) {
+    makePlanarRouteKeys(next_planar_route_keys_);
+    have_previous_keys
+        = planar_route_keys_valid_ && planar_route_key_net_ids_ == net_ids_;
+    if (have_previous_keys) {
+      for (size_t position = 0; position < net_ids_.size(); position++) {
+        if (!next_planar_route_keys_.sameKey(planar_route_keys_, position)) {
+          changed.push_back(position);
+        }
+      }
+    }
+  }
+  const double key_seconds = timer.elapsed();
+  timer.reset();
+  estimator.estimateAllGlobalRouteParasitics(num_threads_);
+  const double estimate_seconds = timer.elapsed();
+  if (use_keys) {
+    std::swap(planar_route_keys_, next_planar_route_keys_);
+    if (planar_route_key_net_ids_ != net_ids_) {
+      planar_route_key_net_ids_ = net_ids_;
+    }
+    planar_route_keys_valid_ = true;
+  } else {
+    planar_route_keys_valid_ = false;
+  }
+  if (trace) {
+    tracePartialRouteParasitics(changed,
+                                have_previous_keys,
+                                /*incremental=*/false,
+                                key_seconds,
+                                estimate_seconds);
+  }
+  partial_slack_query_timer_.reset();
+}
+
+namespace {
+
+// FNV-1a over 32-bit words.
+class WordHash
+{
+ public:
+  void add(const uint32_t word)
+  {
+    for (int byte = 0; byte < 4; byte++) {
+      hash_ ^= (word >> (8 * byte)) & 0xffu;
+      hash_ *= 0x100000001b3ull;
+    }
+  }
+  void addFloat(const float value)
+  {
+    uint32_t word;
+    std::memcpy(&word, &value, sizeof(word));
+    add(word);
+  }
+  uint64_t value() const { return hash_; }
+
+ private:
+  uint64_t hash_ = 0xcbf29ce484222325ull;
+};
+
+}  // namespace
+
+void FastRouteCore::tracePartialRouteParasitics(
+    const std::vector<size_t>& changed,
+    const bool have_previous_keys,
+    const bool incremental,
+    const double key_seconds,
+    const double estimate_seconds)
+{
+  partial_parasitics_update_count_++;
+  const size_t net_count = net_ids_.size();
+  if (partial_route_changed_in_run_.size() != net_count) {
+    partial_route_changed_in_run_.assign(net_count, 0);
+  }
+  size_t changed_key_values = 0;
+  for (const size_t position : changed) {
+    partial_route_changed_in_run_[position] = 1;
+    changed_key_values += planar_route_keys_.keySize(position);
+  }
+  const size_t changed_in_run = std::count(partial_route_changed_in_run_.begin(),
+                                           partial_route_changed_in_run_.end(),
+                                           1);
+  // The cost of the copies a full estimate makes: FastRoute's planar routes
+  // of every net, and GlobalRouter's copy of them.
+  Timer timer;
+  NetRouteMap planar_routes = getPlanarRoutes();
+  const double planar_route_seconds = timer.elapsed();
+  timer.reset();
+  NetRouteMap planar_routes_copy = planar_routes;
+  const double route_copy_seconds = timer.elapsed();
+  const double share = net_count == 0 ? 0.0 : 100.0 / net_count;
+  debugPrint(logger_,
+             GRT,
+             "partial_parasitics",
+             1,
+             "partial parasitics update={} nets={} previous_keys={} "
+             "changed={} changed_share={:.3f}% changed_in_run={} "
+             "changed_in_run_share={:.3f}% changed_key_values={} "
+             "key_values={} estimate={} key_s={:.4f} estimate_s={:.4f} "
+             "planar_routes_s={:.4f} route_copy_s={:.4f}",
+             partial_parasitics_update_count_,
+             net_count,
+             have_previous_keys ? 1 : 0,
+             changed.size(),
+             changed.size() * share,
+             changed_in_run,
+             changed_in_run * share,
+             changed_key_values,
+             planar_route_keys_.values.size(),
+             incremental ? "incremental" : "full",
+             key_seconds,
+             estimate_seconds,
+             planar_route_seconds,
+             route_copy_seconds);
+}
+
+void FastRouteCore::tracePartialSlacks() const
+{
+  if (!logger_->debugCheck(GRT, "partial_parasitics", 1)) {
+    return;
+  }
+  const double query_seconds = partial_slack_query_timer_.elapsed();
+  WordHash hash;
+  for (const int net_id : net_ids_) {
+    hash.addFloat(nets_[net_id]->getSlack());
+  }
+  debugPrint(logger_,
+             GRT,
+             "partial_parasitics",
+             1,
+             "partial slacks update={} nets={} hash={:016x} query_s={:.4f}",
+             partial_parasitics_update_count_,
+             net_ids_.size(),
+             hash.value(),
+             query_seconds);
+  if (logger_->debugCheck(GRT, "partial_parasitics", 2)) {
+    for (const int net_id : net_ids_) {
+      logger_->report("partial slack update={} net={} slack={:a}",
+                      partial_parasitics_update_count_,
+                      nets_[net_id]->getName(),
+                      nets_[net_id]->getSlack());
+    }
+  }
+}
+
+void FastRouteCore::traceNetOrder() const
+{
+  if (!logger_->debugCheck(GRT, "partial_parasitics", 1)) {
+    return;
+  }
+  WordHash hash;
+  for (const OrderTree& tree : tree_order_cong_) {
+    hash.add(static_cast<uint32_t>(tree.treeIndex));
+    hash.addFloat(nets_[tree.treeIndex]->getSlack());
+  }
+  debugPrint(logger_,
+             GRT,
+             "partial_parasitics",
+             1,
+             "net order update={} nets={} hash={:016x}",
+             partial_parasitics_update_count_,
+             tree_order_cong_.size(),
+             hash.value());
 }
 
 void FastRouteCore::recoverEdge(const int netID, const int edgeID)
