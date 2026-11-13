@@ -205,13 +205,19 @@ class EstimateParasitics : public sta::dbStaState, public ParasiticsService
   void estimateGlobalRouteRC(sta::SpefWriter* spef_writer = nullptr);
   void estimateGlobalRouteRC(odb::dbNet* db_net);
   void estimateGlobalRouteParasitics(odb::dbNet* net, grt::GRoute& route);
+  // With ensure_all false the caller has made the parasitic placeholders of
+  // the nets in `work` (ensureParasiticsForThreads).
   void estimateRoutesInParallel(
       const std::vector<std::pair<odb::dbNet*, grt::GRoute*>>& work,
       int threads,
-      bool partial);
+      bool partial,
+      bool ensure_all = true);
   // Make the parasitic placeholders for every driver and net so threads
   // only look up sta::Parasitics entries, which are not locked.
   void ensureParasiticsForThreads();
+  // The same for the drivers of the given nets; returns false, and makes
+  // nothing, when one of them has no driver.
+  bool ensureParasiticsForThreads(const std::vector<odb::dbNet*>& nets);
   void clearParasitics();
 
   ////////////////////////////////////////////////////////////////
