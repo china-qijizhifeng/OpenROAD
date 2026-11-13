@@ -103,8 +103,12 @@ struct BonnRouteDRParams
   // order of the chunk at every thread count. A sequence that failed at
   // the limit of its box runs again with 4 x the margin, then over the
   // whole chip. Takes precedence over ripup_partitions. 0: serial queue.
+  // Under an effort budget (final_ripup_effort) the first chunk of a pass
+  // holds at most 16 sequences and a later chunk at most the remaining
+  // budget divided by the mean effort of the pass's sequences so far, so a
+  // chunk ends near the budget.
   bool ripup_boxes = false;
-  int ripup_box_margin = 2;
+  int ripup_box_margin = 4;
   int ripup_box_chunk = 64;
   // Off-track pin access: largest jog to a track, in pitches.
   int max_access_jog = 2;

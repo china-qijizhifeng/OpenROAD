@@ -8439,6 +8439,9 @@ void BonnRouteDR::routeRipupBoxes(std::vector<int>& queue,
   std::vector<Slot> slots;
   std::vector<br::OrderedBoxSchedule::Box> boxes;
   std::vector<int> again;
+  // Sequences of this pass counted against the budget and their effort.
+  int64_t counted = 0;
+  int64_t counted_settled = 0;
   const br::OrderedBoxSchedule::Parallel parallel
       = [](const int count, const std::function<void(int)>& body) {
 #pragma omp parallel num_threads(count)
@@ -8460,8 +8463,18 @@ void BonnRouteDR::routeRipupBoxes(std::vector<int>& queue,
     }
     slots.clear();
     boxes.clear();
-    while (!pending.empty()
-           && static_cast<int>(slots.size()) < params_.ripup_box_chunk) {
+    // Under a budget a chunk ends near it (deterministic: sizes follow the
+    // settled vertices of the pass's earlier chunks).
+    int64_t chunk = params_.ripup_box_chunk;
+    if (settled_budget > 0) {
+      if (counted == 0) {
+        chunk = std::min<int64_t>(chunk, 16);
+      } else {
+        const int64_t mean = std::max<int64_t>(1, counted_settled / counted);
+        chunk = std::clamp<int64_t>((settled_budget - settled) / mean, 1, chunk);
+      }
+    }
+    while (!pending.empty() && static_cast<int64_t>(slots.size()) < chunk) {
       const int id = pending.front();
       pending.pop_front();
       if (nets_[id].routed) {
@@ -8567,6 +8580,10 @@ void BonnRouteDR::routeRipupBoxes(std::vector<int>& queue,
       // the limit of its box is repeated with a larger box.
       if (slot.routed || !slot.limited) {
         settled += slot.settled;
+        if (slot.attempted) {
+          counted++;
+          counted_settled += slot.settled;
+        }
       }
       const RipupState& s = slot.state;
       serial_ripup_.events += s.events;
