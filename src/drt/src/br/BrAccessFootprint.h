@@ -19,6 +19,9 @@
 #include <array>
 #include <cstdint>
 #include <limits>
+#include <map>
+#include <unordered_set>
+#include <utility>
 #include <vector>
 
 namespace drt::br {
@@ -140,6 +143,33 @@ class AccessFootprint
     writes_.fill(TileBox{});
     wide_reads_ = TileBox{};
     unit_violations_ = 0;
+    detail_boxes_.clear();
+    detail_tiles_.clear();
+  }
+  // Dependency trace (log only): level 1 keeps a tile box per structure,
+  // layer and read / write; level 2 also the tiles. 0: off.
+  void setDetail(const int level) { detail_ = level; }
+  // (structure * 2 + write, layer); structure 0 shape grid, 1 wide-shape
+  // lists, 2 fast grid. Layers are those of the structure.
+  using DetailKey = std::pair<int, int>;
+  const std::map<DetailKey, TileBox>& detailBoxes() const
+  {
+    return detail_boxes_;
+  }
+  // Tiles as detailKey(resource, layer, x, y).
+  const std::unordered_set<uint64_t>& detailTiles() const
+  {
+    return detail_tiles_;
+  }
+  static uint64_t detailKey(const int resource,
+                            const int layer,
+                            const int x,
+                            const int y)
+  {
+    return (static_cast<uint64_t>(resource & 0xff) << 56)
+           | (static_cast<uint64_t>(layer & 0xff) << 48)
+           | (static_cast<uint64_t>(x & 0xffffff) << 24)
+           | static_cast<uint64_t>(y & 0xffffff);
   }
   // Enlarges the allowed box of the unit (its work continues in a larger
   // area that the caller admitted).
@@ -155,6 +185,9 @@ class AccessFootprint
       return;
     }
     (isWriteAccess(kind) ? writes_ : reads_)[step_].add(tiles);
+    if (detail_ > 0) [[unlikely]] {
+      recordDetail(kind, layer, tiles);
+    }
     if (!allowed_.contains(tiles)) {
       violation_count_++;
       unit_violations_++;
@@ -188,7 +221,25 @@ class AccessFootprint
   const std::vector<Violation>& violations() const { return violations_; }
 
  private:
+  void recordDetail(const AccessKind kind, const int layer, const TileBox& tiles)
+  {
+    const int structure = static_cast<int>(kind) / 2;
+    const int resource = structure * 2 + (isWriteAccess(kind) ? 1 : 0);
+    detail_boxes_[{resource, layer}].add(tiles);
+    if (detail_ < 2 || tiles.empty()) {
+      return;
+    }
+    for (int y = tiles.ylo; y <= tiles.yhi; y++) {
+      for (int x = tiles.xlo; x <= tiles.xhi; x++) {
+        detail_tiles_.insert(detailKey(resource, layer, x, y));
+      }
+    }
+  }
+
   static inline thread_local AccessFootprint* current_ = nullptr;
+  int detail_ = 0;
+  std::map<DetailKey, TileBox> detail_boxes_;
+  std::unordered_set<uint64_t> detail_tiles_;
 
   int32_t unit_ = -1;
   int step_ = 0;

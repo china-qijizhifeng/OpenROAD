@@ -11,6 +11,7 @@
 #include <array>
 #include <atomic>
 #include <cstdint>
+#include <fstream>
 #include <memory>
 #include <string>
 #include <unordered_map>
@@ -474,6 +475,13 @@ struct BonnRouteDRParams
   // report how far beyond the net's core tile box each step reaches. The
   // routing is unchanged.
   bool partition_check = false;
+  // Debug (dependency replay): with partition_check, write per region net
+  // (partitions) and per rip-up box task the seconds, the schedule box and
+  // the accessed tiles per structure, layer and read / write (tile boxes for
+  // region nets, tiles for rip-up tasks) and the nets a rip-up task changed
+  // to $RESULTS_DIR/bonnroute_dependency_trace.txt. Setting it sets
+  // partition_check. The routing is unchanged.
+  bool dependency_trace = false;
   // Ahrens et al., arXiv:2111.06169, Sec. 5.2 incremental routing: a
   // detailed_route -bonnroute call on a design that already carries routing
   // (the antenna-repair ECO) routes the nets that need routing against the
@@ -1302,6 +1310,12 @@ class BonnRouteDR
     br::BusyThreads::Seconds busy_threads{};
   };
   RipupBoxStats ripup_box_stats_;
+  // dependency_trace: the accesses of a footprint as trace text (tiles when
+  // `tiles`, else tile boxes), and the trace file.
+  static std::string traceAccesses(const br::AccessFootprint& footprint,
+                                   bool tiles);
+  void writeTrace(const std::vector<std::string>& lines);
+  std::unique_ptr<std::ofstream> dependency_trace_out_;
   // try_plain: first try the connection without rip-up. The nets of the
   // rip-up queue have just failed that search, so their sequences start
   // with the rip-up mode search (which finds a legal path at no penalty

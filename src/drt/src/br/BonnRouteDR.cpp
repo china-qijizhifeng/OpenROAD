@@ -12,6 +12,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <deque>
+#include <fstream>
 #include <functional>
 #include <iterator>
 #include <limits>
@@ -344,6 +345,9 @@ bool BonnRouteDRParams::set(const std::string& name, const double value)
     cleanup_check_only_workers = v != 0;
   } else if (name == "partition_check") {
     partition_check = v != 0;
+  } else if (name == "dependency_trace") {
+    dependency_trace = v != 0;
+    partition_check = partition_check || dependency_trace;
   } else if (name == "start_check") {
     start_check = std::clamp(v, 0, 1);
   } else if (name == "planar_first") {
@@ -6823,6 +6827,62 @@ br::TileBox BonnRouteDR::netClippedTileBox(const NetData& net) const
   return box;
 }
 
+std::string BonnRouteDR::traceAccesses(const br::AccessFootprint& footprint,
+                                       const bool tiles)
+{
+  static constexpr std::array<const char*, 6> kResources
+      = {"sR", "sW", "wR", "wW", "fR", "fW"};
+  std::string out;
+  if (!tiles) {
+    for (const auto& [key, box] : footprint.detailBoxes()) {
+      if (box.empty()) {
+        continue;
+      }
+      out += fmt::format(" {}/{}:{},{},{},{}",
+                         kResources[key.first],
+                         key.second,
+                         box.xlo,
+                         box.ylo,
+                         box.xhi,
+                         box.yhi);
+    }
+    return out;
+  }
+  std::vector<uint64_t> keys(footprint.detailTiles().begin(),
+                             footprint.detailTiles().end());
+  std::ranges::sort(keys);
+  uint64_t group = ~uint64_t{0};
+  for (const uint64_t key : keys) {
+    const uint64_t g = key >> 48;
+    if (g != group) {
+      group = g;
+      out += fmt::format(" {}/{}:", kResources[(g >> 8) & 0xff], g & 0xff);
+    } else {
+      out += ';';
+    }
+    out += fmt::format(
+        "{}.{}", (key >> 24) & 0xffffff, key & 0xffffff);
+  }
+  return out;
+}
+
+void BonnRouteDR::writeTrace(const std::vector<std::string>& lines)
+{
+  if (!dependency_trace_out_) {
+    const char* dir = std::getenv("RESULTS_DIR");
+    const std::string path = std::string(dir != nullptr ? dir : ".")
+                             + "/bonnroute_dependency_trace.txt";
+    dependency_trace_out_ = std::make_unique<std::ofstream>(path);
+    if (params_.verbose) {
+      logger_->report("BonnRoute DR dependency trace: {}.", path);
+    }
+  }
+  for (const std::string& line : lines) {
+    *dependency_trace_out_ << line << '\n';
+  }
+  dependency_trace_out_->flush();
+}
+
 void BonnRouteDR::beginFootprint(Worker& worker,
                                  const NetData& net,
                                  const FootprintPhase phase,
@@ -8055,6 +8115,8 @@ void BonnRouteDR::routePartitions(const std::vector<int>& order,
   std::vector<int> pending = order;
   std::vector<std::array<int, 4>> regions;
   int partition = 0;
+  std::string stage_trace_name = stage;
+  std::ranges::replace(stage_trace_name, ' ', '_');
   while (!pending.empty()) {
     if (params_.tail_batch > 0 && count < tail_below) {
       routeSpeculative(pending, failed, stage);
@@ -8109,6 +8171,9 @@ void BonnRouteDR::routePartitions(const std::vector<int>& order,
     // Each region is routed by one thread, which changes routing only
     // inside it; its nets are routed and committed in order.
     std::vector<double> busy(regions.size(), 0);
+    // dependency_trace: one line per net of each region, in member order.
+    std::vector<std::vector<std::string>> region_trace(
+        params_.dependency_trace ? regions.size() : 0);
     const double wall_start = omp_get_wtime();
 #pragma omp parallel for num_threads(threads) schedule(dynamic, 1)
     for (int r = 0; r < static_cast<int>(regions.size()); r++) {
@@ -8122,8 +8187,10 @@ void BonnRouteDR::routePartitions(const std::vector<int>& order,
           regions[r][0], regions[r][1], regions[r][2], regions[r][3]};
       for (const int id : members[r]) {
         NetData& net = nets_[id];
+        const double net_start = omp_get_wtime();
         if (params_.partition_check) {
           const auto& b = boxes[id];
+          w.footprint.setDetail(params_.dependency_trace ? 1 : 0);
           beginFootprint(w, net, kPhaseRegion, {b[0], b[1], b[2], b[3]});
         }
         w.limit = &region;
@@ -8156,8 +8223,30 @@ void BonnRouteDR::routePartitions(const std::vector<int>& order,
         if (params_.partition_check) {
           endFootprint(w, net, &region);
         }
+        if (params_.dependency_trace) {
+          const auto& b = boxes[id];
+          region_trace[r].push_back(fmt::format(
+              "R {} {} {} {} {} {:.6f} {} {} {} {}{}",
+              stage_trace_name,
+              partition,
+              r,
+              region_trace[r].size(),
+              id,
+              omp_get_wtime() - net_start,
+              b[0],
+              b[1],
+              b[2],
+              b[3],
+              traceAccesses(w.footprint, false)));
+        }
       }
+      w.footprint.setDetail(0);
       busy[r] = omp_get_wtime() - region_start;
+    }
+    if (params_.dependency_trace) {
+      for (const std::vector<std::string>& lines : region_trace) {
+        writeTrace(lines);
+      }
     }
     const double wall = omp_get_wtime() - wall_start;
     // Rip-up history of the regions' sequences (Sec. 4.2).
@@ -8529,6 +8618,8 @@ void BonnRouteDR::routeRipupBoxes(std::vector<int>& queue,
     int source = -1;
     int64_t settled = 0;
     RipupState state;
+    // dependency_trace: seconds, changed nets and accessed tiles.
+    std::string trace;
   };
   // A sequence's box at a step: the routing area widened by the margin, 4 x
   // the margin, or the whole chip.
@@ -8675,11 +8766,13 @@ void BonnRouteDR::routeRipupBoxes(std::vector<int>& queue,
             return;
           }
           Worker& w = workers_[t];
+          const double task_start = omp_get_wtime();
           const br::TileBox* resident = slot.whole ? nullptr : &slot.box;
           const br::AccessFootprintScope footprint_scope(
               params_.partition_check && resident != nullptr ? &w.footprint
                                                              : nullptr);
           if (params_.partition_check && resident != nullptr) {
+            w.footprint.setDetail(params_.dependency_trace ? 2 : 0);
             beginFootprint(w, net, kPhaseRegion, netAreaTileBox(net, dilation));
             w.footprint.widen(slot.box);
           }
@@ -8722,7 +8815,49 @@ void BonnRouteDR::routeRipupBoxes(std::vector<int>& queue,
           if (params_.partition_check && resident != nullptr) {
             endFootprint(w, net, resident);
           }
+          if (params_.dependency_trace) {
+            std::vector<int> changed;
+            for (const SavedRouting& saved : journal) {
+              changed.push_back(saved.net);
+            }
+            std::ranges::sort(changed);
+            changed.erase(std::unique(changed.begin(), changed.end()),
+                          changed.end());
+            std::string nets;
+            for (const int id : changed) {
+              nets += fmt::format("{}{}", nets.empty() ? "" : ",", id);
+            }
+            slot.trace = fmt::format(
+                "{:.6f} nets:{}{}",
+                omp_get_wtime() - task_start,
+                nets.empty() ? "-" : nets,
+                resident != nullptr ? traceAccesses(w.footprint, true)
+                                    : std::string());
+            w.footprint.setDetail(0);
+          }
         });
+    if (params_.dependency_trace) {
+      std::vector<std::string> lines;
+      for (size_t index = 0; index < order.size(); index++) {
+        const Slot& slot = slots[order[index]];
+        lines.push_back(fmt::format(
+            "B {} {} {} {} {} {} {} {} {} {} {} {} {}",
+            pass,
+            ripup_box_stats_.chunks,
+            index,
+            order[index],
+            slot.net,
+            slot.step,
+            slot.whole ? 1 : 0,
+            slot.attempted ? 1 : 0,
+            slot.box.xlo,
+            slot.box.ylo,
+            slot.box.xhi,
+            slot.box.yhi,
+            slot.trace.empty() ? "0.000000 nets:-" : slot.trace));
+      }
+      writeTrace(lines);
+    }
     // Rip-up history of the chunk's box-limited sequences (Sec. 4.2).
     for (Worker& w : workers_) {
       for (const size_t v : w.history_bumps) {
