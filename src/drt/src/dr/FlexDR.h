@@ -289,6 +289,11 @@ class FlexDR
       int& version,
       IterationProgress& iter_prog);
   odb::Rect getDRVBBox(const odb::Rect& drv_rect) const;
+  // Debug group bonnroute_cleanup_worker: the competing workers of every
+  // cluster of a tile-flow batch and the chosen one.
+  void reportClusterResults(
+      const std::vector<std::unique_ptr<FlexDRWorker>>& batch,
+      const std::map<int, FlexDRWorker*>& chosen) const;
   std::vector<odb::Rect> getOffGuideWorkerBoxes(frMarker* marker) const;
   // Runs a stubborn-tiles batch; per cluster, a worker created after the first
   // worker that ended with zero markers is skipped or stopped.  Returns the
@@ -575,6 +580,21 @@ class FlexDRWorker
   frUInt4 getWorkerMarkerCost() const { return workerMarkerCost_; }
   frUInt4 getWorkerDRCCost() const { return workerDRCCost_; }
   int getWorkerId() const { return worker_id_; }
+  // Measurement of one worker (debug group bonnroute_cleanup_worker): the
+  // work of its route queue and where its seconds went. It is written by
+  // main() and does not influence routing.
+  struct WorkStatistics
+  {
+    int routed_nets = 0;       // queue entries that ripped up and routed a net
+    int checked_objects = 0;   // queue entries that ran a design-rule check
+    int dropped_entries = 0;   // queue entries dropped as stale or unchanged
+    double maze_seconds = 0;   // routeNet
+    double check_seconds = 0;  // FlexGC runs inside the route queue
+    double queue_seconds = 0;  // route_queue_main
+    double init_seconds = 0;   // initMarkers and init
+    double total_seconds = 0;  // main
+  };
+  const WorkStatistics& getWorkStatistics() const { return work_statistics_; }
   // others
   // main() is mainRead() followed by mainRoute().
   int main(frDesign* design);
@@ -757,8 +777,10 @@ class FlexDRWorker
   bool changed_design_{false};
   bool save_updates_{false};
   int worker_id_{0};
+  WorkStatistics work_statistics_;
 
   // hellpers
+  void reportWorkStatistics(int num_markers) const;
   bool isRoutePatchWire(const frPatchWire* pwire) const;
   bool isRouteVia(const frVia* via) const;
   // init

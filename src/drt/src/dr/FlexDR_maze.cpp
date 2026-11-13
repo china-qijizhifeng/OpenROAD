@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <cassert>
+#include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <iostream>
@@ -2077,6 +2078,11 @@ void FlexDRWorker::identifyCongestionLevel()
 
 void FlexDRWorker::route_queue_main(std::queue<RouteQueueEntry>& rerouteQueue)
 {
+  using Clock = std::chrono::steady_clock;
+  const auto seconds_since = [](const Clock::time_point& start) {
+    return std::chrono::duration<double>(Clock::now() - start).count();
+  };
+  const Clock::time_point queue_start = Clock::now();
   int gc_version = 1;
   std::map<frBlockObject*, std::pair<int, int>> obj_gc_version;
   auto& workerRegionQuery = getWorkerRegionQuery();
@@ -2101,6 +2107,7 @@ void FlexDRWorker::route_queue_main(std::queue<RouteQueueEntry>& rerouteQueue)
     if (obj->typeId() == drcNet && doRoute) {
       auto net = static_cast<drNet*>(obj);
       if (numReroute != net->getNumReroutes()) {
+        work_statistics_.dropped_entries++;
         continue;
       }
       if (ripupMode_ == RipUpMode::DRC && checking_obj != nullptr
@@ -2108,6 +2115,7 @@ void FlexDRWorker::route_queue_main(std::queue<RouteQueueEntry>& rerouteQueue)
           && obj_gc_version.find(checking_obj) != obj_gc_version.end()
           && obj_gc_version[net->getFrNet()] == std::make_pair(gc_version, 0)
           && obj_gc_version[checking_obj] == std::make_pair(gc_version, 0)) {
+        work_statistics_.dropped_entries++;
         continue;
       }
       // init
@@ -2138,7 +2146,10 @@ void FlexDRWorker::route_queue_main(std::queue<RouteQueueEntry>& rerouteQueue)
       // route
       mazeNetInit(net);
       std::vector<FlexMazeIdx> paths;
+      const Clock::time_point maze_start = Clock::now();
       bool isRouted = routeNet(net, paths);
+      work_statistics_.maze_seconds += seconds_since(maze_start);
+      work_statistics_.routed_nets++;
       if (!isRouted) {
         if (router_cfg_->OUT_MAZE_FILE == std::string("")) {
           if (router_cfg_->VERBOSE > 0) {
@@ -2171,9 +2182,11 @@ void FlexDRWorker::route_queue_main(std::queue<RouteQueueEntry>& rerouteQueue)
       didRoute = true;
       // gc
       if (gcWorker_->setTargetNet(net)) {
+        const Clock::time_point check_start = Clock::now();
         gcWorker_->updateDRNet(net);
         gcWorker_->setEnableSurgicalFix(true);
         gcWorker_->main();
+        work_statistics_.check_seconds += seconds_since(check_start);
         modEolCosts_poly(gcWorker_->getTargetNet(), ModCostType::addRouteShape);
         // write back GC patches
         drNet* currNet = net;
@@ -2251,8 +2264,10 @@ void FlexDRWorker::route_queue_main(std::queue<RouteQueueEntry>& rerouteQueue)
         gcWorker_->setEnableSurgicalFix(false);
         if (obj_gc_version.find(obj) != obj_gc_version.end()
             && obj_gc_version[obj].first == gc_version) {
+          work_statistics_.dropped_entries++;
           continue;
         }
+        const Clock::time_point check_start = Clock::now();
         if (obj->typeId() == frcNet) {
           auto net = static_cast<frNet*>(obj);
           if (gcWorker_->setTargetNet(net)) {
@@ -2264,6 +2279,10 @@ void FlexDRWorker::route_queue_main(std::queue<RouteQueueEntry>& rerouteQueue)
             gcWorker_->main();
             didCheck = true;
           }
+        }
+        if (didCheck) {
+          work_statistics_.check_seconds += seconds_since(check_start);
+          work_statistics_.checked_objects++;
         }
         obj_gc_version[obj] = {gc_version, gcWorker_->getMarkers().size()};
       }
@@ -2286,6 +2305,7 @@ void FlexDRWorker::route_queue_main(std::queue<RouteQueueEntry>& rerouteQueue)
       }
     }
   }
+  work_statistics_.queue_seconds += seconds_since(queue_start);
 }
 
 void FlexDRWorker::modEolCosts_poly(gcPin* shape,

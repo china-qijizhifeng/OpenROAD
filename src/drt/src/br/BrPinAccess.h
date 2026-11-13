@@ -132,6 +132,50 @@ SelectionResult selectConflictFree(const SelectionInput& in);
 // first candidate compatible with the earlier choices.
 SelectionResult selectGreedy(const SelectionInput& in);
 
+// Catalogues of an instance whose conflict-free selection leaves a pin
+// without a primary path (Sec. 4.3 gives every pin one; Sec. 4.4 "we
+// dynamically generate new access paths"): the selection is repeated with
+// other catalogues of the instance's pins.
+struct CatalogueVariant
+{
+  // Algorithm 3's grid and direction states instead of the Hanan grid.
+  bool algorithm3 = false;
+  // The pin's access points start at equal cost. With the preference for
+  // the access point pin access chose, the paths of the other access points
+  // start with a penalty and enter the catalogue only behind the paths of
+  // the chosen one.
+  bool all_access_points = false;
+  // Pitches added to the radius of the on-track targets.
+  int extra_radius = 0;
+  // Multiple of the catalogue size (paths kept per pin).
+  int paths_factor = 1;
+  bool operator==(const CatalogueVariant&) const = default;
+};
+
+// The variants tried in order for such an instance.
+//   algorithm3_fallback: the Algorithm 3 catalogues with the configured
+//     access point preference take part (offtrack_algorithm3_fallback).
+//   mode 0: only that fallback.
+//   mode 1: the fallback, then the completion variants.
+//   mode 2: the completion variants at the catalogue size, then the
+//     fallback, then the wider completion variants.
+// Completion variants: all access points alike on the configured grid, then
+// on the Algorithm 3 grid; `widenings` times again, each time with one more
+// pitch of radius and twice the paths.
+std::vector<CatalogueVariant> selectionCompletionVariants(
+    bool algorithm3_fallback,
+    int mode,
+    int widenings);
+
+// The attempt to keep in place of a selection that assigns `assigned` of
+// the `pins` pins with catalogues, given the number of pins each attempt
+// assigns: the first attempt that assigns all pins; else the first of the
+// attempts that assign the most pins, when that is more than `assigned`;
+// -1 keeps the current selection.
+int bestSelectionAttempt(int pins,
+                         int assigned,
+                         const std::vector<int>& attempts);
+
 // A pin of the routed net for the pin-contact guard: its shapes and its
 // access points (layer, point).
 struct ContactPin

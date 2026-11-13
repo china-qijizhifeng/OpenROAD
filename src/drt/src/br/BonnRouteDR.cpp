@@ -313,6 +313,8 @@ bool BonnRouteDRParams::set(const std::string& name, const double value)
     offtrack_access_report = std::max(0, v);
   } else if (name == "offtrack_algorithm3_fallback") {
     offtrack_algorithm3_fallback = v != 0;
+  } else if (name == "offtrack_complete_selection") {
+    offtrack_complete_selection = std::clamp(v, 0, 2);
   } else if (name == "access_classes") {
     access_classes = v != 0;
   } else if (name == "access_class_margin") {
@@ -2100,6 +2102,11 @@ void BonnRouteDR::AccessStats::add(const AccessStats& o)
   member_regenerated += o.member_regenerated;
   fallback_instances += o.fallback_instances;
   fallback_improved += o.fallback_improved;
+  completion_complete += o.completion_complete;
+  completion_incomplete += o.completion_incomplete;
+  for (size_t k = 0; k < completion_kept.size(); k++) {
+    completion_kept[k] += o.completion_kept[k];
+  }
   pin_classes += o.pin_classes;
   mapped_options += o.mapped_options;
   mapped_dropped += o.mapped_dropped;
@@ -3020,9 +3027,15 @@ void BonnRouteDR::offTrackCatalogue(const int net,
                                     const Worker* worker,
                                     std::vector<AccessOption>& out,
                                     AccessStats& stats,
-                                    const int extra_radius,
-                                    const bool algorithm3) const
+                                    const br::CatalogueVariant& variant) const
 {
+  const int extra_radius = variant.extra_radius;
+  const bool algorithm3 = variant.algorithm3;
+  // Paths kept per pin, and the preference for the access point pin access
+  // chose (off in the variants with all access points alike).
+  const int max_paths = params_.max_access_options * variant.paths_factor;
+  const bool prefer_chosen_access_point
+      = params_.offtrack_preferred_access_points && !variant.all_access_points;
   out.clear();
   stats.pins++;
   utl::Timer step_timer;
@@ -3314,9 +3327,8 @@ void BonnRouteDR::offTrackCatalogue(const int net,
                              * std::max<frCoord>(max_pitch, 1);
   if (from_aps) {
     for (const AccessSource& a : aps) {
-      const int64_t c = params_.offtrack_preferred_access_points && !a.preferred
-                            ? ap_penalty
-                            : 0;
+      const int64_t c
+          = prefer_chosen_access_point && !a.preferred ? ap_penalty : 0;
       req.sources.push_back({0, toBox(odb::Rect(a.point, a.point)), c});
     }
   } else {
@@ -3333,7 +3345,7 @@ void BonnRouteDR::offTrackCatalogue(const int net,
   // cost model.
   req.via_cost = layers_[z_of_fr_[frs.back()]].width;
   // The nearest on-track points; some may fail the exact checks below.
-  req.max_targets = 2 * params_.max_access_options;
+  req.max_targets = 2 * max_paths;
   req.merge_direction_states = hanan;
   req.on_track_ties = params_.offtrack_on_track_ties && !algorithm3;
   for (size_t s = 0; s < frs.size(); s++) {
@@ -3443,8 +3455,7 @@ void BonnRouteDR::offTrackCatalogue(const int net,
       const bool preferred = (a.p.y == b.p.y) == layers_[z].horizontal;
       cost += len * (preferred ? 1 : params_.jog_factor) * unit();
     }
-    if (from_aps && params_.offtrack_preferred_access_points
-        && !opt.route.empty()) {
+    if (from_aps && prefer_chosen_access_point && !opt.route.empty()) {
       for (const AccessSource& a : aps) {
         if (toGrid(a.point) == opt.route.front().p && !a.preferred) {
           cost += static_cast<Cost>(params_.pin_cost) * layers_[0].pitch
@@ -3486,7 +3497,7 @@ void BonnRouteDR::offTrackCatalogue(const int net,
       continue;
     }
     out.push_back(std::move(opt));
-    if (static_cast<int>(out.size()) >= params_.max_access_options) {
+    if (static_cast<int>(out.size()) >= max_paths) {
       break;
     }
   }
@@ -4038,34 +4049,72 @@ void BonnRouteDR::buildOffTrackAccess(const std::vector<char>& pre_skip)
                                  std::vector<std::vector<AccessOption>>& cats,
                                  std::vector<int>& choice,
                                  const std::vector<int>& nets) {
-    if (!params_.offtrack_algorithm3_fallback
-        || !params_.offtrack_hanan_grid) {
+    // The Algorithm 3 fallback belongs to the Hanan grid;
+    // offtrack_complete_selection adds the variants of
+    // br::selectionCompletionVariants. The first selection that assigns
+    // every pin with a catalogue is kept, else the one assigning the most
+    // pins when that is more than now (br::bestSelectionAttempt).
+    const bool fallback
+        = params_.offtrack_algorithm3_fallback && params_.offtrack_hanan_grid;
+    const std::vector<br::CatalogueVariant> variants
+        = br::selectionCompletionVariants(
+            fallback, params_.offtrack_complete_selection, 2);
+    if (variants.empty()) {
       return;
     }
     const int n = static_cast<int>(cats.size());
     int assigned = 0;
-    bool missing = false;
+    int with_catalogue = 0;
     for (int p = 0; p < n; p++) {
       assigned += choice[p] >= 0;
-      missing = missing || (choice[p] < 0 && !cats[p].empty());
+      with_catalogue += !cats[p].empty();
     }
-    if (!missing) {
+    if (assigned >= with_catalogue) {
       return;
     }
     stats.fallback_instances++;
-    std::vector<std::vector<AccessOption>> alt(n);
-    for (int p = 0; p < n; p++) {
-      const auto [net, t] = ia.terms[p];
-      offTrackCatalogue(
-          net, nets_[net].terms[t], nullptr, alt[p], stats, 0, true);
+    struct Attempt
+    {
+      std::vector<std::vector<AccessOption>> catalogues;
+      std::vector<int> choice;
+    };
+    std::vector<Attempt> attempts;
+    std::vector<int> attempt_assigned;
+    for (const br::CatalogueVariant& variant : variants) {
+      Attempt& attempt = attempts.emplace_back();
+      attempt.catalogues.resize(n);
+      for (int p = 0; p < n; p++) {
+        const auto [net, t] = ia.terms[p];
+        offTrackCatalogue(net,
+                          nets_[net].terms[t],
+                          nullptr,
+                          attempt.catalogues[p],
+                          stats,
+                          variant);
+      }
+      attempt.choice = solve(attempt.catalogues, nets);
+      attempt_assigned.push_back(static_cast<int>(std::ranges::count_if(
+          attempt.choice, [](const int c) { return c >= 0; })));
+      if (attempt_assigned.back() >= with_catalogue) {
+        break;
+      }
     }
-    std::vector<int> alt_choice = solve(alt, nets);
-    const int alt_assigned = static_cast<int>(
-        std::ranges::count_if(alt_choice, [](const int c) { return c >= 0; }));
-    if (alt_assigned > assigned) {
-      cats = std::move(alt);
-      choice = std::move(alt_choice);
-      stats.fallback_improved++;
+    const int kept
+        = br::bestSelectionAttempt(with_catalogue, assigned, attempt_assigned);
+    if (kept >= 0) {
+      cats = std::move(attempts[kept].catalogues);
+      choice = std::move(attempts[kept].choice);
+      assigned = attempt_assigned[kept];
+      stats.completion_kept[std::min<size_t>(
+          kept, stats.completion_kept.size() - 1)]++;
+      if (variants[kept] == br::CatalogueVariant{.algorithm3 = true}) {
+        stats.fallback_improved++;
+      }
+    }
+    if (assigned >= with_catalogue) {
+      stats.completion_complete++;
+    } else {
+      stats.completion_incomplete++;
     }
   };
   // D10 pin keys (also for the M3 statistics): per access pin, the inputs
@@ -4503,7 +4552,8 @@ void BonnRouteDR::buildOffTrackAccess(const std::vector<char>& pre_skip)
       // A top-level pin without a legal path: Algorithm 3 catalogue.
       stats.fallback_instances++;
       std::vector<std::vector<AccessOption>> alt(1);
-      offTrackCatalogue(net_id, term, nullptr, alt[0], stats, 0, true);
+      offTrackCatalogue(
+          net_id, term, nullptr, alt[0], stats, {.algorithm3 = true});
       const std::vector<int> alt_choice = solve(alt, {net_id});
       if (alt_choice[0] >= 0) {
         cats = std::move(alt);
@@ -4525,6 +4575,40 @@ void BonnRouteDR::buildOffTrackAccess(const std::vector<char>& pre_skip)
                   "more pins with Algorithm 3 catalogues.",
                   stats.fallback_instances,
                   stats.fallback_improved);
+  }
+  if (params_.verbose && params_.offtrack_complete_selection > 0) {
+    // The kept variants in the order of br::selectionCompletionVariants.
+    const std::vector<br::CatalogueVariant> variants
+        = br::selectionCompletionVariants(
+            params_.offtrack_algorithm3_fallback && params_.offtrack_hanan_grid,
+            params_.offtrack_complete_selection,
+            2);
+    std::string kept;
+    for (size_t k = 0; k < variants.size(); k++) {
+      const br::CatalogueVariant& v = variants[k];
+      kept += fmt::format(
+          "{}{}{}{} {}",
+          k == 0 ? "" : ", ",
+          v.algorithm3 ? "Algorithm 3" : "configured grid",
+          v.all_access_points ? " with all access points alike" : "",
+          v.extra_radius > 0
+              ? fmt::format(" and {} more pitches of radius, {} times the "
+                            "paths",
+                            v.extra_radius,
+                            v.paths_factor)
+              : "",
+          stats.completion_kept[std::min<size_t>(
+              k, stats.completion_kept.size() - 1)]);
+    }
+    logger_->info(utl::DRT,
+                  9240,
+                  "BonnRoute off-track selection completion: {} instances "
+                  "with a pin without a primary path, {} completed, {} keep "
+                  "such a pin; instances by kept catalogues: {}.",
+                  stats.fallback_instances,
+                  stats.completion_complete,
+                  stats.completion_incomplete,
+                  kept);
   }
   for (NetData& net : nets_) {
     if (pre_skip[net.id]) {
@@ -4921,7 +5005,7 @@ bool BonnRouteDR::regenerateAccess(NetData& net, const int t, Worker& worker)
   std::vector<AccessOption> fresh;
   // Against the current routing space, two pitches farther out (Sec. 4.4
   // "we dynamically generate new access paths").
-  offTrackCatalogue(net.id, term, &worker, fresh, stats, 2);
+  offTrackCatalogue(net.id, term, &worker, fresh, stats, {.extra_radius = 2});
   worker.regenerations++;
   int added = 0;
   for (AccessOption& opt : fresh) {
