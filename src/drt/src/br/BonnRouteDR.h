@@ -191,7 +191,7 @@ struct BonnRouteDRParams
   // holds short searches only; the nets over it are searched again in a
   // second pass with tail_defer_settled. 0, or a value at or above
   // tail_defer_settled: one pass with tail_defer_settled.
-  int tail_first_settled = 0;
+  int tail_first_settled = 100000;
   // The final pass of the stage for the deferred nets. 0 hands them to the
   // rip-up phase instead (final_ripup), whose rip-up mode search finds a
   // legal path at no penalty when one exists and does not exhaust the area
@@ -204,7 +204,7 @@ struct BonnRouteDRParams
   // Batch size of the deferred pass. Its searches are long and few of them
   // end with a route, so larger batches cost few conflicts and fewer
   // barriers. 0: tail_batch.
-  int tail_deferred_batch = 0;
+  int tail_deferred_batch = 128;
   // Sec. 5.1: a critical net routing step before the partitions; clock
   // nets are routed first, serially, on the whole chip.
   bool critical_nets = true;
