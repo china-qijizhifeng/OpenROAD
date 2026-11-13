@@ -271,10 +271,11 @@ struct BonnRouteDRParams
   // catalogue with that point's paths), on the configured grid and on the
   // Algorithm 3 grid, then twice more with one more pitch of radius and
   // twice the paths. The first selection that gives every pin a primary
-  // path is kept (DRT-9240). 1: after the Algorithm 3 fallback; 2: the
-  // catalogues with all access points alike before it; 0: off. An instance
-  // whose selection is complete keeps its catalogues and primary paths.
-  int offtrack_complete_selection = 1;
+  // path is kept (DRT-9240). 2: the catalogues with all access points
+  // alike at the catalogue size come before the Algorithm 3 fallback; 1:
+  // all of them after it; 0: off. An instance whose selection is complete
+  // keeps its catalogues and primary paths.
+  int offtrack_complete_selection = 2;
   // Reuse a circuit class's catalogues and conflict-free solution for all
   // its instances; 0 solves every instance separately.
   bool access_classes = true;
