@@ -54,8 +54,7 @@ constexpr float kFloatInfinity = std::numeric_limits<float>::infinity();
 
 double secondsSince(const std::chrono::steady_clock::time_point start)
 {
-  return std::chrono::duration<double>(std::chrono::steady_clock::now()
-                                       - start)
+  return std::chrono::duration<double>(std::chrono::steady_clock::now() - start)
       .count();
 }
 
@@ -268,42 +267,43 @@ int ResourceSharingSizingPolicy::runBufferRound()
     RebufferTreePlan plan;
   };
   RebufferPlannerPool& pool = *planners_;
-  const std::vector<BufferChoice> choices = thread_pool_->parallelMap(
-      ready, [this, &pool](const BufferJob& job) {
-        BufferChoice choice;
-        const RebufferPlannerPool::Lease lease(pool);
-        std::vector<RebufferTreePlan> plans
-            = lease.planner().makeRebufferTreePlans(
-                job.driver_pin, job.net, job.target_load_pin, 4);
-        choice.plans = static_cast<int>(plans.size());
-        for (RebufferTreePlan& plan : plans) {
-          if (plan.buffer_count > 0) {
-            ++choice.plans_with_buffers;
-            choice.best_gain = std::max(choice.best_gain, plan.driver_slack_gain);
-          }
-          if (plan.buffer_count == 0 || plan.driver_slack_gain <= 0.0f) {
-            continue;
-          }
-          bool dont_touch_behind_buffer = false;
-          for (const BufferTreeLoadPath& load_path : plan.load_paths) {
-            for (const BufferTreePathStage& stage : load_path.stages) {
-              if (stage.type == BufferTreeStageType::kBuffer
-                  && resizer_.dontTouch(load_path.load_pin)) {
-                dont_touch_behind_buffer = true;
+  const std::vector<BufferChoice> choices
+      = thread_pool_->parallelMap(ready, [this, &pool](const BufferJob& job) {
+          BufferChoice choice;
+          const RebufferPlannerPool::Lease lease(pool);
+          std::vector<RebufferTreePlan> plans
+              = lease.planner().makeRebufferTreePlans(
+                  job.driver_pin, job.net, job.target_load_pin, 4);
+          choice.plans = static_cast<int>(plans.size());
+          for (RebufferTreePlan& plan : plans) {
+            if (plan.buffer_count > 0) {
+              ++choice.plans_with_buffers;
+              choice.best_gain
+                  = std::max(choice.best_gain, plan.driver_slack_gain);
+            }
+            if (plan.buffer_count == 0 || plan.driver_slack_gain <= 0.0f) {
+              continue;
+            }
+            bool dont_touch_behind_buffer = false;
+            for (const BufferTreeLoadPath& load_path : plan.load_paths) {
+              for (const BufferTreePathStage& stage : load_path.stages) {
+                if (stage.type == BufferTreeStageType::kBuffer
+                    && resizer_.dontTouch(load_path.load_pin)) {
+                  dont_touch_behind_buffer = true;
+                }
               }
             }
+            if (dont_touch_behind_buffer) {
+              continue;
+            }
+            if (!choice.valid
+                || plan.driver_slack_gain > choice.plan.driver_slack_gain) {
+              choice.plan = std::move(plan);
+              choice.valid = true;
+            }
           }
-          if (dont_touch_behind_buffer) {
-            continue;
-          }
-          if (!choice.valid
-              || plan.driver_slack_gain > choice.plan.driver_slack_gain) {
-            choice.plan = std::move(plan);
-            choice.valid = true;
-          }
-        }
-        return choice;
-      });
+          return choice;
+        });
   // Main thread: apply, one tree per net and none on a net that a tree
   // already changed.
   std::unordered_set<const sta::Net*> touched_nets;
@@ -382,8 +382,7 @@ void ResourceSharingSizingPolicy::readConfig()
         rs_config_.multipliers
             = ResourceSharingSizingConfig::Multipliers::kLagrangian;
       } else {
-        logger_->warn(
-            RSZ, 3306, "RS_SIZING: unknown multipliers '{}'.", value);
+        logger_->warn(RSZ, 3306, "RS_SIZING: unknown multipliers '{}'.", value);
       }
     } else if (key == "lagrangian_exponent") {
       rs_config_.lagrangian_exponent = number;
@@ -628,16 +627,16 @@ void ResourceSharingSizingPolicy::computeLogWeights()
         if (log_from == kNegativeInfinity) {
           continue;
         }
-        const float delay = sta::delayAsFloat(
-            graph_->arcDelay(edge, const_cast<sta::TimingArc*>(arc), dcalc_ap_));
+        const float delay = sta::delayAsFloat(graph_->arcDelay(
+            edge, const_cast<sta::TimingArc*>(arc), dcalc_ap_));
         log_forward_[base + to_rf]
             = logSumExp(log_forward_[base + to_rf], log_from + scale * delay);
       }
     }
     if (!has_fanin) {
       for (const sta::RiseFall* rf : sta::RiseFall::range()) {
-        const sta::Arrival arrival = sta_->arrival(
-            vertex, rf->asRiseFallBoth(), scenes, max_);
+        const sta::Arrival arrival
+            = sta_->arrival(vertex, rf->asRiseFallBoth(), scenes, max_);
         const float value = sta::delayAsFloat(arrival);
         if (std::abs(value) < 1e10f) {
           log_forward_[base + rf->index()] = scale * value;
@@ -653,8 +652,8 @@ void ResourceSharingSizingPolicy::computeLogWeights()
     const size_t base = 2 * graph_->id(vertex);
     if (search->isEndpoint(vertex)) {
       for (const sta::RiseFall* rf : sta::RiseFall::range()) {
-        const sta::Required required = sta_->required(
-            vertex, rf->asRiseFallBoth(), scenes, max_);
+        const sta::Required required
+            = sta_->required(vertex, rf->asRiseFallBoth(), scenes, max_);
         const float value = sta::delayAsFloat(required);
         if (std::abs(value) < 1e10f) {
           log_backward_[base + rf->index()] = -scale * value;
@@ -676,8 +675,8 @@ void ResourceSharingSizingPolicy::computeLogWeights()
         if (log_to == kNegativeInfinity) {
           continue;
         }
-        const float delay = sta::delayAsFloat(
-            graph_->arcDelay(edge, const_cast<sta::TimingArc*>(arc), dcalc_ap_));
+        const float delay = sta::delayAsFloat(graph_->arcDelay(
+            edge, const_cast<sta::TimingArc*>(arc), dcalc_ap_));
         log_backward_[base + from_rf]
             = logSumExp(log_backward_[base + from_rf], log_to + scale * delay);
       }
@@ -711,8 +710,7 @@ void ResourceSharingSizingPolicy::accumulateLogWeights(const int iteration)
   mix(log_backward_mean_, log_backward_);
 }
 
-void ResourceSharingSizingPolicy::updateLagrangeMultipliers(
-    const int iteration)
+void ResourceSharingSizingPolicy::updateLagrangeMultipliers(const int iteration)
 {
   const sta::SceneSeq scenes{const_cast<sta::Scene*>(scene_)};
   sta::Search* search = sta_->search();
@@ -752,9 +750,8 @@ void ResourceSharingSizingPolicy::updateLagrangeMultipliers(
     endpoint_multipliers_.assign(vertex_slots, 1.0);
   }
   auto factor = [this](const double criticality) {
-    return std::pow(
-        std::max(rs_config_.lagrangian_floor, 1.0 + criticality),
-        rs_config_.lagrangian_exponent);
+    return std::pow(std::max(rs_config_.lagrangian_floor, 1.0 + criticality),
+                    rs_config_.lagrangian_exponent);
   };
   // Multiplicative update by local criticality.  Arcs without a constrained
   // path through them get multiplier zero.
@@ -778,8 +775,8 @@ void ResourceSharingSizingPolicy::updateLagrangeMultipliers(
           multiplier = 0.0;
           continue;
         }
-        const float delay = sta::delayAsFloat(
-            graph_->arcDelay(edge, const_cast<sta::TimingArc*>(arc), dcalc_ap_));
+        const float delay = sta::delayAsFloat(graph_->arcDelay(
+            edge, const_cast<sta::TimingArc*>(arc), dcalc_ap_));
         const double criticality = (a + delay - r) / period_;
         if (multiplier == 0.0) {
           multiplier = 1.0;
@@ -878,7 +875,8 @@ void ResourceSharingSizingPolicy::normalizeLagrangeMultipliers()
     }
     sta::VertexOutEdgeIterator edges(vertex, graph_);
     while (edges.hasNext()) {
-      const size_t edge_base = 4 * static_cast<size_t>(graph_->id(edges.next()));
+      const size_t edge_base
+          = 4 * static_cast<size_t>(graph_->id(edges.next()));
       for (size_t slot = 0; slot < 4; ++slot) {
         if (edge_base + slot < arc_multipliers_.size()) {
           largest = std::max(largest, arc_multipliers_[edge_base + slot]);
@@ -923,8 +921,7 @@ double ResourceSharingSizingPolicy::gateCriticality(
             edge, const_cast<sta::TimingArc*>(arc), dcalc_ap_));
         criticality = std::max(
             criticality,
-            arcWeight(edge, arc, edge->from(graph_), vertex, delay)
-                * period_);
+            arcWeight(edge, arc, edge->from(graph_), vertex, delay) * period_);
       }
     }
   }
@@ -952,8 +949,8 @@ double ResourceSharingSizingPolicy::arcWeight(sta::Edge* edge,
   const int to_rf = riseFallIndex(arc->toEdge());
   if (rs_config_.multipliers
       == ResourceSharingSizingConfig::Multipliers::kLagrangian) {
-    const size_t slot = 4 * static_cast<size_t>(graph_->id(edge))
-                        + 2 * from_rf + to_rf;
+    const size_t slot
+        = 4 * static_cast<size_t>(graph_->id(edge)) + 2 * from_rf + to_rf;
     return slot < arc_multipliers_.size() ? arc_multipliers_[slot] / period_
                                           : 0.0;
   }
@@ -1007,8 +1004,8 @@ bool ResourceSharingSizingPolicy::fillTableArc(sta::Edge* edge,
   table_arc.input_rf = riseFallIndex(arc->fromEdge());
   table_arc.output_rf = riseFallIndex(arc->toEdge());
   table_arc.pvt = pvtOf(network_->instance(from->pin()));
-  table_arc.input_slew = sta::delayAsFloat(graph_->slew(
-      from, sta::RiseFall::find(table_arc.input_rf), dcalc_ap_));
+  table_arc.input_slew = sta::delayAsFloat(
+      graph_->slew(from, sta::RiseFall::find(table_arc.input_rf), dcalc_ap_));
   table_arc.load_cap = load_cap;
   const float delay = sta::delayAsFloat(
       graph_->arcDelay(edge, const_cast<sta::TimingArc*>(arc), dcalc_ap_));
@@ -1124,8 +1121,8 @@ bool ResourceSharingSizingPolicy::snapshot(sta::Instance* instance,
               continue;
             }
             sta::Vertex* sibling_out = edge->to(graph_);
-            const float sibling_load = graph_delay_calc->loadCap(
-                sibling_out->pin(), scene_, max_);
+            const float sibling_load
+                = graph_delay_calc->loadCap(sibling_out->pin(), scene_, max_);
             for (const sta::TimingArc* arc : edge->timingArcSet()->arcs()) {
               TableArc table_arc;
               if (fillTableArc(edge,
@@ -1190,9 +1187,12 @@ bool ResourceSharingSizingPolicy::snapshot(sta::Instance* instance,
         GateArc gate_arc;
         gate_arc.input_index = input_index;
         gate_arc.output_index = static_cast<int>(output_index);
-        if (!fillTableArc(
-                edge, arc, from, driver_vertex, output.load_cap,
-                gate_arc.table_arc)) {
+        if (!fillTableArc(edge,
+                          arc,
+                          from,
+                          driver_vertex,
+                          output.load_cap,
+                          gate_arc.table_arc)) {
           return false;
         }
         output.current_slew[gate_arc.table_arc.output_rf]
@@ -1438,22 +1438,21 @@ double ResourceSharingSizingPolicy::objective(const GateSnapshot& snap,
       }
     }
   }
-  const double power_term = powerWeight() * (candidate.power - snap.current_power)
-                            / power_budget_;
+  const double power_term
+      = powerWeight() * (candidate.power - snap.current_power) / power_budget_;
   return timing + power_term;
 }
 
-ResourceSharingSizingPolicy::GateDecision
-ResourceSharingSizingPolicy::evaluate(const GateSnapshot& snap) const
+ResourceSharingSizingPolicy::GateDecision ResourceSharingSizingPolicy::evaluate(
+    const GateSnapshot& snap) const
 {
   GateDecision decision;
   decision.instance = snap.instance;
   const double power_weight = powerWeight();
   // Gain threshold: a fraction of the larger of the gate's weighted delay and
   // its weighted power.
-  const double scale
-      = std::max(snap.weighted_delay,
-                 power_weight * snap.current_power / power_budget_);
+  const double scale = std::max(
+      snap.weighted_delay, power_weight * snap.current_power / power_budget_);
   const double threshold = rs_config_.min_relative_gain * scale;
   double best = -threshold;
   for (const CandidateCell& candidate : snap.candidates) {
@@ -1552,13 +1551,14 @@ void ResourceSharingSizingPolicy::iterate()
   const double mean_violation
       = violating > 0 ? -static_cast<double>(tns) / violating : 0.0;
   if (mean_violation < rs_config_.start_violation_ratio * period_) {
-    logger_->info(RSZ,
-                  3307,
-                  "RS_SIZING: skipped; mean violation {} of {} endpoints is "
-                  "below {:.0f}% of the period.",
-                  sta::delayAsString(static_cast<float>(mean_violation), 3, sta_),
-                  violating,
-                  100.0 * rs_config_.start_violation_ratio);
+    logger_->info(
+        RSZ,
+        3307,
+        "RS_SIZING: skipped; mean violation {} of {} endpoints is "
+        "below {:.0f}% of the period.",
+        sta::delayAsString(static_cast<float>(mean_violation), 3, sta_),
+        violating,
+        100.0 * rs_config_.start_violation_ratio);
     markRunComplete(true);
     return;
   }
@@ -1596,12 +1596,10 @@ void ResourceSharingSizingPolicy::iterate()
       checkWeights();
     }
     // Shift so the most critical arc weights stay near one.
-    const std::vector<double>& forward = rs_config_.accumulate_weights
-                                             ? log_forward_mean_
-                                             : log_forward_;
-    const std::vector<double>& backward = rs_config_.accumulate_weights
-                                              ? log_backward_mean_
-                                              : log_backward_;
+    const std::vector<double>& forward
+        = rs_config_.accumulate_weights ? log_forward_mean_ : log_forward_;
+    const std::vector<double>& backward
+        = rs_config_.accumulate_weights ? log_backward_mean_ : log_backward_;
     // Shift by the most critical data vertex; the clock tree carries the
     // weight of every path.
     log_weight_shift_ = kNegativeInfinity;
@@ -1655,13 +1653,13 @@ void ResourceSharingSizingPolicy::iterate()
     const double new_power = designPower();
     const double power_increase
         = std::max(1e-3, (new_power - power) / power_budget_);
-    const double efficiency
-        = (static_cast<double>(new_tns) - tns) / std::abs(initial_tns)
-          / power_increase;
+    const double efficiency = (static_cast<double>(new_tns) - tns)
+                              / std::abs(initial_tns) / power_increase;
     bool keep = resized > 0
                 && ((tns_better && new_wns >= wns - rs_config_.wns_loss_limit)
                     || (wns_better
-                        && new_tns >= tns - rs_config_.tns_loss_fraction
+                        && new_tns >= tns
+                                          - rs_config_.tns_loss_fraction
                                                 * std::abs(tns)));
     bool stop = false;
     if (keep && first_efficiency > 0.0
