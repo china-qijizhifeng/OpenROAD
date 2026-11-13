@@ -278,6 +278,10 @@ bool BonnRouteDRParams::set(const std::string& name, const double value)
     cleanup_check_only_workers = v != 0;
   } else if (name == "partition_check") {
     partition_check = v != 0;
+  } else if (name == "cleanup_normalize_initial_routing") {
+    cleanup_normalize_initial_routing = v != 0;
+  } else if (name == "left_net_track_assignment") {
+    left_net_track_assignment = v != 0;
   } else if (name == "verbose") {
     verbose = v != 0;
   } else {

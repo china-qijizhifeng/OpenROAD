@@ -280,6 +280,11 @@ int FlexDRWorker::main(frDesign* design)
   }
   high_resolution_clock::time_point t2 = high_resolution_clock::now();
   const int num_markers = getNumMarkers();
+  // end() reads the worker's markers, nets and patches, not the GC state.
+  // Releasing the GC worker here runs its destruction inside the parallel
+  // loop of processWorkersBatch instead of in the serial endWorkersBatch,
+  // and only the GC workers still running stay in memory together.
+  setGCWorker(nullptr);
   cleanup();
   high_resolution_clock::time_point t3 = high_resolution_clock::now();
 
@@ -805,6 +810,32 @@ void FlexDR::processWorkersBatchDistributed(
         }
       }
     }
+  }
+}
+
+void FlexDR::normalizeInitialRouting()
+{
+  // The connectivity check processes the nets marked modified, which are the
+  // nets the other router wrote; it clears the flag. Iteration 0 checks every
+  // tile, so the Recheck markers of the removed and shrunk objects are
+  // dropped.
+  FlexDRConnectivityChecker checker(
+      router_, logger_, router_cfg_, graphics_.get(), dist_on_);
+  checker.check(0);
+  std::vector<frMarker*> markers;
+  for (const auto& marker : getDesign()->getTopBlock()->getMarkers()) {
+    markers.push_back(marker.get());
+  }
+  for (frMarker* marker : markers) {
+    getRegionQuery()->removeMarker(marker);
+    getDesign()->getTopBlock()->removeMarker(marker);
+  }
+  if (router_cfg_->VERBOSE > 0) {
+    logger_->info(DRT,
+                  9150,
+                  "Initial routing clean-up: connectivity normalisation "
+                  "before iteration 0 removed or shrank {} objects.",
+                  markers.size());
   }
 }
 
@@ -2307,6 +2338,10 @@ int FlexDR::main()
     if (incremental && hasFixed) {
       break;
     }
+  }
+  if (initial_routing_cleanup_.normalize_initial_routing && incremental
+      && iter_ == 0 && num_db_markers == 0) {
+    normalizeInitialRouting();
   }
   const auto search_repair_args
       = strategy(router_cfg_->ROUTESHAPECOST, router_cfg_->MARKERCOST);

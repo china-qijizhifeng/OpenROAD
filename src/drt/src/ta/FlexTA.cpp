@@ -127,6 +127,8 @@ int FlexTA::initTA_helper(int iter,
       worker.setExtBox(extBox);
       worker.setDir(dbTechLayerDir::HORIZONTAL);
       worker.setTAIter(iter);
+      worker.setNetsWithoutInitialRoutingOnly(
+          nets_without_initial_routing_only_);
       if (workers.empty()
           || (int) workers.back().size() >= router_cfg_->BATCHSIZETA) {
         workers.emplace_back(std::vector<std::unique_ptr<FlexTAWorker>>());
@@ -151,6 +153,8 @@ int FlexTA::initTA_helper(int iter,
       worker.setExtBox(extBox);
       worker.setDir(dbTechLayerDir::VERTICAL);
       worker.setTAIter(iter);
+      worker.setNetsWithoutInitialRoutingOnly(
+          nets_without_initial_routing_only_);
       if (workers.empty()
           || (int) workers.back().size() >= router_cfg_->BATCHSIZETA) {
         workers.emplace_back(std::vector<std::unique_ptr<FlexTAWorker>>());

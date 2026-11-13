@@ -426,8 +426,13 @@ void FlexDRGraphics::drawLayer(odb::dbTechLayer* layer, web::Painter& painter)
       drawMarker(box.xMin(), box.yMin(), box.xMax(), box.yMax(), painter);
     }
   }
+  // A worker releases its GC worker at the end of main().
+  FlexGCWorker* gc_worker = worker_->getGCWorker();
+  if (gc_worker == nullptr) {
+    return;
+  }
   painter.setPen(web::Painter::kYellow, /* cosmetic */ true);
-  for (auto& marker : worker_->getGCWorker()->getMarkers()) {
+  for (auto& marker : gc_worker->getMarkers()) {
     if (marker->getLayerNum() == layerNum) {
       odb::Rect box = marker->getBBox();
       drawMarker(box.xMin(), box.yMin(), box.xMax(), box.yMax(), painter);

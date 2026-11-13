@@ -283,13 +283,31 @@ struct BonnRouteDRParams
   // 3 is the first that rips up nets at violations. After iteration 0 (which
   // routes the left nets and checks every tile), the clean-up runs the first
   // cleanup_incremental_iterations of the incremental iterations 1 and 2 and
-  // continues with iteration 3; 2 is FlexDR's own sequence.
-  int cleanup_incremental_iterations = 2;
+  // continues with iteration 3; 2 is FlexDR's own sequence. With 1, the
+  // left nets get one more reroute pass before iteration 3 and the result
+  // stays within the spread of BonnRoute routings; 0 hands more markers to
+  // iteration 3, which then rips up BonnRoute nets (more vias).
+  int cleanup_incremental_iterations = 1;
   // In the incremental iterations, a FlexDR worker whose nets all carry
   // initial routing has nothing to reroute; it runs the design-rule check
   // (with FlexGC's patches) and writes back the same result without
-  // building the maze grid graph.
-  bool cleanup_check_only_workers = false;
+  // building the maze grid graph. The routing result equals that of the
+  // full worker (bit-identical result files).
+  bool cleanup_check_only_workers = true;
+  // Before FlexDR's iteration 0, run the connectivity check that otherwise
+  // follows iteration 0 over BonnRoute's nets (all are marked modified): it
+  // removes objects that are not on a connecting path (e.g. a pin-layer
+  // segment next to a via whose pad already touches the pin) and shrinks
+  // overshooting segments. Iteration 0 then checks the geometry FlexDR keeps;
+  // the Recheck markers of this check are dropped, since iteration 0 checks
+  // every tile.
+  bool cleanup_normalize_initial_routing = false;
+  // Track assignment runs after BonnRoute instead of before it, for the nets
+  // left to FlexDR only, and sees BonnRoute's routing as obstacles. FlexDR
+  // reads track assignment only for those nets (their tile-boundary pins in
+  // iteration 0). With reservations 1, BonnRoute reads track assignment
+  // before routing, so track assignment keeps its place before BonnRoute.
+  bool left_net_track_assignment = true;
   // Debug (Sec. 5.1): record the global routing tiles that the search and
   // the commit of every net read and write in the shape grid and the fast
   // grid, compare them with the net's tile box and its partition region, and
