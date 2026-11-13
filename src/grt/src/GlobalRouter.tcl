@@ -1,6 +1,18 @@
 # SPDX-License-Identifier: BSD-3-Clause
 # Copyright (c) 2019-2025, The OpenROAD Authors
 
+sta::define_cmd_args "set_global_routing_thread_limit" { limit }
+
+proc set_global_routing_thread_limit { args } {
+  sta::parse_key_args "set_global_routing_thread_limit" args \
+    keys {} \
+    flags {}
+  sta::check_argc_eq1 "set_global_routing_thread_limit" $args
+  set limit [lindex $args 0]
+  sta::check_positive_integer "limit" $limit
+  grt::set_thread_limit $limit
+}
+
 sta::define_cmd_args "set_global_routing_layer_adjustment" { layer adj }
 
 proc set_global_routing_layer_adjustment { args } {

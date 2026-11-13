@@ -3,6 +3,8 @@
 
 #include "grt/GlobalRouter.h"
 
+#include <omp.h>
+
 #include <algorithm>
 #include <array>
 #include <chrono>
@@ -117,9 +119,18 @@ GlobalRouter::GlobalRouter(utl::Logger* logger,
 
 void GlobalRouter::setNumThreads(int num_threads)
 {
-  num_threads_ = num_threads;
+  requested_threads_ = std::max(1, num_threads);
+  num_threads_ = thread_limit_ > 0
+                     ? std::min(requested_threads_, thread_limit_)
+                     : requested_threads_;
   fastroute_->setNumThreads(num_threads_);
   cugr_->setNumThreads(num_threads_);
+}
+
+void GlobalRouter::setThreadLimit(const int limit)
+{
+  thread_limit_ = std::max(0, limit);
+  setNumThreads(requested_threads_);
 }
 
 void GlobalRouter::setBonnRoute(const bool enabled)
@@ -520,6 +531,42 @@ void GlobalRouter::reportIncrementalCongestion()
 void GlobalRouter::globalRoute(bool save_guides)
 {
   utl::Timer timer;
+  // Parallel regions without an explicit team size (BonnRoute GR capacity
+  // estimation) use num_threads_ as well; the previous default is restored.
+  struct OmpThreads
+  {
+    explicit OmpThreads(const int threads) : saved(omp_get_max_threads())
+    {
+      omp_set_num_threads(threads);
+    }
+    ~OmpThreads() { omp_set_num_threads(saved); }
+    int saved;
+  } omp_threads(std::max(1, num_threads_));
+  // OpenSTA's parallel search, which global routing starts through net
+  // slacks and clock nets, uses the same limit for the call; the STA thread
+  // count set by set_thread_count is restored afterwards.
+  struct StaThreads
+  {
+    StaThreads(sta::dbSta* sta, const int threads) : sta(sta)
+    {
+      if (sta != nullptr) {
+        saved = static_cast<int>(sta->threadCount());
+        if (threads < saved) {
+          sta->setThreadCount(threads);
+        }
+      }
+    }
+    ~StaThreads()
+    {
+      if (sta != nullptr && static_cast<int>(sta->threadCount()) != saved) {
+        sta->setThreadCount(saved);
+      }
+    }
+    StaThreads(const StaThreads&) = delete;
+    StaThreads& operator=(const StaThreads&) = delete;
+    sta::dbSta* sta;
+    int saved{1};
+  } sta_threads(sta_, std::max(1, num_threads_));
   bool has_routable_nets = false;
 
   for (auto net : db_->getChip()->getBlock()->getNets()) {
