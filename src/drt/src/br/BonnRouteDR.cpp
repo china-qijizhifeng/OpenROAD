@@ -272,6 +272,8 @@ bool BonnRouteDRParams::set(const std::string& name, const double value)
     offtrack_algorithm3_fallback = v != 0;
   } else if (name == "offtrack_complete_selection") {
     offtrack_complete_selection = std::clamp(v, 0, 2);
+  } else if (name == "critical_access_nets") {
+    critical_access_nets = v != 0;
   } else if (name == "access_classes") {
     access_classes = v != 0;
   } else if (name == "access_class_margin") {
@@ -3993,9 +3995,6 @@ void BonnRouteDR::buildOffTrackAccess(const std::vector<char>& pre_skip)
     const std::vector<br::CatalogueVariant> variants
         = br::selectionCompletionVariants(
             fallback, params_.offtrack_complete_selection, 2);
-    if (variants.empty()) {
-      return;
-    }
     const int n = static_cast<int>(cats.size());
     int assigned = 0;
     int with_catalogue = 0;
@@ -4004,6 +4003,13 @@ void BonnRouteDR::buildOffTrackAccess(const std::vector<char>& pre_skip)
       with_catalogue += !cats[p].empty();
     }
     if (assigned >= with_catalogue) {
+      return;
+    }
+    // critical_access_nets: the nets of this instance are routed first.
+    for (const int net : nets) {
+      nets_[net].access_critical = true;
+    }
+    if (variants.empty()) {
       return;
     }
     stats.fallback_instances++;
@@ -8784,8 +8790,20 @@ void BonnRouteDR::main()
     // when the majority of nets has already been routed" (NDR nets).
     const bool is_critical
         = params_.critical_nets
-          && (nets_[id].net->isClock() || nets_[id].wire_type != 0);
+          && (nets_[id].net->isClock() || nets_[id].wire_type != 0
+              || (params_.critical_access_nets && nets_[id].access_critical));
     (is_critical ? critical : regular).push_back(id);
+  }
+  if (params_.verbose && params_.critical_access_nets) {
+    logger_->report(
+        "BonnRoute DR critical nets: {} of {} nets, {} of them for a pin on "
+        "an instance with an incomplete selection of primary access paths.",
+        critical.size(),
+        order.size(),
+        std::ranges::count_if(critical, [&](const int id) {
+          return nets_[id].access_critical && !nets_[id].net->isClock()
+                 && nets_[id].wire_type == 0;
+        }));
   }
   if (!critical.empty()) {
     routePartitions(critical, failed_first, 1, "critical-net partition");
