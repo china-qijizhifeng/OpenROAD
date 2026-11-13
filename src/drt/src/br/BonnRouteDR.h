@@ -88,7 +88,7 @@ struct BonnRouteDRParams
   // reservations stay active); later stages route only the terms not joined
   // yet. Nets still partial after the rip-up phase are removed and left to
   // FlexDR whole. 0: a failed net keeps nothing.
-  bool keep_partial = false;
+  bool keep_partial = true;
   // Parallel rip-up (Sec. 4.4 / 5.1): before each pass of the serial rip-up
   // queue, this many rounds of partition regions run the queued nets'
   // rip-up sequences in parallel, victims resident in the region; each
