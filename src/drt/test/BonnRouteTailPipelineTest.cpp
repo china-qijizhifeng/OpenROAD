@@ -628,12 +628,22 @@ LookaheadOutcome lookaheadScheduled(const LookaheadInstance& in,
     }
     // As routeSpeculativePipeline: unrouted nets over the budget are
     // deferred, the others failed; the attempt counter already advanced.
+    drt::br::TailOutcomes tally;
+    for (const TailLookahead::Attempt& a : attempts) {
+      tally.decided(a.decision, false);
+    }
     for (const int n : unrouted) {
-      if (budget && overBudget(in, n, attempt[n] - 1)) {
+      const bool over = budget && overBudget(in, n, attempt[n] - 1);
+      tally.unrouted(over, false);
+      if (over) {
         deferred.push_back(n);
       } else {
         out.failed.push_back(n);
       }
+    }
+    if (!tally.conserved() || tally.attempts != stats.attempts
+        || tally.failed != stats.failed) {
+      out.violations++;
     }
   };
   pass(in.order, out.main_pass, out.deferred);
@@ -745,6 +755,83 @@ int runLookaheadCases(const int cases,
   return failures;
 }
 
+// Tail outcome statistics (TailOutcomes): random passes with partial
+// commits (keep_partial) and an effort budget, counted independently. The
+// previous count "failed - deferred" goes negative once partial commits are
+// deferred (swerv: "-211 without a route"); failedToRipup() never does.
+// Returns the number of failing cases.
+int runOutcomeCases(const int cases, int64_t& old_negative)
+{
+  std::mt19937_64 rng(20261114);
+  int failures = 0;
+  for (int c = 0; c < cases; c++) {
+    drt::br::TailOutcomes tally;
+    int64_t complete = 0, partial = 0, conflicts = 0, failed = 0;
+    int64_t deferred = 0, deferred_partial = 0, ripup = 0, ripup_partial = 0;
+    const int n = static_cast<int>(rng() % 300);
+    const int partial_share = static_cast<int>(rng() % 60);
+    const int over_share = static_cast<int>(rng() % 100);
+    for (int i = 0; i < n; i++) {
+      const int r = static_cast<int>(rng() % 100);
+      Decision d = r < 50 ? Decision::kCommitted
+                   : r < 75 ? Decision::kConflict
+                            : Decision::kFailed;
+      const bool is_partial
+          = d == Decision::kCommitted
+            && static_cast<int>(rng() % 100) < partial_share;
+      tally.decided(d, is_partial);
+      if (d == Decision::kConflict) {
+        conflicts++;
+        continue;
+      }
+      if (d == Decision::kCommitted && !is_partial) {
+        complete++;
+        continue;
+      }
+      (is_partial ? partial : failed)++;
+      const bool over = static_cast<int>(rng() % 100) < over_share;
+      tally.unrouted(over, is_partial);
+      if (over) {
+        deferred++;
+        deferred_partial += is_partial;
+      } else {
+        ripup++;
+        ripup_partial += is_partial;
+      }
+    }
+    const bool equal = tally.attempts == n && tally.complete == complete
+                       && tally.partial == partial
+                       && tally.conflicts == conflicts
+                       && tally.failed == failed && tally.deferred == deferred
+                       && tally.deferred_partial == deferred_partial
+                       && tally.to_ripup == ripup
+                       && tally.to_ripup_partial == ripup_partial
+                       && tally.failedToRipup() == ripup - ripup_partial
+                       && tally.failedToRipup() >= 0;
+    // Broken counts must not pass the conservation check.
+    drt::br::TailOutcomes moved = tally;
+    moved.complete++;
+    moved.partial--;
+    drt::br::TailOutcomes lost = tally;
+    lost.to_ripup++;
+    drt::br::TailOutcomes twice = tally;
+    twice.deferred++;
+    const bool detects = !lost.conserved() && !twice.conserved()
+                         && (tally.partial == 0 || !moved.conserved());
+    if (!equal || !tally.conserved() || !detects) {
+      failures++;
+      std::printf("outcome case %d: counts %s, conserved %d, detects %d\n",
+                  c,
+                  equal ? "equal" : "DIFF",
+                  tally.conserved() ? 1 : 0,
+                  detects ? 1 : 0);
+    }
+    // The previous log count: failed decisions minus every deferred net.
+    old_negative += failed - deferred < 0;
+  }
+  return failures;
+}
+
 }  // namespace
 
 int main(int argc, char** argv)
@@ -807,9 +894,20 @@ int main(int argc, char** argv)
       static_cast<long long>(varied),
       static_cast<long long>(grown),
       lookahead_failures);
+  int64_t old_negative = 0;
+  const int outcome_failures = runOutcomeCases(20000, old_negative);
+  std::printf(
+      "tail outcomes: 20000 random passes with partial commits, %d failures; "
+      "the previous count \"failed - deferred\" is negative in %lld of "
+      "them\n",
+      outcome_failures,
+      static_cast<long long>(old_negative));
   // The lookahead must actually start searches early on these instances,
   // and batch sizes must actually change in some of them.
   const bool exercised
       = lookahead_cases == 0 || (early > 0 && varied > 0 && grown > 0);
-  return failures == 0 && lookahead_failures == 0 && exercised ? 0 : 1;
+  return failures == 0 && lookahead_failures == 0 && outcome_failures == 0
+                 && old_negative > 0 && exercised
+             ? 0
+             : 1;
 }

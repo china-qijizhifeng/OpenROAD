@@ -1249,6 +1249,10 @@ class BonnRouteDR
   void routeParallel(const std::vector<int>& order, std::vector<int>& failed);
   // D6: the batch size policy of the speculative tail.
   br::TailBatchPolicy tailBatchPolicy() const;
+  // DRT-9134 line of one tail pass; DRT-9135 when the counts are not
+  // conserved.
+  void reportTailOutcomes(const std::string& stage,
+                          const br::TailOutcomes& outcomes) const;
   // settled_budget: stop starting sequences once the serial worker settled
   // this many vertices in the phase (0: unlimited).
   void routeRipupQueue(const std::vector<int>& failed,

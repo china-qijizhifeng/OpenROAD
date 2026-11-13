@@ -304,6 +304,77 @@ class TailBatchSizes
   std::vector<std::pair<int64_t, int64_t>> outcomes_;
 };
 
+// Outcomes of one speculative tail pass (log statistics only). Every
+// attempt is decided once: a complete route committed, a partial commit
+// (keep_partial: its connections stay, the net stays unrouted), a conflict
+// (searched again in a later batch) or failed. The unrouted nets, partial
+// commits and failed attempts, go to the deferred pass (over the effort
+// budget) or to the rip-up phase.
+struct TailOutcomes
+{
+  int64_t attempts = 0;
+  int64_t complete = 0;
+  int64_t partial = 0;
+  int64_t conflicts = 0;
+  int64_t failed = 0;
+  int64_t deferred = 0;
+  int64_t deferred_partial = 0;
+  int64_t to_ripup = 0;
+  int64_t to_ripup_partial = 0;
+
+  void decided(const TailPipeline::Decision decision, const bool partial_commit)
+  {
+    attempts++;
+    switch (decision) {
+      case TailPipeline::Decision::kCommitted:
+        (partial_commit ? partial : complete)++;
+        break;
+      case TailPipeline::Decision::kConflict:
+        conflicts++;
+        break;
+      case TailPipeline::Decision::kFailed:
+        failed++;
+        break;
+    }
+  }
+  void unrouted(const bool over_budget, const bool partial_commit)
+  {
+    if (over_budget) {
+      deferred++;
+      deferred_partial += partial_commit;
+    } else {
+      to_ripup++;
+      to_ripup_partial += partial_commit;
+    }
+  }
+  // Failed attempts (no route) that go to the rip-up phase.
+  int64_t failedToRipup() const { return to_ripup - to_ripup_partial; }
+  // Every attempt has one outcome; every unrouted net (partial commit or
+  // failed attempt) goes to exactly one of the deferred pass and the
+  // rip-up phase.
+  bool conserved() const
+  {
+    const int64_t counts[] = {attempts,
+                              complete,
+                              partial,
+                              conflicts,
+                              failed,
+                              deferred,
+                              deferred_partial,
+                              to_ripup,
+                              to_ripup_partial};
+    for (const int64_t c : counts) {
+      if (c < 0) {
+        return false;
+      }
+    }
+    return attempts == complete + partial + conflicts + failed
+           && partial + failed == deferred + to_ripup
+           && deferred_partial + to_ripup_partial == partial
+           && deferred_partial <= deferred && to_ripup_partial <= to_ripup;
+  }
+};
+
 class TailLookahead
 {
  public:

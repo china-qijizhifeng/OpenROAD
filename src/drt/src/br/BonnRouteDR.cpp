@@ -7197,6 +7197,33 @@ void BonnRouteDR::routeSpeculative(const std::vector<int>& order,
   failed.insert(failed.end(), none.begin(), none.end());
 }
 
+void BonnRouteDR::reportTailOutcomes(const std::string& stage,
+                                     const br::TailOutcomes& o) const
+{
+  logger_->info(utl::DRT,
+                9134,
+                "BonnRoute {} tail outcomes: {} attempts = {} complete + {} "
+                "partial + {} conflicts + {} without a route; to the deferred "
+                "pass {} ({} partial), to the rip-up phase {} ({} partial).",
+                stage,
+                o.attempts,
+                o.complete,
+                o.partial,
+                o.conflicts,
+                o.failed,
+                o.deferred,
+                o.deferred_partial,
+                o.to_ripup,
+                o.to_ripup_partial);
+  if (!o.conserved()) {
+    logger_->warn(utl::DRT,
+                  9135,
+                  "BonnRoute {} tail outcomes are not conserved (statistics "
+                  "bug).",
+                  stage);
+  }
+}
+
 br::TailBatchPolicy BonnRouteDR::tailBatchPolicy() const
 {
   // tail_batch_max: start at tail_batch, grow up to tail_batch_max.
@@ -7240,6 +7267,8 @@ void BonnRouteDR::routeSpeculativeBatches(const std::vector<int>& order,
   // keep_partial: progress of the failed attempts of the batch.
   std::vector<PartialState> batch_progress;
   int64_t deferred_count = 0;
+  // Outcome statistics of the pass (log only).
+  br::TailOutcomes tail_outcome;
   std::vector<int> slots;
   std::vector<double> estimate;
   std::vector<RShape> shapes;
@@ -7387,6 +7416,7 @@ void BonnRouteDR::routeSpeculativeBatches(const std::vector<int>& order,
         commit_worker.footprint.setStep(kStepCommit);
       }
       auto unrouted = [&]() {
+        tail_outcome.unrouted(over[k] != 0, outcome == 4);
         if (over[k]) {
           deferred.push_back(net.id);
           deferred_count++;
@@ -7398,6 +7428,8 @@ void BonnRouteDR::routeSpeculativeBatches(const std::vector<int>& order,
       if (!writes) {
         net.wires.clear();
         net.vias.clear();
+        tail_outcome.decided(br::TailPipeline::Decision::kFailed, false);
+        tail_outcome.unrouted(over[k] != 0, false);
         if (over[k]) {
           deferred.push_back(net.id);
           deferred_count++;
@@ -7433,6 +7465,7 @@ void BonnRouteDR::routeSpeculativeBatches(const std::vector<int>& order,
           net.wires.clear();
           net.vias.clear();
           net.pin_points.clear();
+          tail_outcome.decided(br::TailPipeline::Decision::kFailed, false);
           unrouted();
         } else if (clash) {
           net.wires.clear();
@@ -7442,7 +7475,10 @@ void BonnRouteDR::routeSpeculativeBatches(const std::vector<int>& order,
           conflicts++;
           outcome = 2;
           commit_worker.conflict_settled += settled[k];
+          tail_outcome.decided(br::TailPipeline::Decision::kConflict, false);
         } else if (partial) {
+          tail_outcome.decided(br::TailPipeline::Decision::kCommitted, true);
+          outcome = 4;
           commitPartial(net, batch_progress[k], nullptr);
           commit_worker.tail_partial_commits++;
           odb::Rect box;
@@ -7472,6 +7508,7 @@ void BonnRouteDR::routeSpeculativeBatches(const std::vector<int>& order,
             committed_boxes.push_back(box);
           }
           nets++;
+          tail_outcome.decided(br::TailPipeline::Decision::kCommitted, false);
           outcome = 1;
         }
         if (params_.partition_check) {
@@ -7530,6 +7567,7 @@ void BonnRouteDR::routeSpeculativeBatches(const std::vector<int>& order,
   partition_busy_ += busy_total;
   partition_capacity_ += wall_total * threads;
   if (params_.verbose) {
+    reportTailOutcomes(stage, tail_outcome);
     logger_->info(
         utl::DRT,
         9105,
@@ -7823,15 +7861,16 @@ void BonnRouteDR::routeSpeculativePipeline(const std::vector<int>& order,
   }
   std::vector<int> unrouted;
   br::TailPipeline::Stats stats;
+  // Outcome statistics of the pass (log only).
+  br::TailOutcomes outcome;
   if (params_.tail_lookahead) {
     br::TailLookahead lookahead(tailBatchPolicy());
     std::vector<br::TailLookahead::Attempt> attempts;
-    stats = lookahead.run(order,
-                          boxes,
-                          threads,
-                          hooks,
-                          unrouted,
-                          tail_partial ? &attempts : nullptr);
+    stats = lookahead.run(
+        order, boxes, threads, hooks, unrouted, &attempts);
+    for (const br::TailLookahead::Attempt& a : attempts) {
+      outcome.decided(a.decision, partial_attempt[a.net] != 0);
+    }
     if (tail_partial) {
       // Unrouted: failed attempts and partial commits, in (batch, position)
       // order, as the barrier batches list them.
@@ -7859,15 +7898,24 @@ void BonnRouteDR::routeSpeculativePipeline(const std::vector<int>& order,
   } else {
     br::TailPipeline pipeline(params_.tail_batch, params_.tail_retry_delay);
     stats = pipeline.run(order, boxes, threads, hooks, unrouted);
+    // No partial commits without the lookahead.
+    outcome.attempts = stats.attempts;
+    outcome.complete = stats.committed;
+    outcome.conflicts = stats.conflicts;
+    outcome.failed = stats.failed;
   }
   int64_t deferred_count = 0;
   for (const int id : unrouted) {
+    outcome.unrouted(over[id] != 0, partial_attempt[id] != 0);
     if (over[id]) {
       deferred.push_back(id);
       deferred_count++;
     } else {
       failed.push_back(id);
     }
+  }
+  if (params_.verbose) {
+    reportTailOutcomes(stage, outcome);
   }
   partition_wall_ += stats.wall;
   partition_busy_ += stats.search_busy + stats.decide_busy;
@@ -7907,9 +7955,9 @@ void BonnRouteDR::routeSpeculativePipeline(const std::vector<int>& order,
           stage,
           stats.batches,
           params_.tail_batch,
-          stats.committed,
+          outcome.complete,
           stats.conflicts,
-          stats.failed - deferred_count,
+          outcome.failedToRipup(),
           stats.wall,
           threads,
           capacity > 0
@@ -7949,9 +7997,9 @@ void BonnRouteDR::routeSpeculativePipeline(const std::vector<int>& order,
         stats.batches,
         params_.tail_batch,
         params_.tail_retry_delay,
-        stats.committed,
+        outcome.complete,
         stats.conflicts,
-        stats.failed - deferred_count,
+        outcome.failedToRipup(),
         stats.wall,
         threads,
         capacity > 0
