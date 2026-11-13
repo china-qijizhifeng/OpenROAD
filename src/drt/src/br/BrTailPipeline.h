@@ -45,6 +45,8 @@
 #include <stdexcept>
 #include <vector>
 
+#include "br/BrBusyThreads.h"
+
 namespace drt::br {
 
 class TailPipeline
@@ -96,6 +98,9 @@ class TailPipeline
     // included).
     int64_t smallest_batch = 0;
     int64_t largest_batch = 0;
+    // TailLookahead: wall seconds by the number of threads inside a search
+    // or decision.
+    BusyThreads::Seconds busy_threads{};
   };
 
   TailPipeline(int batch, int retry_delay)
@@ -217,18 +222,28 @@ class TailPipeline
 // starts, so the search reads the state of the commits of batches <= k.
 // D6: size of the speculative batches. Batch k holds every retry of batch
 // k-1 first, then fresh nets of the queue up to size(k) in total. size(0) =
-// size(1) = max; size(k+1) follows the conflict share of batch k-1 (the last
-// batch decided when batch k is formed, so the size of the next batch is
-// known while batch k is decided, as TailLookahead's R3 needs): above
-// high_percent conflicts per attempt it halves, below low_percent it
-// doubles, within [min, max]. min 0 or >= max: every batch has max nets.
+// size(1) = the start size (start, clamped to [min, max]; 0: max);
+// size(k+1) follows the conflict share of batch k-1 (the last batch decided
+// when batch k is formed, so the size of the next batch is known while
+// batch k is decided, as TailLookahead's R3 needs): above high_percent
+// conflicts per attempt it halves, below low_percent it doubles, within
+// [min, max]. min 0 or >= max: every batch has max nets. A start below max
+// lets the batches grow while conflicts are rare (tail_batch_max).
 struct TailBatchPolicy
 {
   int max = 32;
   int min = 0;
   int high_percent = 50;
   int low_percent = 20;
+  int start = 0;
   bool adaptive() const { return min > 0 && min < max; }
+  int startSize() const
+  {
+    if (!adaptive() || start <= 0) {
+      return max;
+    }
+    return std::clamp(start, min, max);
+  }
   int next(int size, int64_t attempts, int64_t conflicts) const
   {
     if (!adaptive() || attempts <= 0) {
@@ -257,8 +272,12 @@ class TailBatchSizes
   {
     while (static_cast<int>(sizes_.size()) <= k) {
       const int j = static_cast<int>(sizes_.size());
-      if (j < 2 || !policy_.adaptive()) {
+      if (!policy_.adaptive()) {
         sizes_.push_back(max_);
+        continue;
+      }
+      if (j < 2) {
+        sizes_.push_back(policy_.startSize());
         continue;
       }
       if (static_cast<int>(outcomes_.size()) < j - 1) {

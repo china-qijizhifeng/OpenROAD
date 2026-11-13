@@ -162,6 +162,10 @@ bool BonnRouteDRParams::set(const std::string& name, const double value)
     ripup_box_margin = std::max(0, v);
   } else if (name == "ripup_box_chunk") {
     ripup_box_chunk = std::max(1, v);
+  } else if (name == "ripup_box_chunk_retry") {
+    ripup_box_chunk_retry = v != 0;
+  } else if (name == "ripup_box_order") {
+    ripup_box_order = v != 0;
   } else if (name == "max_access_jog") {
     max_access_jog = v;
   } else if (name == "max_access_options") {
@@ -228,6 +232,8 @@ bool BonnRouteDRParams::set(const std::string& name, const double value)
     tail_batch_high = std::clamp(v, 0, 100);
   } else if (name == "tail_batch_low") {
     tail_batch_low = std::clamp(v, 0, 100);
+  } else if (name == "tail_batch_max") {
+    tail_batch_max = std::max(0, v);
   } else if (name == "tail_threads") {
     tail_threads = std::max(0, v);
   } else if (name == "tail_order") {
@@ -7169,6 +7175,17 @@ void BonnRouteDR::routeSpeculative(const std::vector<int>& order,
 
 br::TailBatchPolicy BonnRouteDR::tailBatchPolicy() const
 {
+  // tail_batch_max: start at tail_batch, grow up to tail_batch_max.
+  if (params_.tail_batch_max > params_.tail_batch && params_.tail_batch > 0) {
+    const int low = params_.tail_batch_min > 0
+                        ? std::min(params_.tail_batch_min, params_.tail_batch)
+                        : params_.tail_batch;
+    return {params_.tail_batch_max,
+            low,
+            params_.tail_batch_high,
+            params_.tail_batch_low,
+            params_.tail_batch};
+  }
   return {params_.tail_batch,
           params_.tail_batch_min,
           params_.tail_batch_high,
@@ -7884,6 +7901,10 @@ void BonnRouteDR::routeSpeculativePipeline(const std::vector<int>& order,
           deferred_count,
           budget,
           tailRoutingDigest());
+      // Where the pass waits: wall seconds by busy threads (log only).
+      logger_->report("BonnRoute {} busy threads: {}.",
+                      stage,
+                      br::BusyThreads::text(stats.busy_threads));
       return;
     }
     logger_->info(
@@ -8426,8 +8447,25 @@ void BonnRouteDR::routeRipupBoxes(std::vector<int>& queue,
     bool routed = false;
     // Failed at the limit of its box: a larger box can change the outcome.
     bool limited = false;
+    // ripup_box_chunk_retry: the slot runs again the sequence of slot
+    // `source` of the same chunk when that one failed at its box's limit.
+    int source = -1;
     int64_t settled = 0;
     RipupState state;
+  };
+  // A sequence's box at a step: the routing area widened by the margin, 4 x
+  // the margin, or the whole chip.
+  auto stepBox = [&](const int id, const int box_step) {
+    if (box_step >= whole_step) {
+      return chip;
+    }
+    const int margin = params_.ripup_box_margin * (box_step == 0 ? 1 : 4);
+    br::TileBox box = netAreaTileBox(nets_[id], dilation);
+    box.xlo = std::max(box.xlo - margin, 0);
+    box.ylo = std::max(box.ylo - margin, 0);
+    box.xhi = std::min(box.xhi + margin, tiles_x_ - 1);
+    box.yhi = std::min(box.yhi + margin, tiles_y_ - 1);
+    return box;
   };
   // Box step of the queued nets of this pass.
   std::vector<uint8_t> step(nets_.size(), 0);
@@ -8485,29 +8523,74 @@ void BonnRouteDR::routeRipupBoxes(std::vector<int>& queue,
       Slot slot;
       slot.net = id;
       slot.step = step[id];
-      if (slot.step >= whole_step) {
-        slot.box = chip;
-      } else {
-        const int margin = params_.ripup_box_margin * (slot.step == 0 ? 1 : 4);
-        slot.box = netAreaTileBox(nets_[id], dilation);
-        slot.box.xlo = std::max(slot.box.xlo - margin, 0);
-        slot.box.ylo = std::max(slot.box.ylo - margin, 0);
-        slot.box.xhi = std::min(slot.box.xhi + margin, tiles_x_ - 1);
-        slot.box.yhi = std::min(slot.box.yhi + margin, tiles_y_ - 1);
-      }
+      slot.box = stepBox(id, slot.step);
       // A box over the whole chip runs as the serial loop does.
       slot.whole = slot.box.contains(chip);
-      boxes.push_back(
-          {slot.box.xlo, slot.box.ylo, slot.box.xhi, slot.box.yhi});
       slots.push_back(std::move(slot));
     }
     if (slots.empty()) {
       break;
     }
+    // ripup_box_chunk_retry: a retry slot with the next box after the
+    // chunk's first sequences; it runs only when its source failed at the
+    // limit of its box. A retry over the whole chip waits for the next chunk.
+    const int first_count = static_cast<int>(slots.size());
+    std::vector<int> retry_of(first_count, -1);
+    if (params_.ripup_box_chunk_retry) {
+      for (int i = 0; i < first_count; i++) {
+        if (slots[i].whole) {
+          continue;
+        }
+        Slot retry;
+        retry.net = slots[i].net;
+        retry.step = slots[i].step + 1;
+        retry.box = stepBox(retry.net, retry.step);
+        retry.whole = retry.box.contains(chip);
+        retry.source = i;
+        if (retry.whole) {
+          continue;
+        }
+        retry_of[i] = static_cast<int>(slots.size());
+        slots.push_back(std::move(retry));
+      }
+    }
+    // Schedule order: the first sequences, then the retries, each part in
+    // slot order or (ripup_box_order) in layers of disjoint boxes.
+    std::vector<int> order;
+    auto addPart = [&](const int begin, const int end) {
+      std::vector<br::OrderedBoxSchedule::Box> part;
+      for (int i = begin; i < end; i++) {
+        const br::TileBox& b = slots[i].box;
+        part.push_back({b.xlo, b.ylo, b.xhi, b.yhi});
+      }
+      if (params_.ripup_box_order) {
+        for (const int k : br::OrderedBoxSchedule::disjointLayerOrder(part)) {
+          order.push_back(begin + k);
+        }
+      } else {
+        for (int i = begin; i < end; i++) {
+          order.push_back(i);
+        }
+      }
+    };
+    addPart(0, first_count);
+    addPart(first_count, static_cast<int>(slots.size()));
+    for (const int i : order) {
+      const br::TileBox& b = slots[i].box;
+      boxes.push_back({b.xlo, b.ylo, b.xhi, b.yhi});
+    }
     const br::OrderedBoxSchedule::Stats stats = br::OrderedBoxSchedule::run(
         boxes, threads, parallel, [&](const int index, const int t) {
-          Slot& slot = slots[index];
+          Slot& slot = slots[order[index]];
           NetData& net = nets_[slot.net];
+          // A retry runs when its source failed at its box's limit (the
+          // source's box lies in the retry's box, so it returned).
+          if (slot.source >= 0) {
+            const Slot& first = slots[slot.source];
+            if (first.routed || !first.limited) {
+              return;
+            }
+          }
           // Routed again as a victim of an earlier sequence of the chunk
           // (that sequence's box held the net's area, so it returned).
           if (net.routed) {
@@ -8573,11 +8656,15 @@ void BonnRouteDR::routeRipupBoxes(std::vector<int>& queue,
     ripup_box_stats_.chunks++;
     ripup_box_stats_.longest_chain
         = std::max(ripup_box_stats_.longest_chain, stats.longest_chain);
+    ripup_box_stats_.chain_sum += stats.longest_chain;
+    ripup_box_stats_.critical_path += stats.critical_path;
+    br::BusyThreads::add(ripup_box_stats_.busy_threads, stats.busy_threads);
     ripup_box_stats_.wall += stats.wall;
     ripup_box_stats_.busy += stats.busy;
     ripup_box_stats_.capacity += stats.wall * stats.threads;
     again.clear();
-    for (const Slot& slot : slots) {
+    // Statistics and budget of one run of a sequence.
+    auto account = [&](const Slot& slot) {
       // The budget counts the last run of a sequence: a run that failed at
       // the limit of its box is repeated with a larger box.
       if (slot.routed || !slot.limited) {
@@ -8601,19 +8688,31 @@ void BonnRouteDR::routeRipupBoxes(std::vector<int>& queue,
       }
       if (slot.attempted) {
         ripup_box_stats_.sequences[slot.whole ? whole_step : slot.step]++;
-      }
-      if (slot.routed) {
-        if (slot.attempted) {
+        if (slot.routed) {
           ripup_box_stats_.routed[slot.whole ? whole_step : slot.step]++;
         }
+      }
+    };
+    // Outcomes in slot order of the first sequences; a retry of the same
+    // chunk stands for its source's next run.
+    for (int i = 0; i < first_count; i++) {
+      const Slot* slot = &slots[i];
+      account(*slot);
+      if (slot->limited && !slot->routed && retry_of[i] >= 0) {
+        ripup_box_stats_.widened++;
+        ripup_box_stats_.retried_in_chunk++;
+        slot = &slots[retry_of[i]];
+        account(*slot);
+      }
+      if (slot->routed) {
         continue;
       }
-      if (slot.limited) {
-        step[slot.net] = static_cast<uint8_t>(slot.step + 1);
-        again.push_back(slot.net);
+      if (slot->limited) {
+        step[slot->net] = static_cast<uint8_t>(slot->step + 1);
+        again.push_back(slot->net);
         ripup_box_stats_.widened++;
       } else {
-        unrouted.push_back(slot.net);
+        unrouted.push_back(slot->net);
       }
     }
     pending.insert(pending.begin(), again.begin(), again.end());
@@ -9646,8 +9745,10 @@ void BonnRouteDR::main()
             "BonnRoute DR rip-up boxes: {} chunks of up to {} nets; {} "
             "sequences in the area widened by {} tiles ({} routed), {} by {} "
             "tiles ({} routed), {} over the whole chip ({} routed); {} "
-            "continued with a larger box; longest chain {}; {:.2f}s wall, "
-            "{:.2f} thread-s, thread utilization {:.0f}%.",
+            "continued with a larger box ({} in the same chunk); longest "
+            "chain {}; {:.2f}s wall, {:.2f} thread-s, thread utilization "
+            "{:.0f}%; chunks' longest chains {} tasks, critical paths "
+            "{:.2f}s.",
             b.chunks,
             params_.ripup_box_chunk,
             b.sequences[0],
@@ -9659,10 +9760,15 @@ void BonnRouteDR::main()
             b.sequences[2],
             b.routed[2],
             b.widened,
+            b.retried_in_chunk,
             b.longest_chain,
             b.wall,
             b.busy,
-            b.capacity > 0 ? 100.0 * b.busy / b.capacity : 0.0);
+            b.capacity > 0 ? 100.0 * b.busy / b.capacity : 0.0,
+            b.chain_sum,
+            b.critical_path);
+        logger_->report("BonnRoute DR rip-up boxes busy threads: {}.",
+                        br::BusyThreads::text(b.busy_threads));
       }
       if (params_.ripup_partitions > 0) {
         logger_->report(

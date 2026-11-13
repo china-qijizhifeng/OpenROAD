@@ -293,6 +293,9 @@ struct LookaheadInstance
   int batch_min = 0;
   int high_percent = 50;
   int low_percent = 20;
+  // Size of the first two batches when adaptive (0: batch); below batch the
+  // sizes can grow (tail_batch_max).
+  int batch_start = 0;
   uint64_t salt;
   int found_modulus;     // a route is missing when route % found_modulus == 0
   int conflict_modulus;  // routes conflict when mix % conflict_modulus == 0
@@ -320,16 +323,24 @@ struct LookaheadOutcome
 };
 
 // D6 size rule, written independently of TailBatchPolicy: size(0) = size(1)
-// = batch; size(k) from size(k-1) and the attempts and conflicts of batch
-// k-2.
+// = batch, or batch_start (within [batch_min, batch]) when adaptive; size(k)
+// from size(k-1) and the attempts and conflicts of batch k-2.
 int referenceSize(const LookaheadInstance& in,
                   const std::vector<int>& sizes,
                   const std::vector<std::pair<int, int>>& outcomes)
 {
   const size_t k = sizes.size();
   const bool adaptive = in.batch_min > 0 && in.batch_min < in.batch;
-  if (k < 2 || !adaptive) {
+  if (!adaptive) {
     return in.batch;
+  }
+  if (k < 2) {
+    if (in.batch_start <= 0) {
+      return in.batch;
+    }
+    return in.batch_start < in.batch_min   ? in.batch_min
+           : in.batch_start > in.batch ? in.batch
+                                       : in.batch_start;
   }
   const int previous = sizes[k - 1];
   const auto [attempts, conflicts] = outcomes[k - 2];
@@ -601,7 +612,11 @@ LookaheadOutcome lookaheadScheduled(const LookaheadInstance& in,
                   AttemptList& list,
                   std::vector<int>& deferred) {
     TailLookahead lookahead(drt::br::TailBatchPolicy{
-        in.batch, in.batch_min, in.high_percent, in.low_percent});
+        in.batch,
+        in.batch_min,
+        in.high_percent,
+        in.low_percent,
+        in.batch_start});
     std::vector<int> unrouted;
     std::vector<TailLookahead::Attempt> attempts;
     const TailLookahead::Stats stats
@@ -657,6 +672,12 @@ LookaheadInstance randomLookaheadInstance(std::mt19937_64& rng)
     in.batch_min = uniform(1, in.batch);
     in.high_percent = uniform(0, 100);
     in.low_percent = uniform(0, in.high_percent);
+    // Half of the adaptive cases start small and can grow; a few start
+    // outside [batch_min, batch] (clamped).
+    if (rng() % 2 == 0) {
+      in.batch_start = rng() % 8 == 0 ? uniform(1, in.batch + 8)
+                                      : uniform(in.batch_min, in.batch);
+    }
   }
   in.salt = rng();
   in.found_modulus = uniform(2, 16);
@@ -670,7 +691,8 @@ LookaheadInstance randomLookaheadInstance(std::mt19937_64& rng)
 int runLookaheadCases(const int cases,
                       int64_t& attempts,
                       int64_t& early,
-                      int64_t& varied)
+                      int64_t& varied,
+                      int64_t& grown)
 {
   std::mt19937_64 rng(20261113);
   int failures = 0;
@@ -680,6 +702,11 @@ int runLookaheadCases(const int cases,
     // Cases whose batch sizes changed during a pass.
     varied += std::ranges::any_of(
         ref.sizes, [&](const int s) { return s != in.batch; });
+    // Cases whose batches grew above the start size.
+    if (!ref.sizes.empty() && ref.sizes.front() < in.batch) {
+      grown += std::ranges::any_of(
+          ref.sizes, [&](const int s) { return s > ref.sizes.front(); });
+    }
     // Thread counts 1-8, each in a quarter of the cases.
     for (const int threads : {1 + c % 8, 1 + (c + 4) % 8}) {
       const LookaheadOutcome got = lookaheadScheduled(in, threads, rng());
@@ -767,20 +794,22 @@ int main(int argc, char** argv)
   int64_t lookahead_attempts = 0;
   int64_t early = 0;
   int64_t varied = 0;
-  const int lookahead_failures
-      = runLookaheadCases(lookahead_cases, lookahead_attempts, early, varied);
+  int64_t grown = 0;
+  const int lookahead_failures = runLookaheadCases(
+      lookahead_cases, lookahead_attempts, early, varied, grown);
   std::printf(
       "tail lookahead: %d cases x 2 thread counts (1-8), %lld attempts, "
-      "%lld searches started early, %lld cases with adaptive batch sizes, "
-      "%d failures\n",
+      "%lld searches started early, %lld cases with adaptive batch sizes "
+      "(%lld grew above their start size), %d failures\n",
       lookahead_cases,
       static_cast<long long>(lookahead_attempts),
       static_cast<long long>(early),
       static_cast<long long>(varied),
+      static_cast<long long>(grown),
       lookahead_failures);
   // The lookahead must actually start searches early on these instances,
   // and batch sizes must actually change in some of them.
   const bool exercised
-      = lookahead_cases == 0 || (early > 0 && varied > 0);
+      = lookahead_cases == 0 || (early > 0 && varied > 0 && grown > 0);
   return failures == 0 && lookahead_failures == 0 && exercised ? 0 : 1;
 }

@@ -59,6 +59,7 @@ cc_library(
     hdrs = [
         "src/br/BrAccessFootprint.h",
         "src/br/BrBlockageGrid.h",
+        "src/br/BrBusyThreads.h",
         "src/br/BrCore.h",
         "src/br/BrDistanceRules.h",
         "src/br/BrFastGrid.h",

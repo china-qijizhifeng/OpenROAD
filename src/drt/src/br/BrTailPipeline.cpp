@@ -528,7 +528,9 @@ TailLookahead::Stats TailLookahead::run(const std::vector<int>& order,
   Stats stats;
   const int count = threads < 1 ? 1 : threads;
   std::vector<Stats> local(count);
+  BusyThreads line;
   const double start = now();
+  line.start(start);
   hooks.parallel(count, [&](const int thread) {
     Stats& mine = local[thread];
     std::vector<int> earlier;
@@ -570,7 +572,7 @@ TailLookahead::Stats TailLookahead::run(const std::vector<int>& order,
           }
         }
       }
-      running_++;
+      line.change(running_++, now());
       lock.unlock();
       const double task_start = now();
       bool result_found = false;
@@ -582,7 +584,7 @@ TailLookahead::Stats TailLookahead::run(const std::vector<int>& order,
       }
       const double task_seconds = now() - task_start;
       lock.lock();
-      running_--;
+      line.change(running_--, now());
       if (decide) {
         mine.decide_busy += task_seconds;
         items_[x].decision = decision;
@@ -596,7 +598,10 @@ TailLookahead::Stats TailLookahead::run(const std::vector<int>& order,
     }
     wake_.notify_all();
   });
-  stats.wall = now() - start;
+  const double end = now();
+  stats.wall = end - start;
+  line.change(running_, end);
+  stats.busy_threads = line.seconds();
   if (deadlock_) {
     throw std::logic_error("TailLookahead: no ready search or decision");
   }

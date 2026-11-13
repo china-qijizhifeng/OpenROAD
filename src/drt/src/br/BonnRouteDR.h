@@ -28,6 +28,7 @@
 #include "br/BrPotentialOracle.h"
 #include "br/BrSameNetRules.h"
 #include "br/BrShapeGrid.h"
+#include "br/BrBusyThreads.h"
 #include "br/BrOrderedBoxSchedule.h"
 #include "br/BrTailPipeline.h"
 #include "br/BrWireModel.h"
@@ -110,6 +111,16 @@ struct BonnRouteDRParams
   bool ripup_boxes = false;
   int ripup_box_margin = 4;
   int ripup_box_chunk = 64;
+  // ripup_box_chunk_retry: a sequence that failed at the limit of its box
+  // with the margin runs again with 4 x the margin in the same chunk, after
+  // the chunk's first sequences (in their order), scheduled by the larger
+  // box; 0: in the next chunk. ripup_box_order: a chunk's sequences run in
+  // layers of pairwise disjoint boxes (OrderedBoxSchedule::
+  // disjointLayerOrder, layers formed in queue order), so a chain of waiting
+  // sequences holds at most one sequence per layer; 0: queue order. Both
+  // change the serial order the results equal, not their determinism.
+  bool ripup_box_chunk_retry = false;
+  bool ripup_box_order = false;
   // Off-track pin access: largest jog to a track, in pitches.
   int max_access_jog = 2;
   int max_access_options = 8;
@@ -157,6 +168,13 @@ struct BonnRouteDRParams
   int tail_batch_min = 0;
   int tail_batch_high = 50;
   int tail_batch_low = 20;
+  // D6 growth: above tail_batch, batches start at tail_batch nets and grow
+  // up to tail_batch_max under the same rule (doubling below
+  // tail_batch_low percent conflicts, halving above tail_batch_high, never
+  // below tail_batch_min or, with tail_batch_min 0, tail_batch). The
+  // deferred pass starts at tail_deferred_batch. 0, or at most the start
+  // size: no growth.
+  int tail_batch_max = 0;
   // Threads of the speculative batches; 0 uses all router threads. The
   // batch results do not depend on it (a check of that determinism).
   int tail_threads = 0;
@@ -1231,10 +1249,16 @@ class BonnRouteDR
     std::array<int64_t, kRipupBoxSteps> sequences{};
     std::array<int64_t, kRipupBoxSteps> routed{};
     int64_t widened = 0;
+    // ripup_box_chunk_retry: sequences run again in their own chunk.
+    int64_t retried_in_chunk = 0;
     int64_t longest_chain = 0;
+    // Sum of the chunks' longest chains (tasks) and critical paths (s).
+    int64_t chain_sum = 0;
+    double critical_path = 0;
     double wall = 0;
     double busy = 0;
     double capacity = 0;
+    br::BusyThreads::Seconds busy_threads{};
   };
   RipupBoxStats ripup_box_stats_;
   // try_plain: first try the connection without rip-up. The nets of the
