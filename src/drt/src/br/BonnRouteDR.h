@@ -283,7 +283,7 @@ struct BonnRouteDRParams
   // reads track assignment only for those nets (their tile-boundary pins in
   // iteration 0). With reservations 1, BonnRoute reads track assignment
   // before routing, so track assignment keeps its place before BonnRoute.
-  bool left_net_track_assignment = false;
+  bool left_net_track_assignment = true;
   bool verbose = true;
   // Algorithm profile: 0 = 2013-improved (default), 1 = 2013-reimpl,
   // 2 = 2021 (2013-reimpl plus Ahrens et al., arXiv:2111.06169).
