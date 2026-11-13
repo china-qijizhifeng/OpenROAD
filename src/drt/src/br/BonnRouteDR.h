@@ -303,8 +303,10 @@ struct BonnRouteDRParams
   // (the antenna-repair ECO) routes the nets that need routing against the
   // existing routing (rip-up and reroute included) and writes them; FlexDR
   // then only checks the changed regions and repairs markers
-  // (BrIncremental.cpp).
-  bool incremental = false;
+  // (BrIncremental.cpp). Default in every profile: the full-flow E2E (eco
+  // line, round r1) gives final DRC 0 and no more antenna nets than the
+  // FlexDR ECO on jpeg/ibex sky130hd, aes nangate45/asap7.
+  bool incremental = true;
   // Keep the routing space alive across detailed_route calls and update it
   // with the design changes since the previous call; 0 rebuilds it from the
   // design and its routing in every incremental call.

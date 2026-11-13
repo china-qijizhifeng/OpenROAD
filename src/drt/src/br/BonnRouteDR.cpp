@@ -107,7 +107,9 @@ void BonnRouteDRParams::applyProfile(const int which)
   postprocess = true;
   access_classes = true;
   reservations = false;
-  incremental = false;
+  // Sec. 5.2 incremental routing of the later detailed_route -bonnroute
+  // calls (the post-antenna ECO routes), in every profile.
+  incremental = true;
   if (profile == 2) {
     // 2021: the bulk routing experiment of Ahrens et al., arXiv:2111.06169
     // (Table 3) on top of 2013-reimpl: the general-model potential for every
@@ -117,8 +119,6 @@ void BonnRouteDRParams::applyProfile(const int which)
     potential = 3;
     discount_numerator = 3;
     discount_denominator = 4;
-    // Sec. 5.2 incremental routing of the later detailed_route calls.
-    incremental = true;
   }
 }
 
