@@ -73,6 +73,7 @@ cc_library(
         "src/br/BrSameNetRules.h",
         "src/br/BrSearchQueue.h",
         "src/br/BrShapeGrid.h",
+        "src/br/BrOrderedBoxSchedule.h",
         "src/br/BrTailPipeline.h",
         "src/br/BrTrackGraph.h",
         "src/br/BrWireModel.h",

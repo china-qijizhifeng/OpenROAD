@@ -28,6 +28,7 @@
 #include "br/BrPotentialOracle.h"
 #include "br/BrSameNetRules.h"
 #include "br/BrShapeGrid.h"
+#include "br/BrOrderedBoxSchedule.h"
 #include "br/BrTailPipeline.h"
 #include "br/BrWireModel.h"
 #include "frBaseTypes.h"
@@ -94,6 +95,17 @@ struct BonnRouteDRParams
   // region gets the serial budget times its share of the queued nets. The
   // serial loop handles the rest. 0: serial only.
   int ripup_partitions = 0;
+  // Rip-up sequences scheduled by net boxes (BrOrderedBoxSchedule.h): the
+  // rip-up queue runs in chunks of ripup_box_chunk nets; a net's sequence
+  // stays inside its routing area widened by ripup_box_margin tiles
+  // (victims resident there) and starts when the earlier sequences of the
+  // chunk whose boxes meet its box returned, so results equal the serial
+  // order of the chunk at every thread count. A sequence that failed at
+  // the limit of its box runs again with 4 x the margin, then over the
+  // whole chip. Takes precedence over ripup_partitions. 0: serial queue.
+  bool ripup_boxes = false;
+  int ripup_box_margin = 2;
+  int ripup_box_chunk = 64;
   // Off-track pin access: largest jog to a track, in pitches.
   int max_access_jog = 2;
   int max_access_options = 8;
@@ -1190,6 +1202,27 @@ class BonnRouteDR
   int64_t parallel_ripup_rollbacks_ = 0;
   int64_t parallel_ripup_budget_stops_ = 0;
   double parallel_ripup_seconds_ = 0;
+  // ripup_boxes: one pass of the rip-up queue under OrderedBoxSchedule.
+  // `queue` becomes the nets still unrouted; `settled` counts the vertices
+  // the phase's sequences settled, against settled_budget.
+  void routeRipupBoxes(std::vector<int>& queue,
+                       int pass,
+                       int64_t settled_budget,
+                       int64_t& settled);
+  // Box steps of a sequence: margin, 4 x margin, whole chip.
+  static constexpr int kRipupBoxSteps = 3;
+  struct RipupBoxStats
+  {
+    int64_t chunks = 0;
+    std::array<int64_t, kRipupBoxSteps> sequences{};
+    std::array<int64_t, kRipupBoxSteps> routed{};
+    int64_t widened = 0;
+    int64_t longest_chain = 0;
+    double wall = 0;
+    double busy = 0;
+    double capacity = 0;
+  };
+  RipupBoxStats ripup_box_stats_;
   // try_plain: first try the connection without rip-up. The nets of the
   // rip-up queue have just failed that search, so their sequences start
   // with the rip-up mode search (which finds a legal path at no penalty

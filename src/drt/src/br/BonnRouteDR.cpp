@@ -154,6 +154,12 @@ bool BonnRouteDRParams::set(const std::string& name, const double value)
     keep_partial = v != 0;
   } else if (name == "ripup_partitions") {
     ripup_partitions = std::max(0, v);
+  } else if (name == "ripup_boxes") {
+    ripup_boxes = v != 0;
+  } else if (name == "ripup_box_margin") {
+    ripup_box_margin = std::max(0, v);
+  } else if (name == "ripup_box_chunk") {
+    ripup_box_chunk = std::max(1, v);
   } else if (name == "max_access_jog") {
     max_access_jog = v;
   } else if (name == "max_access_options") {
@@ -8291,6 +8297,11 @@ void BonnRouteDR::routeRipupQueue(const std::vector<int>& failed,
   // Vertices settled by the serial loop's own sequences.
   int64_t serial_settled = 0;
   for (int pass = 0; pass < params_.ripup_passes && !queue.empty(); pass++) {
+    // Incremental calls prepare victims and move input routing serially.
+    if (params_.ripup_boxes && !incremental_active_) {
+      routeRipupBoxes(queue, pass, settled_budget, serial_settled);
+      continue;
+    }
     // Region-parallel rounds first; the serial loop takes the rest.
     // Incremental calls prepare victims and move input routing serially.
     for (int round = 0;
@@ -8360,6 +8371,203 @@ void BonnRouteDR::routeRipupQueue(const std::vector<int>& failed,
     net.vias.clear();
     net.failed = true;
   }
+}
+
+void BonnRouteDR::routeRipupBoxes(std::vector<int>& queue,
+                                  const int pass,
+                                  const int64_t settled_budget,
+                                  int64_t& settled)
+{
+  const int threads = static_cast<int>(workers_.size());
+  const int dilation = params_.retry_dilation + pass;
+  // Sec. 4.4: later passes with higher ripup effort.
+  const br::RipupLevel level
+      = pass == 0 ? static_cast<br::RipupLevel>(params_.first_pass_ripup_level)
+                  : br::kMaxRemovableLevel;
+  const br::TileBox chip{0, 0, tiles_x_ - 1, tiles_y_ - 1};
+  const int whole_step = kRipupBoxSteps - 1;
+  struct Slot
+  {
+    int net = -1;
+    int step = 0;
+    br::TileBox box;
+    bool whole = false;
+    bool attempted = false;
+    bool routed = false;
+    // Failed at the limit of its box: a larger box can change the outcome.
+    bool limited = false;
+    int64_t settled = 0;
+    RipupState state;
+  };
+  // Box step of the queued nets of this pass.
+  std::vector<uint8_t> step(nets_.size(), 0);
+  std::deque<int> pending;
+  for (const int id : queue) {
+    if (!nets_[id].routed) {
+      pending.push_back(id);
+    }
+  }
+  std::vector<int> unrouted;
+  std::vector<Slot> slots;
+  std::vector<br::OrderedBoxSchedule::Box> boxes;
+  std::vector<int> again;
+  const br::OrderedBoxSchedule::Parallel parallel
+      = [](const int count, const std::function<void(int)>& body) {
+#pragma omp parallel num_threads(count)
+          body(omp_get_thread_num());
+        };
+  while (!pending.empty()) {
+    if (settled_budget > 0 && settled >= settled_budget) {
+      for (const int id : pending) {
+        if (nets_[id].routed) {
+          continue;
+        }
+        unrouted.push_back(id);
+        ripup_budget_skipped_++;
+        if (nets_[id].ripup_outcome == kRipupNotStarted) {
+          nets_[id].ripup_outcome = kRipupBudget;
+        }
+      }
+      break;
+    }
+    slots.clear();
+    boxes.clear();
+    while (!pending.empty()
+           && static_cast<int>(slots.size()) < params_.ripup_box_chunk) {
+      const int id = pending.front();
+      pending.pop_front();
+      if (nets_[id].routed) {
+        continue;
+      }
+      Slot slot;
+      slot.net = id;
+      slot.step = step[id];
+      if (slot.step >= whole_step) {
+        slot.box = chip;
+      } else {
+        const int margin = params_.ripup_box_margin * (slot.step == 0 ? 1 : 4);
+        slot.box = netAreaTileBox(nets_[id], dilation);
+        slot.box.xlo = std::max(slot.box.xlo - margin, 0);
+        slot.box.ylo = std::max(slot.box.ylo - margin, 0);
+        slot.box.xhi = std::min(slot.box.xhi + margin, tiles_x_ - 1);
+        slot.box.yhi = std::min(slot.box.yhi + margin, tiles_y_ - 1);
+      }
+      // A box over the whole chip runs as the serial loop does.
+      slot.whole = slot.box.contains(chip);
+      boxes.push_back(
+          {slot.box.xlo, slot.box.ylo, slot.box.xhi, slot.box.yhi});
+      slots.push_back(std::move(slot));
+    }
+    if (slots.empty()) {
+      break;
+    }
+    const br::OrderedBoxSchedule::Stats stats = br::OrderedBoxSchedule::run(
+        boxes, threads, parallel, [&](const int index, const int t) {
+          Slot& slot = slots[index];
+          NetData& net = nets_[slot.net];
+          // Routed again as a victim of an earlier sequence of the chunk
+          // (that sequence's box held the net's area, so it returned).
+          if (net.routed) {
+            slot.routed = true;
+            return;
+          }
+          Worker& w = workers_[t];
+          const br::TileBox* resident = slot.whole ? nullptr : &slot.box;
+          const br::AccessFootprintScope footprint_scope(
+              params_.partition_check && resident != nullptr ? &w.footprint
+                                                             : nullptr);
+          if (params_.partition_check && resident != nullptr) {
+            beginFootprint(w, net, kPhaseRegion, netAreaTileBox(net, dilation));
+            w.footprint.widen(slot.box);
+          }
+          const int64_t start = w.settled;
+          const br::RipupLevel saved_level = w.max_ripup_level;
+          w.max_ripup_level = level;
+          w.limit = resident;
+          w.area_deferred = false;
+          std::vector<SavedRouting> journal;
+          RipupState& state = slot.state;
+          state.outcome = kRipupNotStarted;
+          state.outcome_depth = 0;
+          slot.attempted = true;
+          slot.routed = ripupSequence(
+              slot.net, 0, pass, journal, false, w, state, resident);
+          if (!slot.routed) {
+            // The step the net's own rip-up mode search failed at, before
+            // the rollback restores the routings.
+            const uint8_t left_step = net.left_step;
+            const int left_term = net.left_term;
+            // Sec. 4.4: a failed sequence restores the original situation.
+            for (auto it = journal.rbegin(); it != journal.rend(); ++it) {
+              restoreRouting(*it, resident != nullptr ? &w : nullptr);
+            }
+            state.rollbacks++;
+            slot.limited
+                = resident != nullptr
+                  && (w.area_deferred || state.victim_outside_failures > 0);
+            // A failure below the net's own call is a victim's.
+            net.ripup_outcome = state.outcome_depth > 0
+                                    ? uint8_t{kRipupVictimFailed}
+                                    : state.outcome;
+            net.left_step = left_step;
+            net.left_term = left_term;
+          }
+          w.limit = nullptr;
+          w.area_deferred = false;
+          w.max_ripup_level = saved_level;
+          slot.settled = w.settled - start;
+          if (params_.partition_check && resident != nullptr) {
+            endFootprint(w, net, resident);
+          }
+        });
+    // Rip-up history of the chunk's box-limited sequences (Sec. 4.2).
+    for (Worker& w : workers_) {
+      for (const size_t v : w.history_bumps) {
+        grid_.bumpHistory(v);
+      }
+      w.history_bumps.clear();
+    }
+    ripup_box_stats_.chunks++;
+    ripup_box_stats_.longest_chain
+        = std::max(ripup_box_stats_.longest_chain, stats.longest_chain);
+    ripup_box_stats_.wall += stats.wall;
+    ripup_box_stats_.busy += stats.busy;
+    ripup_box_stats_.capacity += stats.wall * stats.threads;
+    again.clear();
+    for (const Slot& slot : slots) {
+      settled += slot.settled;
+      const RipupState& s = slot.state;
+      serial_ripup_.events += s.events;
+      serial_ripup_.rollbacks += s.rollbacks;
+      serial_ripup_.plain_connects += s.plain_connects;
+      serial_ripup_.mode_connects += s.mode_connects;
+      serial_ripup_.plain_seconds += s.plain_seconds;
+      serial_ripup_.mode_seconds += s.mode_seconds;
+      serial_ripup_.victim_level_failures += s.victim_level_failures;
+      serial_ripup_.victim_outside_failures += s.victim_outside_failures;
+      for (size_t l = 0; l < s.victims_by_level.size(); l++) {
+        serial_ripup_.victims_by_level[l] += s.victims_by_level[l];
+      }
+      if (slot.attempted) {
+        ripup_box_stats_.sequences[slot.whole ? whole_step : slot.step]++;
+      }
+      if (slot.routed) {
+        if (slot.attempted) {
+          ripup_box_stats_.routed[slot.whole ? whole_step : slot.step]++;
+        }
+        continue;
+      }
+      if (slot.limited) {
+        step[slot.net] = static_cast<uint8_t>(slot.step + 1);
+        again.push_back(slot.net);
+        ripup_box_stats_.widened++;
+      } else {
+        unrouted.push_back(slot.net);
+      }
+    }
+    pending.insert(pending.begin(), again.begin(), again.end());
+  }
+  queue.swap(unrouted);
 }
 
 int64_t BonnRouteDR::parallelRipupRound(const std::vector<int>& queue,
@@ -9381,6 +9589,30 @@ void BonnRouteDR::main()
           serial_ripup_.plain_seconds,
           serial_ripup_.mode_connects,
           serial_ripup_.mode_seconds);
+      if (params_.ripup_boxes) {
+        const RipupBoxStats& b = ripup_box_stats_;
+        logger_->report(
+            "BonnRoute DR rip-up boxes: {} chunks of up to {} nets; {} "
+            "sequences in the area widened by {} tiles ({} routed), {} by {} "
+            "tiles ({} routed), {} over the whole chip ({} routed); {} "
+            "continued with a larger box; longest chain {}; {:.2f}s wall, "
+            "{:.2f} thread-s, thread utilization {:.0f}%.",
+            b.chunks,
+            params_.ripup_box_chunk,
+            b.sequences[0],
+            params_.ripup_box_margin,
+            b.routed[0],
+            b.sequences[1],
+            4 * params_.ripup_box_margin,
+            b.routed[1],
+            b.sequences[2],
+            b.routed[2],
+            b.widened,
+            b.longest_chain,
+            b.wall,
+            b.busy,
+            b.capacity > 0 ? 100.0 * b.busy / b.capacity : 0.0);
+      }
       if (params_.ripup_partitions > 0) {
         logger_->report(
             "BonnRoute DR parallel rip-up: {} rounds, {} sequences, {} nets "
