@@ -128,6 +128,8 @@ cc_library(
         "src/policy/ParallelEvalState.cc",
         "src/policy/ProgressReporter.cc",
         "src/policy/ProgressReporter.hh",
+        "src/policy/ResourceSharingSizingPolicy.cc",
+        "src/policy/ResourceSharingSizingPolicy.hh",
         "src/policy/SetupCritVtSwapPolicy.cc",
         "src/policy/SetupCritVtSwapPolicy.hh",
         "src/policy/SetupDirectionalPolicy.cc",

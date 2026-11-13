@@ -16,6 +16,7 @@
 #include "RepairSetupContext.hh"
 #include "RepairSetupProfiler.hh"
 #include "RepairTargetCollector.hh"
+#include "ResourceSharingSizingPolicy.hh"
 #include "SetupCritVtSwapPolicy.hh"
 #include "SetupDirectionalPolicy.hh"
 #include "SetupLastGaspPolicy.hh"
@@ -139,6 +140,10 @@ std::unique_ptr<OptimizationPolicy> Optimizer::makePolicyForPhase(
     return std::make_unique<GlobalSizingPolicy>(
         resizer_, committer_, setup_context, config_);
   }
+  if (phase_name == "RS_SIZING") {
+    return std::make_unique<ResourceSharingSizingPolicy>(
+        resizer_, committer_, setup_context, config_);
+  }
   // Only the phases of the README are listed; the experimental PARALLEL_EVAL
   // has a README section.
   resizer_.logger()->error(
@@ -146,7 +151,7 @@ std::unique_ptr<OptimizationPolicy> Optimizer::makePolicyForPhase(
       217,
       "Unknown phase name '{}'. Valid phase names are: LEGACY, WNS, "
       "WNS_PATH, WNS_CONE, TNS, ENDPOINT_FANIN, STARTPOINT_FANOUT, "
-      "LAST_GASP, CRIT_VT_SWAP, REROUTE, GLOBAL_SIZING, "
+      "LAST_GASP, CRIT_VT_SWAP, REROUTE, GLOBAL_SIZING, RS_SIZING, "
       "PARALLEL_EVAL (experimental)",
       phase_name);
   return nullptr;
@@ -191,7 +196,7 @@ bool Optimizer::run()
         223,
         "No phase names specified. Valid phase names are: LEGACY, WNS, "
         "WNS_PATH, WNS_CONE, TNS, ENDPOINT_FANIN, STARTPOINT_FANOUT, "
-        "LAST_GASP, CRIT_VT_SWAP, REROUTE, GLOBAL_SIZING, "
+        "LAST_GASP, CRIT_VT_SWAP, REROUTE, GLOBAL_SIZING, RS_SIZING, "
         "PARALLEL_EVAL (experimental)");
   }
   const int phase_count = phase_names.size();

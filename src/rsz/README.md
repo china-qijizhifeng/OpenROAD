@@ -262,7 +262,7 @@ repair_timing
 | `-hold_margin` | Add additional hold slack margin. |
 | `-allow_setup_violations` | While repairing hold violations, buffers are not inserted that will cause setup violations unless `-allow_setup_violations` is specified. |
 | `-sequence` | Specify a particular order of setup timing optimization moves. The default is "unbuffer vt_swap sizeup swap buffer clone split". Obeys skip flags also. |
-| `-phases` | Specify a particular order of setup timing optimization phases. The default is "LEGACY LAST_GASP CRIT_VT_SWAP". The experimental `PARALLEL_EVAL` policy is described in [PARALLEL_EVAL Policy](#parallel_eval-policy). |
+| `-phases` | Specify a particular order of setup timing optimization phases. The default is "LEGACY LAST_GASP CRIT_VT_SWAP". The experimental `PARALLEL_EVAL` policy is described in [PARALLEL_EVAL Policy](#parallel_eval-policy) and the experimental `RS_SIZING` phase in [RS_SIZING Phase](#rs_sizing-phase-experimental). |
 | `-path_group` | Restrict setup and hold repair to one path group: `reg2reg`, `in2reg`, `reg2out`, `in2out` or `gated_clock`. Any other name warns and repairs every path group, which is the default. A supported group that the SDC has no `group_path` for is created, so timing reports group paths the same way `repair_timing` optimizes them. |
 | `-skip_pin_swap` | Flag to skip pin swap. The default is to perform pin swap transform during setup fixing. |
 | `-skip_gate_cloning` | Flag to skip gate cloning. The default is to perform gate cloning transform during setup fixing. |
@@ -352,6 +352,39 @@ then works on the worst endpoints one batch at a time. The policy differs from
   `-phases` lists only `PARALLEL_EVAL`.
 - Profiling: `-profile_mode` records the batch decisions under
   `-profile_dir`.
+
+#### RS_SIZING Phase (experimental)
+
+`-phases {RS_SIZING LEGACY LAST_GASP}` runs a global sizing and buffering
+phase before the per-endpoint repair, so that `LEGACY` starts from fewer and
+smaller violations. Each iteration of the phase:
+
+- Weights: every timing arc gets the summed weight of the paths through it.
+  The default Lagrangian multipliers grow with the arc's local violation
+  (`(1 + criticality)` per iteration) and are projected onto flow
+  conservation; `multipliers=rs` uses resource-sharing path weights
+  `exp(gamma * usage)` (Daboul, Hähnle, Held and Schorr, TCAD 2018) from one
+  forward and one backward log-sum-exp pass. Weights are normalized by the
+  largest weight on a data arc.
+- Sizing: the gates whose arc weight is at least `critical_weight_ratio` of
+  the largest pick the swappable cell that minimizes the weighted delay change
+  of their own arcs, their input-net drivers, sibling loads and fanout arcs
+  (Liberty table models at the current slews and loads) plus a power term.
+  The evaluation runs on the worker threads; gates that share a net are
+  resized in different rounds.
+- Buffering: the violating nets with a wire-arc weight of at least
+  `buffer_weight_ratio` and fewer than `buffer_max_fanout` loads are rebuffered
+  with the `LEGACY` buffer-tree algorithm, most critical first.
+- Acceptance: the iteration is kept when it improves TNS without losing WNS,
+  or WNS without losing TNS; otherwise it is undone. The phase stops when an
+  iteration's TNS gain per power increase falls below `min_efficiency_ratio`
+  of the first kept iteration's.
+
+The phase runs only when the mean violation of the violating endpoints is at
+least `start_violation_ratio` (0.15) of the clock period; designs with smaller
+violations go straight to `LEGACY` with unchanged results. Settings are read
+from the environment variable `RSZ_RS_SIZING_OPTIONS` as `name=value` pairs,
+for example `RSZ_RS_SIZING_OPTIONS="multipliers=rs iterations=8"`.
 
 #### Instance Name Prefixes
 
