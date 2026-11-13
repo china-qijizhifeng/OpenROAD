@@ -409,6 +409,13 @@ struct BonnRouteDRParams
   // instance class (master, orientation, offset in master coordinates, via
   // definition) before routing; the searches look the result up.
   bool planar_first = true;
+  // Incremental calls: a new antenna-cell pin (diode of repair_antennas
+  // -keep_detailed_wires) of a net whose kept routing joins all its other
+  // pins connects on the lowest track layer to the kept metal of the nearest
+  // other pin's node at that layer (the gate the diode serves), so that the
+  // diode is on the gate's node for every antenna ratio of that layer and
+  // above. Falls back to the unrestricted connection when that fails.
+  bool incremental_diode_node = true;
   bool verbose = true;
   // Algorithm profile: 0 = 2013-improved (default), 1 = 2013-reimpl,
   // 2 = 2021 (2013-reimpl plus Ahrens et al., arXiv:2111.06169).
@@ -622,6 +629,9 @@ class BonnRouteDR
     // or access path shape of a wide class; its updates and queries reach
     // the layer's whole rule distance (buildPartitionHalos, markWideNets).
     bool wide_shapes = false;
+    // Highest track layer of the net's search area in this call (-1: no
+    // limit); incremental_diode_node sets 0.
+    int max_layer = -1;
     int64_t hpwl = 0;
     // Wire type (Sec. 3.2): 0 = default rule, else the net's NDR.
     int wire_type = 0;
@@ -1321,6 +1331,30 @@ class BonnRouteDR
   // Terms of a component joined by kept pieces become one terminal whose
   // options include the track vertices on the kept pieces.
   void mergeKeptComponents(NetData& net, const InputClassification& c);
+  // incremental_diode_node: new diode pins of a net and the gates they
+  // serve, the allowed targets, and the unrestricted options for the
+  // fallback.
+  struct DiodeConnection
+  {
+    std::vector<std::pair<const frInstTerm*, const frInstTerm*>> pairs;
+    std::unordered_set<size_t> targets;
+    std::vector<std::vector<AccessOption>> unrestricted;
+    bool restricted = false;
+  };
+  std::unordered_map<int, DiodeConnection> diode_connections_;
+  // Before mergeKeptComponents: false if the net has no new diode pin or
+  // its kept routing is not one component.
+  bool planDiodeConnection(const NetData& net,
+                           const InputClassification& c,
+                           DiodeConnection& out) const;
+  // After mergeKeptComponents: restricts the options and the search layers.
+  bool restrictDiodeConnection(NetData& net, DiodeConnection& dc);
+  void unrestrictDiodeConnection(NetData& net, DiodeConnection& dc);
+  // The pins a and b of `net` are joined by its metal on the layers at or
+  // below the lowest track layer (antenna node of that layer).
+  bool joinedOnLowLayers(const frNet* net,
+                         const frInstTerm* a,
+                         const frInstTerm* b) const;
   std::unordered_map<int, InputClassification> classified_;
   std::unordered_map<const frInst*, InstRecord> inst_records_;
   bool record_fixed_ = false;

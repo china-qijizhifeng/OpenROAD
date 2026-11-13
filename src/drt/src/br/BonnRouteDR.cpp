@@ -322,6 +322,8 @@ bool BonnRouteDRParams::set(const std::string& name, const double value)
     incremental_potential = std::clamp(v, 0, 4);
   } else if (name == "incremental_ripup") {
     incremental_ripup = v != 0;
+  } else if (name == "incremental_diode_node") {
+    incremental_diode_node = v != 0;
   } else if (name == "incremental_check") {
     incremental_check = std::clamp(v, 0, 2);
   } else if (name == "verbose") {
@@ -5177,7 +5179,9 @@ void BonnRouteDR::buildRegion(const NetData& net,
     for (int dz = -params_.layer_dilation; dz <= params_.layer_dilation; dz++) {
       for (int dx = -around; dx <= around; dx++) {
         for (int dy = -around; dy <= around; dy++) {
-          region.allow(z + dz, tx + dx, ty + dy);
+          if (net.max_layer < 0 || z + dz <= net.max_layer) {
+            region.allow(z + dz, tx + dx, ty + dy);
+          }
         }
       }
     }
@@ -5338,7 +5342,9 @@ bool BonnRouteDR::buildPathRegion(const NetData& net,
     for (int dz = -params_.layer_dilation; dz <= params_.layer_dilation; dz++) {
       for (int dx = -around; dx <= around; dx++) {
         for (int dy = -around; dy <= around; dy++) {
-          region.allow(z + dz, x + dx, y + dy);
+          if (net.max_layer < 0 || z + dz <= net.max_layer) {
+            region.allow(z + dz, x + dx, y + dy);
+          }
         }
       }
     }
