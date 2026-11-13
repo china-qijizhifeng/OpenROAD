@@ -2358,7 +2358,7 @@ bool BonnRouteDR::viaCheckClean(frBlockObject* term,
   return true;
 }
 
-void BonnRouteDR::buildPinViaLegality()
+void BonnRouteDR::buildPinViaLegality(const std::vector<int>* only)
 {
   // Every lower vertex of a search via whose bottom pad overlaps a pin shape
   // of the net. Approved as is: an access point whose FlexPA via definitions
@@ -2410,7 +2410,19 @@ void BonnRouteDR::buildPinViaLegality()
   int64_t approved = 0;
   const int num_fr = static_cast<int>(z_of_fr_.size());
   std::vector<frRect> shapes;
-  for (int n = 0; n < static_cast<int>(nets_.size()); n++) {
+  std::vector<int> ids;
+  if (only != nullptr) {
+    ids = *only;
+    for (const int n : ids) {
+      nets_[n].forbidden_pin_vias.clear();
+    }
+  } else {
+    ids.resize(nets_.size());
+    for (int n = 0; n < static_cast<int>(nets_.size()); n++) {
+      ids[n] = n;
+    }
+  }
+  for (const int n : ids) {
     NetData& data = nets_[n];
     if (data.skip) {
       continue;

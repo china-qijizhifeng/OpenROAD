@@ -1722,7 +1722,14 @@ bool BonnRouteDR::prepareVictim(const int id)
   if (net.dead || net.keeps_input || victim_changed_insts_ == nullptr) {
     return false;
   }
-  return prepareNet(net, *victim_changed_insts_);
+  if (!prepareNet(net, *victim_changed_insts_)) {
+    return false;
+  }
+  if (params_.planar_first) {
+    const std::vector<int> one{id};
+    buildPinViaLegality(&one);
+  }
+  return true;
 }
 
 void BonnRouteDR::routeIncremental(std::vector<odb::Rect>& regions)
@@ -1882,6 +1889,16 @@ void BonnRouteDR::routeIncremental(std::vector<odb::Rect>& regions)
   // (pins, reservations, access options) as prepared in this call.
   for (const int id : order) {
     nets_[id].wide_shapes = netHasWideShapes(nets_[id]);
+  }
+  // planar_first (C5): the nets prepared in this call get the forbidden
+  // via positions of their (possibly new) pins, as the first call's nets.
+  if (params_.planar_first) {
+    std::vector<int> prepared = order;
+    for (const auto& [id, dc] : diode_connections_) {
+      prepared.push_back(id);
+    }
+    std::ranges::sort(prepared);
+    buildPinViaLegality(&prepared);
   }
   const double access_s = timer.elapsed() - sync_s;
   std::ranges::stable_sort(

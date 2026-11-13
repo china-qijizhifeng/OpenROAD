@@ -1199,8 +1199,9 @@ class BonnRouteDR
                      const frViaDef* def,
                      const odb::Point& p,
                      bool own_net_only) const;
-  // planar_first: NetData::forbidden_pin_vias of every net.
-  void buildPinViaLegality();
+  // planar_first: NetData::forbidden_pin_vias of every net, or of the nets
+  // `only` (incremental calls: the nets prepared in the call).
+  void buildPinViaLegality(const std::vector<int>* only = nullptr);
   // The access point of `term` (frInstTerm or frBTerm) at p on layer, or
   // nullptr.
   const frAccessPoint* accessPointAt(const frBlockObject* term,
