@@ -1337,9 +1337,12 @@ class BonnRouteDR
   struct DiodeConnection
   {
     std::vector<std::pair<const frInstTerm*, const frInstTerm*>> pairs;
+    // Access options of the paired gates before the merge.
+    std::vector<AccessOption> gate_options;
     std::unordered_set<size_t> targets;
     std::vector<std::vector<AccessOption>> unrestricted;
-    bool restricted = false;
+    // Track layer cap of the current restriction; -1: unrestricted.
+    int cap = -1;
   };
   std::unordered_map<int, DiodeConnection> diode_connections_;
   // Before mergeKeptComponents: false if the net has no new diode pin or
@@ -1347,14 +1350,25 @@ class BonnRouteDR
   bool planDiodeConnection(const NetData& net,
                            const InputClassification& c,
                            DiodeConnection& out) const;
-  // After mergeKeptComponents: restricts the options and the search layers.
-  bool restrictDiodeConnection(NetData& net, DiodeConnection& dc);
+  // Targets of the diode connections with the search capped at track layer
+  // `cap`: track vertices at or below it on kept metal joined to a paired
+  // gate through layers at or below it, and the gates' options there.
+  void diodeTargets(const InputClassification& c,
+                    DiodeConnection& dc,
+                    int cap) const;
+  // After mergeKeptComponents: restricts the options and the search layers
+  // to `cap`; false (and unrestricted) when a term has no option left.
+  bool restrictDiodeConnection(NetData& net,
+                               const InputClassification& c,
+                               DiodeConnection& dc,
+                               int cap);
   void unrestrictDiodeConnection(NetData& net, DiodeConnection& dc);
   // The pins a and b of `net` are joined by its metal on the layers at or
-  // below the lowest track layer (antenna node of that layer).
+  // below track layer `cap` (antenna node of that layer).
   bool joinedOnLowLayers(const frNet* net,
                          const frInstTerm* a,
-                         const frInstTerm* b) const;
+                         const frInstTerm* b,
+                         int cap) const;
   std::unordered_map<int, InputClassification> classified_;
   std::unordered_map<const frInst*, InstRecord> inst_records_;
   bool record_fixed_ = false;
