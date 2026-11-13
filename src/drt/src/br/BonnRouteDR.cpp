@@ -8955,13 +8955,22 @@ void BonnRouteDR::reportLeftNets() const
 void BonnRouteDR::writeNets()
 {
   frTechObject* tech = design_->getTech();
-  std::vector<std::pair<frLayerNum, odb::Rect>> notch_fill_rects;
-  // (net, index in notch_fill_rects) of every fill written.
-  std::vector<std::pair<int, size_t>> written_fills;
-  for (NetData& data : nets_) {
-    if (!data.routed || (!write_mask_.empty() && !write_mask_[data.id])) {
-      continue;
-    }
+  // Counters of one net's write, summed over the nets afterwards.
+  struct WriteCounts
+  {
+    int64_t guard_via_contacts = 0;
+    int64_t guard_nets = 0;
+    int64_t guard_contacts = 0;
+    int64_t wrong_way_nets = 0;
+    int64_t uncontacted_nets = 0;
+    int64_t uncontacted_pins = 0;
+    int64_t connected_vias = 0;
+  };
+  // Writes one net's routing as FlexDR objects; false when a guard leaves
+  // the net to FlexDR. Reads the design, the region query and the net's
+  // own data, and writes only the net's NetData and frNet, so that nets are
+  // written in parallel.
+  auto write_net = [&](NetData& data, WriteCounts& counts) {
     frNet* net = data.net;
     // Split wires at planar pin points so the pin end is an endpoint.
     std::vector<OutWire> wires;
@@ -8992,15 +9001,16 @@ void BonnRouteDR::writeNets()
     }
     // Contact guard: FlexDR's clean-up needs every pin contact at one of the
     // pin's access points; otherwise the net is left to FlexDR.
-    guard_via_contacts_ += pinContactViolations(data, wires, data.vias, true);
+    counts.guard_via_contacts
+        += pinContactViolations(data, wires, data.vias, true);
     if (const int64_t bad = pinContactViolations(data, wires, data.vias)) {
-      guard_nets_++;
-      guard_contacts_ += bad;
+      counts.guard_nets++;
+      counts.guard_contacts += bad;
       data.left_guard = kGuardPinContact;
       data.routed = false;
       data.wires.clear();
       data.vias.clear();
-      continue;
+      return false;
     }
     // Wrong-way or off-track wires on layers that only allow on-track
     // preferred wires (asap7 M1-M3): FlexDR cannot reach a worker-boundary
@@ -9009,24 +9019,24 @@ void BonnRouteDR::writeNets()
                              [&](const OutWire& w) { return wireOnTracks(w); })
         || !std::ranges::all_of(
             patches, [&](const OutWire& w) { return wireOnTracks(w); })) {
-      wrong_way_nets_++;
+      counts.wrong_way_nets++;
       data.left_guard = kGuardOnTrack;
       data.routed = false;
       data.wires.clear();
       data.vias.clear();
-      continue;
+      return false;
     }
     // Every pin of the net needs a contact FlexDR recognises; a pin without
     // one stops FlexDR's connectivity check (DRT-0206). Leave the net to
     // FlexDR instead.
     if (const int missing = pinsWithoutContact(data, wires)) {
-      uncontacted_nets_++;
-      uncontacted_pins_ += missing;
+      counts.uncontacted_nets++;
+      counts.uncontacted_pins += missing;
       data.left_guard = kGuardMissingContact;
       data.routed = false;
       data.wires.clear();
       data.vias.clear();
-      continue;
+      return false;
     }
     for (const OutWire& w : wires) {
       if (w.begin == w.end) {
@@ -9089,24 +9099,60 @@ void BonnRouteDR::writeNets()
       auto via = std::make_unique<frVia>(v.def, v.point);
       if (atAccessPoint(data, v.def->getLayer1Num(), v.point)) {
         via->setBottomConnected(true);
-        connected_vias_++;
+        counts.connected_vias++;
       }
       if (atAccessPoint(data, v.def->getLayer2Num(), v.point)) {
         via->setTopConnected(true);
-        connected_vias_++;
+        counts.connected_vias++;
       }
       via->setTapered(data.wire_type != 0 && v.wire_type == 0);
       net->addVia(std::move(via));
     }
-    if (params_.notch_fill) {
-      const size_t first_fill = notch_fill_rects.size();
-      fillNotches(net, data.id, notch_fill_rects);
-      for (size_t k = first_fill; k < notch_fill_rects.size(); k++) {
-        written_fills.emplace_back(data.id, k);
-      }
-    }
     net->setHasInitialRouting(true);
     net->setModified(true);
+    return true;
+  };
+  std::vector<int> ids;
+  for (const NetData& data : nets_) {
+    if (data.routed && (write_mask_.empty() || write_mask_[data.id])) {
+      ids.push_back(data.id);
+    }
+  }
+  std::vector<WriteCounts> counts(ids.size());
+  std::vector<char> written(ids.size(), 0);
+  const int threads = std::max(1, static_cast<int>(workers_.size()));
+#pragma omp parallel for num_threads(threads) schedule(dynamic, 16)
+  for (int k = 0; k < static_cast<int>(ids.size()); k++) {
+    written[k] = write_net(nets_[ids[k]], counts[k]) ? 1 : 0;
+  }
+  for (const WriteCounts& c : counts) {
+    guard_via_contacts_ += c.guard_via_contacts;
+    guard_nets_ += c.guard_nets;
+    guard_contacts_ += c.guard_contacts;
+    wrong_way_nets_ += c.wrong_way_nets;
+    uncontacted_nets_ += c.uncontacted_nets;
+    uncontacted_pins_ += c.uncontacted_pins;
+    connected_vias_ += c.connected_vias;
+  }
+  std::vector<std::pair<frLayerNum, odb::Rect>> notch_fill_rects;
+  // (net, index in notch_fill_rects) of every fill written.
+  std::vector<std::pair<int, size_t>> written_fills;
+  // Notch fills in net order, after all nets are written: a fill keeps its
+  // distance to the fills of earlier nets; fillNotches reads the net's own
+  // FlexDR objects and the routing space, which the writes above leave
+  // unchanged.
+  if (params_.notch_fill) {
+    for (size_t k = 0; k < ids.size(); k++) {
+      if (!written[k]) {
+        continue;
+      }
+      const int id = ids[k];
+      const size_t first_fill = notch_fill_rects.size();
+      fillNotches(nets_[id].net, id, notch_fill_rects);
+      for (size_t f = first_fill; f < notch_fill_rects.size(); f++) {
+        written_fills.emplace_back(id, f);
+      }
+    }
   }
   // A routing space kept for incremental calls holds the notch fills as
   // routed shapes of their net (patch wires, as routingShapes reads them);
