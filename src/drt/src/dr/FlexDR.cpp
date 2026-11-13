@@ -44,6 +44,7 @@
 #include "distributed/drUpdate.h"
 #include "distributed/frArchive.h"
 #include "dr/AbstractDRGraphics.h"
+#include "dr/FlexDRWorkerCancel.h"
 #include "dr/FlexDR_conn.h"
 #include "drt/TritonRoute.h"
 #include "dst/BalancerJobDescription.h"
@@ -290,11 +291,12 @@ int FlexDRWorker::mainRoute()
   using std::chrono::high_resolution_clock;
   const high_resolution_clock::time_point t0 = main_start_time_;
   auto micronPerDBU = 1.0 / getTech()->getDBUPerUU();
-  if (!skipRouting_) {
+  // A cancelled worker (see setCancelRequest) skips the remaining steps.
+  if (!skipRouting_ && !pollCancelRequest()) {
     init(getDesign());
   }
   const high_resolution_clock::time_point t1 = high_resolution_clock::now();
-  if (!skipRouting_) {
+  if (!skipRouting_ && !pollCancelRequest()) {
     route_queue();
   }
   high_resolution_clock::time_point t2 = high_resolution_clock::now();
@@ -1013,7 +1015,9 @@ int FlexDR::runGridWorkersAhead(std::vector<GridWorkerSlot>& slots,
     State state = State::kWaiting;
     uint64_t fingerprint = 0;  // of a worker started ahead
     bool runs_in_batch = false;
-    std::unique_ptr<std::atomic<bool>> stop_request;
+    // Of the running worker; replaced at every start.
+    std::unique_ptr<WorkerCancelRequest> cancel_request;
+    WorkerCancelRequest::Clock::time_point run_start;
     // Slots whose extended box intersects this one.
     std::vector<int> overlaps;
     // Markers in the DRC box when last counted.  The count orders the starts
@@ -1074,8 +1078,18 @@ int FlexDR::runGridWorkersAhead(std::vector<GridWorkerSlot>& slots,
   int num_restarted_ahead = 0;
   int num_dropped = 0;
   std::priority_queue<std::pair<int, int>> batch_queue;  // markers, -slot
+  // A worker detached from its slot while its thread runs stays here with
+  // its cancel request until that thread returns; the thread reclaims both.
+  struct DetachedRun
+  {
+    std::unique_ptr<FlexDRWorker> worker;
+    std::unique_ptr<WorkerCancelRequest> cancel_request;
+    WorkerCancelRequest::Clock::time_point run_start;
+  };
+  std::map<const FlexDRWorker*, DetachedRun> detached_runs;
+  // Detached workers without a running thread; released at the end.
   std::vector<std::unique_ptr<FlexDRWorker>> discarded_workers;
-  std::vector<std::unique_ptr<std::atomic<bool>>> discarded_stop_requests;
+  WorkerCancelStatistics cancel_statistics;
   ThreadException exception;
 
   // Needs a slot that still holds its worker.
@@ -1091,13 +1105,21 @@ int FlexDR::runGridWorkersAhead(std::vector<GridWorkerSlot>& slots,
       marked_later_slots.erase(i);
     }
   };
+  // Detaches the worker from slot i; its result is never written back.  A
+  // running worker is asked to cancel.
   const auto discard = [&](const int i) {
     Slot& state = states[i];
     if (state.state == State::kRunning) {
-      state.stop_request->store(true);
+      state.cancel_request->request();
+      cancel_statistics.requests++;
+      const FlexDRWorker* worker = slots[i].worker.get();
+      detached_runs.emplace(worker,
+                            DetachedRun{std::move(slots[i].worker),
+                                        std::move(state.cancel_request),
+                                        state.run_start});
+    } else {
+      discarded_workers.push_back(std::move(slots[i].worker));
     }
-    discarded_workers.push_back(std::move(slots[i].worker));
-    discarded_stop_requests.push_back(std::move(state.stop_request));
   };
   const auto report_progress = [&]() {
     if (router_cfg_->VERBOSE > 0) {
@@ -1267,21 +1289,47 @@ int FlexDR::runGridWorkersAhead(std::vector<GridWorkerSlot>& slots,
         Slot& state = states[picked];
         FlexDRWorker* worker = slots[picked].worker.get();
         state.state = State::kRunning;
-        state.stop_request = std::make_unique<std::atomic<bool>>(false);
-        worker->setStopRequest(state.stop_request.get());
+        state.cancel_request = std::make_unique<WorkerCancelRequest>();
+        worker->setCancelRequest(state.cancel_request.get());
+        state.run_start = WorkerCancelRequest::Clock::now();
         lock.unlock();
         worker->mainRoute();
+        const WorkerCancelRequest::Clock::time_point run_end
+            = WorkerCancelRequest::Clock::now();
         lock.lock();
-        // A worker started ahead may have been replaced or dropped.
+        // A worker started ahead may have been replaced or dropped.  The
+        // detached worker is alive until here, so no other worker has its
+        // address.
         if (slots[picked].worker.get() == worker) {
           state.state = State::kDone;
           if (slots[picked].batch == current_batch) {
             report_progress();
           }
           write_back();
+        } else {
+          auto detached = detached_runs.find(worker);
+          if (detached == detached_runs.end()) {
+            logger_->error(DRT,
+                           9251,
+                           "Grid workers ahead: a worker left its slot "
+                           "without being detached.");
+          }
+          DetachedRun run = std::move(detached->second);
+          detached_runs.erase(detached);
+          cancel_statistics.addExit(*run.cancel_request,
+                                    worker->isCancelled(),
+                                    worker->getAstarPops(),
+                                    run.run_start,
+                                    run_end);
+          lock.unlock();
+          run.worker.reset();
+          run.cancel_request.reset();
+          lock.lock();
         }
         wake.notify_all();
       } catch (...) {
+        // Also an exception of a detached worker ends the iteration: only an
+        // observed cancel request ends a run early without an error.
         if (!lock.owns_lock()) {
           lock.lock();
         }
@@ -1308,6 +1356,27 @@ int FlexDR::runGridWorkersAhead(std::vector<GridWorkerSlot>& slots,
              num_dropped,
              num_started_before_neighbours,
              num_restarted_ahead);
+  if (router_cfg_->VERBOSE > 0 && cancel_statistics.requests > 0) {
+    const int exits = std::max(1, cancel_statistics.exits());
+    logger_->info(
+        DRT,
+        9250,
+        "Grid workers ahead, iteration {}: {} running workers detached, {} "
+        "stopped at a cancel check, {} ended their routing first; cancel to "
+        "exit mean {:.2f} ms, max {:.2f} ms; A* pops after the cancel mean "
+        "{:.0f}, max {}; detached runs {:.2f} thread s, after the cancel "
+        "{:.3f} thread s.",
+        iter_,
+        cancel_statistics.requests,
+        cancel_statistics.cancelled,
+        cancel_statistics.completed,
+        cancel_statistics.exit_latency_sum_ms / exits,
+        cancel_statistics.exit_latency_max_ms,
+        static_cast<double>(cancel_statistics.pops_after_request_sum) / exits,
+        cancel_statistics.pops_after_request_max,
+        cancel_statistics.detached_run_seconds,
+        cancel_statistics.detached_run_seconds_after_request);
+  }
   return num_unaffected_workers;
 }
 
