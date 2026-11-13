@@ -7802,7 +7802,7 @@ void BonnRouteDR::routeSpeculativePipeline(const std::vector<int>& order,
     }
     if (params_.verbose && tailBatchPolicy().adaptive()) {
       logger_->info(utl::DRT,
-                    9132,
+                    9133,
                     "BonnRoute {} adaptive batches: {} batches of {} to {} "
                     "nets (tail_batch_min {}, tail_batch {}).",
                     stage,
