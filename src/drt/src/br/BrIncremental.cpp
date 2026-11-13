@@ -1439,7 +1439,7 @@ void BonnRouteDR::routeIncremental(std::vector<odb::Rect>& regions)
   const double access_s = timer.elapsed() - sync_s;
   std::ranges::stable_sort(
       order, [&](int a, int b) { return nets_[a].hpwl < nets_[b].hpwl; });
-  const int64_t ripups_before = ripup_events_;
+  const int64_t ripups_before = serial_ripup_.events;
   std::vector<int> failed;
   routeParallel(order, failed);
   const int64_t first_failed = static_cast<int64_t>(failed.size());
@@ -1673,7 +1673,7 @@ void BonnRouteDR::routeIncremental(std::vector<odb::Rect>& regions)
         pins_changed,
         not_prepared.size(),
         first_failed,
-        ripup_events_ - ripups_before,
+        serial_ripup_.events - ripups_before,
         written,
         left,
         regions.size(),

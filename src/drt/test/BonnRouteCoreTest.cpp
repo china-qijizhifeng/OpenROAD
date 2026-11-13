@@ -65,6 +65,15 @@ struct Ref
                ? 0
                : r.ripup_cost * (1 + f.history(v));
   }
+  // Surcharge of a wire or jog step of cost `base` that ends in the widened
+  // part of the region.
+  Cost corridor(int z, int i, int j, Cost base) const
+  {
+    return r.corridor_cost_percent != 0
+                   && r.region->widened(g.layers[z], z, i, j)
+               ? base * r.corridor_cost_percent / 100
+               : 0;
+  }
   // Cost of one edge u->w as the searches price it; kInfCost if absent.
   Cost edge(size_t u, size_t w, bool u_source) const
   {
@@ -104,7 +113,8 @@ struct Ref
           }
         }
       }
-      return std::abs(l.positions[j2] - l.positions[j]) * rate + pen(w, kWire)
+      const Cost base = std::abs(l.positions[j2] - l.positions[j]) * rate;
+      return base + corridor(z2, i2, j2, base) + pen(w, kWire)
              + pen(e, kWireEdge) + spread;
     }
     if (z == z2 && j == j2 && std::abs(i - i2) == 1) {
@@ -113,7 +123,8 @@ struct Ref
           || !enter(e, kJogEdge)) {
         return kInfCost;
       }
-      return l.jog_factor * std::abs(l.tracks[i2] - l.tracks[i]) + pen(w, kJog)
+      const Cost base = l.jog_factor * std::abs(l.tracks[i2] - l.tracks[i]);
+      return base + corridor(z2, i2, j2, base) + pen(w, kJog)
              + pen(e, kJogEdge) + (u_source ? 0 : pen(u, kJog));
     }
     if (z2 == z + 1 && l.up_track[j] == i2 && l.up_pos[i] == j2) {
@@ -226,9 +237,7 @@ struct Ref
           if (!enter(w, kJog) || !enter(e, kJogEdge)) {
             continue;
           }
-          go(w,
-             l.jog_factor * std::abs(l.tracks[i2] - l.tracks[i]) + pen(w, kJog)
-                 + pen(e, kJogEdge) + (s ? 0 : pen(v, kJog)));
+          go(w, edge(v, w, s));
         }
       }
       if (z + 1 < g.numLayers()) {
@@ -238,9 +247,7 @@ struct Ref
           size_t w = g.vertex(z + 1, i2, j2);
           if (enter(v, kViaUpPad) && enter(v, kCutUp)
               && enter(w, kViaDownPad)) {
-            go(w,
-               g.via_cost[z] + pen(v, kViaUpPad) + pen(v, kCutUp)
-                   + pen(w, kViaDownPad));
+            go(w, edge(v, w, s));
           }
         }
       }
@@ -251,9 +258,7 @@ struct Ref
           size_t w = g.vertex(z - 1, i2, j2);
           if (enter(w, kViaUpPad) && enter(w, kCutUp)
               && enter(v, kViaDownPad)) {
-            go(w,
-               g.via_cost[z - 1] + pen(w, kViaUpPad) + pen(w, kCutUp)
-                   + pen(v, kViaDownPad));
+            go(w, edge(v, w, s));
           }
         }
       }
@@ -371,11 +376,17 @@ static int randomCases(const int cases,
     Region reg;
     reg.init(Z, T, T);
     bool full = rng() % 2;
+    // Vertex search only: part of the area is widened and costs more.
+    const bool corridor = modern && rng() % 2;
     for (int z = 0; z < Z; z++) {
       for (int x = 0; x < T; x++) {
         for (int y = 0; y < T; y++) {
           if (full || u(rng) < 0.7) {
-            reg.allow(z, x, y);
+            if (corridor && rng() % 3 == 0) {
+              reg.allowWidened(z, x, y);
+            } else {
+              reg.allow(z, x, y);
+            }
           }
         }
       }
@@ -383,6 +394,7 @@ static int randomCases(const int cases,
     SearchRequest q;
     q.net = rng() % 3;
     q.region = &reg;
+    q.corridor_cost_percent = corridor ? 1 + static_cast<int>(rng() % 300) : 0;
     q.ripup = rng() % 2;
     q.ripup_cost = 50 + rng() % 500;
     q.max_ripup_level = 1 + rng() % kMaxRemovableLevel;
@@ -1196,9 +1208,42 @@ static int labelBudget()
   return 0;
 }
 
+// Region cells: a tile of the area, a widened tile (corridor cost), and
+// their precedence.
+static int regionCells()
+{
+  TrackLayer l;
+  l.horizontal = true;
+  l.tracks = {5, 15, 25};
+  l.positions = {5, 15, 25};
+  l.track_tile = {0, 1, 2};
+  l.pos_tile = {0, 1, 2};
+  Region region;
+  region.init(1, 3, 3);
+  region.allow(0, 0, 0);
+  region.allowWidened(0, 1, 1);
+  region.allowWidened(0, 0, 0);  // stays a tile of the area
+  region.allowWidened(0, 2, 2);
+  region.allow(0, 2, 2);  // becomes a tile of the area
+  int fails = 0;
+  // Vertex (track i, position j) lies in tile (x = pos tile, y = track tile).
+  fails += !region.contains(l, 0, 0, 0) || region.widened(l, 0, 0, 0);
+  fails += !region.contains(l, 0, 1, 1) || !region.widened(l, 0, 1, 1);
+  fails += !region.contains(l, 0, 2, 2) || region.widened(l, 0, 2, 2);
+  fails += region.contains(l, 0, 0, 1) || region.widened(l, 0, 0, 1);
+  fails += region.touched.size() != 3;
+  fails += region.bx_lo != 0 || region.bx_hi != 2 || region.by_lo != 0
+           || region.by_hi != 2;
+  region.reset();
+  fails += region.contains(l, 0, 1, 1) || region.widened(l, 0, 1, 1)
+           || !region.touched.empty();
+  printf("region cells: %d failures\n", fails);
+  return fails != 0;
+}
+
 int main()
 {
-  if (blockedGeometry() || obstacleDetour() || reusedSearch()
+  if (regionCells() || blockedGeometry() || obstacleDetour() || reusedSearch()
       || reservationCases() || labelBudget()) {
     return 1;
   }

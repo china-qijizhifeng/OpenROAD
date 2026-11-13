@@ -101,6 +101,18 @@ Cost PathSearch::spreadCost(const int z, const int i, const int j) const
   return 0;
 }
 
+Cost PathSearch::corridorCost(const int z,
+                              const int i,
+                              const int j,
+                              const Cost base) const
+{
+  if (req_->corridor_cost_percent == 0
+      || !req_->region->widened(graph_.layers[z], z, i, j)) {
+    return 0;
+  }
+  return base * req_->corridor_cost_percent / 100;
+}
+
 Cost PathSearch::wireCost(const int z,
                           const int i,
                           const int j,
@@ -110,13 +122,15 @@ Cost PathSearch::wireCost(const int z,
   const Cost length = std::abs(layer.positions[j2] - layer.positions[j]);
   const Cost spread = spreadCost(z, i, j2);
   if (req_->discounts.empty()) {
-    return length * graph_.wire_unit + spread;
+    const Cost base = length * graph_.wire_unit;
+    return base + corridorCost(z, i, j2, base) + spread;
   }
   size_t li = 0;
   const bool discounted = local(z, i, std::min(j, j2), li)
                           && (labels_[li].marks & kMarkDiscount) != 0;
-  return length * (discounted ? req_->discount_rate : graph_.wire_unit)
-         + spread;
+  const Cost base
+      = length * (discounted ? req_->discount_rate : graph_.wire_unit);
+  return base + corridorCost(z, i, j2, base) + spread;
 }
 
 Cost PathSearch::penalty(const At a, const RipupLevel l) const
@@ -228,9 +242,10 @@ void PathSearch::settle(const int z, const int i, const int j, const Cost g)
       if (!usable(le)) {
         continue;
       }
-      const Cost c
-          = jogFactor(z, i, j) * std::abs(layer.tracks[i2] - layer.tracks[i])
-            + penalty(aw, lw) + penalty(edge, le) + own;
+      const Cost jog
+          = jogFactor(z, i, j) * std::abs(layer.tracks[i2] - layer.tracks[i]);
+      const Cost c = jog + corridorCost(z, i2, j, jog) + penalty(aw, lw)
+                     + penalty(edge, le) + own;
       relax(z, i2, j, g + c, di > 0 ? kFromTrackBelow : kFromTrackAbove, 0);
     }
   }

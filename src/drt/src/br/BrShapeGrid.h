@@ -281,7 +281,15 @@ class ShapeGrid
                : 1;
   }
   // Removable shapes of `net` get ripup level `level` (1..6); default 1.
+  // Grows the level table when needed: call it before parallel readers.
   void setNetRipupLevel(int32_t net, RipupLevel level);
+  // Ripup level of the removable shapes of `net`.
+  RipupLevel netRipupLevel(const int32_t net) const
+  {
+    return net >= 0 && net < static_cast<int32_t>(net_levels_.size())
+               ? net_levels_[net]
+               : 1;
+  }
 
   struct Statistics
   {

@@ -134,6 +134,13 @@ cc_test(
 )
 
 cc_test(
+    name = "bonnroute_ordered_box_schedule_test",
+    size = "small",
+    srcs = ["BonnRouteOrderedBoxScheduleTest.cpp"],
+    deps = ["//src/drt:bonnroute_core"],
+)
+
+cc_test(
     name = "bonnroute_tail_pipeline_test",
     size = "small",
     srcs = ["BonnRouteTailPipelineTest.cpp"],

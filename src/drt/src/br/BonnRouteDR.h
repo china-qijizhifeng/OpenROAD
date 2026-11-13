@@ -28,6 +28,8 @@
 #include "br/BrPotentialOracle.h"
 #include "br/BrSameNetRules.h"
 #include "br/BrShapeGrid.h"
+#include "br/BrOrderedBoxSchedule.h"
+#include "br/BrTailPipeline.h"
 #include "br/BrWireModel.h"
 #include "frBaseTypes.h"
 #include "frRTree.h"
@@ -68,6 +70,46 @@ struct BonnRouteDRParams
   // Rip-up penalty per vertex, in pitches of the bottom layer.
   int ripup_cost = 40;
   int max_ripups = 3;
+  // Sec. 3.3 / 4.4: rip-up level of the routed shapes of critical nets
+  // (clock and NDR nets, routed first; critical_nets); other nets have
+  // level 1. A rip-up sequence of the first pass removes shapes up to
+  // first_pass_ripup_level, later passes up to 6 ("higher ripup effort").
+  // Defaults 1 and 1: every routed shape is removable in every pass.
+  int critical_ripup_level = 1;
+  int first_pass_ripup_level = 1;
+  // Sec. 4.4 / 5.1: a net whose connection fails inside its partition
+  // region gets a rip-up sequence there (victims resident in the region, at
+  // most first_pass_ripup_level); the sequences of a region settle at most
+  // this percentage of the vertices its connections settled. 0: none (the
+  // serial rip-up phase handles every failed net).
+  int region_ripup_effort = 0;
+  // D1 S2 (design/D1-connection-unit.md): a net whose connection fails in
+  // a partition region keeps the connections it closed (committed, its
+  // reservations stay active); later stages route only the terms not joined
+  // yet. Nets still partial after the rip-up phase are removed and left to
+  // FlexDR whole. 0: a failed net keeps nothing.
+  bool keep_partial = true;
+  // Parallel rip-up (Sec. 4.4 / 5.1): before each pass of the serial rip-up
+  // queue, this many rounds of partition regions run the queued nets'
+  // rip-up sequences in parallel, victims resident in the region; each
+  // region gets the serial budget times its share of the queued nets. The
+  // serial loop handles the rest. 0: serial only.
+  int ripup_partitions = 0;
+  // Rip-up sequences scheduled by net boxes (BrOrderedBoxSchedule.h): the
+  // rip-up queue runs in chunks of ripup_box_chunk nets; a net's sequence
+  // stays inside its routing area widened by ripup_box_margin tiles
+  // (victims resident there) and starts when the earlier sequences of the
+  // chunk whose boxes meet its box returned, so results equal the serial
+  // order of the chunk at every thread count. A sequence that failed at
+  // the limit of its box runs again with 4 x the margin, then over the
+  // whole chip. Takes precedence over ripup_partitions. 0: serial queue.
+  // Under an effort budget (final_ripup_effort) the first chunk of a pass
+  // holds at most 16 sequences and a later chunk at most the remaining
+  // budget divided by the mean effort of the pass's sequences so far, so a
+  // chunk ends near the budget.
+  bool ripup_boxes = false;
+  int ripup_box_margin = 4;
+  int ripup_box_chunk = 64;
   // Off-track pin access: largest jog to a track, in pitches.
   int max_access_jog = 2;
   int max_access_options = 8;
@@ -81,6 +123,11 @@ struct BonnRouteDRParams
   // global routing corridor; the dilated area of a retry adds
   // retry_dilation on top.
   int guide_dilation = 0;
+  // Vertex search: wires and jogs in the tiles around the guide tiles (the
+  // guide_dilation and retry_dilation parts of the routing area) cost this
+  // percentage more than in the guide tiles; 0: the same. With
+  // use_intervals it is set to 0 (DRT-9131).
+  int corridor_cost = 0;
   bool use_intervals = false;
   bool ripup = false;
   // Sec. 4.4: search area of a connection = GR tiles of a shortest path
@@ -102,6 +149,14 @@ struct BonnRouteDRParams
   // Results depend on the net order and the batch size only. 0 keeps the
   // partition sequence to its end.
   int tail_batch = 32;
+  // D6 (BrTailPipeline.h, TailBatchPolicy): batches of at least
+  // tail_batch_min and at most tail_batch nets; the size halves after a
+  // batch with more than tail_batch_high percent conflicts per attempt and
+  // doubles below tail_batch_low percent. 0: every batch has tail_batch
+  // nets. Barrier batches and the lookahead follow the same sizes.
+  int tail_batch_min = 0;
+  int tail_batch_high = 50;
+  int tail_batch_low = 20;
   // Threads of the speculative batches; 0 uses all router threads. The
   // batch results do not depend on it (a check of that determinism).
   int tail_threads = 0;
@@ -131,11 +186,25 @@ struct BonnRouteDRParams
   // deferred to a final pass of the stage without a budget, so it does not
   // hold up the batches. 0 disables the budget.
   int tail_defer_settled = 300000;
+  // Staged budgets: the first pass of a tail stage gives every net this
+  // smaller budget, so a batch (whose wall time is its longest search)
+  // holds short searches only; the nets over it are searched again in a
+  // second pass with tail_defer_settled. 0, or a value at or above
+  // tail_defer_settled: one pass with tail_defer_settled.
+  int tail_first_settled = 100000;
   // The final pass of the stage for the deferred nets. 0 hands them to the
   // rip-up phase instead (final_ripup), whose rip-up mode search finds a
   // legal path at no penalty when one exists and does not exhaust the area
   // when none exists.
   bool tail_deferred_pass = true;
+  // Settled vertices a net may use in the deferred pass; nets over it go to
+  // the rip-up phase (most deferred nets have no route: jpeg 37 of 39).
+  // 0: no budget.
+  int tail_deferred_settled = 0;
+  // Batch size of the deferred pass. Its searches are long and few of them
+  // end with a route, so larger batches cost few conflicts and fewer
+  // barriers. 0: tail_batch.
+  int tail_deferred_batch = 128;
   // Sec. 5.1: a critical net routing step before the partitions; clock
   // nets are routed first, serially, on the whole chip.
   bool critical_nets = true;
@@ -548,7 +617,32 @@ class BonnRouteDR
     kRipupNoPath,        // no path in rip-up mode (LeftStep says why)
     kRipupVictimLimit,   // a victim was ripped up max_ripups times already
     kRipupVictimFailed,  // a victim could not be routed again
+    kRipupVictimLevel,   // a victim above the pass's rip-up level
+    kRipupVictimOutside,  // a victim not resident in the partition region
     kNumRipupOutcomes
+  };
+  // Rip-up sequences of one worker: where the running sequence failed first
+  // (outcome and depth of that call) and counters.
+  struct RipupState
+  {
+    uint8_t outcome = kRipupNotStarted;
+    int outcome_depth = 0;
+    int64_t sequences = 0;
+    int64_t routed = 0;
+    int64_t budget_skips = 0;
+    int64_t events = 0;  // victims ripped up
+    int64_t rollbacks = 0;
+    int64_t plain_connects = 0;
+    int64_t mode_connects = 0;
+    double plain_seconds = 0;
+    double mode_seconds = 0;
+    // Victims ripped up, by their rip-up level (index 1..6).
+    std::array<int64_t, br::kMaxRemovableLevel + 1> victims_by_level{};
+    // Sequences that failed at a victim above the pass's level, at a victim
+    // outside the partition region.
+    int64_t victim_level_failures = 0;
+    int64_t victim_outside_failures = 0;
+    int64_t settled = 0;
   };
   enum LeftGuard : uint8_t
   {
@@ -567,6 +661,22 @@ class BonnRouteDR
     kAccessReservation,   // reservations of other nets
     kAccessFixed,         // blockages or pins of other nets
     kNumAccessBlocks
+  };
+  // D1 S2: the connections a net closed so far, from which connect
+  // resumes: joined terms (term 0 always), terms whose access path is part
+  // of a post-processed connection, chosen access options, track vertices
+  // that carry metal (sources of later connections), and the geometry.
+  struct PartialState
+  {
+    bool valid = false;
+    int net = -1;  // the net whose connect produced it
+    int joined = 0;
+    std::vector<char> connected;
+    std::vector<char> consumed;
+    std::vector<int> chosen;
+    std::vector<size_t> tree;
+    std::vector<OutWire> wires;
+    std::vector<OutVia> vias;
   };
   struct NetData
   {
@@ -625,6 +735,9 @@ class BonnRouteDR
     int64_t hpwl = 0;
     // Wire type (Sec. 3.2): 0 = default rule, else the net's NDR.
     int wire_type = 0;
+    // keep_partial: shapes holds the committed shapes of partial_state.
+    bool partial = false;
+    PartialState partial_state;
   };
 
   // partition_check (Sec. 5.1): the steps of a net's unit of work, the
@@ -679,6 +792,21 @@ class BonnRouteDR
     // area_deferred, and the net continues in a later partition or the tail.
     const br::TileBox* limit = nullptr;
     bool area_deferred = false;
+    // Rip-up mode: shapes up to this rip-up level may be removed.
+    br::RipupLevel max_ripup_level = br::kMaxRemovableLevel;
+    // region_ripup_effort: the rip-up sequences of this worker's regions,
+    // the vertices they settled in the current region, and the rip-up
+    // history increments of its regions (merged into the fast grid after
+    // each partition; increments commute).
+    RipupState ripup;
+    int64_t region_ripup_settled = 0;
+    std::vector<size_t> history_bumps;
+    // keep_partial: progress of the last failed connectInRegion, partial
+    // commits of the regions, connects that resumed a partial net.
+    PartialState progress;
+    int64_t partial_commits = 0;
+    int64_t partial_resumes = 0;
+    int64_t tail_partial_commits = 0;
     int64_t area_deferrals = 0;
     // Settled-vertex budget of the current connect (0: none), the settled
     // count at its start, and whether a search was skipped for it.
@@ -750,6 +878,8 @@ class BonnRouteDR
     std::vector<int> chosen;
     std::vector<char> reserved;
     bool input_reserved;
+    bool was_partial = false;
+    PartialState partial_state;
     bool input_present;
   };
 
@@ -1066,24 +1196,73 @@ class BonnRouteDR
                     const br::TileBox* region);
   void reportFootprints();
   void routeParallel(const std::vector<int>& order, std::vector<int>& failed);
+  // D6: the batch size policy of the speculative tail.
+  br::TailBatchPolicy tailBatchPolicy() const;
   // settled_budget: stop starting sequences once the serial worker settled
   // this many vertices in the phase (0: unlimited).
   void routeRipupQueue(const std::vector<int>& failed,
                        int64_t settled_budget = 0);
+  // ripup_partitions: one round of region-parallel rip-up sequences over
+  // `queue` (pass `pass`); returns the settled vertices of the round.
+  int64_t parallelRipupRound(const std::vector<int>& queue,
+                             int pass,
+                             int round,
+                             int64_t settled_budget);
+  // Parallel rip-up rounds: rounds, sequences, nets routed, rollbacks,
+  // region budget stops, wall seconds.
+  int64_t parallel_ripup_rounds_ = 0;
+  int64_t parallel_ripup_sequences_ = 0;
+  int64_t parallel_ripup_routed_ = 0;
+  int64_t parallel_ripup_rollbacks_ = 0;
+  int64_t parallel_ripup_budget_stops_ = 0;
+  double parallel_ripup_seconds_ = 0;
+  // ripup_boxes: one pass of the rip-up queue under OrderedBoxSchedule.
+  // `queue` becomes the nets still unrouted; `settled` counts the vertices
+  // the phase's sequences settled, against settled_budget.
+  void routeRipupBoxes(std::vector<int>& queue,
+                       int pass,
+                       int64_t settled_budget,
+                       int64_t& settled);
+  // Box steps of a sequence: margin, 4 x margin, whole chip.
+  static constexpr int kRipupBoxSteps = 3;
+  struct RipupBoxStats
+  {
+    int64_t chunks = 0;
+    std::array<int64_t, kRipupBoxSteps> sequences{};
+    std::array<int64_t, kRipupBoxSteps> routed{};
+    int64_t widened = 0;
+    int64_t longest_chain = 0;
+    double wall = 0;
+    double busy = 0;
+    double capacity = 0;
+  };
+  RipupBoxStats ripup_box_stats_;
   // try_plain: first try the connection without rip-up. The nets of the
   // rip-up queue have just failed that search, so their sequences start
   // with the rip-up mode search (which finds a legal path at no penalty
   // when one exists).
+  // `worker` searches and `state` counts; `resident` (nullptr: the serial
+  // phase) is the partition region the sequence stays in: victims must be
+  // resident there and the worker's write cache is used.
   bool ripupSequence(int net,
                      int depth,
                      int dilation,
                      std::vector<SavedRouting>& journal,
-                     bool try_plain = true);
+                     bool try_plain,
+                     Worker& worker,
+                     RipupState& state,
+                     const br::TileBox* resident);
+  // region_ripup_effort: rip-up sequence of `net` inside `region` on the
+  // region's thread; region_settled_start is the worker's settled count at
+  // the region's start. True if the net is routed (and committed).
+  bool regionRipup(NetData& net,
+                   Worker& worker,
+                   const br::TileBox& region,
+                   int64_t region_settled_start);
   SavedRouting saveRouting(const NetData& net) const;
-  // Where the running rip-up sequence failed first: the outcome and the
-  // depth of that call.
-  uint8_t sequence_outcome_ = kRipupNotStarted;
-  int sequence_outcome_depth_ = 0;
+  // Rip-up sequences of the serial phase (outcome of the running sequence,
+  // counters).
+  RipupState serial_ripup_;
   // Kinds of shapes of other nets that `shape` violates: bit 0 blockages,
   // bit 1 pins, bit 2 reservations, bit 3 routed wires and vias.
   int blockerKinds(const RShape& shape, int net) const;
@@ -1093,7 +1272,8 @@ class BonnRouteDR
   void reportLeftNets() const;
   int64_t input_wires_ = 0;
   int64_t input_reserved_ = 0;
-  void restoreRouting(const SavedRouting& saved);
+  // `local`: the worker whose region contains the net (nullptr: serial).
+  void restoreRouting(const SavedRouting& saved, Worker* local = nullptr);
   void pathToGeometry(const std::vector<size_t>& path, NetData& net) const;
   void shapesOf(const NetData& net, std::vector<RShape>& shapes) const;
   void viaShapes(const OutVia& via, std::vector<RShape>& shapes) const;
@@ -1164,7 +1344,19 @@ class BonnRouteDR
                         int count,
                         bool shifted,
                         std::vector<std::array<int, 4>>& regions) const;
-  void ripupNet(NetData& net);
+  void ripupNet(NetData& net, Worker* local = nullptr);
+  // Removes the committed shapes of `net` from the routing space.
+  void uncommitShapes(NetData& net, Worker* local);
+  // keep_partial: whether `progress` joined more terms than the net's
+  // committed partial routing (term 0 alone without one).
+  static bool progressAdds(const NetData& net, const PartialState& progress)
+  {
+    return progress.valid && progress.net == net.id
+           && progress.connected.size() == net.terms.size()
+           && progress.joined > (net.partial ? net.partial_state.joined : 1);
+  }
+  // keep_partial: commits `state` as the net's partial routing.
+  void commitPartial(NetData& net, const PartialState& state, Worker* local);
   // Rip-up victims: nets reported by the distance rule checker as blocking
   // the net's new shapes (Sec. 3.4, 4.2).
   void collectVictims(const NetData& net, std::vector<int>& victims) const;
@@ -1448,14 +1640,7 @@ class BonnRouteDR
   std::vector<br::CleanupLayer> cleanup_layers_;
   AccessStats access_stats_;
   // Statistics.
-  int64_t ripup_events_ = 0;
-  int64_t rollbacks_ = 0;
   int64_t ripup_budget_skipped_ = 0;
-  // Rip-up phase effort: connections without and with rip-up (time, count).
-  double ripup_plain_seconds_ = 0;
-  double ripup_mode_seconds_ = 0;
-  int64_t ripup_plain_connects_ = 0;
-  int64_t ripup_mode_connects_ = 0;
   double partition_wall_ = 0;
   double partition_busy_ = 0;
   double partition_capacity_ = 0;
