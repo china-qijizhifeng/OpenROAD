@@ -259,8 +259,11 @@ struct BonnRouteDRParams
   // 3 is the first that rips up nets at violations. After iteration 0 (which
   // routes the left nets and checks every tile), the clean-up runs the first
   // cleanup_incremental_iterations of the incremental iterations 1 and 2 and
-  // continues with iteration 3; 2 is FlexDR's own sequence.
-  int cleanup_incremental_iterations = 2;
+  // continues with iteration 3; 2 is FlexDR's own sequence. With 1, the
+  // left nets get one more reroute pass before iteration 3 and the result
+  // stays within the spread of BonnRoute routings; 0 hands more markers to
+  // iteration 3, which then rips up BonnRoute nets (more vias).
+  int cleanup_incremental_iterations = 1;
   // In the incremental iterations, a FlexDR worker whose nets all carry
   // initial routing has nothing to reroute; it runs the design-rule check
   // (with FlexGC's patches) and writes back the same result without
