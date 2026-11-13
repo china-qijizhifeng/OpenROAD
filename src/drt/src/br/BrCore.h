@@ -33,6 +33,10 @@ struct At
 };
 
 // Routing area R of one search: allowed global routing tiles per layer.
+// A cell is 0 (outside), 1 (tile of the area) or 2 (widened part of the
+// area, where SearchRequest::corridor_cost_percent applies). allow() makes a
+// cell a tile of the area whatever it was before; allowWidened() marks only
+// cells outside the area, so the result is independent of the call order.
 struct Region
 {
   int tiles_x = 1;
@@ -74,7 +78,23 @@ struct Region
         && tx < tiles_x && ty >= 0 && ty < tiles_y) {
       uint8_t& cell = allowed[z][size_t(tx) * tiles_y + ty];
       if (!cell) {
-        cell = 1;
+        touched.emplace_back(z, size_t(tx) * tiles_y + ty);
+      }
+      cell = 1;
+      bx_lo = std::min(bx_lo, tx);
+      by_lo = std::min(by_lo, ty);
+      bx_hi = std::max(bx_hi, tx);
+      by_hi = std::max(by_hi, ty);
+    }
+  }
+  // Adds a tile as widened part; a tile of the area stays one.
+  void allowWidened(int z, int tx, int ty)
+  {
+    if (z >= 0 && z < static_cast<int>(allowed.size()) && tx >= 0
+        && tx < tiles_x && ty >= 0 && ty < tiles_y) {
+      uint8_t& cell = allowed[z][size_t(tx) * tiles_y + ty];
+      if (!cell) {
+        cell = 2;
         touched.emplace_back(z, size_t(tx) * tiles_y + ty);
       }
       bx_lo = std::min(bx_lo, tx);
@@ -82,6 +102,15 @@ struct Region
       bx_hi = std::max(bx_hi, tx);
       by_hi = std::max(by_hi, ty);
     }
+  }
+  // Vertex (i, j) of layer z lies in the widened part.
+  bool widened(const TrackLayer& l, int z, int i, int j) const
+  {
+    const int t = l.track_tile[i];
+    const int p = l.pos_tile[j];
+    const int tx = l.horizontal ? p : t;
+    const int ty = l.horizontal ? t : p;
+    return allowed[z][size_t(tx) * tiles_y + ty] == 2;
   }
   bool contains(const TrackLayer& l, int z, int i, int j) const
   {
@@ -205,6 +234,12 @@ struct SearchRequest
   Cost spread_cost = 0;
   // Same-net via rules (vertex search only; nullptr: none).
   const SameNetVias* same_net_vias = nullptr;
+  // Vertex search: a wire or jog step that ends in the widened part of the
+  // region (Region::widened) costs this percentage more ("higher cost for
+  // deviating from global routing"). Costs only grow, so every future cost
+  // (target boxes, PotentialOracle) stays a lower bound. The interval search
+  // does not price it; BonnRouteDR sets it only for the vertex search.
+  int corridor_cost_percent = 0;
   // Vertex search: in tiles where global routing left most tracks of the
   // layer free ([z][tx * tiles_y + ty] != 0), jogs cost the layer's
   // jog_factor_low instead of jog_factor (a wrong-way wire blocks the
@@ -459,6 +494,8 @@ class PathSearch
   Cost wireCost(int z, int i, int j, int j2) const;
   Cost spreadCost(int z, int i, int j) const;
   Cost jogFactor(int z, int i, int j) const;
+  // Surcharge of a step of cost `base` that ends at (z, i, j).
+  Cost corridorCost(int z, int i, int j, Cost base) const;
   void settle(int z, int i, int j, Cost g);
   // The via by which the path to the settled vertex (z, i, j) entered layer
   // z, as via layer and lower vertex; false if the path starts on the layer

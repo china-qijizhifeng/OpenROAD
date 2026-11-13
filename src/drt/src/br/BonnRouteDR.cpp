@@ -149,6 +149,8 @@ bool BonnRouteDRParams::set(const std::string& name, const double value)
     retry_dilation = v;
   } else if (name == "guide_dilation") {
     guide_dilation = std::max(0, v);
+  } else if (name == "corridor_cost") {
+    corridor_cost = std::max(0, v);
   } else if (name == "use_intervals") {
     use_intervals = v != 0;
   } else if (name == "ripup") {
@@ -3807,11 +3809,18 @@ void BonnRouteDR::buildRegion(const NetData& net,
 {
   region.reset();
   const int around = dilation + params_.guide_dilation;
+  // corridor_cost: the tiles around the guide and option tiles are the
+  // widened part of the area.
+  const bool priced = params_.corridor_cost > 0;
   auto allow = [&](int z, int tx, int ty) {
     for (int dz = -params_.layer_dilation; dz <= params_.layer_dilation; dz++) {
       for (int dx = -around; dx <= around; dx++) {
         for (int dy = -around; dy <= around; dy++) {
-          region.allow(z + dz, tx + dx, ty + dy);
+          if (priced && (dx != 0 || dy != 0)) {
+            region.allowWidened(z + dz, tx + dx, ty + dy);
+          } else {
+            region.allow(z + dz, tx + dx, ty + dy);
+          }
         }
       }
     }
@@ -3947,6 +3956,18 @@ bool BonnRouteDR::buildPathRegion(const NetData& net,
   if (found < 0) {
     return false;
   }
+  // corridor_cost: a cell beside the path is plain when its planar tile is
+  // a guide, source or target tile of the net on a layer within
+  // layer_dilation of the cell's layer (the rule of buildRegion).
+  auto plain = [&](const int zc, const int xc, const int yc) {
+    for (int dz = -params_.layer_dilation; dz <= params_.layer_dilation; dz++) {
+      const int64_t at = index(zc + dz, xc, yc);
+      if (at >= 0 && worker.tile_guide[at] == epoch) {
+        return true;
+      }
+    }
+    return false;
+  };
   br::Region& region = worker.region;
   region.reset();
   int steps = 0;
@@ -3972,7 +3993,14 @@ bool BonnRouteDR::buildPathRegion(const NetData& net,
     for (int dz = -params_.layer_dilation; dz <= params_.layer_dilation; dz++) {
       for (int dx = -around; dx <= around; dx++) {
         for (int dy = -around; dy <= around; dy++) {
-          region.allow(z + dz, x + dx, y + dy);
+          // corridor_cost: tiles beside the path are the widened part,
+          // unless they are tiles of the net themselves.
+          if (params_.corridor_cost > 0 && (dx != 0 || dy != 0)
+              && !plain(z + dz, x + dx, y + dy)) {
+            region.allowWidened(z + dz, x + dx, y + dy);
+          } else {
+            region.allow(z + dz, x + dx, y + dy);
+          }
         }
       }
     }
@@ -4418,6 +4446,7 @@ bool BonnRouteDR::connectInRegion(NetData& net,
   req.discount_rate = static_cast<Cost>(params_.discount_numerator) * unit()
                       / params_.discount_denominator;
   req.jog_low_tiles = jog_low_tiles_.empty() ? nullptr : &jog_low_tiles_;
+  req.corridor_cost_percent = params_.corridor_cost;
   req.use_intervals = params_.use_intervals;
   req.interval_via_property = params_.interval_via_property;
   req.interval_nearest_first = params_.interval_nearest_first;
@@ -6988,6 +7017,14 @@ void BonnRouteDR::main()
                   "BonnRoute: reservations use the vertex search; "
                   "use_intervals is ignored.");
     params_.use_intervals = false;
+  }
+  if (params_.use_intervals && params_.corridor_cost > 0) {
+    // The interval search has no corridor price (BrCore.h).
+    logger_->warn(utl::DRT,
+                  9131,
+                  "BonnRoute: corridor_cost needs the vertex search "
+                  "(use_intervals 0); corridor_cost is ignored.");
+    params_.corridor_cost = 0;
   }
   trace_connections_ = logger_->debugCheck(utl::DRT, "bonnroute_connect", 1);
   SetupPhases& phases = setup_phases_;

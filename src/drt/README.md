@@ -160,6 +160,7 @@ set_bonnroute_dr_param name value
 | `offtrack_from_access_points` | `1` | Start catalogue paths at the pin's OpenROAD access points. `0` starts anywhere on the pin, as in the paper; it is incompatible with the FlexDR clean-up, whose workers need every pin contact at an access point (the contact guard then leaves the affected nets to FlexDR). |
 | `layer_dilation` | `1` | Extra routing layers around a guide. |
 | `guide_dilation` | `0` | Width of the detailed routing corridor: the guide area of a net (its path regions and its whole area) includes this many tiles around the guide tiles. `0` keeps the global routing corridor. |
+| `corridor_cost` | `0` | Vertex search: wires and jogs in the tiles around the guide tiles (the `guide_dilation` and `retry_dilation` parts of the routing area) cost this percentage more than in the guide tiles. Vertex search only: with `use_intervals 1` it is set to 0 (DRT-9131). |
 | `retry_dilation` | `2` | A net whose connections fail in its guide area is routed again in the area dilated by this many tiles. A partition thread does so where the dilated area's tile box lies inside its region; otherwise the net continues in a later partition or the tail. |
 | `use_intervals` | `0` | Use vertex search by default; `1` selects interval label sets. |
 | `ripup` | `0` | Leave unresolved nets to FlexDR by default; `1` enables serial rip-up and rerouting. |

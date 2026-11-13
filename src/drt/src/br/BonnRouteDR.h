@@ -79,6 +79,11 @@ struct BonnRouteDRParams
   // global routing corridor; the dilated area of a retry adds
   // retry_dilation on top.
   int guide_dilation = 0;
+  // Vertex search: wires and jogs in the tiles around the guide tiles (the
+  // guide_dilation and retry_dilation parts of the routing area) cost this
+  // percentage more than in the guide tiles; 0: the same. With
+  // use_intervals it is set to 0 (DRT-9131).
+  int corridor_cost = 0;
   bool use_intervals = false;
   bool ripup = false;
   // Sec. 4.4: search area of a connection = GR tiles of a shortest path
