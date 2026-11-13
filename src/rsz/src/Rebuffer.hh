@@ -39,6 +39,7 @@ class Resizer;
 class BufferedNet;
 class BufferCandidate;
 class SetupLegacyBase;
+class ResourceSharingSizingPolicy;
 enum class BufferedNetType;
 using BufferedNetPtr = std::shared_ptr<BufferedNet>;
 using BufferedNetSeq = std::vector<BufferedNetPtr>;
@@ -500,6 +501,7 @@ class Rebuffer : public sta::dbStaState
 
   friend class rsz::BufferCandidate;
   friend class rsz::SetupLegacyBase;
+  friend class rsz::ResourceSharingSizingPolicy;
   friend class Resizer;
 };
 
