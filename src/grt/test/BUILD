@@ -262,6 +262,13 @@ regression_test(
 )
 
 regression_test(
+    name = "critical_nets_partial_parasitics",
+    check_log = False,
+    check_passfail = True,
+    data = [":test_resources"],
+)
+
+regression_test(
     name = "congestion_report_file_cugr",
     check_log = False,
     check_passfail = True,
@@ -387,6 +394,17 @@ cc_test(
         "//src/stt",
         "//src/tst:db_fixture",
         "//src/utl",
+        "@googletest//:gtest",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
+    name = "bonnroute_partial_parasitics_test",
+    size = "small",
+    srcs = ["cpp/TestPartialParasitics.cpp"],
+    deps = [
+        "//src/grt:fastroute",
         "@googletest//:gtest",
         "@googletest//:gtest_main",
     ],

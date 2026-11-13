@@ -3,6 +3,9 @@
 
 #pragma once
 
+#include <utility>
+#include <vector>
+
 #include "grt/GRoute.h"
 
 namespace est {
@@ -24,6 +27,20 @@ class ParasiticsService
 
   // Re-estimate one net's parasitics from the given route; no-op if empty.
   virtual void updateGlobalRouteParasitics(odb::dbNet* net, grt::GRoute& route)
+      = 0;
+
+  // Replace the parasitics of the given nets with estimates from the given
+  // partial routes, keep the parasitics of every other net and invalidate
+  // all delays, as estimateAllGlobalRouteParasitics() does. With every net
+  // whose partial route changed since the previous estimate in `routes`, the
+  // parasitics and the timing equal those of
+  // estimateAllGlobalRouteParasitics(). Works only while the partial routes
+  // are FastRoute's routes of every net
+  // (grt::GlobalRouter::partialRoutesAreFastRouteRoutes()); returns whether
+  // it did.
+  virtual bool updatePartialRouteParasitics(
+      std::vector<std::pair<odb::dbNet*, grt::GRoute>>& routes,
+      int threads)
       = 0;
 };
 

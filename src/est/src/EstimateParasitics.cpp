@@ -113,10 +113,67 @@ void EstimateParasitics::estimateAllGlobalRouteParasitics(const int threads)
   estimateRoutesInParallel(work, threads, true);
 }
 
+bool EstimateParasitics::updatePartialRouteParasitics(
+    std::vector<std::pair<odb::dbNet*, grt::GRoute>>& routes,
+    const int threads)
+{
+  if (!global_router_->partialRoutesAreFastRouteRoutes()) {
+    return false;
+  }
+  initBlock();
+  // Each given net starts from no parasitics, as in the store that
+  // clearParasitics() makes, also when its new route is empty.
+  std::set<sta::Parasitics*> stores;
+  for (Scene* scene : sta_->scenes()) {
+    for (const sta::MinMax* min_max : sta::MinMax::range()) {
+      sta::Parasitics* parasitics = scene->parasitics(min_max);
+      if (parasitics) {
+        stores.insert(parasitics);
+      }
+    }
+  }
+  for (const auto& [db_net, route] : routes) {
+    const sta::Net* net = db_network_->dbToSta(db_net);
+    for (sta::Parasitics* parasitics : stores) {
+      parasitics->deleteParasitics(net);
+    }
+  }
+  // clearParasitics() invalidates every delay (sta::Sta::deleteParasitics);
+  // so does this update, and the next timing update recomputes all of them.
+  sta_->delaysInvalid();
+
+  // The est_rc debug report prints per net: keep it in net order.
+  if (threads <= 1 || logger_->debugCheck(EST, "est_rc", 1)) {
+    for (auto& [db_net, route] : routes) {
+      estimateGlobalRouteParasitics(db_net, route);
+    }
+    return true;
+  }
+  std::vector<std::pair<odb::dbNet*, grt::GRoute*>> work;
+  std::vector<odb::dbNet*> nets;
+  work.reserve(routes.size());
+  nets.reserve(routes.size());
+  for (auto& [db_net, route] : routes) {
+    nets.push_back(db_net);
+    if (!route.empty()) {
+      work.emplace_back(db_net, &route);
+    }
+  }
+  // The previous estimate, with the same thread count, made the placeholders
+  // of every driver and net; the deletion above removed those of the given
+  // nets: make them again, also for the nets without a route.
+  if (!ensureParasiticsForThreads(nets)) {
+    ensureParasiticsForThreads();
+  }
+  estimateRoutesInParallel(work, threads, true, /*ensure_all=*/false);
+  return true;
+}
+
 void EstimateParasitics::estimateRoutesInParallel(
     const std::vector<std::pair<odb::dbNet*, grt::GRoute*>>& work,
     int threads,
-    const bool partial)
+    const bool partial,
+    const bool ensure_all)
 {
   if (work.empty()) {
     return;
@@ -133,7 +190,9 @@ void EstimateParasitics::estimateRoutesInParallel(
   for (int i = 0; i < threads; ++i) {
     calcs.emplace_back(sta_->arcDelayCalc()->copy());
   }
-  ensureParasiticsForThreads();
+  if (ensure_all) {
+    ensureParasiticsForThreads();
+  }
   odb::dbTech* tech = block_->getTech();
 #pragma omp parallel for num_threads(threads) schedule(dynamic, 64)
   for (int i = 0; i < static_cast<int>(work.size()); ++i) {
@@ -153,6 +212,31 @@ void EstimateParasitics::estimateRoutesInParallel(
       builder.estimateParasitics(db_net, *route);
     }
   }
+}
+
+bool EstimateParasitics::ensureParasiticsForThreads(
+    const std::vector<odb::dbNet*>& nets)
+{
+  std::vector<const sta::Pin*> drivers;
+  for (odb::dbNet* db_net : nets) {
+    sta::PinSet* net_drivers = network_->drivers(db_network_->dbToSta(db_net));
+    if (net_drivers == nullptr || net_drivers->empty()) {
+      return false;
+    }
+    drivers.insert(drivers.end(), net_drivers->begin(), net_drivers->end());
+  }
+  std::set<sta::Parasitics*> done;
+  for (Scene* scene : sta_->scenes()) {
+    for (const sta::MinMax* min_max : sta::MinMax::range()) {
+      sta::Parasitics* parasitics = scene->parasitics(min_max);
+      if (parasitics && done.insert(parasitics).second) {
+        for (const sta::Pin* drvr_pin : drivers) {
+          parasitics->ensureParasitics(drvr_pin);
+        }
+      }
+    }
+  }
+  return true;
 }
 
 void EstimateParasitics::ensureParasiticsForThreads()

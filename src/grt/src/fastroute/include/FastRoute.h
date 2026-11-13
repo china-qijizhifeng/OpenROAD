@@ -4,6 +4,7 @@
 #pragma once
 
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <limits>
 #include <memory>
@@ -26,6 +27,7 @@
 #include "odb/PtrSetMap.h"
 #include "odb/geom.h"
 #include "stt/SteinerTreeBuilder.h"
+#include "utl/timer.h"
 
 namespace utl {
 class Logger;
@@ -48,6 +50,10 @@ class Gui;
 
 namespace sta {
 class dbSta;
+}
+
+namespace est {
+class ParasiticsService;
 }
 
 namespace grt {
@@ -89,6 +95,27 @@ struct CostParams
   {
   }
 };
+
+// For each net of a FastRoute run, in net_ids_ order, the inputs of
+// FastRouteCore::getPlanarRoute() that change during routing: the net's
+// minimum layer and the grid path of every tree edge with a route. Nets with
+// equal keys have equal planar routes.
+struct PlanarRouteKeys
+{
+  std::vector<int> values;
+  // The key of net position i is values[begin[i]] .. values[begin[i + 1] - 1].
+  std::vector<size_t> begin;
+
+  void clear();
+  size_t netCount() const { return begin.empty() ? 0 : begin.size() - 1; }
+  size_t keySize(size_t position) const;
+  bool sameKey(const PlanarRouteKeys& other, size_t position) const;
+};
+
+// Appends the planar route key of one net (see PlanarRouteKeys).
+void appendPlanarRouteKey(const StTree& tree,
+                          int min_layer,
+                          std::vector<int>& values);
 
 class FastRouteCore
 {
@@ -272,6 +299,17 @@ class FastRouteCore
     snapshot_batched_width_ = snapshot_batched_width;
   }
   int getSnapshotBatchedWidth() const { return snapshot_batched_width_; }
+  // With true (the default), the slack updates of the 2D maze routing after
+  // the first one of a run re-estimate only the parasitics of the nets whose
+  // planar route changed; the parasitics, slacks and routing are the same.
+  void setIncrementalPartialParasitics(bool incremental)
+  {
+    incremental_partial_parasitics_ = incremental;
+  }
+  bool getIncrementalPartialParasitics() const
+  {
+    return incremental_partial_parasitics_;
+  }
   void getCongestionNets(odb::PtrSet<odb::dbNet>& congestion_nets);
   void computeCongestionInformation();
   std::vector<int> getOriginalResources();
@@ -664,6 +702,22 @@ class FastRouteCore
   void StNetOrder();
   float CalculatePartialSlack();
   float getNetSlack(odb::dbNet* net);
+  // Estimates the parasitics of the partial routes for a slack update of the
+  // 2D maze routing.
+  void updatePartialRouteParasitics(est::ParasiticsService& estimator);
+  void makePlanarRouteKeys(PlanarRouteKeys& keys) const;
+  // Forget the planar route keys: the next slack update estimates the
+  // parasitics of every net.
+  void resetPartialRouteParasitics();
+  // Debug trace GRT partial_parasitics: the nets whose planar route changed
+  // between slack updates, the slacks and the net order of each update.
+  void tracePartialRouteParasitics(const std::vector<size_t>& changed,
+                                   bool have_previous_keys,
+                                   bool incremental,
+                                   double key_seconds,
+                                   double estimate_seconds);
+  void tracePartialSlacks() const;
+  void traceNetOrder() const;
 
   // Resistance-aware related functions
   float getWireResistance(int layer, int length, FrNet* net);
@@ -820,6 +874,20 @@ class FastRouteCore
   bool res_aware_logged_ = false;
   bool is_3d_step_ = false;
   bool is_incremental_grt_ = false;
+  // Planar route keys of the routes the partial-route parasitics were last
+  // estimated from, for the nets planar_route_key_net_ids_; they are valid
+  // only while planar_route_keys_valid_.
+  PlanarRouteKeys planar_route_keys_;
+  PlanarRouteKeys next_planar_route_keys_;
+  std::vector<int> planar_route_key_net_ids_;
+  bool planar_route_keys_valid_ = false;
+  bool incremental_partial_parasitics_ = true;
+  // Slack updates of this run and, for the debug trace GRT
+  // partial_parasitics, whether the planar route of each net position changed
+  // between two updates.
+  int partial_parasitics_update_count_ = 0;
+  std::vector<char> partial_route_changed_in_run_;
+  utl::Timer partial_slack_query_timer_;
   float worst_slack_ = std::numeric_limits<float>::max();
   float worst_net_resistance_ = 0;
   int worst_net_length_ = 0;
