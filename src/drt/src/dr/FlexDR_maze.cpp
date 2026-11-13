@@ -2081,8 +2081,10 @@ void FlexDRWorker::route_queue_main(std::queue<RouteQueueEntry>& rerouteQueue)
   std::map<frBlockObject*, std::pair<int, int>> obj_gc_version;
   auto& workerRegionQuery = getWorkerRegionQuery();
   while (!rerouteQueue.empty()) {
-    if (first_clean_ != nullptr
-        && first_clean_->load(std::memory_order_relaxed) < creation_index_) {
+    if ((first_clean_ != nullptr
+         && first_clean_->load(std::memory_order_relaxed) < creation_index_)
+        || (stop_request_ != nullptr
+            && stop_request_->load(std::memory_order_relaxed))) {
       stopped_ = true;
       return;
     }

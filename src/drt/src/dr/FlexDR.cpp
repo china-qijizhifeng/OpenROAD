@@ -9,6 +9,7 @@
 #include <atomic>
 #include <chrono>
 #include <cmath>
+#include <condition_variable>
 #include <cstdint>
 #include <cstdio>
 #include <fstream>
@@ -19,6 +20,7 @@
 #include <limits>
 #include <map>
 #include <memory>
+#include <mutex>
 #include <numeric>
 #include <queue>
 #include <set>
@@ -209,9 +211,15 @@ void FlexDRWorker::writeUpdates(const std::string& file_name)
 
 int FlexDRWorker::main(frDesign* design)
 {
+  mainRead(design);
+  return mainRoute();
+}
+
+void FlexDRWorker::mainRead(frDesign* design)
+{
   ProfileTask profile("DRW:main");
   using std::chrono::high_resolution_clock;
-  high_resolution_clock::time_point t0 = high_resolution_clock::now();
+  main_start_time_ = high_resolution_clock::now();
   auto micronPerDBU = 1.0 / getTech()->getDBUPerUU();
   if (router_cfg_->VERBOSE > 1) {
     logger_->report("start DR worker (BOX) ( {} {} ) ( {} {} )",
@@ -274,7 +282,16 @@ int FlexDRWorker::main(frDesign* design)
   if (!skipRouting_) {
     init(design);
   }
-  high_resolution_clock::time_point t1 = high_resolution_clock::now();
+  read_end_time_ = high_resolution_clock::now();
+}
+
+int FlexDRWorker::mainRoute()
+{
+  ProfileTask profile("DRW:main");
+  using std::chrono::high_resolution_clock;
+  const high_resolution_clock::time_point t0 = main_start_time_;
+  const high_resolution_clock::time_point t1 = read_end_time_;
+  auto micronPerDBU = 1.0 / getTech()->getDBUPerUU();
   if (!skipRouting_) {
     route_queue();
   }
@@ -908,6 +925,30 @@ void FlexDR::normalizeInitialRouting()
   }
 }
 
+void FlexDR::endWorker(FlexDRWorker& worker,
+                       std::vector<odb::Rect>* changed_regions)
+{
+  cleanup_statistics_.workers++;
+  cleanup_statistics_.workers_without_markers
+      += worker.getInitNumMarkers() == 0 ? 1 : 0;
+  cleanup_statistics_.workers_without_nets
+      += worker.isSkippedWithoutNets() ? 1 : 0;
+  cleanup_statistics_.workers_with_only_initial_routing
+      += worker.hasOnlyNetsWithInitialRouting() ? 1 : 0;
+  if (worker.end(getDesign())) {
+    numWorkUnits_ += 1;
+  }
+  if (worker.isCheckOnly()) {
+    num_check_only_workers_++;
+  }
+  if (changed_regions != nullptr && worker.hasChangedDesign()) {
+    changed_regions->push_back(worker.getExtBox());
+  }
+  if (worker.isCongested()) {
+    increaseClipsize_ = true;
+  }
+}
+
 void FlexDR::endWorkersBatch(
     std::vector<std::unique_ptr<FlexDRWorker>>& workers_batch,
     std::vector<odb::Rect>* changed_regions)
@@ -915,27 +956,351 @@ void FlexDR::endWorkersBatch(
   ProfileTask profile("DR:end_batch");
   // single thread
   for (auto& worker : workers_batch) {
-    cleanup_statistics_.workers++;
-    cleanup_statistics_.workers_without_markers
-        += worker->getInitNumMarkers() == 0 ? 1 : 0;
-    cleanup_statistics_.workers_without_nets
-        += worker->isSkippedWithoutNets() ? 1 : 0;
-    cleanup_statistics_.workers_with_only_initial_routing
-        += worker->hasOnlyNetsWithInitialRouting() ? 1 : 0;
-    if (worker->end(getDesign())) {
-      numWorkUnits_ += 1;
-    }
-    if (worker->isCheckOnly()) {
-      num_check_only_workers_++;
-    }
-    if (changed_regions != nullptr && worker->hasChangedDesign()) {
-      changed_regions->push_back(worker->getExtBox());
-    }
-    if (worker->isCongested()) {
-      increaseClipsize_ = true;
-    }
+    endWorker(*worker, changed_regions);
   }
   workers_batch.clear();
+}
+
+// The batch loop of optimizationFlow runs the batches one after the other:
+// a batch starts when the slowest worker of the previous batch has ended.
+// In the marker-driven iterations few workers run, so most threads idle
+// behind one slow worker per batch.  This function keeps the results of that
+// loop and fills the idle threads:
+//  - A worker reads the design in mainRead() and routes on its own data in
+//    mainRoute().  Results are written back (end()) in the order of the batch
+//    loop: batch by batch, creation order inside a batch.  A result is
+//    written as soon as every earlier result is written and every worker of
+//    the running batch has read the design, so end() never changes what a
+//    worker of the same batch reads.
+//  - Which workers of a batch run is decided when every earlier batch is
+//    written back, on the design state the batch loop decides on.
+//  - A worker of a later batch may start ahead on an idle thread.  When its
+//    batch starts, its design-read fingerprint is compared with the
+//    fingerprint on the design state of that moment: equal means it read
+//    exactly what it reads in the batch loop, so its result is kept; a
+//    different one stops it and a fresh worker runs in the batch.
+//  - The design is written only while no worker reads it.
+// Start order: workers of the running batch first, most markers first (the
+// order of the starts does not enter the results); then workers of later
+// batches whose overlapping earlier workers are all written back.
+int FlexDR::runGridWorkersAhead(std::vector<GridWorkerSlot>& slots,
+                                const int num_batches,
+                                const SearchRepairArgs& args,
+                                IterationProgress& iter_prog,
+                                const bool shape_regions,
+                                std::vector<odb::Rect>* changed_regions)
+{
+  enum class State
+  {
+    kWaiting,
+    kRunning,
+    kDone,
+    kEnded  // written back, or without markers at the start of its batch
+  };
+  struct Slot
+  {
+    State state = State::kWaiting;
+    uint64_t fingerprint = 0;
+    bool runs_in_batch = false;
+    std::unique_ptr<std::atomic<bool>> stop_request;
+    // Slots whose extended box intersects this one.
+    std::vector<int> overlaps;
+    // Markers in the DRC box when last counted.  The count orders the starts
+    // and selects the workers that start ahead; it does not enter the
+    // results.
+    int num_markers = 0;
+  };
+  const int num_slots = slots.size();
+  std::vector<Slot> states(num_slots);
+  std::vector<int> batch_end(num_batches, 0);
+  for (int i = 0; i < num_slots; i++) {
+    batch_end[slots[i].batch] = i + 1;
+  }
+  for (int batch = 1; batch < num_batches; batch++) {
+    batch_end[batch] = std::max(batch_end[batch], batch_end[batch - 1]);
+  }
+  {
+    // Extended boxes intersect only between tiles next to each other.
+    std::map<std::pair<int, int>, int> slot_at;
+    for (int i = 0; i < num_slots; i++) {
+      slot_at[{slots[i].x_offset, slots[i].y_offset}] = i;
+    }
+    for (int i = 0; i < num_slots; i++) {
+      for (int dx = -1; dx <= 1; dx++) {
+        for (int dy = -1; dy <= 1; dy++) {
+          const auto it = slot_at.find({slots[i].x_offset + dx * args.size,
+                                        slots[i].y_offset + dy * args.size});
+          if (it == slot_at.end() || it->second == i
+              || !slots[it->second].worker->getExtBox().intersects(
+                  slots[i].worker->getExtBox())) {
+            continue;
+          }
+          states[i].overlaps.push_back(it->second);
+        }
+      }
+    }
+  }
+
+  const int num_markers_at_start = getDesign()->getTopBlock()->getNumMarkers();
+  std::mutex mutex;
+  std::condition_variable wake;
+  // Everything below is read and written with the mutex held.
+  int front = 0;  // slots before it are ended
+  int current_batch = -1;
+  int reads_pending = 0;  // workers of the running batch that have not read
+  int readers = 0;        // workers inside mainRead()
+  bool write_wanted = false;
+  bool finished = false;
+  bool failed = false;
+  // Waiting slots of later batches with markers in their DRC box.
+  std::set<int> marked_later_slots;
+  bool no_worker_ahead = false;  // until the next result is written back
+  int num_unaffected_workers = 0;
+  int num_started_ahead = 0;
+  int num_kept = 0;
+  int num_rerun = 0;
+  int num_dropped = 0;
+  std::priority_queue<std::pair<int, int>> batch_queue;  // markers, -slot
+  std::vector<std::unique_ptr<FlexDRWorker>> discarded_workers;
+  std::vector<std::unique_ptr<std::atomic<bool>>> discarded_stop_requests;
+  ThreadException exception;
+
+  // Needs a slot that still holds its worker.
+  const auto count_markers = [&](const int i) {
+    std::vector<frMarker*> markers;
+    getDesign()->getRegionQuery()->queryMarker(slots[i].worker->getDrcBox(),
+                                               markers);
+    states[i].num_markers = markers.size();
+    if (slots[i].batch > current_batch && states[i].state == State::kWaiting
+        && states[i].num_markers > 0) {
+      marked_later_slots.insert(i);
+    } else {
+      marked_later_slots.erase(i);
+    }
+  };
+  const auto discard = [&](const int i) {
+    Slot& state = states[i];
+    if (state.state == State::kRunning) {
+      state.stop_request->store(true);
+    }
+    discarded_workers.push_back(std::move(slots[i].worker));
+    discarded_stop_requests.push_back(std::move(state.stop_request));
+  };
+  const auto report_progress = [&]() {
+    if (router_cfg_->VERBOSE > 0) {
+      printIterationProgress(logger_, iter_prog, num_markers_at_start);
+    }
+  };
+  // Needs: every earlier batch is ended and no worker reads the design.
+  const auto start_batch = [&](const int batch) {
+    current_batch = batch;
+    reads_pending = 0;
+    batch_queue = {};
+    for (int i = front; i < batch_end[batch]; i++) {
+      Slot& state = states[i];
+      marked_later_slots.erase(i);
+      const bool started = state.state != State::kWaiting;
+      if (!isAffectedByChanges(*slots[i].worker, true, shape_regions)) {
+        num_unaffected_workers++;
+        iter_prog.total_num_workers--;
+        if (started) {
+          num_dropped++;
+          discard(i);
+        }
+        slots[i].worker.reset();
+        state.state = State::kEnded;
+        continue;
+      }
+      state.runs_in_batch = true;
+      if (started) {
+        // readers == 0, so the worker has read the design.
+        if (state.fingerprint
+            == slots[i].worker->getDesignReadFingerprint(getDesign())) {
+          num_kept++;
+          if (state.state == State::kDone) {
+            report_progress();
+          }
+          continue;
+        }
+        num_rerun++;
+        discard(i);
+        slots[i].worker
+            = createWorker(slots[i].x_offset, slots[i].y_offset, args);
+        state.state = State::kWaiting;
+      }
+      reads_pending++;
+      batch_queue.emplace(state.num_markers, -i);
+    }
+  };
+  // Writes back what the order allows.  Call after every change of a slot.
+  const auto write_back = [&]() {
+    while (!finished) {
+      if (reads_pending > 0) {
+        return;
+      }
+      if (front < batch_end[current_batch]
+          && states[front].state != State::kDone
+          && states[front].state != State::kEnded) {
+        return;
+      }
+      if (readers > 0) {
+        write_wanted = true;  // no further worker starts reading
+        return;
+      }
+      write_wanted = false;
+      while (front < batch_end[current_batch]
+             && (states[front].state == State::kDone
+                 || states[front].state == State::kEnded)) {
+        if (states[front].state == State::kDone) {
+          endWorker(*slots[front].worker, changed_regions);
+          slots[front].worker.reset();
+          states[front].state = State::kEnded;
+          for (const int other : states[front].overlaps) {
+            if (slots[other].batch > current_batch) {
+              count_markers(other);
+            }
+          }
+        }
+        front++;
+      }
+      no_worker_ahead = false;
+      if (front == batch_end[current_batch]) {
+        if (current_batch + 1 == num_batches) {
+          finished = true;
+        } else {
+          start_batch(current_batch + 1);
+        }
+        continue;
+      }
+      return;
+    }
+  };
+  // A slot of a later batch to start ahead, or -1.
+  const auto pick_ahead = [&]() {
+    if (no_worker_ahead) {
+      return -1;
+    }
+    for (const int i : marked_later_slots) {
+      // An overlapping worker of an earlier batch that is still to write
+      // its result back changes what this worker reads.
+      const bool blocked
+          = std::ranges::any_of(states[i].overlaps, [&](const int other) {
+              if (slots[other].batch >= slots[i].batch
+                  || states[other].state == State::kEnded) {
+                return false;
+              }
+              return slots[other].batch == current_batch
+                         ? states[other].runs_in_batch
+                         : states[other].num_markers > 0;
+            });
+      if (!blocked) {
+        return i;
+      }
+    }
+    no_worker_ahead = true;
+    return -1;
+  };
+
+  for (int i = 0; i < num_slots; i++) {
+    count_markers(i);
+  }
+  start_batch(0);
+  write_back();
+#pragma omp parallel
+  {
+    std::unique_lock<std::mutex> lock(mutex);
+    while (!finished && !failed) {
+      int picked = -1;
+      if (!write_wanted) {
+        while (!batch_queue.empty() && picked < 0) {
+          const int i = -batch_queue.top().second;
+          batch_queue.pop();
+          if (states[i].state == State::kWaiting) {
+            picked = i;
+          }
+        }
+        if (picked < 0) {
+          picked = pick_ahead();
+          if (picked >= 0) {
+            marked_later_slots.erase(picked);
+            num_started_ahead++;
+          }
+        }
+      }
+      if (picked < 0) {
+        wake.wait(lock);
+        continue;
+      }
+      Slot& state = states[picked];
+      FlexDRWorker* worker = slots[picked].worker.get();
+      state.state = State::kRunning;
+      state.stop_request = std::make_unique<std::atomic<bool>>(false);
+      worker->setStopRequest(state.stop_request.get());
+      const bool in_batch = slots[picked].batch == current_batch;
+      readers++;
+      lock.unlock();
+      uint64_t fingerprint = 0;
+      bool thrown = false;
+      try {
+        fingerprint = worker->getDesignReadFingerprint(getDesign());
+        worker->mainRead(getDesign());
+      } catch (...) {
+        exception.capture();
+        thrown = true;
+      }
+      lock.lock();
+      readers--;
+      if (thrown) {
+        failed = true;
+        wake.notify_all();
+        break;
+      }
+      // A batch starts only while no worker reads, so this slot still holds
+      // this worker and the running batch is the one of the start.
+      state.fingerprint = fingerprint;
+      if (in_batch) {
+        reads_pending--;
+      }
+      write_back();
+      wake.notify_all();
+      lock.unlock();
+      try {
+        worker->mainRoute();
+      } catch (...) {
+        exception.capture();
+        thrown = true;
+      }
+      lock.lock();
+      if (thrown) {
+        failed = true;
+        wake.notify_all();
+        break;
+      }
+      if (slots[picked].worker.get() == worker) {
+        state.state = State::kDone;
+        if (slots[picked].batch == current_batch) {
+          report_progress();
+        }
+        write_back();
+      }
+      wake.notify_all();
+    }
+  }
+  exception.rethrow();
+  debugPrint(logger_,
+             DRT,
+             "bonnroute_cleanup",
+             1,
+             "grid workers ahead: iteration {} slots {} batches {} started "
+             "ahead {} kept {} run again {} dropped without markers {}",
+             iter_,
+             num_slots,
+             num_batches,
+             num_started_ahead,
+             num_kept,
+             num_rerun,
+             num_dropped);
+  return num_unaffected_workers;
 }
 
 odb::Rect FlexDR::getDRVBBox(const odb::Rect& drv_rect) const
@@ -1598,6 +1963,9 @@ void FlexDR::optimizationFlow(const SearchRepairArgs& args,
 
   std::vector<std::vector<std::vector<std::unique_ptr<FlexDRWorker>>>> workers(
       batchStepX * batchStepY);
+  // The gcell offsets of the workers, in the shape of workers.
+  std::vector<std::vector<std::vector<std::pair<int, int>>>> worker_offsets(
+      batchStepX * batchStepY);
   const double create_start = omp_get_wtime();
 
   // In the incremental iterations a worker whose extended box sees no change
@@ -1629,8 +1997,10 @@ void FlexDR::optimizationFlow(const SearchRepairArgs& args,
       if (create_new_batch) {
         workers[batch_idx].push_back(
             std::vector<std::unique_ptr<FlexDRWorker>>());
+        worker_offsets[batch_idx].emplace_back();
       }
       workers[batch_idx].back().push_back(std::move(worker));
+      worker_offsets[batch_idx].back().emplace_back(i, j);
 
       yIdx++;
     }
@@ -1644,6 +2014,35 @@ void FlexDR::optimizationFlow(const SearchRepairArgs& args,
   increaseClipsize_ = false;
   numWorkUnits_ = 0;
   num_check_only_workers_ = 0;
+  // The marker-driven iterations of the clean-up after BonnRoute run few
+  // workers per batch, so workers of later batches start ahead on idle
+  // threads (runGridWorkersAhead; same results as the batch loop below).
+  // The debug group bonnroute_cleanup_batch_barrier keeps the batch loop,
+  // for timing comparisons inside one binary.
+  const bool start_ahead
+      = skip_unaffected && marker_cleanup && markers_only && iter_ > 0
+        && graphics_ == nullptr
+        && !logger_->debugCheck(DRT, "bonnroute_cleanup_batch_barrier", 1);
+  if (start_ahead) {
+    std::vector<GridWorkerSlot> slots;
+    int num_batches = 0;
+    for (int group = 0; group < (int) workers.size(); group++) {
+      for (int batch = 0; batch < (int) workers[group].size(); batch++) {
+        for (int k = 0; k < (int) workers[group][batch].size(); k++) {
+          slots.push_back({.worker = std::move(workers[group][batch][k]),
+                           .x_offset = worker_offsets[group][batch][k].first,
+                           .y_offset = worker_offsets[group][batch][k].second,
+                           .batch = num_batches});
+        }
+        num_batches++;
+      }
+    }
+    workers.clear();
+    const double batch_start = omp_get_wtime();
+    num_unaffected_workers = runGridWorkersAhead(
+        slots, num_batches, args, iter_prog, marker_cleanup, changed_regions);
+    cleanup_statistics_.batch_seconds += omp_get_wtime() - batch_start;
+  }
   // parallel execution
   for (auto& workerBatch : workers) {
     ProfileTask profile("DR:checkerboard");

@@ -4,6 +4,7 @@
 #pragma once
 
 #include <atomic>
+#include <chrono>
 #include <cstdint>
 #include <deque>
 #include <list>
@@ -241,6 +242,28 @@ class FlexDR
   void endWorkersBatch(
       std::vector<std::unique_ptr<FlexDRWorker>>& workers_batch,
       std::vector<odb::Rect>* changed_regions = nullptr);
+  // Writes one worker's result back and updates the iteration counters.
+  void endWorker(FlexDRWorker& worker, std::vector<odb::Rect>* changed_regions);
+  // The grid workers of one marker-driven clean-up iteration, in the order
+  // of optimizationFlow (batch by batch, creation order inside a batch).
+  struct GridWorkerSlot
+  {
+    std::unique_ptr<FlexDRWorker> worker;
+    int x_offset = 0;
+    int y_offset = 0;
+    int batch = 0;
+  };
+  // Runs the slots with the results of optimizationFlow's batch loop: the
+  // same workers run, each on the design state its batch starts from, and
+  // the results are written back in the same order.  Workers of later
+  // batches start ahead of their batch on idle threads.  Returns the number
+  // of workers without markers in their DRC box at the start of their batch.
+  int runGridWorkersAhead(std::vector<GridWorkerSlot>& slots,
+                          int num_batches,
+                          const SearchRepairArgs& args,
+                          IterationProgress& iter_prog,
+                          bool shape_regions,
+                          std::vector<odb::Rect>* changed_regions);
   // markers_only: only markers in the worker's DRC box count (repair
   // iterations after BonnRoute's incremental routing).
   // shape_regions: the changed regions are shapes, instance boxes and gcell
@@ -544,7 +567,28 @@ class FlexDRWorker
   frUInt4 getWorkerDRCCost() const { return workerDRCCost_; }
   int getWorkerId() const { return worker_id_; }
   // others
+  // main() is mainRead() followed by mainRoute().
   int main(frDesign* design);
+  // Reads the design: the markers in the DRC box and the routed objects in
+  // the extended box, and builds the worker's own nets, grid graph and
+  // design-rule checker from them.
+  void mainRead(frDesign* design);
+  // Routes on the worker's own data.  Of the design it reads only state that
+  // stays fixed during detailed routing (technology, track patterns, fixed
+  // shapes, pins, net attributes), so it may run while end() of other
+  // workers writes routed objects and markers.
+  int mainRoute();
+  // Fingerprint of what mainRead() reads of the routed objects and markers:
+  // the objects in query order with their identity and every field the
+  // worker copies.  Two equal fingerprints mean mainRead() builds the same
+  // worker from both design states.
+  uint64_t getDesignReadFingerprint(const frDesign* design) const;
+  // The worker stops routing at its next route-queue entry once *stop_request
+  // is true; a stopped worker is discarded.
+  void setStopRequest(const std::atomic<bool>* stop_request)
+  {
+    stop_request_ = stop_request;
+  }
   void distributedMain(frDesign* design);
   void writeUpdates(const std::string& file_name);
   void updateDesign(frDesign* design);
@@ -644,7 +688,10 @@ class FlexDRWorker
   bool skipRouting_{false};
   const std::atomic<int>* first_clean_{nullptr};
   int creation_index_{0};
+  const std::atomic<bool>* stop_request_{nullptr};
   bool stopped_{false};
+  std::chrono::high_resolution_clock::time_point main_start_time_;
+  std::chrono::high_resolution_clock::time_point read_end_time_;
   bool check_only_without_reroutable_nets_{false};
   bool check_only_{false};
   bool skipped_without_nets_{false};
