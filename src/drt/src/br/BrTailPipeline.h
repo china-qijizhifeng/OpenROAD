@@ -176,4 +176,135 @@ class TailPipeline
   std::condition_variable wake_;
 };
 
+// The speculative tail with the batch semantics of the barrier version
+// (BonnRouteDR::routeSpeculativeBatches), where idle threads search nets of
+// the next batch early (design D4, tail lookahead). Results equal a serial
+// execution of these semantics for every thread count and timing.
+//
+// Semantics (S):
+//  * The queue Q starts as `order`. Batch k takes the first
+//    min(batch, |Q|) nets of Q.
+//  * Every attempt of batch k is searched on the routing state holding the
+//    commits of batches < k.
+//  * The attempts of batch k are decided in list order. A decision sees the
+//    commits earlier in the batch (`earlier`), and commits, rejects
+//    (conflict) or fails the attempt.
+//  * The conflicting nets of batch k go back to the front of Q in list
+//    order, so batch k + 1 holds them first, followed by fresh nets of Q.
+//
+// Schedule (each net's box holds all its reads and writes of the routing
+// space; boxes "meet" when they share a tile):
+//  * R1: batch k + 1 is formed once every attempt of batch k is decided.
+//  * R2: the decision of y waits for y's search, for the searches of the
+//    other attempts of its batch whose boxes meet y's box, and for the
+//    decisions of the attempts earlier in the batch whose boxes meet it.
+//  * R3: while batch k is decided, let r be the attempts of batch k decided
+//    as conflicts and U the attempts of batch k that are undecided and not
+//    known to be without a route (searching, or found and undecided). The
+//    p-th net after batch k in Q (p from 0) starts its search when
+//    (a) p < batch - r - |U| and (b) no box of U meets its box. Such a
+//    search has the lowest priority, candidates in increasing p.
+//  * R4: that search is the net's search in batch k + 1.
+// Batch k produces at most r + |U| conflicts, so by (a) the net belongs to
+// batch k + 1. By (b), no attempt of batch k writes its box after the search
+// starts, so the search reads the state of the commits of batches <= k.
+class TailLookahead
+{
+ public:
+  using Box = TailPipeline::Box;
+  using Decision = TailPipeline::Decision;
+  using Hooks = TailPipeline::Hooks;
+  // overlapped_searches counts the searches started under R3.
+  using Stats = TailPipeline::Stats;
+  // One attempt of the semantics, in (batch, position) order.
+  struct Attempt
+  {
+    int net;
+    int batch;
+    int position;
+    Decision decision;
+    bool early;  // searched under R3
+  };
+
+  explicit TailLookahead(int batch) : batch_(batch < 1 ? 1 : batch) {}
+
+  // boxes: indexed by net id. failed receives the nets without a route in
+  // (batch, position) order. attempts (optional) receives every attempt in
+  // (batch, position) order.
+  Stats run(const std::vector<int>& order,
+            const std::vector<Box>& boxes,
+            int threads,
+            const Hooks& hooks,
+            std::vector<int>& failed,
+            std::vector<Attempt>* attempts = nullptr);
+
+ private:
+  struct Item
+  {
+    int net;
+    int batch = -1;  // -1: searched under R3 before its batch is formed
+    int position = -1;
+    bool early = false;
+    bool search_started = false;
+    bool searched = false;
+    bool decided = false;
+    bool found = false;
+    Decision decision = Decision::kFailed;
+    int decide_deps = -1;  // -1: not computed yet
+    double cost = 0;
+    std::vector<int> on_searched;  // items whose decide_deps count it
+    std::vector<int> on_decided;   // items whose decide_deps count it
+  };
+
+  static bool meets(const Box& a, const Box& b)
+  {
+    return a[0] <= b[2] && b[0] <= a[2] && a[1] <= b[3] && b[1] <= a[3];
+  }
+  bool meets(int a, int b) const
+  {
+    return meets((*boxes_)[items_[a].net], (*boxes_)[items_[b].net]);
+  }
+  int addItem(int net);
+  void formBatch();
+  void computeDecideDeps(int item);
+  void readySearch(int item);
+  void readyDecide(int item);
+  int lookaheadCandidate();
+  void searched(int item);
+  void decided(int item);
+  bool finished() const { return current_.empty(); }
+
+  const int batch_;
+  const std::vector<int>* order_ = nullptr;
+  const std::vector<Box>* boxes_ = nullptr;
+  const Hooks* hooks_ = nullptr;
+  std::vector<Item> items_;
+  // Items of the formed batches, in (batch, position) order.
+  std::vector<std::vector<int>> batches_;
+  // Items of the batch being decided (batches_.back()).
+  std::vector<int> current_;
+  int current_decided_ = 0;
+  int current_conflicts_ = 0;
+  // Conflicts of the current batch: (position, net).
+  std::vector<std::pair<int, int>> retries_;
+  // First net of order_ that is in no formed batch.
+  size_t queue_head_ = 0;
+  // Items searched under R3, by p = index in order_ - queue_head_ (-1: none).
+  std::vector<int> early_;
+  int running_ = 0;
+  bool deadlock_ = false;
+  // Ready queues of the current batch: decisions by position; searches by
+  // (-cost, position).
+  std::priority_queue<std::pair<int, int>,
+                      std::vector<std::pair<int, int>>,
+                      std::greater<>>
+      ready_decide_;
+  std::priority_queue<std::tuple<double, int, int>,
+                      std::vector<std::tuple<double, int, int>>,
+                      std::greater<>>
+      ready_search_;
+  std::mutex mutex_;
+  std::condition_variable wake_;
+};
+
 }  // namespace drt::br
