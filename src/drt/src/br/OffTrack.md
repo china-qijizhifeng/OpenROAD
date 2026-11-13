@@ -138,7 +138,7 @@ have no complete conflict-free assignment among these paths. The
 instances that fail with Algorithm 3 are a subset of those that fail on
 the Hanan grid.
 
-With `offtrack_algorithm3_fallback 1` (and `offtrack_hanan_grid 1`) an
+With `offtrack_algorithm3_fallback 1` (default; with `offtrack_hanan_grid 1`) an
 instance whose selection leaves a pin with a catalogue unassigned
 recomputes its catalogues on the Algorithm 3 grid (five states, no
 on-track ties: the paths of `offtrack_hanan_grid 0`), solves again and

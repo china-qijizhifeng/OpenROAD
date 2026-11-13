@@ -237,7 +237,7 @@ struct BonnRouteDRParams
   // grid (five states, no on-track ties) and solves again; the result that
   // assigns more pins is kept (ties: the Hanan one). 0: Hanan catalogues
   // only.
-  bool offtrack_algorithm3_fallback = false;
+  bool offtrack_algorithm3_fallback = true;
   // Reuse a circuit class's catalogues and conflict-free solution for all
   // its instances; 0 solves every instance separately.
   bool access_classes = true;
