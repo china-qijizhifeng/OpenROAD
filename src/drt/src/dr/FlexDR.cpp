@@ -280,6 +280,11 @@ int FlexDRWorker::main(frDesign* design)
   }
   high_resolution_clock::time_point t2 = high_resolution_clock::now();
   const int num_markers = getNumMarkers();
+  // end() reads the worker's markers, nets and patches, not the GC state.
+  // Releasing the GC worker here runs its destruction inside the parallel
+  // loop of processWorkersBatch instead of in the serial endWorkersBatch,
+  // and only the GC workers still running stay in memory together.
+  setGCWorker(nullptr);
   cleanup();
   high_resolution_clock::time_point t3 = high_resolution_clock::now();
 
