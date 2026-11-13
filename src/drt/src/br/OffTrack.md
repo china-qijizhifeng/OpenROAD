@@ -119,6 +119,24 @@ sky130-like access situations (`opus-kit/offtrack/AccessShape.cpp`) the share
 of preferred-direction catalogue wire off the tracks is 94% with Algorithm
 3, 78% on the Hanan grid, and 6% with the tie-break.
 
+## Pins without a primary path
+
+The selection of an instance (`choosePrimaries`) leaves a pin unassigned
+when each of its catalogue paths conflicts with the other pins' choices or
+with earlier reservations. Such a pin keeps no reservation; other nets may
+route over its access area, and its connects later fail for want of a
+feasible access option. On ibex_sky130hd every such pin is B1 of
+sky130_fd_sc_hd__a222oi_1 (55 pins with Algorithm 3, 93 on the Hanan grid:
+the catalogue targets and costs are equal, the equal-cost paths differ), and
+the left nets with such a pin are the left-net difference between the two
+grids (`offtrack_access_report`).
+
+With `offtrack_primary_regenerate 1` such a pin, after the instance's other
+pins are reserved, generates its own catalogue against the current routing
+space two pitches farther out (the Sec. 4.4 dynamic generation, at setup)
+and reserves its best legal path; the new paths go first in its options.
+DRT-9165 counts the pins and those that got a primary path.
+
 ## Multi-layer blockage grid
 
 Section 3.8: "we have a blockage grid for each wiring and via layer.

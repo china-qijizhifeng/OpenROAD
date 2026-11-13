@@ -232,6 +232,13 @@ struct BonnRouteDRParams
   // (no feasible access option) and nets left to FlexDR, each listed up to
   // this many lines (0: off).
   int offtrack_access_report = 0;
+  // Setup: a pin whose catalogue holds no path the instance's selection
+  // can take (all paths conflict with the instance's other primaries or
+  // earlier reservations) generates its own catalogue against the
+  // routing space after the instance's reservations, two pitches farther
+  // out (Sec. 4.4 dynamic generation), and reserves its best legal path.
+  // 0: such a pin keeps no primary path and no reservation.
+  bool offtrack_primary_regenerate = false;
   // Reuse a circuit class's catalogues and conflict-free solution for all
   // its instances; 0 solves every instance separately.
   bool access_classes = true;
@@ -543,6 +550,10 @@ class BonnRouteDR
     int64_t empty_rejected = 0;
     int64_t macro_pins = 0;
     int64_t member_regenerated = 0;
+    // offtrack_primary_regenerate: pins with a catalogue and no primary
+    // path after the selection, and those that got one.
+    int64_t primary_missing = 0;
+    int64_t primary_recovered = 0;
     // D10 pin classes: classes, mapped paths of member pins and those
     // illegal at the member.
     int64_t pin_classes = 0;

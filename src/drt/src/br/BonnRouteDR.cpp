@@ -255,6 +255,8 @@ bool BonnRouteDRParams::set(const std::string& name, const double value)
     offtrack_catalogue_sample = std::max(0, v);
   } else if (name == "offtrack_access_report") {
     offtrack_access_report = std::max(0, v);
+  } else if (name == "offtrack_primary_regenerate") {
+    offtrack_primary_regenerate = v != 0;
   } else if (name == "access_classes") {
     access_classes = v != 0;
   } else if (name == "access_class_margin") {
@@ -1834,6 +1836,8 @@ void BonnRouteDR::AccessStats::add(const AccessStats& o)
   empty_rejected += o.empty_rejected;
   macro_pins += o.macro_pins;
   member_regenerated += o.member_regenerated;
+  primary_missing += o.primary_missing;
+  primary_recovered += o.primary_recovered;
   pin_classes += o.pin_classes;
   mapped_options += o.mapped_options;
   mapped_dropped += o.mapped_dropped;
@@ -3275,6 +3279,34 @@ void BonnRouteDR::buildOffTrackAccess(const std::vector<char>& pre_skip)
     }
     return choice;
   };
+  // A pin with a catalogue and no primary path, after its instance's other
+  // pins are reserved: its own catalogue against the current routing space
+  // (offtrack_primary_regenerate); the new paths go first in its options.
+  auto recover_primary = [&](NetData& net, Term& term) {
+    if (!params_.offtrack_primary_regenerate) {
+      return;
+    }
+    stats.primary_missing++;
+    std::vector<std::vector<AccessOption>> fresh(1);
+    offTrackCatalogue(net.id, term, nullptr, fresh[0], stats, 2);
+    if (fresh[0].empty()) {
+      return;
+    }
+    const std::vector<int> choice = solve(fresh, {net.id});
+    if (choice[0] < 0) {
+      return;
+    }
+    std::vector<AccessOption> options = std::move(fresh[0]);
+    for (AccessOption& o : term.options) {
+      if (options.size() >= 1000) {
+        break;
+      }
+      options.push_back(std::move(o));
+    }
+    term.options = std::move(options);
+    reserve(net, term, choice[0]);
+    stats.primary_recovered++;
+  };
   // D10 pin keys (also for the M3 statistics): per access pin, the inputs
   // of its own catalogue search that are equal between instances of a
   // master, in the instance's local frame. `environment` adds every other
@@ -3568,6 +3600,7 @@ void BonnRouteDR::buildOffTrackAccess(const std::vector<char>& pre_skip)
         phases.member_solve += step_timer.elapsed();
       }
       step_timer.reset();
+      std::vector<int> missing;
       for (int p = 0; p < n; p++) {
         const auto [net_id, t] = ia.terms[p];
         NetData& net = nets_[net_id];
@@ -3579,7 +3612,13 @@ void BonnRouteDR::buildOffTrackAccess(const std::vector<char>& pre_skip)
         keepStubs(term, cats[p]);
         if (choice[p] >= 0) {
           reserve(net, term, choice[p]);
+        } else {
+          missing.push_back(p);
         }
+      }
+      for (const int p : missing) {
+        const auto [net_id, t] = ia.terms[p];
+        recover_primary(nets_[net_id], nets_[net_id].terms[t]);
       }
       phases.member_reservations += step_timer.elapsed();
       md = MemberData();
@@ -3675,6 +3714,7 @@ void BonnRouteDR::buildOffTrackAccess(const std::vector<char>& pre_skip)
       phases.member_solve += step_timer.elapsed();
     }
     step_timer.reset();
+    std::vector<int> missing;
     for (int p = 0; p < n; p++) {
       const auto [net_id, t] = ia.terms[p];
       NetData& net = nets_[net_id];
@@ -3686,7 +3726,13 @@ void BonnRouteDR::buildOffTrackAccess(const std::vector<char>& pre_skip)
       keepStubs(term, cats[p]);
       if (choice[p] >= 0) {
         reserve(net, term, choice[p]);
+      } else {
+        missing.push_back(p);
       }
+    }
+    for (const int p : missing) {
+      const auto [net_id, t] = ia.terms[p];
+      recover_primary(nets_[net_id], nets_[net_id].terms[t]);
     }
     phases.member_reservations += step_timer.elapsed();
   }
@@ -3706,9 +3752,20 @@ void BonnRouteDR::buildOffTrackAccess(const std::vector<char>& pre_skip)
     keepStubs(term, cats[0]);
     if (choice[0] >= 0) {
       reserve(net, term, choice[0]);
+    } else {
+      recover_primary(net, term);
     }
   }
   phases.top_level_pins = phase_timer.elapsed();
+  if (params_.verbose && params_.offtrack_primary_regenerate) {
+    logger_->info(utl::DRT,
+                  9165,
+                  "BonnRoute off-track primary regeneration: {} pins with a "
+                  "catalogue and no primary path, {} got a primary path from "
+                  "their own catalogue.",
+                  stats.primary_missing,
+                  stats.primary_recovered);
+  }
   for (NetData& net : nets_) {
     if (pre_skip[net.id]) {
       continue;
