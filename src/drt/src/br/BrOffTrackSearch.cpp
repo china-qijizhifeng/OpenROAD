@@ -8,6 +8,8 @@
 #include <cstdlib>
 #include <functional>
 #include <limits>
+#include <map>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -16,7 +18,9 @@ namespace drt::br {
 namespace {
 
 constexpr int kFresh = 4;
-constexpr uint32_t kStates = 5;
+// States per grid vertex: four incoming directions and "no incoming
+// direction"; one where the incoming direction restricts no arc.
+constexpr uint32_t kDirectionStates = 5;
 constexpr uint32_t kNoParent = std::numeric_limits<uint32_t>::max();
 constexpr int64_t kInf = std::numeric_limits<int64_t>::max() / 4;
 
@@ -84,6 +88,17 @@ int64_t nearest(const std::vector<GeoCoord>& v, const GeoCoord c)
     d = std::min(d, int64_t{c} - *(it - 1));
   }
   return d;
+}
+
+// True if consecutive values of the sorted v are at least tau apart.
+bool gapsAtLeast(const std::vector<GeoCoord>& v, const GeoCoord tau)
+{
+  for (size_t i = 1; i < v.size(); i++) {
+    if (int64_t{v[i]} - v[i - 1] < tau) {
+      return false;
+    }
+  }
+  return true;
 }
 
 // Index of each line of `from` in `to` (both sorted), or -1.
@@ -226,9 +241,42 @@ OffTrackResult OffTrackSearch::run(const OffTrackRequest& req)
     l.base = static_cast<uint32_t>(std::min<uint64_t>(total, kNoParent));
     total += static_cast<uint64_t>(l.nx) * l.ny;
   }
+  // One state per grid vertex when every planar arc between neighbouring
+  // grid lines is a tau-feasible segment and no arc filter reads the
+  // incoming direction: a path of that graph is a tau-feasible path of the
+  // grid and a path of G is one of that graph, so both have the same
+  // distances.
+  bool single_state = req.merge_direction_states && !req.arc_filter;
+  for (int z = 0; z < num_layers && single_state; z++) {
+    const LayerIndex& l = index_[z];
+    single_state = !req.layers[z].wires
+                   || (gapsAtLeast(l.xs, req.layers[z].grid.tau)
+                       && gapsAtLeast(l.ys, req.layers[z].grid.tau));
+  }
+  const uint32_t stride = single_state ? 1 : kDirectionStates;
+  // The "no incoming direction" state of a grid vertex.
+  const uint32_t fresh = single_state ? 0 : kFresh;
+  // Tie-break scale: every simple path's off-track preferred length is
+  // below it (per layer at most the window length per line), so
+  // cost * scale + off-track length orders lexicographically. Off (scale
+  // 1) if that would leave less than 2^38 for the cost.
+  int64_t scale = 1;
+  if (req.on_track_ties) {
+    int64_t bound = 1;
+    for (int z = 0; z < num_layers; z++) {
+      const LayerIndex& l = index_[z];
+      if (req.layers[z].tie_tracks == nullptr || l.nx == 0 || l.ny == 0) {
+        continue;
+      }
+      bound += req.layers[z].horizontal
+                   ? int64_t{l.ny} * (int64_t{l.xs.back()} - l.xs.front())
+                   : int64_t{l.nx} * (int64_t{l.ys.back()} - l.ys.front());
+    }
+    scale = bound < (int64_t{1} << 24) ? bound : 1;
+  }
   res.grid_vertices = static_cast<int64_t>(total);
-  res.states = static_cast<int64_t>(total) * kStates;
-  if (total * kStates >= kNoParent) {
+  res.states = static_cast<int64_t>(total) * stride;
+  if (total * stride >= kNoParent) {
     return res;
   }
   for (int z = 0; z < num_layers; z++) {
@@ -255,6 +303,15 @@ OffTrackResult OffTrackSearch::run(const OffTrackRequest& req)
     turnLines(l.ys, in.grid.tau, l.turn_y_plus, l.turn_y_minus);
     l.row_on_track.clear();
     l.col_on_track.clear();
+    l.line_off_track.clear();
+    if (req.on_track_ties && in.tie_tracks != nullptr) {
+      const std::vector<GeoCoord>& lines = in.horizontal ? l.ys : l.xs;
+      l.line_off_track.resize(lines.size());
+      for (size_t k = 0; k < lines.size(); k++) {
+        l.line_off_track[k] = !std::binary_search(
+            in.tie_tracks->begin(), in.tie_tracks->end(), lines[k]);
+      }
+    }
     if (in.tracks != nullptr) {
       // Planar arcs start on a track line in the preferred direction.
       if (in.horizontal) {
@@ -272,7 +329,7 @@ OffTrackResult OffTrackSearch::run(const OffTrackRequest& req)
       }
     }
   }
-  const size_t states = static_cast<size_t>(total) * kStates;
+  const size_t states = static_cast<size_t>(total) * stride;
   if (labels_.size() < states) {
     labels_.resize(states, Label{0, kNoParent, 0});
   }
@@ -365,10 +422,7 @@ OffTrackResult OffTrackSearch::run(const OffTrackRequest& req)
     }
   }
   // Future cost of grid vertex (ix, iy) of layer z.
-  auto future = [&](const int z, const int ix, const int iy) -> int64_t {
-    if (!req.future_cost) {
-      return 0;
-    }
+  auto futureCost = [&](const int z, const int ix, const int iy) -> int64_t {
     const LayerIndex& l = index_[z];
     int64_t h = kInf;
     for (int k = 0; k < num_target_layers; k++) {
@@ -380,6 +434,12 @@ OffTrackResult OffTrackSearch::run(const OffTrackRequest& req)
                        + req.via_cost * std::abs(t - z));
     }
     return h == kInf ? 0 : h;
+  };
+  auto future = [&](const int z, const int ix, const int iy) -> int64_t {
+    if (!req.future_cost) {
+      return 0;
+    }
+    return scale * futureCost(z, ix, iy);
   };
   // A binary heap ordered by f only (std::priority_queue's push / pop).
   heap_.clear();
@@ -403,10 +463,10 @@ OffTrackResult OffTrackSearch::run(const OffTrackRequest& req)
     for (int ix = x0; ix < l.nx && l.xs[ix] <= s.region.xhi; ix++) {
       for (int iy = y0; iy < l.ny && l.ys[iy] <= s.region.yhi; iy++) {
         const uint32_t v = l.base + static_cast<uint32_t>(ix) * l.ny + iy;
-        const uint32_t st = v * kStates + kFresh;
-        if (dist(st) > s.cost) {
-          labels[st] = {s.cost, kNoParent, epoch};
-          push(s.cost + future(s.layer, ix, iy), st);
+        const uint32_t st = v * stride + fresh;
+        if (dist(st) > s.cost * scale) {
+          labels[st] = {s.cost * scale, kNoParent, epoch};
+          push(s.cost * scale + future(s.layer, ix, iy), st);
         }
       }
     }
@@ -460,8 +520,8 @@ OffTrackResult OffTrackSearch::run(const OffTrackRequest& req)
     std::pop_heap(heap_.begin(), heap_.end(), heap_less);
     heap_.pop_back();
     const uint32_t st = top.state;
-    const uint32_t v = st / kStates;
-    const int d = static_cast<int>(st % kStates);
+    const uint32_t v = st / stride;
+    const int d = single_state ? kFresh : static_cast<int>(st % stride);
     const int z = layer_of(v);
     LayerIndex& l = index_[z];
     const uint32_t local = v - l.base;
@@ -472,7 +532,7 @@ OffTrackResult OffTrackSearch::run(const OffTrackRequest& req)
     if (cost > dist(st)) {
       continue;
     }
-    if (cost > req.max_cost) {
+    if (cost / scale > req.max_cost) {
       break;
     }
     res.settled++;
@@ -504,15 +564,22 @@ OffTrackResult OffTrackSearch::run(const OffTrackRequest& req)
     };
     const uint32_t row0 = l.base;
     auto state = [&](const int jx, const int jy, const int dir) {
-      return (row0 + static_cast<uint32_t>(jx) * l.ny + jy) * kStates + dir;
+      return (row0 + static_cast<uint32_t>(jx) * l.ny + jy) * stride
+             + (single_state ? 0 : dir);
     };
     auto planar = [&](const int jx, const int jy, const int dir) {
       const GridPoint q{l.xs[jx], l.ys[jy]};
       if (has_filter && !req.arc_filter(z, p, q, d, dir)) {
         return;
       }
-      const int64_t c = std::abs(int64_t{q.x} - p.x) * in.cost_x
-                        + std::abs(int64_t{q.y} - p.y) * in.cost_y;
+      int64_t c = (std::abs(int64_t{q.x} - p.x) * in.cost_x
+                   + std::abs(int64_t{q.y} - p.y) * in.cost_y)
+                  * scale;
+      if (!l.line_off_track.empty() && (dir < 2) == in.horizontal
+          && l.line_off_track[in.horizontal ? iy : ix]) {
+        // Tie-break: preferred-direction wire off the tracks.
+        c += std::abs(int64_t{q.x} - p.x) + std::abs(int64_t{q.y} - p.y);
+      }
       relax(state(jx, jy, dir), cost + c, z, jx, jy);
     };
     if (in.wires) {
@@ -543,8 +610,23 @@ OffTrackResult OffTrackSearch::run(const OffTrackRequest& req)
         }
       }
       // Turn arcs to the nearest vertices at distance >= tau.
-      const bool turn_x = d == kFresh || d == 2 || d == 3;
-      const bool turn_y = d == kFresh || d == 0 || d == 1;
+      const bool turn_x = !single_state && (d == kFresh || d == 2 || d == 3);
+      const bool turn_y = !single_state && (d == kFresh || d == 0 || d == 1);
+      if (single_state) {
+        // Arcs to the four neighbours.
+        if (ix + 1 < l.nx && freeH(l, iy, ix, ix + 1) && arcs_x) {
+          planar(ix + 1, iy, 0);
+        }
+        if (ix > 0 && freeH(l, iy, ix - 1, ix) && arcs_x) {
+          planar(ix - 1, iy, 1);
+        }
+        if (iy + 1 < l.ny && freeV(l, ix, iy, iy + 1) && arcs_y) {
+          planar(ix, iy + 1, 2);
+        }
+        if (iy > 0 && freeV(l, ix, iy - 1, iy) && arcs_y) {
+          planar(ix, iy - 1, 3);
+        }
+      }
       if (turn_x) {
         const int kp = l.turn_x_plus[ix];
         if (kp < l.nx && freeH(l, iy, ix, kp) && arcs_x) {
@@ -580,7 +662,7 @@ OffTrackResult OffTrackSearch::run(const OffTrackRequest& req)
       const uint32_t w = n.base + static_cast<uint32_t>(jx) * n.ny + jy;
       const bool ok = nz > z ? via_ok(z, v, p) : via_ok(nz, w, p);
       if (ok) {
-        relax(w * kStates + kFresh, cost + req.via_cost, nz, jx, jy);
+        relax(w * stride + fresh, cost + req.via_cost * scale, nz, jx, jy);
       }
     }
   }
@@ -592,11 +674,11 @@ OffTrackResult OffTrackSearch::run(const OffTrackRequest& req)
     }
     OffTrackPath path;
     path.target_id = targets[k].second;
-    path.cost = labels[reached[k]].dist;
+    path.cost = labels[reached[k]].dist / scale;
     std::vector<RouteNode> full;
     for (uint32_t s = static_cast<uint32_t>(reached[k]); s != kNoParent;
          s = labels[s].parent) {
-      const uint32_t v = s / kStates;
+      const uint32_t v = s / stride;
       const int z = layer_of(v);
       const LayerIndex& l = index_[z];
       const uint32_t local = v - l.base;
@@ -628,6 +710,132 @@ OffTrackResult OffTrackSearch::run(const OffTrackRequest& req)
                      return a.cost < b.cost;
                    });
   return res;
+}
+
+namespace {
+
+// Pieces per (layer, horizontal, line) as sorted disjoint intervals.
+using WireKey = std::tuple<int, bool, GeoCoord>;
+using Intervals = std::vector<std::pair<GeoCoord, GeoCoord>>;
+using WireSet = std::map<WireKey, Intervals>;
+
+Intervals mergedIntervals(Intervals in)
+{
+  std::sort(in.begin(), in.end());
+  Intervals out;
+  for (const auto& [lo, hi] : in) {
+    if (hi <= lo) {
+      continue;
+    }
+    if (!out.empty() && lo <= out.back().second) {
+      out.back().second = std::max(out.back().second, hi);
+    } else {
+      out.emplace_back(lo, hi);
+    }
+  }
+  return out;
+}
+
+WireSet wireSet(const std::vector<CatalogueWire>& path)
+{
+  WireSet raw;
+  for (const CatalogueWire& w : path) {
+    raw[{w.layer, w.horizontal, w.line}].emplace_back(std::min(w.lo, w.hi),
+                                                      std::max(w.lo, w.hi));
+  }
+  WireSet out;
+  for (auto& [key, intervals] : raw) {
+    Intervals merged = mergedIntervals(std::move(intervals));
+    if (!merged.empty()) {
+      out[key] = std::move(merged);
+    }
+  }
+  return out;
+}
+
+// Positive-length intersection of two interval lists.
+Intervals intersection(const Intervals& a, const Intervals& b)
+{
+  Intervals out;
+  size_t i = 0;
+  size_t j = 0;
+  while (i < a.size() && j < b.size()) {
+    const GeoCoord lo = std::max(a[i].first, b[j].first);
+    const GeoCoord hi = std::min(a[i].second, b[j].second);
+    if (lo < hi) {
+      out.emplace_back(lo, hi);
+    }
+    if (a[i].second < b[j].second) {
+      i++;
+    } else {
+      j++;
+    }
+  }
+  return out;
+}
+
+WireSet intersection(const WireSet& a, const WireSet& b)
+{
+  WireSet out;
+  for (const auto& [key, intervals] : a) {
+    const auto it = b.find(key);
+    if (it == b.end()) {
+      continue;
+    }
+    Intervals common = intersection(intervals, it->second);
+    if (!common.empty()) {
+      out[key] = std::move(common);
+    }
+  }
+  return out;
+}
+
+int64_t length(const WireSet& s)
+{
+  int64_t total = 0;
+  for (const auto& [key, intervals] : s) {
+    for (const auto& [lo, hi] : intervals) {
+      total += int64_t{hi} - lo;
+    }
+  }
+  return total;
+}
+
+}  // namespace
+
+CatalogueSharing catalogueSharing(
+    const std::vector<std::vector<CatalogueWire>>& paths)
+{
+  CatalogueSharing out;
+  std::vector<WireSet> sets;
+  sets.reserve(paths.size());
+  WireSet all;
+  for (const std::vector<CatalogueWire>& path : paths) {
+    sets.push_back(wireSet(path));
+    out.wire += length(sets.back());
+    for (const auto& [key, intervals] : sets.back()) {
+      Intervals& u = all[key];
+      u.insert(u.end(), intervals.begin(), intervals.end());
+    }
+  }
+  for (auto& [key, intervals] : all) {
+    intervals = mergedIntervals(std::move(intervals));
+  }
+  out.distinct_wire = length(all);
+  for (size_t i = 0; i < sets.size(); i++) {
+    for (size_t j = i + 1; j < sets.size(); j++) {
+      out.pairs++;
+      out.sharing_pairs += intersection(sets[i], sets[j]).empty() ? 0 : 1;
+    }
+  }
+  if (sets.size() >= 2) {
+    WireSet common = sets[0];
+    for (size_t i = 1; i < sets.size() && !common.empty(); i++) {
+      common = intersection(common, sets[i]);
+    }
+    out.common = !common.empty();
+  }
+  return out;
 }
 
 }  // namespace drt::br

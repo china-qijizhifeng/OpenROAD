@@ -104,8 +104,14 @@ class L1Potential
   mutable PotentialCounters counters_;
 };
 
-// Exact distance in the simple model, Theorem 3: O(t * l) per query, no
-// preprocessing beyond copying the rates.
+// Exact distance in the simple model, Theorem 3. A path of Lemma 1 (vias,
+// a run on layer a, vias, a run on layer b, vias) costs C + h * dx + v * dy
+// with C its via cost and (h, v) the rates of its runs, so the distance
+// between two layers is the lower envelope of these linear functions over
+// all (a, b, run order). prepare() tabulates, per layer pair, the functions
+// that no other function bounds from below everywhere (a handful: the rates
+// take few values); the table is kept while the rates stay the same, so a
+// query costs a few multiply-adds per target.
 class SimplePotential
 {
  public:
@@ -114,11 +120,28 @@ class SimplePotential
   Cost query(int z, Coord x, Coord y) const;
   const PotentialCounters& counters() const { return counters_; }
   void resetCounters() { counters_.reset(); }
+  // dist((x_target, y_target, z_target), (x, y, z)) for dx, dy >= 0: from
+  // the table, and by the two O(l) sweeps of Theorem 3 (reference).
+  Cost pointDistance(int target_z, int z, Cost dx, Cost dy) const;
+  Cost pointDistanceSweep(int target_z, int z, Cost dx, Cost dy) const;
+  // Linear functions in the table (all layer pairs).
+  size_t tableFunctions() const { return functions_.size(); }
 
  private:
   Cost viaCost(int z0, int z1) const;
-  // dist((x_target, y_target, z_target), (x, y, z)) for dx, dy >= 0.
-  Cost pointDistance(int target_z, int z, Cost dx, Cost dy) const;
+  void buildTable();
+
+  // Lower envelope of layer pair (target_z, z): functions_[first_[k] ..
+  // first_[k + 1]) with k = target_z * num_layers_ + z.
+  struct LinearCost
+  {
+    Cost constant;
+    Cost horizontal;
+    Cost vertical;
+  };
+  std::vector<LinearCost> functions_;
+  std::vector<int> first_;
+  bool table_valid_ = false;
 
   int num_layers_ = 0;
   LayerCostRates rates_;

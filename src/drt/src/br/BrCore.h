@@ -20,6 +20,7 @@
 #include <vector>
 
 #include "br/BrFastGrid.h"
+#include "br/BrSearchQueue.h"
 #include "br/BrTrackGraph.h"
 
 namespace drt::br {
@@ -266,6 +267,9 @@ struct SearchResult
   // (vertex search).
   int64_t run_label_pops = 0;
   int64_t run_continuations = 0;
+  // Pops answered by the last pushed item without a heap operation
+  // (vertex search, SearchQueue).
+  int64_t held_pops = 0;
   bool aborted = false;  // label budget exceeded
 };
 
@@ -434,16 +438,15 @@ class PathSearch
     kFromLayerAbove = 6,  // via from z + 1
   };
   // A heap entry at vertex (z, i, j). Ties of key and g are broken by the
-  // vertex in (z, i, j) order, which is the order of the vertex ids.
+  // vertex in (z, i, j) order, which is the order of the vertex ids:
+  // `order` packs (z, i, j, dir + 1) so that one comparison breaks them
+  // (a vertex is queued at most once per g, so dir never decides).
   struct Item
   {
     Cost key;
     Cost g;
-    int32_t i;
-    int32_t j;
+    uint64_t order;
     int32_t aux;
-    int8_t z;
-    int8_t dir;  // 0 vertex label, +1 / -1 ray, 2 sink
     bool operator>(const Item& o) const
     {
       if (key != o.key) {
@@ -452,15 +455,20 @@ class PathSearch
       if (g != o.g) {
         return g < o.g;  // deeper first on ties
       }
-      if (z != o.z) {
-        return z > o.z;
-      }
-      if (i != o.i) {
-        return i > o.i;
-      }
-      return j > o.j;
+      return order > o.order;
     }
   };
+  // dir: 0 vertex label, +1 / -1 ray, 2 sink.
+  Item makeItem(const Cost key,
+                const Cost g,
+                const int z,
+                const int i,
+                const int j,
+                const int aux,
+                const int dir) const
+  {
+    return Item{key, g, order_.pack(z, i, j, dir), aux};
+  }
 
   Cost futureCost(int z, Coord x, Coord y) const;
   // FastGridReader::level, inlined: the run cursors answer most queries
@@ -488,11 +496,14 @@ class PathSearch
   // Rip-up penalty of entering a of level l.
   Cost penalty(At a, RipupLevel l) const;
   bool enter(const At a, const Kind k) const { return usable(level(a, k)); }
-  // 4-ary min-heap on heap_. Item::operator> is a strict total order (no
+  // SearchQueue on queue_. Item::operator> is a strict total order (no
   // two queued items share key, g and vertex), so the pop sequence is that
   // of any other heap.
-  void push(const Item& item);
-  Item pop();
+  void push(const Item& item)
+  {
+    queue_.push(item);
+    res_->heap_pushes++;
+  }
   bool relax(int z, int i, int j, Cost g, Parent parent, int8_t dir);
   // Cost of the preferred-direction edge between positions j and j2,
   // including the wire spreading cost of entering j2.
@@ -558,7 +569,8 @@ class PathSearch
   using Labels = PagedLabels<Label, /*kClear=*/true>;
   mutable Labels labels_;
   uint32_t epoch_ = 0;
-  std::vector<Item> heap_;
+  SearchQueue<Item> queue_;
+  VertexOrder order_;  // Item::order
 };
 
 // Interval-based shortest path search (Sec. 4.1, Algorithm 4; Hetzel 1998,

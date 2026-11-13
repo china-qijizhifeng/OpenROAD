@@ -16,6 +16,13 @@ cc_test(
 )
 
 cc_test(
+    name = "bonnroute_incremental_test",
+    size = "small",
+    srcs = ["BonnRouteIncrementalTest.cpp"],
+    deps = ["//src/drt:bonnroute_core"],
+)
+
+cc_test(
     name = "bonnroute_potential_test",
     size = "medium",
     srcs = ["BonnRoutePotentialTest.cpp"],
@@ -86,6 +93,23 @@ cc_test(
         "BonnRouteFastGridTest.cpp",
         "BonnRouteRoutingSpaceTestUtil.h",
     ],
+    deps = ["//src/drt:bonnroute_core"],
+)
+
+cc_test(
+    name = "bonnroute_fast_grid_dense_test",
+    size = "small",
+    srcs = [
+        "BonnRouteFastGridDenseTest.cpp",
+        "BonnRouteRoutingSpaceTestUtil.h",
+    ],
+    deps = ["//src/drt:bonnroute_core"],
+)
+
+cc_test(
+    name = "bonnroute_search_queue_test",
+    size = "small",
+    srcs = ["BonnRouteSearchQueueTest.cpp"],
     deps = ["//src/drt:bonnroute_core"],
 )
 
@@ -164,6 +188,39 @@ COMPULSORY_TESTS = [
 
 PASSFAIL_TESTS = [
 ]
+
+regression_test(
+    name = "bonnroute_incremental_fallback",
+    check_log = False,
+    check_passfail = True,
+    data = [
+        ":regression_resources",
+        "ta_ap_aligned.def",
+        "ta_ap_aligned.route_guide",
+    ],
+)
+
+regression_test(
+    name = "bonnroute_incremental_keep",
+    check_log = False,
+    check_passfail = True,
+    data = [
+        ":regression_resources",
+        "ta_ap_aligned.def",
+        "ta_ap_aligned.route_guide",
+    ],
+)
+
+regression_test(
+    name = "bonnroute_incremental_ndr",
+    check_log = False,
+    check_passfail = True,
+    data = [
+        ":regression_resources",
+        "ta_ap_aligned.def",
+        "ta_ap_aligned.route_guide",
+    ],
+)
 
 ALL_TESTS = COMPULSORY_TESTS + PASSFAIL_TESTS
 

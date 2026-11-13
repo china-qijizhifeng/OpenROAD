@@ -34,6 +34,12 @@
 //
 // Intervals are kept per track and global routing tile column (chunk), so
 // threads routing disjoint tile regions (Sec. 5.1) write disjoint chunks.
+//
+// Dense layers (fast_grid_dense): a layer may instead keep one word per
+// position in an array per layer (track-major), which a lookup reads with
+// one load and an update writes in place. Dense and interval layers hold
+// the same words; every reader and writer below answers identically for
+// both encodings, and the statistics count the same intervals.
 
 #pragma once
 
@@ -135,6 +141,9 @@ class FastGrid
     int n = 0;
     int first = 0;
     int count = 0;
+    // Dense layer: the words of positions first .. first + count - 1
+    // (starts / words unused).
+    const uint64_t* dense = nullptr;
   };
   RunsView wiringRuns(int z, int i, int j) const;
   uint64_t viaRun(int z, int i, int c, int& lo, int& hi) const;
@@ -176,6 +185,28 @@ class FastGrid
   void setLevel(size_t v, Kind kind, int wire_type, RipupLevel level);
   void setEdgeQuery(size_t v, Kind edge_kind, bool query);
 
+  // Dense encoding of layer z: bytes it takes (wiring and via words), and
+  // the switch. setDense keeps every word: a layer that becomes dense
+  // copies its runs into the array and releases them, a layer that becomes
+  // interval-encoded compresses its array into runs. Not concurrent with
+  // other calls.
+  size_t denseBytes(int z) const;
+  void setDense(int z, bool dense);
+  bool dense(const int z) const { return layers_[z].dense; }
+  // Dense layer z: the words of track i (positions / via positions).
+  const uint64_t* denseWiringRow(const int z, const int i) const
+  {
+    const Layer& fl = layers_[z];
+    return fl.dense_wiring.data()
+           + static_cast<size_t>(i) * fl.pos_chunk.size();
+  }
+  const uint64_t* denseViaRow(const int z, const int i) const
+  {
+    const Layer& fl = layers_[z];
+    return fl.dense_via.data()
+           + static_cast<size_t>(i) * fl.via_position.size();
+  }
+
   // Via positions of layer z: positions with a track of layer z + 1.
   int viaIndex(const int z, const int j) const
   {
@@ -208,6 +239,8 @@ class FastGrid
     int64_t marked_edges = 0;
     int64_t tiles = 0;  // allocated tiles
     size_t bytes = 0;   // run storage, tile tables, per-position maps
+    int dense_layers = 0;
+    size_t dense_bytes = 0;  // dense arrays (included in bytes)
   };
   Statistics statistics() const;
   // Releases spare capacity after a bulk build.
@@ -239,7 +272,28 @@ class FastGrid
     std::vector<int> via_chunk;                     // per via position
     std::vector<int> via_chunk_first;               // pos_chunks + 1
     std::vector<std::unique_ptr<TileRuns>> via;
+    // Dense encoding: word of (track i, position j) at i * positions + j,
+    // via word of (i, via position c) at i * via positions + c.
+    bool dense = false;
+    std::vector<uint64_t> dense_wiring;
+    std::vector<uint64_t> dense_via;
   };
+  // The maximal run around index x of a dense chunk [first, last] of row:
+  // positions [lo, hi] with the word of x.
+  static uint64_t denseRun(const uint64_t* row,
+                           int first,
+                           int last,
+                           int x,
+                           int& lo,
+                           int& hi);
+  // Statistics of a dense layer: intervals per track and tile chunk.
+  void denseStatistics(const Layer& fl,
+                       const std::vector<uint64_t>& words,
+                       int positions,
+                       const std::vector<int>& chunk_first,
+                       int chunks,
+                       int64_t& intervals,
+                       int64_t* marked) const;
   static uint64_t lookup(const TileRuns* tile, int track, int index);
   static uint64_t lookupRun(const TileRuns* tile,
                             int track,
@@ -343,16 +397,26 @@ class FastGridReader
   uint64_t wiringWord(const int z, const int i, const int j)
   {
     Cursor& c = wiring_[slot(z, i)];
-    if (c.z == z && c.i == i && j >= c.lo && j <= c.hi) {
-      return c.word;
+    if (c.z == z && c.i == i) {
+      if (c.row != nullptr) {
+        return c.row[j];
+      }
+      if (j >= c.lo && j <= c.hi) {
+        return c.word;
+      }
     }
     return fillWiring(c, z, i, j);
   }
   uint64_t viaWord(const int z, const int i, const int v)
   {
     Cursor& c = via_[slot(z, i)];
-    if (c.z == z && c.i == i && v >= c.lo && v <= c.hi) {
-      return c.word;
+    if (c.z == z && c.i == i) {
+      if (c.row != nullptr) {
+        return c.row[v];
+      }
+      if (v >= c.lo && v <= c.hi) {
+        return c.word;
+      }
     }
     return fillVia(c, z, i, v);
   }
@@ -373,6 +437,11 @@ class FastGridReader
     // The runs of the cursor's tile (wiring, without overlay).
     FastGrid::RunsView runs;
     int32_t run = -1;
+    // Dense layer: the words of the track when it has no overlay runs
+    // (every position is read from it), else nullptr and `overlay` holds
+    // the track's overlay runs.
+    const uint64_t* row = nullptr;
+    const std::vector<FastGridOverlay::Run>* overlay = nullptr;
   };
   static constexpr int kSlots = 256;
   static int slot(const int z, const int i)
@@ -381,6 +450,15 @@ class FastGridReader
   }
   uint64_t fillWiring(Cursor& c, int z, int i, int j);
   uint64_t fillVia(Cursor& c, int z, int i, int v);
+  // Dense layers: row pointer, or the overlay run / single position.
+  uint64_t fillDense(
+      Cursor& c,
+      const std::unordered_map<uint64_t, std::vector<FastGridOverlay::Run>>*
+          runs,
+      const uint64_t* row,
+      int z,
+      int i,
+      int j);
   static uint64_t applyOverlay(
       const std::unordered_map<uint64_t, std::vector<FastGridOverlay::Run>>&
           runs,

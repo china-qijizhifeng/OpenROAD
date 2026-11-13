@@ -718,9 +718,83 @@ int builderCases(Potentials& p, int cases, uint32_t seed)
 
 }  // namespace
 
+// SimplePotential's tabulated layer-pair envelopes against the two O(l)
+// sweeps of Theorem 3: random rates with forbidden directions, forbidden
+// vias and few distinct rate values (as the router's: preferred and jog
+// rates), random gaps including zero; tables rebuilt and reused.
+void tableEqualsSweep(const int cases, const uint32_t seed)
+{
+  std::mt19937 rng(seed);
+  int64_t checks = 0;
+  size_t functions = 0;
+  SimplePotential sp;
+  for (int c = 0; c < cases; c++) {
+    const int n = 1 + static_cast<int>(rng() % 12);
+    LayerCostRates rates;
+    const Cost pref = 1 + static_cast<Cost>(rng() % 4);
+    const Cost jog = rng() % 2 ? 4 * pref : 1 + static_cast<Cost>(rng() % 20);
+    for (int z = 0; z < n; z++) {
+      const bool horizontal = (z % 2 == 0) != (c % 3 == 0);
+      Cost h = horizontal ? pref : jog;
+      Cost v = horizontal ? jog : pref;
+      if (rng() % 7 == 0) {
+        h = kInfCost;
+      }
+      if (rng() % 7 == 0) {
+        v = kInfCost;
+      }
+      if (rng() % 5 == 0) {
+        h = 1 + static_cast<Cost>(rng() % 30);
+      }
+      rates.horizontal.push_back(h);
+      rates.vertical.push_back(v);
+      if (z + 1 < n) {
+        rates.via_up.push_back(rng() % 9 == 0
+                                   ? kInfCost
+                                   : static_cast<Cost>(rng() % 400));
+      }
+    }
+    // Twice with the same rates (table reused), then the next case.
+    for (int round = 0; round < 2; round++) {
+      sp.prepare(rates, {});
+      functions = std::max(functions, sp.tableFunctions());
+      for (int k = 0; k < 300; k++) {
+        const int tz = static_cast<int>(rng() % n);
+        const int z = static_cast<int>(rng() % n);
+        const Cost dx = rng() % 4 == 0 ? 0 : static_cast<Cost>(rng() % 100000);
+        const Cost dy = rng() % 4 == 0 ? 0 : static_cast<Cost>(rng() % 100000);
+        const Cost a = sp.pointDistance(tz, z, dx, dy);
+        const Cost b = sp.pointDistanceSweep(tz, z, dx, dy);
+        checks++;
+        CHECK(a == b,
+              "case %d: table %lld != sweep %lld (layers %d, %d -> %d, dx "
+              "%lld, dy %lld)",
+              c,
+              (long long) a,
+              (long long) b,
+              n,
+              tz,
+              z,
+              (long long) dx,
+              (long long) dy);
+      }
+    }
+  }
+  std::printf("%-15s cases=%d checks=%lld largest table=%zu failures=%d\n",
+              "simple-table",
+              cases,
+              (long long) checks,
+              functions,
+              failures);
+}
+
 int main()
 {
   std::setvbuf(stdout, nullptr, _IONBF, 0);
+  tableEqualsSweep(4000, 41);
+  if (failures) {
+    return 1;
+  }
   Potentials p;
   figureSeven(p);
   unreachable(p);

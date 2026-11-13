@@ -44,6 +44,8 @@ class Logger;
 
 namespace drt {
 
+class frBlock;
+class frBlockObject;
 class frDesign;
 class frNet;
 class frInst;
@@ -264,6 +266,47 @@ struct BonnRouteDRParams
   // rules (Sec. 3.7). `offtrack_notch_tau` adds notch spacing + width.
   int offtrack_tau = 0;
   bool offtrack_notch_tau = false;
+  // Blockage grid of a catalogue search: the Hanan lines alone, and one
+  // search state per grid vertex, where tau is at most the manufacturing
+  // grid (every coordinate is on that grid, so any two lines are at least
+  // tau apart and every Hanan-grid path is tau-feasible). 0 keeps
+  // Algorithm 3's lines at multiples of tau and the five direction states.
+  bool offtrack_hanan_grid = true;
+  // Among catalogue paths of equal cost, prefer the least preferred-
+  // direction wire off the tracks of the search layers (lexicographic
+  // tie-break; path costs unchanged): paths jog onto a track at the access
+  // point instead of running beside the tracks. 0: ties resolve by the
+  // search order.
+  bool offtrack_on_track_ties = true;
+  // D10: catalogues per pin class instead of per circuit class. The key of
+  // a pin holds only its own search inputs that are equal between
+  // instances of a master (local frame): master, pin, access points with
+  // their vias and preferred marks, the instance's own shapes and the
+  // tracks within the pin's search reach. Each class's catalogue is
+  // generated at its first pin; every other pin maps it, keeps the paths
+  // legal at the member, and generates its own catalogue when fewer than
+  // min(offtrack_regenerate, catalogue size) remain. Selection per
+  // instance. Needs access_classes.
+  bool offtrack_pin_classes = false;
+  // M3 statistics (verbose log, results unchanged): circuit classes with
+  // one signature component left out, pin-key classes, and the blockage
+  // grid lines of both grids.
+  bool offtrack_access_stats = false;
+  // D10 sampled comparison: every n-th member pin also generates its own
+  // catalogue, compared with the mapped one (0: off; results unchanged).
+  int offtrack_catalogue_sample = 0;
+  // Access report (verbose log, results unchanged): wire sharing of the
+  // catalogues and off-track wire and blocked tracks of the primary paths
+  // after setup; pins without a primary path, pins of failed connects
+  // (no feasible access option) and nets left to FlexDR, each listed up to
+  // this many lines (0: off).
+  int offtrack_access_report = 0;
+  // With offtrack_hanan_grid: an instance whose selection leaves a pin with
+  // a catalogue unassigned recomputes its catalogues on the Algorithm 3
+  // grid (five states, no on-track ties) and solves again; the result that
+  // assigns more pins is kept (ties: the Hanan one). 0: Hanan catalogues
+  // only.
+  bool offtrack_algorithm3_fallback = true;
   // Reuse a circuit class's catalogues and conflict-free solution for all
   // its instances; 0 solves every instance separately.
   bool access_classes = true;
@@ -320,6 +363,12 @@ struct BonnRouteDRParams
   // Sec. 4.1 searches: per-worker label budget in MB (0: unlimited); a
   // search that would exceed it stops without a path (counted).
   int search_label_mb = 512;
+  // Fast grid (Sec. 3.6) in the dense encoding: layers keep one word per
+  // track-graph vertex (and via position) instead of runs, within
+  // fast_grid_memory_mb MB of dense arrays, layers taken bottom-up; the
+  // other layers keep the run encoding. Same words, same results.
+  bool fast_grid_dense = false;
+  int fast_grid_memory_mb = 8192;
   // FlexDR clean-up after BonnRoute. FlexDR's iterations 0-2 run in
   // incremental mode, which reroutes only nets without initial routing
   // (the nets BonnRoute left) and keeps every BonnRoute net fixed; iteration
@@ -357,6 +406,52 @@ struct BonnRouteDRParams
   // report how far beyond the net's core tile box each step reaches. The
   // routing is unchanged.
   bool partition_check = false;
+  // Ahrens et al., arXiv:2111.06169, Sec. 5.2 incremental routing: a
+  // detailed_route -bonnroute call on a design that already carries routing
+  // (the antenna-repair ECO) routes the nets that need routing against the
+  // existing routing (rip-up and reroute included) and writes them; FlexDR
+  // then only checks the changed regions and repairs markers
+  // (BrIncremental.cpp). Default in every profile: the full-flow E2E (eco
+  // line, round r1) gives final DRC 0 and no more antenna nets than the
+  // FlexDR ECO on jpeg/ibex sky130hd, aes nangate45/asap7.
+  bool incremental = true;
+  // Keep the routing space alive across detailed_route calls and update it
+  // with the design changes since the previous call; 0 rebuilds it from the
+  // design and its routing in every incremental call.
+  bool incremental_resident = true;
+  // Input wires shorter than this many pitches of their layer that connect
+  // only to illegal input wires get no reservation (Sec. 5.2).
+  int reserve_short_pitches = 2;
+  // In incremental calls (whatever the profile), legal input wires are
+  // reservations of their net at the discount (Sec. 5.2: the input is a
+  // legal detailed routing); the first call is unaffected. The search of
+  // incremental calls is then the vertex search with discounted runs.
+  bool incremental_reservations = true;
+  // Future cost of incremental calls (values of `potential`); 3 is the
+  // general model with discounts used in the paper's Tables 4 and 6.
+  int incremental_potential = 3;
+  // Rip-up sequences (ripup_depth, ripup_passes) for the nets that fail in
+  // incremental calls, whatever `ripup` is for the first call.
+  bool incremental_ripup = true;
+  // Debug: at the start of every incremental call, count the routing shapes
+  // of the design (wires, vias, patches of nets whose routing did not
+  // change) that no shape of the routing space covers. 1 reports the count,
+  // 2 also stops with an error when it is not 0.
+  int incremental_check = 0;
+  // C5 step 1 (design lead/cleanup/C5-revised.md): after routing, check
+  // every via whose bottom pad lies on a pin shape of its own net with
+  // FlexPA's via check (FlexGC, as FlexPA::isViaViolationFree), and with
+  // every other via definition of the access point when it fails. Prints
+  // statistics and one line per failing via; the routing is unchanged.
+  int start_check = 0;
+  // C5 step 2 (lead/cleanup/C5-revised.md, rule 3'): the searches place a
+  // via whose bottom pad overlaps a pin shape of its own net only at an
+  // access point whose FlexPA via definitions include the via, or where the
+  // start check passes with same-net markers only; elsewhere on the pin the
+  // path leaves the pin on the pin layer first. The check runs once per
+  // instance class (master, orientation, offset in master coordinates, via
+  // definition) before routing; the searches look the result up.
+  bool planar_first = true;
   bool verbose = true;
   // Algorithm profile: 0 = 2013-improved (default), 1 = 2013-reimpl,
   // 2 = 2021 (2013-reimpl plus Ahrens et al., arXiv:2111.06169).
@@ -384,6 +479,21 @@ class BonnRouteDR
   void buildJogTiles();
 
   void main();
+
+  // Incremental mode (BrIncremental.cpp, arXiv:2111.06169 Sec. 5.2).
+  // True if this routing space belongs to `design` and can be updated.
+  bool residentFor(const frDesign* design) const;
+  // Builds the routing space from the design and its existing routing
+  // (first call without BonnRoute, or incremental_resident 0).
+  void buildFromDesign();
+  // After main(): turns the routes written by main() into input routing and
+  // releases all reservations, so that later incremental calls start from
+  // the routing space of the design as written.
+  void keepRoutingSpace();
+  // Updates the routing space with the design changes, routes the nets
+  // that need routing against the existing routing and writes them;
+  // `regions` receives the areas FlexDR checks afterwards.
+  void routeIncremental(std::vector<odb::Rect>& regions);
 
  private:
   struct LayerInfo
@@ -556,6 +666,9 @@ class BonnRouteDR
     std::vector<RShape> shapes;  // committed shapes
     std::vector<RShape> pins;    // pin shapes in the shape grid
     std::vector<std::pair<frLayerNum, odb::Point>> pin_points;
+    // planar_first: lower vertices of vias the searches may not place
+    // (pad on an own pin, neither FlexPA-approved nor clean); sorted.
+    std::vector<size_t> forbidden_pin_vias;
     // Legal input wires reserved for this net (arXiv:2111.06169 Sec. 5.2)
     // and the track-graph edges they cover.
     std::vector<RShape> input_reservation;
@@ -565,6 +678,23 @@ class BonnRouteDR
     std::vector<std::array<int, 3>> guide_tiles;
     // Tiles (z, tile x * tiles_y + tile y) with GR extra space for the net.
     std::vector<std::pair<int, int>> extra_space_tiles;
+    // Routing read from the design (incremental mode, Sec. 5.2): routed
+    // shapes of the net in the routing space while input_present.
+    std::vector<RShape> input_shapes;
+    bool input_present = false;
+    // The input shapes were ripped up in this call: the frNet's routing is
+    // replaced when the net is written.
+    bool input_removed = false;
+    // Terms built for this incremental call (access and guide tiles).
+    bool prepared = false;
+    // Kept pin-to-pin paths of the input routing are a terminal of the
+    // net in this call (Fig. 9 of arXiv:2111.06169).
+    bool keeps_input = false;
+    // The frNet was deleted from the design.
+    bool dead = false;
+    // Fingerprints of the frNet's routing and pins at the last update.
+    uint64_t routing_fp = 0;
+    uint64_t terms_fp = 0;
     int ripups = 0;
     bool routed = false;
     bool failed = false;
@@ -667,6 +797,12 @@ class BonnRouteDR
     double potential_seconds = 0;
     int64_t potential_checks = 0;
     int64_t potential_mismatches = 0;
+    // potential_check: pops and settled vertices of the checked searches
+    // with the potential and of their pi_H repetitions (same state).
+    int64_t potential_check_pops = 0;
+    int64_t potential_check_settled = 0;
+    int64_t potential_check_plain_pops = 0;
+    int64_t potential_check_plain_settled = 0;
     // Guide path of the last buildPathRegion: planar tile steps minus the
     // tile distance of its ends.
     int path_detour = 0;
@@ -696,10 +832,13 @@ class BonnRouteDR
     // connect() calls that failed because a pin had no feasible access
     // option even after dynamic generation.
     int64_t access_failures = 0;
+    // (net, term) of each such failure (offtrack_access_report only).
+    std::vector<std::pair<int, int>> access_failure_terms;
     int64_t regenerated_paths = 0;
     int64_t searches = 0;
     int64_t path_region_searches = 0;
     int64_t heap_pops = 0;
+    int64_t held_pops = 0;
     int64_t settled = 0;
   };
   // Saved routing of a net, for restoring a failed rip-up sequence.
@@ -715,6 +854,7 @@ class BonnRouteDR
     bool input_reserved;
     bool was_partial = false;
     PartialState partial_state;
+    bool input_present;
   };
 
   void buildTrackGraph();
@@ -755,6 +895,33 @@ class BonnRouteDR
     int64_t empty_rejected = 0;
     int64_t macro_pins = 0;
     int64_t member_regenerated = 0;
+    // offtrack_algorithm3_fallback: instances with a pin without a primary
+    // path on the Hanan grid, and those whose Algorithm 3 catalogues assign
+    // more pins.
+    int64_t fallback_instances = 0;
+    int64_t fallback_improved = 0;
+    // D10 pin classes: classes, mapped paths of member pins and those
+    // illegal at the member.
+    int64_t pin_classes = 0;
+    int64_t mapped_options = 0;
+    int64_t mapped_dropped = 0;
+    // Sampled comparison of a member pin's mapped catalogue with the one
+    // generated at the member: sampled pins, equal (target, cost) sets,
+    // pins whose whole search environment equals the representative's
+    // (and of those, related by a translation, and their unequal sets).
+    int64_t sample_pins = 0;
+    int64_t sample_equal = 0;
+    int64_t sample_mapped_only = 0;  // (target, cost) only in the mapped
+    int64_t sample_own_only = 0;     // (target, cost) only in the own
+    int64_t sample_same_environment = 0;
+    int64_t sample_same_environment_translated = 0;
+    int64_t sample_same_environment_translated_unequal = 0;
+    // M3 (c): blockage-grid lines and vertices inside the window with the
+    // grid in use and with the other grid (Hanan / Algorithm 3).
+    int64_t grid_lines = 0;
+    int64_t grid_lines_other = 0;
+    int64_t grid_vertices_other = 0;
+    int64_t search_states = 0;
     std::vector<std::string> empty_examples;
     // Thread seconds of the catalogue steps besides the search: on-track
     // targets, obstacle collection, blockage grid, exact path checks, and
@@ -809,6 +976,11 @@ class BonnRouteDR
   void buildSameNetRules();
   // pre_skip: net skip flags before buildAccess.
   void buildOffTrackAccess(const std::vector<char>& pre_skip);
+  // offtrack_access_report: the catalogues and primary paths after setup,
+  // and the access failures and left nets after routing.
+  void reportOffTrackAccess() const;
+  void reportAccessFailures() const;
+  std::string termName(const Term& term) const;
   // Rectangles of the pin on its access layer (the lowest routing layer
   // that is a track layer or directly below the lowest one).
   // A start of catalogue paths: an access point with its up via, if any.
@@ -876,7 +1048,8 @@ class BonnRouteDR
                          const Worker* worker,
                          std::vector<AccessOption>& out,
                          AccessStats& stats,
-                         int extra_radius = 0) const;
+                         int extra_radius = 0,
+                         bool algorithm3 = false) const;
   void candidateOf(const AccessOption& option,
                    int net,
                    br::AccessCandidate& candidate) const;
@@ -1151,6 +1324,23 @@ class BonnRouteDR
   bool routedConflicts(const RShape& shape, int net) const;
   frCoord spacing(int z, frCoord width1, frCoord width2, frCoord prl) const;
   void writeNets();
+  // start_check: FlexPA's via check on the written vias (statistics only).
+  void checkPathStarts();
+  // FlexPA's via check (FlexPA::isViaViolationFree) of via `def` at p on the
+  // pin `term` (frInstTerm or frBTerm) of `net`; with own_net_only, only
+  // markers whose sources are all `net` count.
+  bool viaCheckClean(frBlockObject* term,
+                     frNet* net,
+                     const frViaDef* def,
+                     const odb::Point& p,
+                     bool own_net_only) const;
+  // planar_first: NetData::forbidden_pin_vias of every net.
+  void buildPinViaLegality();
+  // The access point of `term` (frInstTerm or frBTerm) at p on layer, or
+  // nullptr.
+  const frAccessPoint* accessPointAt(const frBlockObject* term,
+                                     frLayerNum layer,
+                                     const odb::Point& p) const;
   // notch_fill for one written net; fills of earlier nets are in `fills`.
   void fillNotches(frNet* net,
                    int id,
@@ -1171,6 +1361,135 @@ class BonnRouteDR
     int64_t illegal_fixed = 0;
     int64_t collapsed = 0;
   } bridge_stats_, lower_bridge_stats_;
+
+  // Incremental mode (BrIncremental.cpp).
+  struct FixedEntry
+  {
+    RShape shape;
+    br::ShapeType type;
+    int owner;
+  };
+  // Fixed shapes of an instance in the routing space and the state they
+  // were read in.
+  struct InstRecord
+  {
+    std::string name;
+    odb::Rect bbox;
+    int orient = 0;
+    const void* master = nullptr;
+    std::vector<const frNet*> term_nets;
+    std::vector<FixedEntry> shapes;
+    bool seen = false;
+  };
+  struct SyncStats
+  {
+    int64_t instances_changed = 0;
+    int64_t nets_reread = 0;
+    int64_t nets_added = 0;
+    int64_t nets_removed = 0;
+    int64_t shapes_removed = 0;
+    int64_t shapes_inserted = 0;
+    std::vector<odb::Rect> inst_regions;
+    std::unordered_set<const frInst*> changed_insts;
+  };
+  // buildFixed hook: records the fixed shapes of instances.
+  void recordFixedShape(const frBlockObject* obj,
+                        const RShape& shape,
+                        br::ShapeType type,
+                        int owner);
+  void recordInstanceState(const frInst* inst, InstRecord& record) const;
+  void readInstanceShapes(const frInst* inst, InstRecord& record);
+  void removeInstanceShapes(InstRecord& record, SyncStats& stats);
+  void syncInstances(SyncStats& stats);
+  void syncNets(SyncStats& stats);
+  // Routed shapes of the frNet's own geometry (wires, vias, patches).
+  void routingShapes(const frNet* net, std::vector<RShape>& shapes) const;
+  // The routed shape of a patch wire (or notch fill) as routingShapes reads
+  // it from the design.
+  RShape patchShape(frLayerNum layer, const odb::Rect& rect) const;
+  // incremental_check: design routing shapes outside the routing space.
+  void checkRoutingSpace(int64_t& nets, int64_t& uncovered) const;
+  static uint64_t routingFingerprint(const frNet* net);
+  static uint64_t termsFingerprint(const frNet* net);
+  int addNetData(frNet* net);
+  // Wire type of the net's nondefault rule, 0 for the default rule.
+  int ndrType(const frNet* net) const;
+  void setInputShapes(NetData& net,
+                      bool present,
+                      br::FastGridBuilder::PendingRemovals* pending = nullptr);
+  void insertDesignRouting();
+  bool routableType(const NetData& net) const;
+  // Terms, access catalogues and guide tiles of a net routed in this call;
+  // false if BonnRoute cannot route it (FlexDR does).
+  bool prepareNet(NetData& net,
+                  const std::unordered_set<const frInst*>& changed_insts);
+  // Rip-up hook: a victim of an incremental call is prepared before it is
+  // removed; false keeps it in place.
+  bool prepareVictim(int net);
+  // Sec. 5.2 / Fig. 9: pieces of a net's input routing (wires, vias,
+  // patches) classified into kept pin-to-pin paths, reservations and
+  // dropped pieces.
+  struct InputPiece
+  {
+    std::vector<RShape> shapes;
+    const frBlockObject* obj = nullptr;
+    int kind = 0;  // 0 wire, 1 via, 2 patch
+  };
+  struct InputClassification
+  {
+    std::vector<InputPiece> pieces;
+    std::vector<char> kept;
+    std::vector<char> reserved;
+    // Component label per term (net.terms order) and per piece.
+    std::vector<int> term_label;
+    std::vector<int> piece_label;
+    bool complete = false;
+    bool any_illegal = false;
+  };
+  struct ClassifyStats
+  {
+    int64_t nets = 0;
+    int64_t pieces = 0;
+    int64_t illegal = 0;
+    int64_t kept = 0;
+    int64_t reserved = 0;
+    int64_t dropped = 0;
+    int64_t discount_runs = 0;
+  };
+  void classifyInput(const NetData& net, InputClassification& out) const;
+  // Applies a classification: dropped pieces leave the routing space,
+  // reserved ones become reservations of the net (with discount runs on
+  // their tracks), kept ones stay.
+  void applyClassification(NetData& net,
+                           const InputClassification& c,
+                           ClassifyStats& stats);
+  // Terms of a component joined by kept pieces become one terminal whose
+  // options include the track vertices on the kept pieces.
+  void mergeKeptComponents(NetData& net, const InputClassification& c);
+  std::unordered_map<int, InputClassification> classified_;
+  std::unordered_map<const frInst*, InstRecord> inst_records_;
+  bool record_fixed_ = false;
+  bool incremental_active_ = false;
+  // writeNets() writes only the nets marked here (empty: all routed nets).
+  std::vector<char> write_mask_;
+  const frDesign* built_design_ = nullptr;
+  const frBlock* built_block_ = nullptr;
+  const std::unordered_set<const frInst*>* victim_changed_insts_ = nullptr;
+  // Bulk updates of the incremental mode change the shape grid only; the
+  // fast grid is rebuilt afterwards.
+  bool grid_only_ = false;
+  // Incremental calls: wire costs scaled to the discount denominator and
+  // the vertex search set up (enableIncrementalDiscounts).
+  bool incremental_discounts_ = false;
+  void enableIncrementalDiscounts();
+  // Components of the net's routing and pins in the design (touching metal
+  // on a layer joins two objects); 1 for a connected net. Debug check of
+  // the nets written by an incremental call.
+  int routingComponents(const frNet* net) const;
+  void gridOnlyChange(const RShape& shape,
+                      br::ShapeType type,
+                      int owner,
+                      bool insert);
 
   int tileX(frCoord x) const;
   int tileY(frCoord y) const;
@@ -1235,6 +1554,8 @@ class BonnRouteDR
   // Sets NetData::wide_shapes from the net's wire type, pins, reservations
   // and the shapes of its access options (end of setup).
   void markWideNets();
+  // NetData::wide_shapes of one net (as markWideNets).
+  bool netHasWideShapes(const NetData& net) const;
   // Largest distance at which two shapes of the routing space interact
   // (any layer, incl. via-layer rules), plus one pitch.
   int64_t interaction_reach_ = 0;

@@ -31,12 +31,19 @@ int64_t ceilDiv(int64_t a, int64_t b)
 
 std::vector<GeoCoord> blockageGridCoordinates(
     const std::vector<GeoCoord>& hanan,
-    const GeoCoord tau)
+    const GeoCoord tau,
+    const GeoCoord grid_unit)
 {
   // Lines 1-3: V' (the sentinels -inf, inf are implicit: the gap from the
   // first and to the last finite line is infinite, hence >= 4 tau).
   std::vector<GeoCoord> lines = hanan;
   sortUnique(lines);
+  if (grid_unit > 0 && tau <= grid_unit
+      && std::all_of(lines.begin(), lines.end(), [grid_unit](GeoCoord c) {
+           return c % grid_unit == 0;
+         })) {
+    return lines;
+  }
   std::vector<GeoCoord> out;
   const int n = static_cast<int>(lines.size());
   const int64_t t = std::max<GeoCoord>(tau, 1);
@@ -83,6 +90,15 @@ std::vector<BlockageGridLayer> buildBlockageGrid(const BlockageGridInput& in)
           hy.push_back(b.yhi);
         };
   auto pointsOnly = [&](const int k) { return in.layers[k].points_only; };
+  // Hanan lines only when every layer's tau is at most the grid unit: a
+  // layer with a larger tau keeps Algorithm 3, and its neighbours keep
+  // their own multiples of tau, which its paths may need.
+  GeoCoord grid_unit = in.grid_unit;
+  for (const BlockageGridInput::Layer& l : in.layers) {
+    if (l.tau > grid_unit) {
+      grid_unit = 0;
+    }
+  }
   for (int z = 0; z < num; z++) {
     std::vector<GeoCoord> hx;
     std::vector<GeoCoord> hy;
@@ -111,8 +127,8 @@ std::vector<BlockageGridLayer> buildBlockageGrid(const BlockageGridInput& in)
     for (const Box& b : in.borders) {
       add_box(hx, hy, b);
     }
-    own_x[z] = blockageGridCoordinates(hx, in.layers[z].tau);
-    own_y[z] = blockageGridCoordinates(hy, in.layers[z].tau);
+    own_x[z] = blockageGridCoordinates(hx, in.layers[z].tau, grid_unit);
+    own_y[z] = blockageGridCoordinates(hy, in.layers[z].tau, grid_unit);
   }
   std::vector<BlockageGridLayer> out(num);
   for (int z = 0; z < num; z++) {
