@@ -10,6 +10,7 @@
 #include "db/obj/frNet.h"
 #include "db/obj/frShape.h"
 #include "db/obj/frVia.h"
+#include "drt-global.h"
 #include "utl/Logger.h"
 
 namespace drt {
@@ -31,14 +32,14 @@ inline void connectivityProbe(const frNet* net,
   out << "[DEBUG-c9300] net " << net->getName() << " phase " << phase
       << " iter " << iter << " initial " << net->hasInitialRouting() << '\n';
   for (const auto& obj : net->getShapes()) {
-    out << *obj << '\n';
+    out << static_cast<const frConnFig&>(*obj) << '\n';
   }
   for (const auto& obj : net->getVias()) {
-    out << *obj << " connected " << obj->isBottomConnected() << ' '
-        << obj->isTopConnected() << '\n';
+    out << static_cast<const frConnFig&>(*obj) << " connected "
+        << obj->isBottomConnected() << ' ' << obj->isTopConnected() << '\n';
   }
   for (const auto& obj : net->getPatchWires()) {
-    out << *obj << '\n';
+    out << static_cast<const frConnFig&>(*obj) << '\n';
   }
   for (const auto* term : net->getInstTerms()) {
     out << *term << '\n';
