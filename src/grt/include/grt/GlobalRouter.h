@@ -253,6 +253,9 @@ class GlobalRouter
                           int final_y,
                           int layer_level,
                           odb::dbNet* db_net) const;
+  // Debug group "jumper_rejections" (log only): the routing resources per
+  // layer as the jumper insertion sees them.
+  void logJumperLayerResources(const char* phase);
   odb::Point getPositionOnGrid(const odb::Point& real_position);
   int repairAntennas(odb::dbMTerm* diode_mterm,
                      int iterations,
@@ -353,6 +356,10 @@ class GlobalRouter
                           int layer,
                           int via_layer,
                           GRoute& route);
+  void guideToGlobalRouting(odb::dbGuide* guide,
+                            int layer,
+                            int via_layer,
+                            GRoute& route);
   void updateVias();
   // Insert explicit via segments wherever adjacent routing layers meet at a
   // grid point but no via connects them, so the route handed to parasitics

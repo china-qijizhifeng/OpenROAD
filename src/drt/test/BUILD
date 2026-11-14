@@ -16,6 +16,13 @@ cc_test(
 )
 
 cc_test(
+    name = "bonnroute_wire_junctions_test",
+    size = "small",
+    srcs = ["BonnRouteWireJunctionsTest.cpp"],
+    deps = ["//src/drt:bonnroute_core"],
+)
+
+cc_test(
     name = "bonnroute_incremental_test",
     size = "small",
     srcs = ["BonnRouteIncrementalTest.cpp"],

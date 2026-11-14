@@ -1,0 +1,38 @@
+[INFO ODB-0227] LEF file: sky130hs/sky130hs.tlef, created 13 layers, 25 vias
+[INFO ODB-0227] LEF file: sky130hs/sky130hs_std_cell.lef, created 390 library cells
+[INFO ODB-0128] Design: gcd
+[INFO ODB-0130]     Created 54 pins.
+[INFO ODB-0131]     Created 1360 components and 6650 component-terminals.
+[INFO ODB-0132]     Created 2 special nets and 0 connections.
+[INFO ODB-0133]     Created 411 nets and 1210 connections.
+[INFO ANT-0002] Found 12 net violations.
+[INFO ANT-0001] Found 14 pin violations.
+[INFO GRT-0012] Found 12 antenna violations.
+[INFO GRT-0302] Inserted 18 jumpers for 12 nets.
+[INFO GRT-0012] Found 0 antenna violations.
+[INFO ANT-0002] Found 0 net violations.
+[INFO ANT-0001] Found 0 pin violations.
+[INFO GRT-0130] CUGR congestion report:
+Layer   Dir     Resource     Wire Dmd      Via Dmd    Total Dmd  Usage (%)
+--------------------------------------------------------------------------
+li1       V         0.00         0.00         0.00         0.00       0.00
+met1      H     25777.27      3693.00       137.84      3830.84      14.86
+met2      V      4938.61      1344.00        85.55      1429.55      28.95
+met3      H      3196.82        34.00         3.38        37.38       1.17
+met4      V      1648.00         2.00         0.05         2.05       0.12
+met5      H      1640.00         0.00         0.00         0.00       0.00
+--------------------------------------------------------------------------
+Total           37200.69      5073.00       226.82      5299.82      14.25
+No differences found.
+[INFO GRT-0012] Found 0 antenna violations.
+[INFO GRT-0130] CUGR congestion report:
+Layer   Dir     Resource     Wire Dmd      Via Dmd    Total Dmd  Usage (%)
+--------------------------------------------------------------------------
+li1       V         0.00         0.00         0.00         0.00       0.00
+met1      H     25777.27      3693.00       140.90      3833.90      14.87
+met2      V      4938.61      1344.00        85.55      1429.55      28.95
+met3      H      3196.82        34.00         3.38        37.38       1.17
+met4      V      1648.00         2.00         0.05         2.05       0.12
+met5      H      1640.00         0.00         0.00         0.00       0.00
+--------------------------------------------------------------------------
+Total           37200.69      5073.00       229.88      5302.88      14.25

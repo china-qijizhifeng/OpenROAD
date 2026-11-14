@@ -1,5 +1,6 @@
-# repair_antennas -jumper_only under CUGR with the jumper layers nearly
-# full: candidates whose accumulated wire+via demand overflows an edge are
+# repair_antennas -jumper_only under CUGR with every routing layer nearly
+# full (met1, met4 and met5 with adjustment 0.9, met2 and met3 with 0.8):
+# candidates whose accumulated wire+via demand overflows an edge are
 # rejected (debug log) and insertion retries the remaining candidates.
 source "helpers.tcl"
 read_liberty "sky130hs/sky130hs_tt.lib"
@@ -8,6 +9,7 @@ read_lef "sky130hs/sky130hs_std_cell.lef"
 read_def "gcd_sky130.def"
 
 set_placement_padding -global -left 2 -right 2
+set_global_routing_layer_adjustment met1 0.9
 set_global_routing_layer_adjustment met2-met3 0.8
 set_global_routing_layer_adjustment met4-met5 0.9
 set_routing_layers -signal met1-met5

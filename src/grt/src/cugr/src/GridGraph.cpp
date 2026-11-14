@@ -1160,9 +1160,11 @@ void GridGraph::restoreDemand(
 }
 
 template <typename F>
-void GridGraph::forEachTreeWireEdgeImpl(const std::shared_ptr<GRTreeNode>& tree,
-                                        const bool adopted,
-                                        F&& fn) const
+void GridGraph::forEachTreeWireEdgeImpl(
+    const std::shared_ptr<GRTreeNode>& tree,
+    const bool adopted,
+    F&& fn,
+    std::vector<std::array<int, 3>>* jumper_wires) const
 {
   // A net occupies a wire edge or a wrong-way cell once even where its tree
   // crosses it twice, as the union of two merged nets can (CUGR::mergeNet).
@@ -1213,8 +1215,12 @@ void GridGraph::forEachTreeWireEdgeImpl(const std::shared_ptr<GRTreeNode>& tree,
             wrong_way.push_back({layer, cell.x(), cell.y()});
           }
         } else {
+          const bool jumper = jumper_wires != nullptr && child->isJumperWire();
           forEachWireEdgeImpl(layer, *node, *child, [&](PointT lower) {
             wires.push_back({layer, lower.x(), lower.y()});
+            if (jumper) {
+              jumper_wires->push_back({layer, lower.x(), lower.y()});
+            }
           });
         }
       }
@@ -1223,6 +1229,11 @@ void GridGraph::forEachTreeWireEdgeImpl(const std::shared_ptr<GRTreeNode>& tree,
   for (auto* cells : {&wires, &wrong_way}) {
     std::ranges::sort(*cells);
     cells->erase(std::ranges::unique(*cells).begin(), cells->end());
+  }
+  if (jumper_wires != nullptr && !jumper_wires->empty()) {
+    std::ranges::sort(*jumper_wires);
+    jumper_wires->erase(std::ranges::unique(*jumper_wires).begin(),
+                        jumper_wires->end());
   }
   for (const auto& [layer, x, y] : wires) {
     fn(layer, PointT(x, y), false);
@@ -1238,8 +1249,16 @@ void GridGraph::forEachTreeDemandImpl(const std::shared_ptr<GRTreeNode>& tree,
                                       const std::vector<double>& net_costs,
                                       F&& fn) const
 {
+  // Edges of the tree's antenna jumper wires. On a jumper's layer the pads
+  // of the via stacks at its two ends lie on the jumper's own track, which
+  // the wire's demand on those edges already holds: a stack's pad charges
+  // no edge a jumper wire of the tree runs over. CUGR::hasJumperResources
+  // applies the same rule when it admits a jumper.
+  std::vector<std::array<int, 3>> jumper_wires;
   forEachTreeWireEdgeImpl(
-      tree, adopted, [&](const int layer, const PointT cell, bool wrong_way) {
+      tree,
+      adopted,
+      [&](const int layer, const PointT cell, bool wrong_way) {
         const double factor = layerFactor(net_costs, layer);
         if (!wrong_way) {
           fn(TreeDemand{layer, cell, 1, factor, DemandKind::kWire, cell});
@@ -1250,7 +1269,8 @@ void GridGraph::forEachTreeDemandImpl(const std::shared_ptr<GRTreeNode>& tree,
               fn(TreeDemand{
                   layer, edge, demand, factor, DemandKind::kWrongWay, cell});
             });
-      });
+      },
+      &jumper_wires);
   forEachViaColumnImpl(
       tree, [&](const PointT loc, const int low, const int high) {
         if (high >= num_layers_) {
@@ -1266,6 +1286,12 @@ void GridGraph::forEachTreeDemandImpl(const std::shared_ptr<GRTreeNode>& tree,
             loc,
             net_costs,
             [&](int layer, PointT edge, CapacityT demand, double factor) {
+              if (!jumper_wires.empty()
+                  && std::ranges::binary_search(
+                      jumper_wires,
+                      std::array<int, 3>{layer, edge.x(), edge.y()})) {
+                return;
+              }
               fn(TreeDemand{
                   layer, edge, demand, factor, DemandKind::kViaPad, loc});
             });
@@ -1370,17 +1396,15 @@ void GridGraph::accumulateViaDemand(const std::shared_ptr<GRTreeNode>& tree,
   if (!tree) {
     return;
   }
-  forEachViaColumnImpl(
-      tree, [&](const PointT loc, const int low, const int high) {
-        forEachStackFlankEdgeImpl(
-            low,
-            high,
-            loc,
-            net_costs,
-            [&](int l, PointT edge_loc, CapacityT demand, double layer_factor) {
-              via_demand[edgeFlatIndex(l, edge_loc.x(), edge_loc.y())]
-                  += demand * layer_factor;
-            });
+  // The via pad charges of the commit (wrong-way spans are legal here: the
+  // wires are not looked at).
+  forEachTreeDemandImpl(
+      tree, /* adopted */ true, net_costs, [&](const TreeDemand& charge) {
+        if (charge.kind == DemandKind::kViaPad) {
+          via_demand[edgeFlatIndex(
+              charge.layer, charge.edge.x(), charge.edge.y())]
+              += charge.demand * charge.factor;
+        }
       });
 }
 

@@ -647,6 +647,15 @@ bool RepairAntennas::addJumperToRoute(GRoute& route,
                jumper_init_y,
                jumper_final_x,
                jumper_final_y);
+    debugPrint(logger_,
+               GRT,
+               "jumper_rejections",
+               1,
+               "JR insert net={} seg={} layer={} position={} outcome=capacity",
+               db_net->getConstName(),
+               seg_id,
+               layer_level,
+               jumper_init_pos);
     return false;
   }
   // Add vias and jumper in the position
@@ -681,8 +690,26 @@ bool RepairAntennas::addJumperToRoute(GRoute& route,
     route[seg_id].init_x = seg_init_x;
     route[seg_id].init_y = seg_init_y;
     grouter_->restoreNetDemand(db_net);
+    debugPrint(logger_,
+               GRT,
+               "jumper_rejections",
+               1,
+               "JR insert net={} seg={} layer={} position={} outcome=adoption",
+               db_net->getConstName(),
+               seg_id,
+               layer_level,
+               jumper_init_pos);
     return false;
   }
+  debugPrint(logger_,
+             GRT,
+             "jumper_rejections",
+             1,
+             "JR insert net={} seg={} layer={} position={} outcome=inserted",
+             db_net->getConstName(),
+             seg_id,
+             layer_level,
+             jumper_init_pos);
   return true;
 }
 
@@ -920,8 +947,12 @@ bool RepairAntennas::findPosToJumper(const GRoute& route,
 {
   jumper_position = -1;
   const GSegment& seg = route[seg_node.seg_id];
+  const bool log_rejections = logger_->debugCheck(GRT, "jumper_rejections", 1);
   // Ignore small segments
   if (seg.length() < smaller_seg_size_) {
+    if (log_rejections) {
+      logSegmentSearch(db_net, seg_node.seg_id, seg, "", 0, -1, "short");
+    }
     return false;
   }
   // Get init and final position of segment
@@ -947,6 +978,9 @@ bool RepairAntennas::findPosToJumper(const GRoute& route,
   // Save best positions to add jumper
   std::vector<int> candidate_positions;
   std::vector<std::pair<int, int>> free_windows;
+  // Debug group "jumper_rejections": per position '.' free, 'v' via,
+  // 'r' no wire resource on the jumper layer, 'b' both.
+  std::string scan;
   // Iterate all position of segment
   while (pos_x <= seg_final_x && pos_y <= seg_final_y) {
     // Check if the position has resources available
@@ -954,6 +988,10 @@ bool RepairAntennas::findPosToJumper(const GRoute& route,
         is_horizontal, pos_x, pos_y, layer_level + 2, db_net);
     is_via = (is_horizontal && via_pos.find(pos_x) != via_pos.end())
              || (!is_horizontal && via_pos.find(pos_y) != via_pos.end());
+    if (log_rejections) {
+      scan += is_via ? (has_available_resources ? 'v' : 'b')
+                     : (has_available_resources ? '.' : 'r');
+    }
     // If the position has vias or does not have resources
     if (is_via || !has_available_resources) {
       findJumperCandidatePositions(last_block_x,
@@ -992,6 +1030,17 @@ bool RepairAntennas::findPosToJumper(const GRoute& route,
                                          seg_init_y,
                                          layer_level,
                                          db_net);
+  if (log_rejections) {
+    logSegmentSearch(db_net,
+                     seg_node.seg_id,
+                     seg,
+                     scan,
+                     free_windows.size(),
+                     jumper_position,
+                     jumper_position != -1  ? "found"
+                     : free_windows.empty() ? "no_window"
+                                            : "capacity");
+  }
   return jumper_position != -1;
 }
 
@@ -1070,8 +1119,14 @@ void RepairAntennas::findSegments(const GRoute& route,
                                   const int& num_nodes,
                                   const int& violation_layer,
                                   SegmentToJumperPos& segments_to_repair,
-                                  odb::dbNet* db_net)
+                                  odb::dbNet* db_net,
+                                  const int candidate_layers_below)
 {
+  // Debug group "jumper_rejections": counts of this search.
+  int start_nodes = 0;
+  int visited_nodes = 0;
+  int candidate_segments = 0;
+  int found_segments = 0;
   // Init stack and vector of visited and parent position
   std::stack<std::pair<odb::dbTechLayer*, SegmentNode>> node_stack;
   std::vector<bool> visited(num_nodes, false);
@@ -1088,6 +1143,7 @@ void RepairAntennas::findSegments(const GRoute& route,
     for (const auto& node_it : layer_it.second) {
       node_stack.push({layer_it.first, segment_graph[layer_it.first][node_it]});
       parent_pos[segment_graph[layer_it.first][node_it].node_id] = gate_pos;
+      start_nodes++;
     }
   }
   // Run DFS
@@ -1104,9 +1160,21 @@ void RepairAntennas::findSegments(const GRoute& route,
     }
 
     visited[cur_node.node_id] = true;
+    visited_nodes++;
 
     int layer_level = cur_layer->getRoutingLevel();
-    if (layer_level == violation_layer && cur_node.seg_id != -1) {
+    // The diagnostic search (candidate_layers_below > 0, nothing is inserted
+    // from it) also takes wire segments below the violation layer, and only
+    // segments whose jumper layer is a routing layer in use.
+    const bool is_candidate
+        = cur_node.seg_id != -1
+          && (layer_level == violation_layer
+              || (layer_level != 0 && layer_level < violation_layer
+                  && layer_level >= violation_layer - candidate_layers_below))
+          && (candidate_layers_below == 0
+              || layer_level + 2 <= max_routing_layer_);
+    if (is_candidate) {
+      candidate_segments++;
       // Candidate to add jumper - find pos checking len and capacity
       int jumper_pos;
       // Convert position --> move pos on tile middle
@@ -1120,6 +1188,7 @@ void RepairAntennas::findSegments(const GRoute& route,
                                       db_net);
       // If jumper wasnt added, then explore adjacent segment nodes
       if (is_found) {
+        found_segments++;
         segments_to_repair[cur_node.seg_id].insert(jumper_pos);
         continue;
       }
@@ -1139,6 +1208,95 @@ void RepairAntennas::findSegments(const GRoute& route,
       }
     }
   }
+  debugPrint(logger_,
+             GRT,
+             "jumper_rejections",
+             1,
+             "JR gate phase={} net={} layer={} gate={} gate_x={} gate_y={} "
+             "start_nodes={} visited={} candidates={} found={}",
+             search_phase_,
+             db_net->getConstName(),
+             violation_layer,
+             iterm->getName(),
+             gate_pos.x(),
+             gate_pos.y(),
+             start_nodes,
+             visited_nodes,
+             candidate_segments,
+             found_segments);
+}
+
+void RepairAntennas::logSegmentSearch(odb::dbNet* db_net,
+                                      const int seg_id,
+                                      const GSegment& seg,
+                                      const std::string& scan,
+                                      const int windows,
+                                      const int position,
+                                      const char* outcome) const
+{
+  debugPrint(logger_,
+             GRT,
+             "jumper_rejections",
+             1,
+             "JR segment phase={} net={} seg={} layer={} dir={} tiles={} "
+             "x0={} y0={} scan={} windows={} position={} outcome={}",
+             search_phase_,
+             db_net->getConstName(),
+             seg_id,
+             seg.init_layer,
+             seg.init_x != seg.final_x ? "H" : "V",
+             seg.length() / tile_size_,
+             seg.init_x,
+             seg.init_y,
+             scan.empty() ? "-" : scan,
+             windows,
+             position,
+             outcome);
+}
+
+void RepairAntennas::logViolations(const char* phase, const int iteration) const
+{
+  if (!logger_->debugCheck(GRT, "jumper_rejections", 1)) {
+    return;
+  }
+  int entries = 0;
+  for (const auto& [db_net, violations] : antenna_violations_) {
+    for (const ant::Violation& violation : violations) {
+      std::string gates;
+      for (odb::dbITerm* gate : violation.gates) {
+        if (!gates.empty()) {
+          gates += ',';
+        }
+        gates += gate->getName();
+      }
+      debugPrint(logger_,
+                 GRT,
+                 "jumper_rejections",
+                 1,
+                 "JR violation phase={} iteration={} net={} layer={} gates={} "
+                 "diodes_per_gate={} excess={:.4f} has_jumpers={} "
+                 "gate_names={}",
+                 phase,
+                 iteration,
+                 db_net->getConstName(),
+                 violation.routing_level,
+                 violation.gates.size(),
+                 violation.diode_count_per_gate,
+                 violation.excess_ratio,
+                 db_net->hasJumpers() ? 1 : 0,
+                 gates);
+      entries++;
+    }
+  }
+  debugPrint(logger_,
+             GRT,
+             "jumper_rejections",
+             1,
+             "JR check phase={} iteration={} nets={} entries={}",
+             phase,
+             iteration,
+             antenna_violations_.size(),
+             entries);
 }
 
 void RepairAntennas::getViolations(
@@ -1178,11 +1336,30 @@ int RepairAntennas::addJumperOnSegments(
     for (const auto& pos_it : seg_it.second) {
       const int seg_len = route[seg_it.first].length();
       if (seg_len < smaller_seg_size_) {
+        debugPrint(logger_,
+                   GRT,
+                   "jumper_rejections",
+                   1,
+                   "JR insert net={} seg={} layer={} position={} outcome=short",
+                   db_net->getConstName(),
+                   seg_it.first,
+                   route[seg_it.first].init_layer,
+                   pos_it);
         break;
       }
       // Skip candidates overlapping the last inserted jumper
       if (last_pos_aux != -1
           && std::abs(last_pos_aux - pos_it) <= jumper_size_) {
+        debugPrint(logger_,
+                   GRT,
+                   "jumper_rejections",
+                   1,
+                   "JR insert net={} seg={} layer={} position={} "
+                   "outcome=overlap",
+                   db_net->getConstName(),
+                   seg_it.first,
+                   route[seg_it.first].init_layer,
+                   pos_it);
         continue;
       }
       if (addJumperToRoute(route,
@@ -1211,11 +1388,47 @@ void RepairAntennas::jumperInsertion(NetRouteMap& routing,
   int total_jumpers = 0;
   int jumper_by_net, required_jumper_by_net;
   int net_with_jumpers = 0;
+  max_routing_layer_ = max_routing_layer;
+  const bool log_rejections = logger_->debugCheck(GRT, "jumper_rejections", 1);
+  debugPrint(logger_,
+             GRT,
+             "jumper_rejections",
+             1,
+             "JR insertion tile={} jumper={} min_segment={} "
+             "max_routing_layer={} nets={}",
+             tile_size_,
+             jumper_size_,
+             smaller_seg_size_,
+             max_routing_layer,
+             antenna_violations_.size());
+  grouter_->logJumperLayerResources("before");
   // Iterate the antenna violations
   for (const auto& net_violations : antenna_violations_) {
     odb::dbNet* db_net = net_violations.first;
     const auto& violations = net_violations.second;
     std::vector<int> violation_id_to_repair;
+    if (logger_->debugCheck(GRT, "jumper_rejections", 2)) {
+      int seg_id = 0;
+      for (const GSegment& seg : routing[db_net]) {
+        debugPrint(logger_,
+                   GRT,
+                   "jumper_rejections",
+                   2,
+                   "JR route net={} seg={} x0={} y0={} l0={} x1={} y1={} "
+                   "l1={} jumper={} pin_bridge={}",
+                   db_net->getConstName(),
+                   seg_id,
+                   seg.init_x,
+                   seg.init_y,
+                   seg.init_layer,
+                   seg.final_x,
+                   seg.final_y,
+                   seg.final_layer,
+                   seg.isJumper() ? 1 : 0,
+                   seg.is_pin_bridge ? 1 : 0);
+        seg_id++;
+      }
+    }
 
     // Get available violations to add jumper
     int max_layer_to_repair = -1;
@@ -1253,6 +1466,39 @@ void RepairAntennas::jumperInsertion(NetRouteMap& routing,
       }
       required_jumper_by_net = segments_to_repair.size();
     }
+    if (log_rejections) {
+      // Diagnostic search (nothing is inserted from it): every violation of
+      // the net, with or without a jumper layer two levels up, and the
+      // segments one layer below the violation layer as candidates too.
+      odb::dbTech* tech = db_->getTech();
+      search_phase_ = "whatif_lower";
+      for (const ant::Violation& violation : violations) {
+        odb::dbTechLayer* violation_layer
+            = tech->findRoutingLayer(violation.routing_level);
+        if (violation_layer == nullptr) {
+          continue;
+        }
+        LayerToSegmentNodeVector whatif_graph;
+        const int whatif_nodes = buildSegmentGraph(
+            routing[db_net], violation.routing_level, whatif_graph);
+        for (odb::dbITerm* iterm : violation.gates) {
+          SegmentNodeIds connected_seg_ids;
+          getSegmentsConnectedToPin(iterm, whatif_graph, connected_seg_ids);
+          SegmentToJumperPos whatif_segments;
+          findSegments(routing[db_net],
+                       iterm,
+                       connected_seg_ids,
+                       whatif_graph,
+                       whatif_nodes,
+                       violation.routing_level,
+                       whatif_segments,
+                       db_net,
+                       1);
+        }
+      }
+      search_phase_ = "search";
+    }
+    jumper_by_net = 0;
     if (required_jumper_by_net > 0) {
       // Add jumper in found segment positions
       jumper_by_net
@@ -1264,7 +1510,19 @@ void RepairAntennas::jumperInsertion(NetRouteMap& routing,
         modified_nets.push_back(db_net);
       }
     }
+    debugPrint(logger_,
+               GRT,
+               "jumper_rejections",
+               1,
+               "JR net net={} violations={} with_jumper_layer={} "
+               "segments_to_repair={} jumpers={}",
+               db_net->getConstName(),
+               violations.size(),
+               violation_id_to_repair.size(),
+               required_jumper_by_net,
+               jumper_by_net);
   }
+  grouter_->logJumperLayerResources("after");
   logger_->info(GRT,
                 302,
                 "Inserted {} jumpers for {} nets.",
