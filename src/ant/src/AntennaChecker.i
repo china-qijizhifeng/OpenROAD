@@ -20,6 +20,7 @@ odb::dbDatabase *getDb();
 %}
 
 %include "../../Exception.i"
+%include <std_string.i>
 
 %inline %{
 
@@ -46,6 +47,12 @@ int
 antenna_violation_count()
 {
   return getAntennaChecker()->antennaViolationCount();
+}
+
+std::string
+antenna_violation_signature()
+{
+  return getAntennaChecker()->antennaViolationSignature();
 }
 
 // check a net for antenna violations

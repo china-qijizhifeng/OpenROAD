@@ -309,7 +309,7 @@ class frLayer
                              frCoord width2,
                              frCoord prl,
                              bool use_min_spacing);
-  void setMinSpacing(frConstraint* in) { minSpc_ = in; }
+  void setMinSpacing(frConstraint* in);
   bool hasSpacingSamenet() const { return spacingSamenet_; }
   frSpacingSamenetConstraint* getSpacingSamenet() const
   {
@@ -925,7 +925,18 @@ class frLayer
   frCollection<frLef58SpacingWrongDirConstraint*>
       lef58SpacingWrongDirConstraints_;
 
+  enum class MinSpacingType
+  {
+    NONE,
+    SPACING,
+    PRL_TABLE,
+    TWO_WIDTHS_TABLE,
+    OTHER
+  };
+
   frConstraint* minSpc_{nullptr};
+  // Constraint types are fixed; values remain owned and mutable in the rule.
+  MinSpacingType min_spacing_type_{MinSpacingType::NONE};
   frSpacingSamenetConstraint* spacingSamenet_{nullptr};
   frSpacingTableInfluenceConstraint* spacingInfluence_{nullptr};
   std::vector<frSpacingEndOfLineConstraint*> eols_;

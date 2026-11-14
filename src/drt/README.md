@@ -27,6 +27,12 @@ guide format.
 
 This command performs detailed routing.
 
+For incremental routing, the final track-assignment repair pass skips panels
+whose guides all belong to nets with existing detailed wiring. Panels that
+contain unwired nets retain the full guide cost context. Earlier passes and
+passes spanning multiple worker batches retain every panel, since their
+assignments can affect subsequent track assignment.
+
 Developer arguments
 - `-or_seed`, `-or_k`
 
@@ -65,6 +71,7 @@ detailed_route
     [-save_guide_updates]
     [-repair_pdn_vias layer]
     [-single_step_dr]
+    [-adaptive_strategy]
 ```
 
 #### Options
@@ -97,6 +104,7 @@ detailed_route
 | `-bonnroute` | Run the experimental BonnRoute initial detailed router after track assignment, then run FlexDR routing and DRC repair. |
 | `-save_guide_updates` | Flag to save guides updates. |
 | `-repair_pdn_vias` | This option is used for PDKs where M1 and M2 power rails run in parallel. |
+| `-adaptive_strategy` | Enable closed-loop adaptive search-and-repair schedule. The default value is disabled. |
 
 #### Developer arguments
 
@@ -482,6 +490,13 @@ Simply run the following command:
 ```shell
 bazelisk test //src/drt/...
 ```
+
+## Experimental routing research
+
+Opt-in routing probes, bounded route trials, and joint checkpoint helpers are
+documented in [the route-trial research notes](test/route_trials/README.md).
+These interfaces require isolated checkpoints and independent physical and
+electrical validation; they are not enabled as a production via optimizer.
 
 ## Limitations
 
