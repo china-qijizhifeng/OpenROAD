@@ -44,6 +44,8 @@ struct Fixture
     for (int j = 0; j <= 32; j++) {
       graph.layers[0].positions.push_back(j * 10);
     }
+    graph.tiles_x = 9;
+    graph.tiles_y = 1;
     graph.finalize([](Coord x) { return x / 40; },
                    [](Coord y) { return y / 40; });
     grid.init(&graph, 1);
@@ -94,12 +96,15 @@ bool cachedReads(const bool dense, const bool overlaid)
     graph.layers[0].positions.push_back(j * 10);
     graph.layers[1].tracks.push_back(j * 10);
   }
+  graph.tiles_x = 9;
+  graph.tiles_y = 1;
   graph.finalize([](Coord x) { return x / 40; },
                  [](Coord y) { return y / 40; });
   FastGrid grid;
   grid.init(&graph, 1);
   grid.setDense(0, dense);
   FastGridOverlay overlay;
+  overlay.owner = 42;
   if (overlaid) {
     const auto key = FastGridOverlay::key(0, 1);
     overlay.wiring[key] = {{0, 32, 1}};
@@ -139,9 +144,17 @@ bool removal(const bool dense, const bool intervals)
   const auto after = f.search();
   // Removing the obstacle cannot invalidate the old detour's legality,
   // yet its cost is no longer optimal. Path legality alone cannot reuse it.
-  return before.result.found && after.result.found
-         && before.result.cost > after.result.cost
-         && !ripupSearchReusable(before.reads, writes, true);
+  const bool valid = before.result.found && after.result.found
+                     && before.result.cost > after.result.cost
+                     && !ripupSearchReusable(before.reads, writes, true);
+  if (!valid) {
+    std::printf("removal result: before=%d/%lld after=%d/%lld\n",
+                before.result.found,
+                static_cast<long long>(before.result.cost),
+                after.result.found,
+                static_cast<long long>(after.result.cost));
+  }
+  return valid;
 }
 
 bool failedSearch(const bool dense, const bool intervals)
