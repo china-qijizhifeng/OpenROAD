@@ -6,12 +6,14 @@
 #include <sys/stat.h>
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <cmath>
 #include <condition_variable>
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <fstream>
 #include <iomanip>
 #include <ios>
@@ -27,6 +29,8 @@
 #include <sstream>
 #include <string>
 #include <tuple>
+#include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -46,6 +50,7 @@
 #include "dr/AbstractDRGraphics.h"
 #include "dr/FlexDRWorkerCancel.h"
 #include "dr/FlexDR_conn.h"
+#include "dr/ViaCleanup.h"
 #include "drt/TritonRoute.h"
 #include "dst/BalancerJobDescription.h"
 #include "dst/Distributed.h"
@@ -319,6 +324,10 @@ int FlexDRWorker::mainRoute()
   high_resolution_clock::time_point t3 = high_resolution_clock::now();
   work_statistics_.total_seconds
       = std::chrono::duration<double>(t3 - t0).count();
+  if (incr_probe::enabled()) {
+    incr_probe::merge(probe_work_, skipRouting_);
+    probe_work_.clear();
+  }
 
   using std::chrono::duration;
   using std::chrono::duration_cast;
@@ -2384,9 +2393,13 @@ bool FlexDR::isAffectedByChanges(const FlexDRWorker& worker,
 void FlexDR::searchRepair(const SearchRepairArgs& args)
 {
   // Calculate flow state
+  SearchRepairArgs flow_args = args;
+  if (flow_args_mode_.has_value()) {
+    flow_args.ripupMode = *flow_args_mode_;
+  }
   const auto flow_state = flow_state_machine_->determineNextFlow(
       {.num_violations = getDesign()->getTopBlock()->getNumMarkers(),
-       .args = args});
+       .args = flow_args});
 
   const RipUpMode ripupMode = args.ripupMode;
   if ((ripupMode == RipUpMode::DRC || ripupMode == RipUpMode::NEARDRC)
@@ -2643,8 +2656,8 @@ void FlexDR::end(bool done)
   }
 }
 
-std::vector<FlexDR::SearchRepairArgs> strategy(const frUInt4 shapeCost,
-                                               const frUInt4 markerCost)
+std::vector<FlexDR::SearchRepairArgs> FlexDR::strategy(const frUInt4 shapeCost,
+                                                       const frUInt4 markerCost)
 {
   // clang-format off
   return {
@@ -2715,6 +2728,201 @@ std::vector<FlexDR::SearchRepairArgs> strategy(const frUInt4 shapeCost,
     {7, -6, 64, 64 * shapeCost, 16 * markerCost, 100 * shapeCost, 0.999, RipUpMode::DRC    , false}  // 64
   };
   // clang-format on
+}
+
+// Closed-loop adaptive search-and-repair schedule.
+// Selects per-iteration SearchRepairArgs for it >= 1 from live DRV count and
+// previous iteration history rather than stepping through strategy() by iter_.
+std::optional<FlexDR::SearchRepairArgs> FlexDR::nextStepStrategy(
+    const int it,
+    const int drvs,
+    const bool has_unidir_layer,
+    const std::vector<FlexDR::SearchRepairArgs>& history_args,
+    const std::vector<int>& history_drvs,
+    const std::vector<FlexDR::SearchRepairArgs>& default_strategy,
+    const frUInt4 shapeCost,
+    const frUInt4 markerCost)
+{
+  if (drvs == 0 || it >= static_cast<int>(default_strategy.size())) {
+    return std::nullopt;
+  }
+
+  // Small designs with low initial DRV count (e.g. gcd, incremental repair
+  // passes, drt unit tests): follow baseline strategy() directly for bit-exact
+  // outputs across all PDKs.
+  if (history_drvs.empty() || history_drvs[0] < kAdaptiveMinInitialDrvs) {
+    return default_strategy[it];
+  }
+
+  // Unidirectional / LEF58_RECTONLY layers (e.g. asap7 7nm): run the first
+  // shifted pass (strategy[1]: size=7, offset=-2, RipUpMode::ALL) to
+  // straighten it=0 tile seams across the chip, skip the redundant second
+  // RipUpMode::ALL pass (strategy[2]: offset=-5), and step through the
+  // RipUpMode::DRC entries in strategy[3..] while skipping non-DRC reset rows
+  // (ALL/NEARDRC such as strategy[17], strategy[23], strategy[25]).
+  if (has_unidir_layer) {
+    if (it == 1) {
+      return default_strategy[1];
+    }
+    size_t idx = 3;
+    for (int k = 3; k <= it; ++k) {
+      ++idx;
+      while (idx + 1 < default_strategy.size()
+             && default_strategy[idx].ripupMode != RipUpMode::DRC) {
+        ++idx;
+      }
+    }
+    idx = std::min<size_t>(default_strategy.size() - 1, idx);
+    return default_strategy[idx];
+  }
+
+  // clang-format off
+  if (it == 1) {
+    return SearchRepairArgs{5, -5, 3, shapeCost, shapeCost, shapeCost, 0.950f, RipUpMode::DRC, true};
+  }
+
+  int stagnant_steps = 0;
+  for (int i = static_cast<int>(history_drvs.size()) - 1; i > 0; --i) {
+    if (history_drvs[i] >= history_drvs[i - 1]) {
+      ++stagnant_steps;
+    } else {
+      break;
+    }
+  }
+
+  const int prev_drvs = (history_drvs.size() >= 2)
+                            ? history_drvs[history_drvs.size() - 2]
+                            : drvs;
+  const double improvement_rate
+      = (history_drvs.size() >= 2)
+            ? static_cast<double>(prev_drvs - drvs) / std::max(1, prev_drvs)
+            : 0.0;
+  // Moderate post-it1 regime (500 <= history_drvs[1] < 600): skip the
+  // low-cost it=2..3 express lane and use steeper DRC costs (2x/4x
+  // shapeCost) with slower marker decay (0.990) and adaptive window sizing
+  // so guideTilesFlow resolves violations in fewer passes. Bounded below by
+  // 500 so designs that drop below 500 DRVs at it=1 stay on the gentler 1x
+  // shapeCost path.
+  const bool moderate_post_it1
+      = (history_drvs.size() >= 2 && history_drvs[1] >= 500
+         && history_drvs[1] < 600);
+
+  if (!moderate_post_it1) {
+    if (it == 2 && improvement_rate >= 0.50) {
+      if (drvs <= 80) {
+        return SearchRepairArgs{3, -2, 3, shapeCost, shapeCost, shapeCost, 0.950f, RipUpMode::DRC, true};
+      }
+      return SearchRepairArgs{5, -2, 4, shapeCost, shapeCost, shapeCost, 0.950f, RipUpMode::DRC, true};
+    }
+    if (it == 3 && drvs <= 30 && improvement_rate >= 0.50) {
+      return SearchRepairArgs{3, -2, 3, shapeCost, markerCost, 2 * shapeCost, 0.950f, RipUpMode::DRC, false};
+    }
+  }
+
+  int last_success_size = 5;
+  for (int i = static_cast<int>(
+                   std::min(history_drvs.size(), history_args.size()))
+               - 1;
+       i > 0;
+       --i) {
+    if (history_drvs[i] < history_drvs[i - 1]
+        && history_args[i].ripupMode != RipUpMode::ALL) {
+      last_success_size = history_args[i].size;
+      break;
+    }
+  }
+
+  const int adaptive_size
+      = (last_success_size > 11) ? 9 : std::max(5, last_success_size - 2);
+  const int low_progress_size = std::min(11, std::max(7, last_success_size));
+
+  // Endgame tail (drvs <= 10): NEARDRC -> 3x3 ALL pin-unboxing -> 7x7 DRC.
+  if (drvs <= 10) {
+    if (stagnant_steps == 2) {
+      return SearchRepairArgs{5, -(it % 5), 8, 8 * shapeCost, 2 * markerCost, 8 * shapeCost, 0.990f, RipUpMode::NEARDRC, false};
+    }
+    if (stagnant_steps == 3) {
+      return SearchRepairArgs{7, -(it % 7), 8, 16 * shapeCost, 4 * markerCost, 16 * shapeCost, 0.990f, RipUpMode::NEARDRC, false};
+    }
+    if (stagnant_steps >= 4 && stagnant_steps <= 6) {
+      const int phase = stagnant_steps - 4;
+      return SearchRepairArgs{3, -phase, 12, 8 * shapeCost, 2 * markerCost, 8 * shapeCost, 0.990f, RipUpMode::ALL, false};
+    }
+    if (stagnant_steps == 7) {
+      return SearchRepairArgs{7, -4, 8, 2 * shapeCost, markerCost, 3 * shapeCost, 0.950f, RipUpMode::DRC, false};
+    }
+    if (stagnant_steps >= 8) {
+      const size_t idx
+          = std::min<size_t>(default_strategy.size() - 1,
+                             static_cast<size_t>(30 + (stagnant_steps - 8)));
+      return default_strategy[idx];
+    }
+    if (moderate_post_it1) {
+      return SearchRepairArgs{adaptive_size, -(it % adaptive_size), 6, 4 * shapeCost, markerCost, 4 * shapeCost, 0.990f, RipUpMode::DRC, false};
+    }
+    return SearchRepairArgs{5, -(it % 5), 8, 4 * shapeCost, markerCost, 4 * shapeCost, 0.950f, RipUpMode::DRC, false};
+  }
+
+  // High/mid-DRV regimes (drvs > 10).
+  const bool is_very_high = (drvs > 100);
+  if (!moderate_post_it1 && is_very_high && !history_args.empty()
+      && drvs > prev_drvs
+      && history_args.back().ripupMode == RipUpMode::NEARDRC) {
+    const int settle_size = std::max(7, history_args.back().size);
+    return SearchRepairArgs{settle_size, -(it % settle_size), 8, 4 * shapeCost, 2 * markerCost, 4 * shapeCost, 0.950f, RipUpMode::DRC, false};
+  }
+
+  if (stagnant_steps >= 2) {
+    if (stagnant_steps == 2) {
+      return SearchRepairArgs{9, -(it % 9), 8, 32 * shapeCost, 8 * markerCost, 32 * shapeCost, 0.990f, RipUpMode::NEARDRC, false};
+    }
+    const float decay = is_very_high
+                            ? ((stagnant_steps == 3) ? 0.990f : 0.995f)
+                            : ((stagnant_steps == 3) ? 0.995f : 0.999f);
+    const frUInt4 drc_cost
+        = (stagnant_steps == 3) ? (64 * shapeCost) : (128 * shapeCost);
+    const frUInt4 mkr_cost
+        = (stagnant_steps == 3) ? (16 * markerCost) : (32 * markerCost);
+    return SearchRepairArgs{11, -(it % 11), 12, drc_cost, mkr_cost, drc_cost, decay, RipUpMode::NEARDRC, false};
+  }
+
+  if (!moderate_post_it1) {
+    if (!is_very_high) {
+      return SearchRepairArgs{5, -(it % 5), 8, 4 * shapeCost, markerCost, 4 * shapeCost, 0.950f, RipUpMode::DRC, false};
+    }
+    if (improvement_rate < 0.15) {
+      return SearchRepairArgs{low_progress_size, -(it % low_progress_size), 8, 8 * shapeCost, 2 * markerCost, 8 * shapeCost, 0.950f, RipUpMode::NEARDRC, false};
+    }
+    return SearchRepairArgs{5, -(it % 5), 6, shapeCost, shapeCost, 2 * shapeCost, 0.950f, RipUpMode::DRC, false};
+  }
+
+  if (is_very_high && stagnant_steps == 0 && improvement_rate < 0.15
+      && !history_args.empty()
+      && history_args.back().ripupMode != RipUpMode::NEARDRC) {
+    return SearchRepairArgs{low_progress_size, -(it % low_progress_size), 8, 8 * shapeCost, 2 * markerCost, 8 * shapeCost, 0.950f, RipUpMode::NEARDRC, false};
+  }
+
+  const bool follow_guide = is_very_high && (it <= 2);
+  const int maze_end = is_very_high ? 4 : 6;
+  const frUInt4 drc_cost = is_very_high ? (2 * shapeCost) : (4 * shapeCost);
+  const frUInt4 mkr_cost = is_very_high ? (2 * shapeCost) : markerCost;
+  const float decay = is_very_high ? 0.950f : 0.990f;
+  return SearchRepairArgs{adaptive_size, -(it % adaptive_size), maze_end, drc_cost, mkr_cost, drc_cost, decay, RipUpMode::DRC, follow_guide};
+  // clang-format on
+}
+
+void FlexDR::updateUnidirStubbornThreshold(const int it,
+                                           const int post_drvs,
+                                           const std::vector<int>& history_drvs,
+                                           FlexDRFlow& flow_state_machine)
+{
+  if (it == 0 && post_drvs >= kAdaptiveMinInitialDrvs) {
+    flow_state_machine.setStubbornFlowViolationThreshold(
+        kAdaptiveUnidirStubbornThreshold);
+  } else if (it >= 3 && !history_drvs.empty()
+             && post_drvs * 5 > history_drvs.back() * 3) {
+    flow_state_machine.resetStubbornFlowViolationThreshold();
+  }
 }
 
 void addRectToPolySet(gtl::polygon_90_set_data<frCoord>& polySet,
@@ -3029,6 +3237,215 @@ std::vector<frVia*> FlexDR::getLonelyVias(frLayer* layer,
   return lonely_vias;
 }
 
+namespace {
+
+// DRT_ITER_MODE="1:NEARDRC,2:DRC": per-iteration rip-up mode for iterations
+// whose strategy-table mode is ALL (after the incremental ALL->INCR rewrite).
+std::map<int, RipUpMode> parseIterModeOverride(utl::Logger* logger)
+{
+  std::map<int, RipUpMode> out;
+  const char* env = std::getenv("DRT_ITER_MODE");
+  if (env == nullptr) {
+    return out;
+  }
+  std::stringstream ss(env);
+  std::string item;
+  while (std::getline(ss, item, ',')) {
+    const auto colon = item.find(':');
+    if (colon == std::string::npos) {
+      logger->error(utl::DRT, 9931, "DRT_ITER_MODE: bad item '{}'", item);
+    }
+    const int iter = std::stoi(item.substr(0, colon));
+    const std::string mode = item.substr(colon + 1);
+    if (mode == "ALL") {
+      out[iter] = RipUpMode::ALL;
+    } else if (mode == "DRC") {
+      out[iter] = RipUpMode::DRC;
+    } else if (mode == "NEARDRC") {
+      out[iter] = RipUpMode::NEARDRC;
+    } else if (mode == "INCR") {
+      out[iter] = RipUpMode::INCR;
+    } else {
+      logger->error(utl::DRT, 9932, "DRT_ITER_MODE: unknown mode '{}'", mode);
+    }
+  }
+  return out;
+}
+
+const char* ripupModeName(RipUpMode mode)
+{
+  switch (mode) {
+    case RipUpMode::DRC:
+      return "DRC";
+    case RipUpMode::ALL:
+      return "ALL";
+    case RipUpMode::NEARDRC:
+      return "NEARDRC";
+    case RipUpMode::INCR:
+      return "INCR";
+    case RipUpMode::VIASWAP:
+      return "VIASWAP";
+  }
+  return "?";
+}
+
+// Order-independent signature of a net's committed routing.
+uint64_t netRouteSignature(const frNet* net, uint64_t& num_items)
+{
+  std::vector<std::array<int64_t, 7>> items;
+  for (const auto& shape : net->getShapes()) {
+    const odb::Rect b = shape->getBBox();
+    items.push_back({(int64_t) shape->typeId(),
+                     shape->getLayerNum(),
+                     b.xMin(),
+                     b.yMin(),
+                     b.xMax(),
+                     b.yMax(),
+                     0});
+  }
+  for (const auto& via : net->getVias()) {
+    const odb::Point o = via->getOrigin();
+    items.push_back(
+        {(int64_t) frcVia, 0, o.x(), o.y(), 0, 0, via->getViaDef()->getId()});
+  }
+  for (const auto& pw : net->getPatchWires()) {
+    const odb::Rect b = pw->getBBox();
+    items.push_back({(int64_t) frcPatchWire,
+                     pw->getLayerNum(),
+                     b.xMin(),
+                     b.yMin(),
+                     b.xMax(),
+                     b.yMax(),
+                     1});
+  }
+  std::sort(items.begin(), items.end());
+  uint64_t h = 1469598103934665603ULL;
+  for (const auto& it : items) {
+    for (const int64_t x : it) {
+      h ^= static_cast<uint64_t>(x);
+      h *= 1099511628211ULL;
+    }
+  }
+  num_items = items.size();
+  return h;
+}
+
+// Nets whose committed routing lies within mult*width of a marker on the
+// marker's layer (the NEARDRC selection rule, evaluated on the design).
+std::unordered_set<const frNet*> netsNearMarkers(const frDesign* design,
+                                                 int mult)
+{
+  std::unordered_set<const frNet*> out;
+  std::vector<frBlockObject*> result;
+  for (const auto& marker : design->getTopBlock()->getMarkers()) {
+    const frLayerNum layer_num = marker->getLayerNum();
+    const frCoord width = design->getTech()->getLayer(layer_num)->getWidth();
+    odb::Rect box = marker->getBBox();
+    box.bloat(mult * width, box);
+    result.clear();
+    design->getRegionQuery()->queryDRObj(box, layer_num, result);
+    for (auto* obj : result) {
+      if (obj->typeId() == frcPathSeg || obj->typeId() == frcPatchWire) {
+        out.insert(static_cast<frShape*>(obj)->getNet());
+      } else if (obj->typeId() == frcVia) {
+        out.insert(static_cast<frVia*>(obj)->getNet());
+      }
+    }
+  }
+  return out;
+}
+
+struct IterProbe
+{
+  std::unordered_map<const frNet*, std::pair<uint64_t, uint64_t>> sig;
+  std::unordered_set<const frNet*> in_marker;
+  std::unordered_set<const frNet*> near2;
+  std::unordered_set<const frNet*> near8;
+  int markers_before = 0;
+};
+
+void probeSignatures(
+    const frDesign* design,
+    std::unordered_map<const frNet*, std::pair<uint64_t, uint64_t>>& sig)
+{
+  sig.clear();
+  for (const auto& net : design->getTopBlock()->getNets()) {
+    uint64_t n = 0;
+    const uint64_t h = netRouteSignature(net.get(), n);
+    sig[net.get()] = {h, n};
+  }
+}
+
+void probeBeforeIteration(const frDesign* design, IterProbe& probe)
+{
+  if (probe.sig.empty()) {
+    probeSignatures(design, probe.sig);
+  }
+  probe.in_marker.clear();
+  for (const auto& marker : design->getTopBlock()->getMarkers()) {
+    for (auto* src : marker->getSrcs()) {
+      if (src != nullptr && src->typeId() == frcNet) {
+        probe.in_marker.insert(static_cast<frNet*>(src));
+      }
+    }
+  }
+  probe.near2 = netsNearMarkers(design, 2);
+  probe.near8 = netsNearMarkers(design, 8);
+  probe.markers_before = design->getTopBlock()->getNumMarkers();
+  std::lock_guard<std::mutex> lock(incr_probe::g_mutex);
+  incr_probe::g_work.clear();
+  incr_probe::g_skipped_workers = 0;
+  incr_probe::g_routed_workers = 0;
+}
+
+void probeAfterIteration(const frDesign* design,
+                         IterProbe& probe,
+                         int call,
+                         int iter,
+                         RipUpMode mode,
+                         double wall_s)
+{
+  std::unordered_map<const frNet*, std::pair<uint64_t, uint64_t>> after;
+  probeSignatures(design, after);
+  std::ofstream out(std::getenv("DRT_NETCHG"), std::ios::app);
+  uint64_t changed_nets = 0;
+  uint64_t total_ns = 0;
+  for (const auto& net : design->getTopBlock()->getNets()) {
+    const frNet* n = net.get();
+    const auto before_it = probe.sig.find(n);
+    const auto& a = after[n];
+    const bool changed
+        = before_it == probe.sig.end() || before_it->second.first != a.first;
+    const auto work_it = incr_probe::g_work.find(n);
+    const incr_probe::NetWork w = work_it == incr_probe::g_work.end()
+                                      ? incr_probe::NetWork{}
+                                      : work_it->second;
+    const bool in_m = probe.in_marker.contains(n);
+    const bool in_n2 = probe.near2.contains(n);
+    const bool in_n8 = probe.near8.contains(n);
+    changed_nets += changed ? 1 : 0;
+    total_ns += w.ns;
+    if (w.routes == 0 && !changed && !in_m && !in_n2 && !in_n8) {
+      continue;
+    }
+    out << "N\t" << call << '\t' << iter << '\t' << ripupModeName(mode) << '\t'
+        << n->getId() << '\t' << (changed ? 1 : 0) << '\t' << (in_m ? 1 : 0)
+        << '\t' << (in_n2 ? 1 : 0) << '\t' << (in_n8 ? 1 : 0) << '\t' << w.ns
+        << '\t' << w.routes << '\t' << w.searches << '\t' << w.pops << '\t'
+        << (before_it == probe.sig.end() ? 0 : before_it->second.second) << '\t'
+        << a.second << '\n';
+  }
+  out << "S\t" << call << '\t' << iter << '\t' << ripupModeName(mode) << '\t'
+      << design->getTopBlock()->getNets().size() << '\t' << changed_nets << '\t'
+      << incr_probe::g_routed_workers << '\t' << incr_probe::g_skipped_workers
+      << '\t' << probe.markers_before << '\t'
+      << design->getTopBlock()->getNumMarkers() << '\t' << total_ns << '\t'
+      << wall_s << '\n';
+  probe.sig = std::move(after);
+}
+
+}  // namespace
+
 int FlexDR::main()
 {
   ProfileTask profile("DR:main");
@@ -3078,15 +3495,57 @@ int FlexDR::main()
       && iter_ == 0 && num_db_markers == 0) {
     normalizeInitialRouting();
   }
-  const auto search_repair_args
+  const bool adaptive_enabled
+      = router_cfg_->ADAPTIVE_STRATEGY && num_db_markers == 0;
+  const bool has_unidir_layer = [this, adaptive_enabled]() {
+    if (!adaptive_enabled) {
+      return false;
+    }
+    // Experiment switch: DRT_ADAPTIVE_FORCE_UNIDIR=1 selects the policy branch
+    // that keeps the first shifted ALL pass (strategy row 1) on every PDK.
+    if (std::getenv("DRT_ADAPTIVE_FORCE_UNIDIR") != nullptr) {
+      return true;
+    }
+    for (const auto& layer : getTech()->getLayers()) {
+      if (layer->getType() == dbTechLayerType::ROUTING
+          && layer->isUnidirectional()) {
+        return true;
+      }
+    }
+    return false;
+  }();
+  const auto default_strategy
       = strategy(router_cfg_->ROUTESHAPECOST, router_cfg_->MARKERCOST);
+  std::vector<SearchRepairArgs> history_args;
+  std::vector<int> history_drvs;
+  history_args.reserve(default_strategy.size());
+  history_drvs.reserve(default_strategy.size());
+  const std::map<int, RipUpMode> iter_mode_override
+      = parseIterModeOverride(logger_);
+  static int probe_calls = 0;
+  const int probe_call = probe_calls++;
+  IterProbe probe;
+
   // iter_ may start > 0 when resuming from imported DRC markers; index the
   // strategy table by iter_ so the per-iteration parameters stay aligned.
-  while (iter_ >= 0 && iter_ < static_cast<int>(search_repair_args.size())) {
-    if (iter_ > router_cfg_->END_ITERATION) {
-      break;
+  while (iter_ >= 0 && iter_ <= router_cfg_->END_ITERATION
+         && iter_ < static_cast<int>(default_strategy.size())) {
+    SearchRepairArgs args = default_strategy[iter_];
+    if (adaptive_enabled && iter_ > 0) {
+      const int drvs = getDesign()->getTopBlock()->getNumMarkers();
+      auto next_args = nextStepStrategy(iter_,
+                                        drvs,
+                                        has_unidir_layer,
+                                        history_args,
+                                        history_drvs,
+                                        default_strategy,
+                                        router_cfg_->ROUTESHAPECOST,
+                                        router_cfg_->MARKERCOST);
+      if (!next_args.has_value()) {
+        break;
+      }
+      args = *next_args;
     }
-    auto args = search_repair_args[iter_];
     // Clean-up of initial routing: a worker that has rerouted a net this
     // often without clearing its violations ends, and the next iteration
     // continues with shifted tiles.  The strategy's own value returns with
@@ -3097,23 +3556,60 @@ int FlexDR::main()
                                   initial_routing_cleanup_.reroutes_per_net);
     }
     int clipSize = args.size;
-    if (args.ripupMode != RipUpMode::ALL) {
+    const bool use_default_clipsize
+        = !adaptive_enabled
+          || (!history_drvs.empty()
+              && history_drvs[0] < kAdaptiveMinInitialDrvs)
+          || (has_unidir_layer && iter_ >= 2);
+    if (use_default_clipsize && args.ripupMode != RipUpMode::ALL) {
       if (increaseClipsize_) {
         clipSizeInc_ += 2;
       } else {
         clipSizeInc_ = std::max((float) 0, clipSizeInc_ - 0.2f);
       }
-      clipSize += std::min(router_cfg_->MAX_CLIPSIZE_INCREASE,
-                           (int) round(clipSizeInc_));
+      args.size += std::min(router_cfg_->MAX_CLIPSIZE_INCREASE,
+                            (int) round(clipSizeInc_));
     }
-    args.size = clipSize;
+    history_args.push_back(args);
     if (args.ripupMode == RipUpMode::ALL) {
       if (hasFixed || (incremental && iter_ <= 2)) {
         args.ripupMode = RipUpMode::INCR;
       }
     }
+    flow_args_mode_.reset();
+    if (args.ripupMode == RipUpMode::ALL) {
+      const auto it = iter_mode_override.find(iter_);
+      if (it != iter_mode_override.end() && it->second != RipUpMode::ALL) {
+        logger_->report("DRT_ITER_MODE iter {}: ALL -> {}",
+                        iter_,
+                        ripupModeName(it->second));
+        flow_args_mode_ = args.ripupMode;
+        args.ripupMode = it->second;
+      }
+    }
+    if (incr_probe::enabled()) {
+      probeBeforeIteration(getDesign(), probe);
+    }
+    const auto probe_t0 = std::chrono::steady_clock::now();
     searchRepair(args);
-    if (getDesign()->getTopBlock()->getNumMarkers() == 0) {
+    if (incr_probe::enabled()) {
+      probeAfterIteration(getDesign(),
+                          probe,
+                          probe_call,
+                          iter_,
+                          args.ripupMode,
+                          std::chrono::duration<double>(
+                              std::chrono::steady_clock::now() - probe_t0)
+                              .count());
+    }
+    flow_args_mode_.reset();
+    const int post_drvs = getDesign()->getTopBlock()->getNumMarkers();
+    if (router_cfg_->ADAPTIVE_STRATEGY && has_unidir_layer) {
+      updateUnidirStubbornThreshold(
+          iter_, post_drvs, history_drvs, *flow_state_machine_);
+    }
+    history_drvs.push_back(post_drvs);
+    if (post_drvs == 0) {
       break;
     }
     if (logger_->debugCheck(DRT, "snapshot", 1)) {
@@ -3144,6 +3640,25 @@ int FlexDR::main()
     ++iter_;
   }
 
+  // Experimental cleanup only after a fresh, clean, local route. Incremental
+  // and distributed updates need their own transaction/writeback contract.
+  const char* cleanup_env = std::getenv("DRT_VIA_CLEANUP");
+  if (cleanup_env && std::string(cleanup_env) == "1" && !incremental
+      && !hasFixed && !dist_on_ && !getTech()->hasMaxSpacingConstraints()
+      && getDesign()->getTopBlock()->getNumMarkers() == 0) {
+    if (via_cleanup::run(getDesign(), logger_, router_cfg_) > 0) {
+      FlexDRConnectivityChecker checker(
+          router_, logger_, router_cfg_, graphics_.get(), false);
+      checker.check(iter_);
+      const auto markers = getDesign()->getTopBlock()->getNumMarkers();
+      if (markers != 0) {
+        logger_->error(DRT,
+                       6002,
+                       "Experimental via cleanup created {} recheck markers.",
+                       markers);
+      }
+    }
+  }
   end(/* done */ true);
   reporter->end(true);
 

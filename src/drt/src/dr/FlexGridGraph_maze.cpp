@@ -858,6 +858,7 @@ MazeSearchStatus FlexGridGraph::search(
     dump_file_.open("expansions.dump");
   }
   curr_id_ = 1;
+  ++probe_searches_;
   if (drWorker_->getDRIter() >= debugMazeIter) {
     std::cout << "INIT search: target pin " << nextPin->getName()
               << "\nsource points:\n";
@@ -925,6 +926,7 @@ MazeSearchStatus FlexGridGraph::search(
     if (drWorker_->pollCancelAfterAstarPop()) {
       return MazeSearchStatus::kCancelled;
     }
+    ++probe_pops_;
     if (getPrevAstarNodeDir({currGrid.x(), currGrid.y(), currGrid.z()})
         != frDirEnum::UNKNOWN) {
       continue;

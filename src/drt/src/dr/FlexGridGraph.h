@@ -1036,6 +1036,9 @@ class FlexGridGraph
   void resetPrevNodeDir();
   void resetSrc();
   void resetDst();
+  // incr_probe counters (worker-local, read around each routed net)
+  uint64_t getProbeSearches() const { return probe_searches_; }
+  uint64_t getProbePops() const { return probe_pops_; }
   // A* from connComps to nextPin.  kCancelled: the worker's cancel request
   // was observed at a check after a batch of pops; path is then incomplete.
   MazeSearchStatus search(std::vector<FlexMazeIdx>& connComps,
@@ -1183,6 +1186,8 @@ class FlexGridGraph
   static_assert(sizeof(Node) == 16);
 #endif
   frVector<Node> nodes_;
+  uint64_t probe_searches_ = 0;
+  uint64_t probe_pops_ = 0;
   std::vector<bool> prevDirs_;
   std::vector<bool> srcs_;
   std::vector<bool> dsts_;
