@@ -5961,6 +5961,9 @@ bool BonnRouteDR::connectWithoutOwnShapes(NetData& net,
     }
     return connectInRegion(net, retry, true, valid, worker);
   }
+  // connection_path_first: the dilated retry continues from the connections
+  // the attempt in the guide area closed.
+  bool continues = false;
   if (!net.dilated_area) {
     if (connectInRegion(net, extra_dilation, false, valid, worker)) {
       return true;
@@ -5970,6 +5973,8 @@ bool BonnRouteDR::connectWithoutOwnShapes(NetData& net,
       return false;
     }
     net.dilated_area = true;
+    continues = params_.connection_path_first > 0
+                && progressAdds(net, worker.progress);
   }
   // Sec. 5.1: the dilated area is searched where its tile box lies inside
   // the thread's region. Otherwise the net continues there in a later
@@ -5984,6 +5989,11 @@ bool BonnRouteDR::connectWithoutOwnShapes(NetData& net,
     worker.footprint.widen(box);
   }
   worker.footprint.setStep(kStepRetrySearch);
+  if (continues) {
+    const PartialState first = std::move(worker.progress);
+    worker.progress = PartialState{};
+    return connectInRegion(net, retry, false, valid, worker, nullptr, &first);
+  }
   return connectInRegion(net, retry, false, valid, worker);
 }
 
@@ -5993,14 +6003,19 @@ bool BonnRouteDR::connectInRegion(
     const bool ripup,
     const std::vector<std::vector<char>>& valid,
     Worker& worker,
-    const std::vector<std::vector<char>>* plain_valid)
+    const std::vector<std::vector<char>>* plain_valid,
+    const PartialState* resume_from)
 {
-  // D1 S2: a partial net resumes from the connections it closed.
-  const bool resume = net.partial;
+  // D1 S2: a partial net resumes from the connections it closed; a dilated
+  // retry from those of its attempt in the guide area (resume_from).
+  const PartialState* const state
+      = resume_from != nullptr ? resume_from
+                               : (net.partial ? &net.partial_state : nullptr);
+  const bool resume = state != nullptr;
   worker.progress.valid = false;
   if (resume) {
-    net.wires = net.partial_state.wires;
-    net.vias = net.partial_state.vias;
+    net.wires = state->wires;
+    net.vias = state->vias;
     worker.partial_resumes++;
   } else {
     net.wires.clear();
@@ -6008,7 +6023,7 @@ bool BonnRouteDR::connectInRegion(
   }
   net.pin_points.clear();
   for (size_t t = 0; t < net.terms.size(); t++) {
-    net.terms[t].chosen = resume ? net.partial_state.chosen[t] : -1;
+    net.terms[t].chosen = resume ? state->chosen[t] : -1;
   }
   // Effort budget of a speculative tail attempt (tail_defer_settled):
   // checked before each search, so an attempt settles at most the budget
@@ -6134,9 +6149,9 @@ bool BonnRouteDR::connectInRegion(
   // Terms whose access path is part of a post-processed connection.
   std::vector<char> consumed(num_terms, 0);
   if (resume) {
-    connected = net.partial_state.connected;
-    consumed = net.partial_state.consumed;
-    for (const size_t v : net.partial_state.tree) {
+    connected = state->connected;
+    consumed = state->consumed;
+    for (const size_t v : state->tree) {
       if (in_tree.insert(v).second) {
         tree.push_back(v);
         sources.emplace_back(v, 0);

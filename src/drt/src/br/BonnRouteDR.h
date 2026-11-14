@@ -1270,14 +1270,18 @@ class BonnRouteDR
                                Worker& worker,
                                int extra_dilation);
   // plain_valid (connection_path_first 2, rip-up mode): the access options
-  // that are legal without rip-up; nullptr: none.
+  // that are legal without rip-up; nullptr: none. resume_from
+  // (connection_path_first): the connections an attempt of this connect
+  // closed in the guide area; the call continues from them instead of the
+  // net's committed partial routing.
   bool connectInRegion(NetData& net,
                        int dilation,
                        bool ripup,
                        const std::vector<std::vector<char>>& valid,
                        Worker& worker,
                        const std::vector<std::vector<char>>* plain_valid
-                       = nullptr);
+                       = nullptr,
+                       const PartialState* resume_from = nullptr);
   // Measurement M5 (debug group bonnroute_search): one line per search of
   // connectInRegion; statistics only.
   void logSearchStatistics(const NetData& net,
