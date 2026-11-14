@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: BSD-3-Clause
 // Copyright (c) 2026, The OpenROAD Authors
 
+#include <cstdint>
 #include <memory>
+#include <utility>
 #include <vector>
 
 #include "br/BrIoPinArea.h"
