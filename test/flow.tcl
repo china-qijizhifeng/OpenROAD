@@ -213,8 +213,15 @@ write_def $routed_def
 # Repair antennas post-DRT
 
 set repair_antennas_iters 0
+set previous_antenna_signature ""
 utl::set_metrics_stage "drt__repair_antennas__pre_repair__{}"
 while { [check_antennas] && $repair_antennas_iters < 5 } {
+  set antenna_signature [ant::antenna_violation_signature]
+  if { $antenna_signature eq $previous_antenna_signature } {
+    puts "Antenna repair stopped after $repair_antennas_iters rounds: violations are unchanged."
+    break
+  }
+  set previous_antenna_signature $antenna_signature
   utl::set_metrics_stage "drt__repair_antennas__iter_${repair_antennas_iters}__{}"
 
   repair_antennas

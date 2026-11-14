@@ -20,6 +20,7 @@ using namespace odb;
 %}
 
 
+%include <std_string.i>
 %include <std_vector.i>
 %template(ViolationVector) std::vector<ant::Violation>;
 %template(NetCheckVector) std::vector<ant::NetCheck>;

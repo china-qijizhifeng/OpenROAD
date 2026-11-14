@@ -27,6 +27,12 @@ guide format.
 
 This command performs detailed routing.
 
+For incremental routing, the final track-assignment repair pass skips panels
+whose guides all belong to nets with existing detailed wiring. Panels that
+contain unwired nets retain the full guide cost context. Earlier passes and
+passes spanning multiple worker batches retain every panel, since their
+assignments can affect subsequent track assignment.
+
 Developer arguments
 - `-or_seed`, `-or_k`
 
