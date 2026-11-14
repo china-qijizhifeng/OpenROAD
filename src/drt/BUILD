@@ -55,6 +55,7 @@ cc_library(
         "src/br/BrPotential.cpp",
         "src/br/BrShapeGrid.cpp",
         "src/br/BrTailPipeline.cpp",
+        "src/br/BrWireJunctions.cpp",
         "src/br/BrWireModel.cpp",
     ],
     hdrs = [
@@ -78,6 +79,7 @@ cc_library(
         "src/br/BrOrderedBoxSchedule.h",
         "src/br/BrTailPipeline.h",
         "src/br/BrTrackGraph.h",
+        "src/br/BrWireJunctions.h",
         "src/br/BrWireModel.h",
     ],
     includes = ["src"],
