@@ -9388,8 +9388,9 @@ void BonnRouteDR::writeNets()
       for (size_t k = 0; k + 1 < cuts.size(); k++) {
         wires.push_back({w.layer, cuts[k], cuts[k + 1], w.patch, w.wire_type});
         junction_ends.push_back(
-            {std::ranges::binary_search(joints, toGrid(cuts[k])),
-             std::ranges::binary_search(joints, toGrid(cuts[k + 1]))});
+            {std::binary_search(joints.begin(), joints.end(), toGrid(cuts[k])),
+             std::binary_search(
+                 joints.begin(), joints.end(), toGrid(cuts[k + 1]))});
       }
     }
     // Contact guard: FlexDR's clean-up needs every pin contact at one of the

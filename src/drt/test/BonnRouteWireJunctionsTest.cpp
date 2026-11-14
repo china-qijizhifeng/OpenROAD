@@ -39,7 +39,7 @@ std::vector<std::vector<GridPoint>> reference(
     }
   }
   for (auto& points : result) {
-    std::ranges::sort(points);
+    std::sort(points.begin(), points.end());
     points.erase(std::ranges::unique(points).begin(), points.end());
   }
   return result;

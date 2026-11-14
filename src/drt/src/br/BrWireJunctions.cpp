@@ -82,7 +82,7 @@ std::vector<std::vector<GridPoint>> interiorWireCrossings(
     }
   }
   for (auto& wire_cuts : cuts) {
-    std::ranges::sort(wire_cuts);
+    std::sort(wire_cuts.begin(), wire_cuts.end());
     wire_cuts.erase(std::ranges::unique(wire_cuts).begin(), wire_cuts.end());
   }
   return cuts;
