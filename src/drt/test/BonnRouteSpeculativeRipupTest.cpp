@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: BSD-3-Clause
 // Copyright (c) 2026, The OpenROAD Authors
 
+#include <cstdint>
 #include <cstdio>
 #include <memory>
 #include <vector>
@@ -77,10 +78,57 @@ struct Fixture
     AccessFootprint footprint;
     footprint.begin(0, {0, 0, graph.tiles_x - 1, graph.tiles_y - 1});
     const AccessFootprintScope scope(&footprint);
-    grid.setLevel(graph.vertex(0, track, position), kWireEdge, 0, level);
+    grid.setLevel(graph.vertex(0, track, position), kWire, 0, level);
     return written(footprint);
   }
 };
+
+bool cachedReads(const bool dense, const bool overlaid)
+{
+  TrackGraph graph;
+  graph.layers.resize(2);
+  graph.layers[0].tracks = {0, 10, 20};
+  graph.layers[1].horizontal = false;
+  graph.layers[1].positions = {0, 10, 20};
+  for (int j = 0; j <= 32; j++) {
+    graph.layers[0].positions.push_back(j * 10);
+    graph.layers[1].tracks.push_back(j * 10);
+  }
+  graph.finalize([](Coord x) { return x / 40; },
+                 [](Coord y) { return y / 40; });
+  FastGrid grid;
+  grid.init(&graph, 1);
+  grid.setDense(0, dense);
+  FastGridOverlay overlay;
+  if (overlaid) {
+    const auto key = FastGridOverlay::key(0, 1);
+    overlay.wiring[key] = {{0, 32, 1}};
+    overlay.via[key] = {{0, 32, 1}};
+  }
+  FastGridReader reader;
+  reader.reset(&grid, overlaid ? &overlay : nullptr);
+  const uint64_t expected = overlaid ? 1 : 0;
+  // This first load warms a run or a whole dense row without recording.
+  if (reader.wiringWord(0, 1, 1) != expected
+      || reader.viaWord(0, 1, grid.viaIndex(0, 1)) != expected) {
+    return false;
+  }
+  for (const int position : {2, 31, 30, 1}) {
+    for (const bool via : {false, true}) {
+      AccessFootprint footprint;
+      footprint.begin(0, {0, 0, graph.tiles_x - 1, graph.tiles_y - 1});
+      const AccessFootprintScope scope(&footprint);
+      const uint64_t word
+          = via ? reader.viaWord(0, 1, grid.viaIndex(0, position))
+                : reader.wiringWord(0, 1, position);
+      const TileBox tile{position / 4, 0, position / 4, 0};
+      if (word != expected || footprint.reads(0) != tile) {
+        return false;
+      }
+    }
+  }
+  return true;
+}
 
 bool removal(const bool dense, const bool intervals)
 {
@@ -156,18 +204,33 @@ bool history(const bool dense, const bool intervals)
 
 int main()
 {
+  bool passed = true;
   for (const bool dense : {false, true}) {
-    for (const bool intervals : {false, true}) {
-      if (!removal(dense, intervals) || !failedSearch(dense, intervals)
-          || !distantAndRollback(dense, intervals)
-          || !history(dense, intervals)) {
+    for (const bool overlaid : {false, true}) {
+      if (!cachedReads(dense, overlaid)) {
         std::printf(
-            "speculative rip-up invalidation failed: dense=%d intervals=%d\n",
+            "cached footprint failed: dense=%d overlay=%d\n", dense, overlaid);
+        passed = false;
+      }
+    }
+    for (const bool intervals : {false, true}) {
+      const bool removed = removal(dense, intervals);
+      const bool failed = failedSearch(dense, intervals);
+      const bool rollback = distantAndRollback(dense, intervals);
+      const bool bumped = history(dense, intervals);
+      if (!removed || !failed || !rollback || !bumped) {
+        std::printf(
+            "speculative invalidation failed: dense=%d intervals=%d "
+            "removal=%d failure=%d rollback=%d history=%d\n",
             dense,
-            intervals);
-        return 1;
+            intervals,
+            removed,
+            failed,
+            rollback,
+            bumped);
+        passed = false;
       }
     }
   }
-  return 0;
+  return passed ? 0 : 1;
 }
