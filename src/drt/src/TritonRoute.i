@@ -104,7 +104,8 @@ void detailed_route_cmd(const char* outputMazeFile,
                         int minAccessPoints,
                         bool saveGuideUpdates,
                         const char* repairPDNLayerName,
-                        int drcReportIterStep)
+                        int drcReportIterStep,
+                        bool adaptiveStrategy = false)
 {
   auto* router = ord::OpenRoad::openRoad()->getTritonRoute();
   const int num_threads = ord::OpenRoad::openRoad()->getThreadCount();
@@ -127,7 +128,8 @@ void detailed_route_cmd(const char* outputMazeFile,
                     minAccessPoints,
                     saveGuideUpdates,
                     repairPDNLayerName,
-                    num_threads});
+                    num_threads,
+                    adaptiveStrategy});
   router->main();
   router->setDistributed(false);
 }
@@ -247,6 +249,20 @@ void step_end()
 {
   auto* router = ord::OpenRoad::openRoad()->getTritonRoute();
   router->endFR();
+}
+
+bool experimental_route_trial_cmd(const char* recipe)
+{
+  auto* router = ord::OpenRoad::openRoad()->getTritonRoute();
+  return router->experimentalRouteTrial(
+      recipe, ord::OpenRoad::openRoad()->getThreadCount());
+}
+
+bool experimental_route_graph_cmd(const char* recipe, const char* output)
+{
+  auto* router = ord::OpenRoad::openRoad()->getTritonRoute();
+  return router->experimentalRouteTrial(
+      recipe, ord::OpenRoad::openRoad()->getThreadCount(), output);
 }
 
 void check_drc_cmd(const char* drc_file, int x1, int y1, int x2, int y2, const char* marker_name)

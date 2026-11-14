@@ -5,6 +5,7 @@
 
 #include <memory>
 #include <optional>
+#include <string>
 #include <vector>
 
 #include "odb/db.h"
@@ -69,6 +70,9 @@ struct DesignCheck
 
   int violatingNets() const;
   int violatingPins() const;
+  // Lossless identity and ratios of the violations, for detecting a stalled
+  // repair. Clean checks do not contribute to the signature.
+  std::string violationSignature() const;
 };
 
 class AntennaChecker
@@ -91,6 +95,8 @@ class AntennaChecker
   // Number of violating nets / gate pins found by the last checkAntennas.
   int antennaViolationCount() const;
   int pinViolationCount() const;
+  // Signature from the last checkAntennas, empty when there are no violations.
+  std::string antennaViolationSignature() const;
   // Checks one net's routing and returns every ratio checked for its gates.
   NetCheck checkNet(odb::dbNet* net, float ratio_margin = 0);
   Violations getAntennaViolations(odb::dbNet* net,
