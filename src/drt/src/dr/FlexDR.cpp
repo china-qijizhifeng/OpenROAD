@@ -3555,7 +3555,6 @@ int FlexDR::main()
       args.mazeEndIter = std::min(args.mazeEndIter,
                                   initial_routing_cleanup_.reroutes_per_net);
     }
-    int clipSize = args.size;
     const bool use_default_clipsize
         = !adaptive_enabled
           || (!history_drvs.empty()
