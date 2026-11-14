@@ -1,0 +1,166 @@
+{
+  "schema": "route_trial_research_evidence_v1",
+  "date": "2026-11-11",
+  "status": "research_only_no_candidate_adopted",
+  "cpp_validation": {
+    "base_commit": "38ab64d3740f273ab6fae09ec9a70859878e9b66",
+    "binary_sha256": "f29211a1b7fd54475e0749d15d9b4d8fc249cea5cf06cccb166ea50b4e918067",
+    "tested_source_sha256": {
+      "src/drt/BUILD": "e16f8ac1fa5f8427446072b9fbf16f8a2a5e29ae723d8f1df774de86e37e8b00",
+      "src/drt/include/drt/TritonRoute.h": "04c2a483b90ec2d1ab2d4e15947351db4dfeca4d42eef719d97cd9bdfbaab917",
+      "src/drt/src/TritonRoute.cpp": "1ecc2adedf8627f40e5d4edefef80099e78ea0ad152acb7ddd1accf62b3aa2d8",
+      "src/drt/src/TritonRoute.i": "f1da9996bf1e2ed4f46611968596b72ffc9417248a93657d4a41fc5fc7ee52eb",
+      "src/drt/src/dr/FlexDR.cpp": "6e4c475fc2680d9c8bec09f2829678491b92f8ac9c1698270a3b799dcdb1950c",
+      "src/drt/src/dr/RouteTrial.h": "c83d0a05986a986e43b61fd601905d396cadc3da70c51c56913f58173217da00",
+      "src/drt/src/dr/RouteTrialGraph.h": "dadc39cafea6e5eef70e84ca6d555f8a9e48110830b72aec8b06f890876bf985",
+      "src/drt/src/dr/ViaCleanup.h": "ae1938cdd52cf15718247e77c8a211c4605d8cb5c6343ac0fbaa61ff923d87c4",
+      "src/drt/src/io/io.cpp": "61a5eab21cbd5ff2eb48b5a0485c0bc488dc90a5533f4d9e609917199e0e2ae9",
+      "src/drt/test/BUILD": "047b8a36e56d2c860870daeefe66cc8bffa4720abcd221fe64dc04a6c4f64593",
+      "src/drt/test/RouteTrialTest.cpp": "b9bae0ab3346cb2ac8b34a4148297e41de0610bbbff9c8ea8b0b8366c96936b2",
+      "src/drt/test/ViaCleanupTest.cpp": "da44e6cd1ce1d8934809297f2a597c35c8a2f58710063981628421ed03de0715"
+    },
+    "unit_tests": {
+      "RouteTrial": 21,
+      "ViaCleanup": 14
+    },
+    "native_regressions": [
+      "ndr_vias1",
+      "ndr_no_auto_taper"
+    ],
+    "scope": "Historical v9 build before final CI formatting; standalone tests are not adaptive-policy or distributed-routing coverage."
+  },
+  "joint_feedback": {
+    "binary_sha256": "c06955ea92a17500cc0b7d1d85f7ad3c20aae387934d9a14d097937587a80c1f",
+    "design": "tinyRocket",
+    "technology": "Nangate45",
+    "native_threads": 4,
+    "regions": 2,
+    "candidate_pool_sizes": [
+      26,
+      30
+    ],
+    "distinct": 19,
+    "logical_requests": 24,
+    "logical_per_arm": 14,
+    "cross_arm_cache_hits": 5,
+    "physical_pass": 10,
+    "physical_reject": 9,
+    "frozen_FAIL": 8,
+    "frozen_INCOMPLETE": 2,
+    "full_PASS": 0,
+    "adopted": 0,
+    "combined": 0,
+    "feedback_endpoint_nonworse": 2,
+    "control_endpoint_nonworse": 1,
+    "candidate_via_delta": -2,
+    "candidate_wire_delta_dbu": -760,
+    "dbu_per_micron": 2000,
+    "each_finite_setup_and_hold_endpoint_count": 4061,
+    "power_evidence": "Original and candidate default activity did not converge.",
+    "posthoc_setup_path_slack_delta_ps": [
+      -0.747957252,
+      -0.450528503,
+      -0.73918649,
+      -0.433209024
+    ],
+    "frozen_verdict_vs_posthoc": "The two endpoint-nonworse candidates remain INCOMPLETE under frozen global/endpoint metrics; separate paired through-net reports show setup branch regressions. No frozen observations were rewritten.",
+    "archive_sha256": "68641fba5d3b894f67b3d6a3ccfec1715be2bad169918ebd291f38df2d0c8ce7",
+    "archive_bytes": 676294242,
+    "manifest_files_verified": 814,
+    "archive_contents": "Original fingerprints; final candidate DB/DEF/SPEF; physical reports; endpoint and quality reports; frozen selection receipts; targeted paths. Large raw artifacts are retained outside Git."
+  },
+  "structure_pilot": {
+    "profiled_designs": [
+      "tinyRocket/Nangate45",
+      "Ibex/Sky130HD",
+      "JPEG/Sky130HD"
+    ],
+    "native_candidate_designs": [
+      "tinyRocket/Nangate45",
+      "Ibex/Sky130HD"
+    ],
+    "unique_sources": 29,
+    "exported_graphs": 22,
+    "full_native_candidates": 3,
+    "accepted": 0,
+    "scope": "Exact infeasibility audits apply only to the exported fixed graphs, not arbitrary windows or global rerouting."
+  },
+  "portability_validation": {
+    "status": "python_checks_and_native_smoke_passed",
+    "bazel": "9.2.0",
+    "rules_python": "2.3.2",
+    "python": "3.13",
+    "bazel_targets": 3,
+    "python_tests": 26,
+    "scope": "Isolated Bazel workspace with the committed package BUILD and repository Python configuration; not a full repository build.",
+    "historical_selector_replays_identical": 10,
+    "historical_adapter_transaction_identical": true,
+    "native_smoke": {
+      "status": "passed",
+      "binary_sha256": "f29211a1b7fd54475e0749d15d9b4d8fc249cea5cf06cccb166ea50b4e918067",
+      "post_format_cpp_rebuild": false,
+      "controls": [
+        "source_only_no_database_changes",
+        "three_net_exact_roundtrip",
+        "known_three_net_proposal_fidelity",
+        "deliberate_later_net_failure_without_output_checkpoint"
+      ],
+      "successful_controls": {
+        "fresh_drc": 0,
+        "antenna": 0,
+        "routed": true
+      },
+      "original_checkpoint_hashes_unchanged": true,
+      "failure_scope": "Earlier net changes are observed inside the failed private process; discarding that process preserves the original checkpoint. No live-DB rollback claim.",
+      "archive_sha256": "faf94a540246e1ca872883fb9aabbe9ce2d6be9d1f996507ee4dab7b62f275ab",
+      "archive_bytes": 70600430,
+      "scope": "Portable Python/Tcl helper smoke on historical v9; no new search, RCX/STA acceptance, or final C++ rebuild.",
+      "archive_files_verified": 46,
+      "sandbox_released": true,
+      "portable_tcl_sha256": "415c9f72abff6429751566d9662e59b825ac6766e6917ecc073a779d51b6f29d"
+    },
+    "final_receipt_sha256": "ab1eb8bb2bf799c126eb19cd12364524dbb8e5b6725fcbc5fcb9f85512f29bba",
+    "tested_python_source_sha256": {
+      "BUILD": "a8a2ee6b098ee0ea872aaf00cb816ac7cab1f8c6bd0dcbfe064c00241584ce2c",
+      "feedback.py": "0a902d3390b28729241faf83a6d2a16267dafe9cb724afa55021f32861a930f4",
+      "joint_adapter.py": "44ecea51adb1556302af1ae2fcb54f9a418436f7354dcfbfb7ce6585de243055",
+      "select_feedback.py": "5b2406c26100247e1229b674c2f3cf81f8ccdecea117bbfaf44f7dc6241a154f",
+      "test_feedback.py": "334ea3d01fc834305812cc0f1a0314231eaba040928d86c1f6c45093f7251207",
+      "test_joint_adapter.py": "5e723e31dd1d706ccba47393b4a3cca53efe54d41c8c10c89adbd18f345af518",
+      "test_select_feedback.py": "70a36be0f5ddbc0347f6fd90241e5f5d64cc031b0bf26978d2d23debec12e884"
+    }
+  },
+  "format_validation": {
+    "tool": "clang-format version 23.1.2",
+    "style_sha256": "dd16d966a16f4a397c298edc725fcf660159fca38f81f35e925d31ba6ac6d537",
+    "files_checked": 17,
+    "final_cpp_commit": "df8d657",
+    "final_cpp_source_sha256": {
+      "src/drt/include/drt/TritonRoute.h": "04c2a483b90ec2d1ab2d4e15947351db4dfeca4d42eef719d97cd9bdfbaab917",
+      "src/drt/src/TritonRoute.cpp": "295bb7e4b2b4100655c9ed80b178018b925307c3119c39ababdfab625d9ce083",
+      "src/drt/src/dr/FlexDR.cpp": "69741ea89bdbb013f155bb41ab78932187fefd5a50119f7f856a3895d46ed989",
+      "src/drt/src/dr/FlexDR.h": "5f5295569e3ef983863ca9ca1c08f80162882a65a642e5775100327776d00c3a",
+      "src/drt/src/dr/FlexDRFlow.cpp": "01f35a3798810c344c6b6a9930fc144c0788476d57470e03618ad14c2beb8d6f",
+      "src/drt/src/dr/FlexDR_init.cpp": "5841dfd83b0c47ea079858590564cfaf2a1874e9eaa8de565addc934e5a99fd9",
+      "src/drt/src/dr/FlexDR_maze.cpp": "6793e439de56425e56b7fc4c22c0458dd9c6f64890b952ed173565e1d6a82e2c",
+      "src/drt/src/dr/FlexGridGraph.h": "e096315852ea83444a67400137b4776150fa4f1593841cdb0d3f8be7dd817d21",
+      "src/drt/src/dr/FlexGridGraph_maze.cpp": "7503685bf63630169326bce004fcb2d555644c33376be1c0c6f950fcda69c6ee",
+      "src/drt/src/dr/RouteTrial.h": "e12f9aa94c1df79b7b4c5ceeffb34158a75ce9dbb48ba85b901892e98732cb64",
+      "src/drt/src/dr/RouteTrialGraph.h": "2887cef96ead3057b6788cd9db7ec81d36594f8328d572f7a8999851edfb321f",
+      "src/drt/src/dr/ViaCleanup.h": "ffc52e9363291fe31271e689c0637ae4acccf849b1c501f5e336c17330de3045",
+      "src/drt/src/drt-global.h": "8891bf3a317ee7f5659acf2cdab44e04964897d12d3f476bf45843f99217b8de",
+      "src/drt/src/io/io.cpp": "61a5eab21cbd5ff2eb48b5a0485c0bc488dc90a5533f4d9e609917199e0e2ae9",
+      "src/drt/src/serialization.h": "95e511025134ceacfee9efb49e1e7144e0600d975dc488e51de0e7685608e9c9",
+      "src/drt/test/RouteTrialTest.cpp": "bfac67da1d0e25733a3592d3ea7fc1a8f179c824fece508e66c7737be4adfc2b",
+      "src/drt/test/ViaCleanupTest.cpp": "da44e6cd1ce1d8934809297f2a597c35c8a2f58710063981628421ed03de0715"
+    },
+    "normalizations": [
+      "whitespace layout",
+      "same-group include order",
+      "adjacent equivalent string literals",
+      "comment reflow"
+    ],
+    "post_format_cpp_rebuild": false,
+    "note": "All 12 pre-format changed source files exactly matched tested-source-manifest; other base-commit C++ files matched HEAD. The v9 native build and 35 unit tests plus 2 NDR regressions apply to pre-format source. CI clang-format 23.1.2 normalized final bytes have not been rebuilt; no binary-to-final-byte identity is claimed."
+  }
+}

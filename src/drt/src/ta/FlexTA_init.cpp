@@ -974,10 +974,8 @@ void FlexTAWorker::initInitialRoutingObjs(const frLayerNum layerNum)
     }
     odb::Rect box;
     bounds.bloat(-1, box);
-    initFixedObjs_helper(box,
-                         initFixedObjs_calcBloatDist(obj, layerNum, bounds),
-                         layerNum,
-                         net);
+    initFixedObjs_helper(
+        box, initFixedObjs_calcBloatDist(obj, layerNum, bounds), layerNum, net);
   }
 }
 
