@@ -88,6 +88,7 @@ cc_library(
     srcs = [
         "src/DesignCallBack.cpp",
         "src/DesignCallBack.h",
+        "src/br/BrConnectivityProbe.h",
         "src/br/BonnRouteDR.cpp",
         "src/br/BonnRouteDR.h",
         "src/br/BrDrtRules.cpp",

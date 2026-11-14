@@ -3,6 +3,8 @@
 
 #include "br/BonnRouteDR.h"
 
+#include "br/BrConnectivityProbe.h"
+
 #include <omp.h>
 
 #include <algorithm>
@@ -10246,7 +10248,25 @@ void BonnRouteDR::main()
   if (params_.verbose) {
     logger_->report("BonnRoute DR routing digest {:016x}.", routingDigest());
   }
+  for (const NetData& net : nets_) {
+    if (!connectivityProbeSelected(net.net)) {
+      continue;
+    }
+    logger_->report("[DEBUG-c9300] raw net {} routed {}", net.net->getName(), net.routed);
+    for (const OutWire& w : net.wires) {
+      logger_->report("[DEBUG-c9300] wire {} {} {} {} {} patch {}", w.layer, w.begin.x(), w.begin.y(), w.end.x(), w.end.y(), w.patch);
+    }
+    for (const OutVia& v : net.vias) {
+      logger_->report("[DEBUG-c9300] via {} {} {}", v.def->getName(), v.point.x(), v.point.y());
+    }
+    for (const auto& [layer, point] : net.pin_points) {
+      logger_->report("[DEBUG-c9300] pinpoint {} {} {}", layer, point.x(), point.y());
+    }
+  }
   writeNets();
+  for (const NetData& net : nets_) {
+    connectivityProbe(net.net, "br-after-write", -1, logger_);
+  }
   if (params_.start_check > 0) {
     checkPathStarts();
   }
