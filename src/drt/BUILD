@@ -94,7 +94,6 @@ cc_library(
         "src/br/BrDrtRules.cpp",
         "src/br/BrIncremental.cpp",
         "src/br/BrIoPinRepair.cpp",
-        "src/br/BrIoPinRepair.h",
         "src/TritonRoute.cpp",
         "src/db/drObj/drAccessPattern.cpp",
         "src/db/drObj/drNet.cpp",
@@ -168,6 +167,7 @@ cc_library(
         "src/ta/FlexTA_rq.cpp",
     ],
     hdrs = [
+        "src/br/BrIoPinRepair.h",
         "include/drt/TritonRoute.h",
         "src/AbstractGraphicsFactory.h",
         "src/br/BrDrtRules.h",

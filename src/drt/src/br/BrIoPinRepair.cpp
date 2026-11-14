@@ -145,7 +145,7 @@ void repairIoPinArea(frDesign* design,
     for (const frRect& pin : pins) {
       const frLayerNum layer_num = pin.getLayerNum();
       frLayer* layer = design->getTech()->getLayer(layer_num);
-      const frAreaConstraint* area = layer->getAreaConstraint();
+      frAreaConstraint* area = layer->getAreaConstraint();
       if (area == nullptr || area->getMinArea() <= 0) {
         continue;
       }
