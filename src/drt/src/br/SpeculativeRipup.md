@@ -5,6 +5,18 @@ queue entries against one committed routing snapshot. The default is zero.
 Incremental routing, rip-up boxes, region-parallel rip-up and zero-depth
 sequences retain their existing execution path.
 
+Set it after selecting the routing profile, before detailed routing:
+
+```tcl
+set_bonnroute_profile 2013-improved
+set_bonnroute_dr_param speculative_ripup 8
+detailed_route -bonnroute
+```
+
+The value is the queue batch size, clamped to 0..256; routing threads are still
+selected independently. It is an opt-in experiment and does not change the
+default profile settings.
+
 Each search owns a NetData copy and worker scratch. It reads the routing space
 and collects its history increments without applying them. The main thread
 waits for the whole batch before making queue decisions. It then accepts or
