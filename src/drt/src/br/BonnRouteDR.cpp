@@ -353,6 +353,8 @@ bool BonnRouteDRParams::set(const std::string& name, const double value)
     partition_check = partition_check || dependency_trace;
   } else if (name == "start_check") {
     start_check = std::clamp(v, 0, 1);
+  } else if (name == "io_pin_area") {
+    io_pin_area = v != 0;
   } else if (name == "planar_first") {
     planar_first = v != 0;
   } else if (name == "cleanup_normalize_initial_routing") {
@@ -9551,7 +9553,9 @@ void BonnRouteDR::writeNets()
       }
       const int id = ids[k];
       const size_t first_fill = notch_fill_rects.size();
-      fillNotches(nets_[id].net, id, notch_fill_rects);
+      if (params_.notch_fill) {
+        fillNotches(nets_[id].net, id, notch_fill_rects);
+      }
       for (size_t f = first_fill; f < notch_fill_rects.size(); f++) {
         written_fills.emplace_back(id, f);
       }

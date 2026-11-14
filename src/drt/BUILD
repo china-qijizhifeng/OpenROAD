@@ -69,6 +69,7 @@ cc_library(
         "src/br/BrFixedShapes.h",
         "src/br/BrGeometry.h",
         "src/br/BrIncrementalCore.h",
+        "src/br/BrIoPinArea.h",
         "src/br/BrOffTrackSearch.h",
         "src/br/BrPathCleanup.h",
         "src/br/BrPinAccess.h",
@@ -95,6 +96,7 @@ cc_library(
         "src/br/BonnRouteDR.h",
         "src/br/BrDrtRules.cpp",
         "src/br/BrIncremental.cpp",
+        "src/br/BrIoPinRepair.cpp",
         "src/TritonRoute.cpp",
         "src/db/drObj/drAccessPattern.cpp",
         "src/db/drObj/drNet.cpp",
@@ -167,6 +169,7 @@ cc_library(
         "src/ta/FlexTA_rq.cpp",
     ],
     hdrs = [
+        "src/br/BrIoPinRepair.h",
         "include/drt/TritonRoute.h",
         "src/AbstractGraphicsFactory.h",
         "src/br/BrDrtRules.h",
