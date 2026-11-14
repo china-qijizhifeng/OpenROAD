@@ -19,6 +19,7 @@
 #include <set>
 #include <sstream>
 #include <string>
+#include <string_view>
 #include <tuple>
 #include <unordered_map>
 #include <unordered_set>
@@ -180,6 +181,8 @@ std::shared_ptr<GRTreeNode> splitEdgeAt(const std::shared_ptr<GRTreeNode>& tree,
     return nullptr;
   }
   auto middle = std::make_shared<GRTreeNode>(point);
+  // Both halves of a jumper wire stay jumper wire.
+  middle->setJumperWire(child->isJumperWire());
   parent->removeChild(child);
   middle->addChild(std::move(child));
   parent->addChild(middle);
@@ -265,14 +268,21 @@ void rerootAt(const std::shared_ptr<GRTreeNode>& tree,
 {
   std::vector<std::shared_ptr<GRTreeNode>> path;
   findPath(tree, node, path);
-  // Each edge keeps its kind (wire/via or pin link) when reversed.
+  // Each edge keeps its kind (wire/via, pin link, jumper wire) when reversed.
   std::vector<int> pins;
+  std::vector<bool> jumpers;
   for (size_t i = 1; i < path.size(); ++i) {
     pins.push_back(path[i]->getLinkPin());
+    jumpers.push_back(path[i]->isJumperWire());
   }
   for (size_t i = 0; i + 1 < path.size(); ++i) {
     path[i]->removeChild(path[i + 1]);
     path[i + 1]->addChild(path[i], pins[i]);
+    path[i]->setJumperWire(jumpers[i]);
+  }
+  // The new root has no incoming edge.
+  if (!path.empty()) {
+    path.back()->setJumperWire(false);
   }
 }
 
@@ -1927,7 +1937,7 @@ void CUGR::buildNetRoute(const GRNet* net, GRoute& route) const
                                max_x,
                                max_y,
                                child->getLayerIdx() + 1,
-                               false);
+                               child->isJumperWire());
             route.back().setIs3DRoute(true);
           } else {
             const auto [bottom_layer, top_layer]
@@ -2754,12 +2764,19 @@ std::shared_ptr<GRTreeNode> CUGR::buildTreeFromRoute(const GRoute& route) const
     nodes.emplace(key, point);
     return key;
   };
-  const auto addEdge = [&](const GRPoint& from, const GRPoint& to) {
-    const uint64_t from_key = addNode(from);
-    const uint64_t to_key = addNode(to);
-    adjacency[from_key].insert(to_key);
-    adjacency[to_key].insert(from_key);
-  };
+  // Unit edges of antenna jumper wires, (lower key, higher key).
+  std::set<std::pair<uint64_t, uint64_t>> jumper_edges;
+  const auto addEdge
+      = [&](const GRPoint& from, const GRPoint& to, const bool jumper = false) {
+          const uint64_t from_key = addNode(from);
+          const uint64_t to_key = addNode(to);
+          adjacency[from_key].insert(to_key);
+          adjacency[to_key].insert(from_key);
+          if (jumper) {
+            jumper_edges.emplace(std::min(from_key, to_key),
+                                 std::max(from_key, to_key));
+          }
+        };
 
   for (const GSegment& segment : route) {
     int init_layer = segment.init_layer - 1;
@@ -2800,17 +2817,20 @@ std::shared_ptr<GRTreeNode> CUGR::buildTreeFromRoute(const GRoute& route) const
       // edges along the crossed axis (commitTree deposits their demand on
       // the flanking edges) instead of rejecting the whole tree.
       const int axis = cells[0].low() != cells[0].high() ? 0 : 1;
+      const bool jumper = segment.isJumper();
       if (axis == 0) {
         const int y = cells[1].low();
         addNode(GRPoint(init_layer, cells[0].low(), y));
         for (int x = cells[0].low(); x < cells[0].high(); x++) {
-          addEdge(GRPoint(init_layer, x, y), GRPoint(init_layer, x + 1, y));
+          addEdge(
+              GRPoint(init_layer, x, y), GRPoint(init_layer, x + 1, y), jumper);
         }
       } else {
         const int x = cells[0].low();
         addNode(GRPoint(init_layer, x, cells[1].low()));
         for (int y = cells[1].low(); y < cells[1].high(); y++) {
-          addEdge(GRPoint(init_layer, x, y), GRPoint(init_layer, x, y + 1));
+          addEdge(
+              GRPoint(init_layer, x, y), GRPoint(init_layer, x, y + 1), jumper);
         }
       }
     }
@@ -2835,6 +2855,8 @@ std::shared_ptr<GRTreeNode> CUGR::buildTreeFromRoute(const GRoute& route) const
         continue;
       }
       auto node = std::make_shared<GRTreeNode>(nodes.at(neighbor_key));
+      node->setJumperWire(jumper_edges.contains(
+          {std::min(key, neighbor_key), std::max(key, neighbor_key)}));
       built[key]->addChild(node);
       built[neighbor_key] = std::move(node);
       queue.push(neighbor_key);
@@ -3413,7 +3435,190 @@ bool CUGR::hasAvailableResources(odb::dbNet* db_net,
   auto it = db_net_map_.find(db_net);
   const double demand
       = it == db_net_map_.end() ? 1.0 : it->second->getNdrCost(layer_0);
-  return grid_graph_->getEdge(layer_0, tile_x, tile_y).getResource() >= demand;
+  const GraphEdge& edge = grid_graph_->getEdge(layer_0, tile_x, tile_y);
+  if (edge.getResource() < demand) {
+    debugPrint(logger_,
+               GRT,
+               "jumper_rejections",
+               3,
+               "JR position layer={} x={} y={} capacity={:.3f} used={:.3f} "
+               "demand={:.3f}",
+               layer_index,
+               tile_x,
+               tile_y,
+               edge.capacity,
+               edge.demand,
+               demand);
+  }
+  return edge.getResource() >= demand;
+}
+
+std::vector<double> CUGR::edgeOverflows() const
+{
+  const int num_layers = grid_graph_->getNumLayers();
+  const int x_size = grid_graph_->getXSize();
+  const int y_size = grid_graph_->getYSize();
+  std::vector<double> overflows(
+      static_cast<size_t>(num_layers) * x_size * y_size, 0.0);
+  for (int layer = 0; layer < num_layers; layer++) {
+    for (int x = 0; x < x_size; x++) {
+      for (int y = 0; y < y_size; y++) {
+        const GraphEdge& edge = grid_graph_->getEdge(layer, x, y);
+        overflows[grid_graph_->edgeFlatIndex(layer, x, y)]
+            = std::max<double>(0.0, edge.demand - edge.capacity);
+      }
+    }
+  }
+  return overflows;
+}
+
+void CUGR::logOverflowIncrease(const std::vector<double>& before,
+                               odb::dbNet* db_net,
+                               const GRoute& route) const
+{
+  // Cells of the route by kind: pin bridge wires (per layer), pin bridge
+  // vias and jumper ends (any layer).
+  std::set<std::tuple<int, int, int>> bridge_wire_cells;
+  std::set<std::pair<int, int>> bridge_via_cells;
+  std::set<std::pair<int, int>> jumper_end_cells;
+  for (const GSegment& segment : route) {
+    const BoxT cells = grid_graph_->rangeSearchCells(
+        BoxT(segment.init_x, segment.init_y, segment.final_x, segment.final_y));
+    if (segment.is_pin_bridge) {
+      for (int x = cells[0].low(); x <= cells[0].high(); x++) {
+        for (int y = cells[1].low(); y <= cells[1].high(); y++) {
+          if (segment.isVia()) {
+            bridge_via_cells.emplace(x, y);
+          } else {
+            bridge_wire_cells.emplace(segment.init_layer - 1, x, y);
+          }
+        }
+      }
+    }
+    if (segment.isJumper() && !segment.isVia()) {
+      jumper_end_cells.emplace(cells[0].low(), cells[1].low());
+      jumper_end_cells.emplace(cells[0].high(), cells[1].high());
+    }
+  }
+  const int num_layers = grid_graph_->getNumLayers();
+  for (int layer = 0; layer < num_layers; layer++) {
+    const int direction = grid_graph_->getLayerDirection(layer);
+    for (int x = 0; x < grid_graph_->getXSize(); x++) {
+      for (int y = 0; y < grid_graph_->getYSize(); y++) {
+        const GraphEdge& edge = grid_graph_->getEdge(layer, x, y);
+        const double after = std::max<double>(0.0, edge.demand - edge.capacity);
+        const double was = before[grid_graph_->edgeFlatIndex(layer, x, y)];
+        if (after <= was + 1e-9) {
+          continue;
+        }
+        // The two cells the edge joins.
+        const int x1 = direction == 0 ? x + 1 : x;
+        const int y1 = direction == 0 ? y : y + 1;
+        const char* kind = "other";
+        if (bridge_wire_cells.contains({layer, x, y})
+            && bridge_wire_cells.contains({layer, x1, y1})) {
+          kind = "pin_bridge_wire";
+        } else if (bridge_via_cells.contains({x, y})
+                   || bridge_via_cells.contains({x1, y1})) {
+          kind = "pin_bridge_via";
+        } else if (jumper_end_cells.contains({x, y})
+                   || jumper_end_cells.contains({x1, y1})) {
+          kind = "jumper_end";
+        }
+        debugPrint(logger_,
+                   GRT,
+                   "jumper_rejections",
+                   1,
+                   "JR adoption_overflow net={} layer={} x={} y={} "
+                   "before={:.3f} after={:.3f} capacity={:.3f} kind={}",
+                   db_net->getConstName(),
+                   layer + 1,
+                   x,
+                   y,
+                   was,
+                   after,
+                   edge.capacity,
+                   kind);
+      }
+    }
+  }
+}
+
+void CUGR::logJumperLayerResources(const char* phase) const
+{
+  if (!grid_graph_ || !logger_->debugCheck(GRT, "jumper_rejections", 1)) {
+    return;
+  }
+  const int num_layers = grid_graph_->getNumLayers();
+  for (int layer = std::max(0, grid_graph_->getMinRoutingLayer());
+       layer < num_layers;
+       layer++) {
+    const int direction = grid_graph_->getLayerDirection(layer);
+    const int x_edges = grid_graph_->getXSize() - (direction == 0 ? 1 : 0);
+    const int y_edges = grid_graph_->getYSize() - (direction == 0 ? 0 : 1);
+    // Capacity in tenths of a track (30 = three tracks and more) -> edges,
+    // edges without use, capacity, use, edges with overflow, overflow.
+    std::map<int, std::array<double, 6>> classes;
+    for (int x = 0; x < x_edges; x++) {
+      for (int y = 0; y < y_edges; y++) {
+        const GraphEdge& edge = grid_graph_->getEdge(layer, x, y);
+        const int tenths = std::min(
+            30, static_cast<int>(std::floor(edge.capacity * 10 + 1e-6)));
+        std::array<double, 6>& entry = classes[tenths];
+        entry[0] += 1;
+        entry[1] += edge.demand < 1e-9 ? 1 : 0;
+        entry[2] += edge.capacity;
+        entry[3] += edge.demand;
+        if (edge.demand > edge.capacity + 1e-9) {
+          entry[4] += 1;
+          entry[5] += edge.demand - edge.capacity;
+        }
+      }
+    }
+    for (const auto& [tenths, entry] : classes) {
+      debugPrint(logger_,
+                 GRT,
+                 "jumper_rejections",
+                 1,
+                 "JR layer_resources phase={} layer={} direction={} "
+                 "capacity_tenths={} edges={} unused={} capacity={:.1f} "
+                 "used={:.1f} overflow_edges={} overflow={:.3f}",
+                 phase,
+                 layer + 1,
+                 direction == 0 ? "H" : "V",
+                 tenths,
+                 static_cast<int>(entry[0]),
+                 static_cast<int>(entry[1]),
+                 entry[2],
+                 entry[3],
+                 static_cast<int>(entry[4]),
+                 entry[5]);
+    }
+    if (layer >= 2 && std::string_view(phase) == "before") {
+      std::string pads;
+      grid_graph_->forEachStackFlankEdge(
+          layer - 2,
+          layer,
+          PointT(grid_graph_->getXSize() / 2, grid_graph_->getYSize() / 2),
+          {},
+          [&](int l, PointT edge_loc, CapacityT demand, double factor) {
+            pads += fmt::format("{}:{}:{}:{:.3f};",
+                                l + 1,
+                                edge_loc.x(),
+                                edge_loc.y(),
+                                demand * factor);
+          });
+      debugPrint(logger_,
+                 GRT,
+                 "jumper_rejections",
+                 1,
+                 "JR jumper_stack layer={} at={}:{} flank_demands={}",
+                 layer + 1,
+                 grid_graph_->getXSize() / 2,
+                 grid_graph_->getYSize() / 2,
+                 pads);
+    }
+  }
 }
 
 bool CUGR::hasJumperResources(odb::dbNet* db_net,
@@ -3462,7 +3667,15 @@ bool CUGR::hasJumperResources(odb::dbNet* db_net,
   if (gr_net != nullptr && gr_net->getRoutingTree() != nullptr) {
     accumulate_wire(layer_0 - 2, -1.0);
   }
-  // The adopted route commits each endpoint's two vias as one stack.
+  // The adopted route commits each endpoint's two vias as one stack. On the
+  // jumper's layer the pads of the two stacks lie on the jumper's own
+  // track: they charge no edge the jumper wire runs over, as in the commit
+  // (GridGraph::forEachTreeDemandImpl).
+  std::set<std::pair<int, int>> wire_edges;
+  grid_graph_->forEachWireEdge(
+      layer_0, endpoints[0], endpoints[1], [&](PointT lower) {
+        wire_edges.emplace(lower.x(), lower.y());
+      });
   for (const PointT& endpoint : endpoints) {
     grid_graph_->forEachStackFlankEdge(
         layer_0 - 2,
@@ -3470,17 +3683,58 @@ bool CUGR::hasJumperResources(odb::dbNet* db_net,
         endpoint,
         costs,
         [&](int l, PointT loc, CapacityT demand, double factor) {
+          if (l == layer_0 && wire_edges.contains({loc.x(), loc.y()})) {
+            return;
+          }
           edge_demands[{l, loc.x(), loc.y()}] += demand * factor;
         });
   }
+  bool fits = true;
   for (const auto& [edge, demand] : edge_demands) {
     const auto& [layer, x, y] = edge;
     if (demand > 0
         && grid_graph_->getEdge(layer, x, y).getResource() < demand) {
-      return false;
+      fits = false;
+      break;
     }
   }
-  return true;
+  if (logger_->debugCheck(GRT, "jumper_rejections", 3)) {
+    // layer, x, y, demand of the jumper; capacity and use of the edge
+    std::vector<std::tuple<int, int, int, double>> charged;
+    for (const auto& [edge, demand] : edge_demands) {
+      if (demand > 0) {
+        const auto& [layer, x, y] = edge;
+        charged.emplace_back(layer, x, y, demand);
+      }
+    }
+    std::ranges::sort(charged);
+    std::string edges;
+    for (const auto& [layer, x, y, demand] : charged) {
+      const GraphEdge& edge = grid_graph_->getEdge(layer, x, y);
+      edges += fmt::format("{}:{}:{}:{:.3f}:{:.3f}:{:.3f};",
+                           layer + 1,
+                           x,
+                           y,
+                           demand,
+                           edge.capacity,
+                           edge.demand);
+    }
+    debugPrint(logger_,
+               GRT,
+               "jumper_rejections",
+               3,
+               "JR fit net={} layer={} x0={} y0={} x1={} y1={} fits={} "
+               "edges={}",
+               db_net->getConstName(),
+               layer_index,
+               init_tile_x,
+               init_tile_y,
+               final_tile_x,
+               final_tile_y,
+               fits ? 1 : 0,
+               edges);
+  }
+  return fits;
 }
 
 }  // namespace grt

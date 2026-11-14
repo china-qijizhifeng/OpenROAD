@@ -538,6 +538,10 @@ struct BonnRouteDRParams
   // every other via definition of the access point when it fails. Prints
   // statistics and one line per failing via; the routing is unchanged.
   int start_check = 0;
+  // After FlexDR, extend routed metal on IO pins to the layer's minimum
+  // area without counting pin-purpose shapes. Each patch is checked against
+  // the final geometry with FlexGC before it is written. Summary DRT-9263.
+  bool io_pin_area = true;
   // C5 step 2 (lead/cleanup/C5-revised.md, rule 3'): the searches place a
   // via whose bottom pad overlaps a pin shape of its own net only at an
   // access point whose FlexPA via definitions include the via, or where the

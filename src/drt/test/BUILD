@@ -16,6 +16,13 @@ cc_test(
 )
 
 cc_test(
+    name = "bonnroute_wire_junctions_test",
+    size = "small",
+    srcs = ["BonnRouteWireJunctionsTest.cpp"],
+    deps = ["//src/drt:bonnroute_core"],
+)
+
+cc_test(
     name = "bonnroute_speculative_ripup_test",
     size = "small",
     srcs = ["BonnRouteSpeculativeRipupTest.cpp"],
@@ -110,6 +117,13 @@ cc_test(
         "BonnRouteFastGridDenseTest.cpp",
         "BonnRouteRoutingSpaceTestUtil.h",
     ],
+    deps = ["//src/drt:bonnroute_core"],
+)
+
+cc_test(
+    name = "bonnroute_io_pin_area_test",
+    size = "small",
+    srcs = ["BonnRouteIoPinAreaTest.cpp"],
     deps = ["//src/drt:bonnroute_core"],
 )
 
@@ -393,6 +407,27 @@ py_library(
     for test_name in PY_TESTS
 ]
 
+cc_test(
+    name = "bonnroute_io_pin_repair_test",
+    size = "medium",
+    srcs = [
+        "BonnRouteIoPinRepairTest.cpp",
+        "fixture.cpp",
+        "fixture.h",
+    ],
+    includes = [
+        "../src",
+    ],
+    deps = [
+        "//src/drt:base_types",
+        "//src/drt:bonnroute_core",
+        "//src/drt:drt_impl",
+        "//src/odb/src/db",
+        "//src/utl",
+        "@googletest//:gtest",
+        "@googletest//:gtest_main",
+    ],
+)
 cc_test(
     name = "bonnroute_lef58_diff_test",
     size = "medium",

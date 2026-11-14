@@ -35,6 +35,7 @@
 #include "br/BrPinAccess.h"
 #include "br/BrSameNetRules.h"
 #include "br/BrTailPipeline.h"
+#include "br/BrWireJunctions.h"
 #include "db/obj/frAccess.h"
 #include "db/obj/frBTerm.h"
 #include "db/obj/frBlock.h"
@@ -354,6 +355,8 @@ bool BonnRouteDRParams::set(const std::string& name, const double value)
     partition_check = partition_check || dependency_trace;
   } else if (name == "start_check") {
     start_check = std::clamp(v, 0, 1);
+  } else if (name == "io_pin_area") {
+    io_pin_area = v != 0;
   } else if (name == "planar_first") {
     planar_first = v != 0;
   } else if (name == "cleanup_normalize_initial_routing") {
@@ -9340,7 +9343,17 @@ void BonnRouteDR::writeNets()
   // written in parallel.
   auto write_net = [&](NetData& data, WriteCounts& counts) {
     frNet* net = data.net;
-    // Split wires at planar pin points so the pin end is an endpoint.
+    // Preserve interior wire junctions through FlexDR's overlap merging.
+    std::vector<br::WireSegment> segments;
+    for (const OutWire& w : data.wires) {
+      if (!w.patch) {
+        segments.push_back({w.layer, toGrid(w.begin), toGrid(w.end)});
+      }
+    }
+    const auto crossings = br::interiorWireCrossings(segments);
+    size_t segment_index = 0;
+    std::vector<std::array<bool, 2>> junction_ends;
+    // Split wires at planar pin points and at crossing junctions.
     std::vector<OutWire> wires;
     std::vector<OutWire> patches;
     for (const OutWire& w : data.wires) {
@@ -9348,7 +9361,11 @@ void BonnRouteDR::writeNets()
         patches.push_back(w);
         continue;
       }
+      const auto& joints = crossings[segment_index++];
       std::vector<odb::Point> cuts{w.begin, w.end};
+      for (const br::GridPoint& point : joints) {
+        cuts.push_back(toPoint(point));
+      }
       for (const auto& [layer, p] : data.pin_points) {
         const bool on_x = w.begin.y() == w.end.y() && p.y() == w.begin.y()
                           && p.x() > std::min(w.begin.x(), w.end.x())
@@ -9363,8 +9380,13 @@ void BonnRouteDR::writeNets()
       std::ranges::sort(cuts, [](const odb::Point& a, const odb::Point& b) {
         return std::make_pair(a.x(), a.y()) < std::make_pair(b.x(), b.y());
       });
+      cuts.erase(std::ranges::unique(cuts).begin(), cuts.end());
       for (size_t k = 0; k + 1 < cuts.size(); k++) {
         wires.push_back({w.layer, cuts[k], cuts[k + 1], w.patch, w.wire_type});
+        junction_ends.push_back(
+            {std::binary_search(joints.begin(), joints.end(), toGrid(cuts[k])),
+             std::binary_search(
+                 joints.begin(), joints.end(), toGrid(cuts[k + 1]))});
       }
     }
     // Contact guard: FlexDR's clean-up needs every pin contact at one of the
@@ -9406,7 +9428,8 @@ void BonnRouteDR::writeNets()
       data.vias.clear();
       return false;
     }
-    for (const OutWire& w : wires) {
+    for (size_t wire_index = 0; wire_index < wires.size(); wire_index++) {
+      const OutWire& w = wires[wire_index];
       if (w.begin == w.end) {
         continue;
       }
@@ -9428,6 +9451,15 @@ void BonnRouteDR::writeNets()
         style.setWidth(width);
         style.setBeginExt(width / 2);
         style.setEndExt(width / 2);
+      }
+      // A crossing is a topological junction. Truncation keeps this split
+      // when a later overlapping segment spans the same junction. Each cut
+      // is internal to its original wire, so its metal union is unchanged.
+      if (junction_ends[wire_index][0]) {
+        style.setBeginStyle(frcTruncateEndStyle, 0);
+      }
+      if (junction_ends[wire_index][1]) {
+        style.setEndStyle(frcTruncateEndStyle, 0);
       }
       // A wire ending on a pin is truncated there, which is how FlexDR
       // recognises planar pin connections.
@@ -9516,7 +9548,9 @@ void BonnRouteDR::writeNets()
       }
       const int id = ids[k];
       const size_t first_fill = notch_fill_rects.size();
-      fillNotches(nets_[id].net, id, notch_fill_rects);
+      if (params_.notch_fill) {
+        fillNotches(nets_[id].net, id, notch_fill_rects);
+      }
       for (size_t f = first_fill; f < notch_fill_rects.size(); f++) {
         written_fills.emplace_back(id, f);
       }

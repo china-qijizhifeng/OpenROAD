@@ -52,6 +52,12 @@ class GRTreeNode : public GRPoint
   bool isPinLink() const { return incoming_pin_ >= 0; }
   // Pin index (GRNet numbering) of the incoming pin link, -1 otherwise.
   int getLinkPin() const { return incoming_pin_; }
+  // True if the edge from this node's parent belongs to the wire of an
+  // antenna jumper. On the jumper's layer the pads of the via stacks at its
+  // two ends lie on the jumper's own track: they charge no edge the jumper
+  // wire runs over (GridGraph::forEachTreeDemandImpl).
+  bool isJumperWire() const { return incoming_jumper_; }
+  void setJumperWire(const bool jumper) { incoming_jumper_ = jumper; }
 
   void removeChild(const std::shared_ptr<GRTreeNode>& child)
   {
@@ -71,6 +77,7 @@ class GRTreeNode : public GRPoint
 
  private:
   int incoming_pin_ = -1;
+  bool incoming_jumper_ = false;
   std::vector<std::shared_ptr<GRTreeNode>> children_;
 };
 

@@ -935,6 +935,7 @@ int GlobalRouter::repairAntennas(odb::dbMTerm* diode_mterm,
                                                           diode_mterm,
                                                           ratio_margin,
                                                           num_threads);
+    repair_antennas_->logViolations("before", itr + 1);
     // if run in GRT and it need run jumper insertion
     std::vector<odb::dbNet*> nets_with_jumpers;
     if (!diode_only && repair_antennas_->hasNewViolations()
@@ -966,6 +967,7 @@ int GlobalRouter::repairAntennas(odb::dbMTerm* diode_mterm,
                                                      diode_mterm,
                                                      ratio_margin,
                                                      num_threads);
+      repair_antennas_->logViolations("after_jumpers", itr + 1);
       updateDbCongestion();
     }
     if (violations && !jumper_only) {
@@ -1562,8 +1564,7 @@ bool GlobalRouter::loadRoutingFromDBGuides(odb::dbNet* db_net)
     int via_layer_idx = guide->getViaLayer() != nullptr
                             ? guide->getViaLayer()->getRoutingLevel()
                             : 0;
-    boxToGlobalRouting(
-        guide->getBox(), layer_idx, via_layer_idx, routes_[db_net]);
+    guideToGlobalRouting(guide, layer_idx, via_layer_idx, routes_[db_net]);
     is_congested_ = is_congested_ || guide->isCongested();
   }
 
@@ -2766,6 +2767,47 @@ bool GlobalRouter::hasJumperResources(const int init_x,
                                    dbuToTile(final_y, /*is_x=*/false));
 }
 
+void GlobalRouter::logJumperLayerResources(const char* phase)
+{
+  if (!logger_->debugCheck(GRT, "jumper_rejections", 1)) {
+    return;
+  }
+  if (use_cugr_) {
+    cugr_->logJumperLayerResources(phase);
+    return;
+  }
+  // FastRoute: edges by available tracks (capacity minus use).
+  const int x_grids = grid_->getXGrids();
+  const int y_grids = grid_->getYGrids();
+  for (int layer = getMinRoutingLayer(); layer <= getMaxRoutingLayer();
+       layer++) {
+    const bool is_horizontal
+        = db_->getTech()->findRoutingLayer(layer)->getDirection()
+          == odb::dbTechLayerDir::HORIZONTAL;
+    std::map<int, int> available;
+    for (int x = 0; x < x_grids - (is_horizontal ? 1 : 0); x++) {
+      for (int y = 0; y < y_grids - (is_horizontal ? 0 : 1); y++) {
+        const int tracks = fastroute_->getAvailableResources(
+            x, y, is_horizontal ? x + 1 : x, is_horizontal ? y : y + 1, layer);
+        available[tracks]++;
+      }
+    }
+    for (const auto& [tracks, edges] : available) {
+      debugPrint(logger_,
+                 GRT,
+                 "jumper_rejections",
+                 1,
+                 "JR layer_available phase={} layer={} direction={} "
+                 "available={} edges={}",
+                 phase,
+                 layer,
+                 is_horizontal ? "H" : "V",
+                 tracks,
+                 edges);
+    }
+  }
+}
+
 // Find the position of the middle of a GCell closest to the position
 odb::Point GlobalRouter::getPositionOnGrid(const odb::Point& real_position)
 {
@@ -2796,10 +2838,20 @@ bool GlobalRouter::updateJumperedRoute(const int& init_x,
                                        odb::dbNet* db_net)
 {
   if (use_cugr_) {
+    // Debug group "jumper_rejections" (log only): the overflow this
+    // adoption adds, edge by edge.
+    const bool log_overflow = logger_->debugCheck(GRT, "jumper_rejections", 1);
+    std::vector<double> overflow_before;
+    if (log_overflow) {
+      overflow_before = cugr_->edgeOverflows();
+    }
     // A failed adoption releases the net's old demand; the caller must roll
     // the jumper back and call restoreNetDemand to recommit the route.
     if (!cugr_->restoreNetRoute(db_net, routes_[db_net])) {
       return false;
+    }
+    if (log_overflow) {
+      cugr_->logOverflowIncrease(overflow_before, db_net, routes_[db_net]);
     }
     // The adopted route supersedes any guide restore a prior failure queued.
     if (Net* net = getNet(db_net)) {
@@ -3450,8 +3502,7 @@ void GlobalRouter::loadGuidesFromDB()
     for (odb::dbGuide* guide : net->getGuides()) {
       int layer_idx = guide->getLayer()->getRoutingLevel();
       int via_layer_idx = guide->getViaLayer()->getRoutingLevel();
-      boxToGlobalRouting(
-          guide->getBox(), layer_idx, via_layer_idx, routes_[net]);
+      guideToGlobalRouting(guide, layer_idx, via_layer_idx, routes_[net]);
       is_congested_ = is_congested_ || guide->isCongested();
     }
   }
@@ -4468,6 +4519,22 @@ void GlobalRouter::boxToGlobalRouting(const odb::Rect& route_bds,
   while (x0 == x1 && (y0 + tile_size) <= y1) {
     route.emplace_back(x0, y0, layer, x0, y0 + tile_size, layer);
     y0 += tile_size;
+  }
+}
+
+// The segments of a guide; the wire segments of a jumper guide are jumper
+// wires again (saveGuides sets the guide's flag from the segment's).
+void GlobalRouter::guideToGlobalRouting(odb::dbGuide* guide,
+                                        const int layer,
+                                        const int via_layer,
+                                        GRoute& route)
+{
+  const size_t first = route.size();
+  boxToGlobalRouting(guide->getBox(), layer, via_layer, route);
+  if (guide->isJumper()) {
+    for (size_t i = first; i < route.size(); i++) {
+      route[i].is_jumper = !route[i].isVia();
+    }
   }
 }
 

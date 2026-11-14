@@ -24,6 +24,7 @@
 #include "boost/bind/bind.hpp"
 #include "boost/geometry/geometry.hpp"
 #include "br/BonnRouteDR.h"
+#include "br/BrIoPinRepair.h"
 #include "db/infra/frSegStyle.h"
 #include "db/obj/frShape.h"
 #include "db/obj/frVia.h"
@@ -981,6 +982,15 @@ void TritonRoute::endFR()
     dr_->end(/* done */ true);
   }
   dr_.reset();
+  if (bonnroute_ && !distributed_ && bonnroute_params_
+      && bonnroute_params_->io_pin_area) {
+    br::repairIoPinArea(getDesign(), logger_, router_cfg_.get());
+    if (!router_cfg_->DRC_RPT_FILE.empty()) {
+      reportDRC(router_cfg_->DRC_RPT_FILE,
+                design_->getTopBlock()->getMarkers(),
+                "DRC");
+    }
+  }
   io::Writer writer(getDesign(), logger_);
   writer.updateDb(db_, router_cfg_.get());
 
