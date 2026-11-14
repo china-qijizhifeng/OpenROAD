@@ -111,5 +111,25 @@ TEST_F(IoPinRepairTest, RejectsExtensionTowardDifferentNet)
   EXPECT_LT(area(io), 20000);
 }
 
+TEST_F(IoPinRepairTest, SplitsExtensionBetweenNearbyNets)
+{
+  frNet* io = makeNet("io");
+  pin(io, odb::Rect(900, 950, 1100, 1050));
+  makePathsegExt(io, 2, {1000, 1000}, {1010, 1000});
+  frNet* left = makeNet("left");
+  frNet* right = makeNet("right");
+  makePathsegExt(left, 2, {700, 1000}, {720, 1000});
+  makePathsegExt(right, 2, {1280, 1000}, {1300, 1000});
+  initRegionQuery();
+  br::repairIoPinArea(design.get(), logger.get(), router_cfg.get());
+  ASSERT_EQ(io->getPatchWires().size(), 1);
+  EXPECT_GE(area(io), 20000);
+  EXPECT_TRUE(left->getPatchWires().empty());
+  EXPECT_TRUE(right->getPatchWires().empty());
+  const odb::Rect patch = io->getPatchWires().front()->getBBox();
+  EXPECT_LT(patch.xMin(), 950);
+  EXPECT_GT(patch.xMax(), 1060);
+}
+
 }  // namespace
 }  // namespace drt
