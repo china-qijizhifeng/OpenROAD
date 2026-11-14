@@ -31,7 +31,7 @@ class IoPinRepairTest : public Fixture
     auto area = std::make_unique<frAreaConstraint>(20000);
     design->getTech()->getLayer(2)->setAreaConstraint(area.get());
     design->getTech()->addUConstraint(std::move(area));
-    makeSimpleSpacingConstraint(2, 100);
+    makeSpacingConstraint(2);
   }
 
   void pin(frNet* net, const odb::Rect& box)
