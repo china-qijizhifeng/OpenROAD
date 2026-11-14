@@ -87,6 +87,7 @@ class AntennaChecker::Impl
   int checkAntennas(odb::dbNet* net, int num_threads, bool verbose);
   int antennaViolationCount() const;
   int pinViolationCount() const;
+  std::string antennaViolationSignature() const;
   NetCheck checkNet(odb::dbNet* net, float ratio_margin);
   Violations getAntennaViolations(odb::dbNet* net,
                                   odb::dbMTerm* diode_mterm,
@@ -189,6 +190,7 @@ class AntennaChecker::Impl
   // The counts of the last checkAntennas.
   int net_violation_count_{0};
   int pin_violation_count_{0};
+  std::string violation_signature_;
   std::string report_file_name_;
   // Last analyses per net, at most one per (diode, ratio margin).  Nets are
   // analyzed in parallel, so the map is guarded; each entry is only read or
