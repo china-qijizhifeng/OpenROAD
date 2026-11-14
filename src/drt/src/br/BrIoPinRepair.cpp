@@ -42,11 +42,11 @@ Box toBox(const odb::Rect& box)
 // initPA0 reads the existing design; addPAObj adds only the candidate to
 // the checker's temporary polygons. The routed design is unchanged.
 bool patchClean(frDesign* design,
-                 utl::Logger* logger,
-                 RouterConfiguration* router_cfg,
-                 frNet* net,
-                 frPatchWire& patch,
-                 std::set<MarkerId>& resolved)
+                utl::Logger* logger,
+                RouterConfiguration* router_cfg,
+                frNet* net,
+                frPatchWire& patch,
+                std::set<MarkerId>& resolved)
 {
   odb::Rect drc_box;
   odb::Rect ext_box;
@@ -155,7 +155,7 @@ void repairIoPinArea(frDesign* design,
     for (const frRect& pin : pins) {
       const frLayerNum layer_num = pin.getLayerNum();
       frLayer* layer = design->getTech()->getLayer(layer_num);
-      const frAreaConstraint* area = layer->getAreaConstraint();
+      frAreaConstraint* area = layer->getAreaConstraint();
       if (area == nullptr || area->getMinArea() <= 0) {
         continue;
       }
@@ -181,7 +181,8 @@ void repairIoPinArea(frDesign* design,
         for (const auto& anchor : metal.anchors) {
           if (!pin_box.containsClosed(anchor.x(), anchor.y())
               || !std::ranges::any_of(group, [&](const size_t k) {
-                   return metal.pieces[k].containsClosed(anchor.x(), anchor.y());
+                   return metal.pieces[k].containsClosed(anchor.x(),
+                                                         anchor.y());
                  })) {
             continue;
           }
@@ -208,7 +209,8 @@ void repairIoPinArea(frDesign* design,
             frPatchWire patch;
             patch.setLayerNum(layer_num);
             patch.setOrigin(anchor);
-            odb::Rect offset(candidate.xlo, candidate.ylo, candidate.xhi, candidate.yhi);
+            odb::Rect offset(
+                candidate.xlo, candidate.ylo, candidate.xhi, candidate.yhi);
             offset.moveDelta(-anchor.x(), -anchor.y());
             patch.setOffsetBox(offset);
             return patchClean(design, logger, router_cfg, net, patch, resolved);
@@ -220,7 +222,8 @@ void repairIoPinArea(frDesign* design,
           auto patch = std::make_unique<frPatchWire>();
           patch->setLayerNum(layer_num);
           patch->setOrigin(anchor);
-          odb::Rect offset(candidate->xlo, candidate->ylo, candidate->xhi, candidate->yhi);
+          odb::Rect offset(
+              candidate->xlo, candidate->ylo, candidate->xhi, candidate->yhi);
           offset.moveDelta(-anchor.x(), -anchor.y());
           patch->setOffsetBox(offset);
           frPatchWire* object = patch.get();
@@ -251,13 +254,13 @@ void repairIoPinArea(frDesign* design,
     }
   }
   logger->info(utl::DRT,
-                9263,
-                "BonnRoute DR IO pins after FlexDR: {} routed components on "
-                "top-level pin shapes, {} below the layer's minimum area "
-                "without the pin, {} patched to it.",
-                components,
-                below,
-                patched);
+               9263,
+               "BonnRoute DR IO pins after FlexDR: {} routed components on "
+               "top-level pin shapes, {} below the layer's minimum area "
+               "without the pin, {} patched to it.",
+               components,
+               below,
+               patched);
 }
 
 }  // namespace drt::br
