@@ -3,8 +3,6 @@
 
 #include "dr/FlexDR_conn.h"
 
-#include "br/BrConnectivityProbe.h"
-
 #include <algorithm>
 #include <climits>
 #include <cstdlib>
@@ -1266,7 +1264,6 @@ void FlexDRConnectivityChecker::check(int iter)
         auto& horzNewSegSpans = aHorzNewSegSpans[i];
         auto& vertNewSegSpans = aVertNewSegSpans[i];
 
-        connectivityProbe(net, "checker-before-overlap", iter, logger_);
         initRouteObjs(net, initNetRouteObjs);
         organizePathSegsByLayerAndTrack(
             net, initNetRouteObjs, horzPathSegs, vertPathSegs);
@@ -1335,7 +1332,6 @@ void FlexDRConnectivityChecker::check(int iter)
         auto& adjPrevIdx = aAdjPrevIdx[i];
         netRouteObjs.clear();
         initRouteObjs(net, netRouteObjs);
-        connectivityProbe(net, "checker-after-overlap", iter, logger_);
         buildPin2epMap(net, netRouteObjs, pin2epMap);
         buildNodeMap(net, netRouteObjs, netPins, pin2epMap, nodeMap);
 
@@ -1387,7 +1383,6 @@ void FlexDRConnectivityChecker::check(int iter)
         // get lock
         // delete / shrink netRouteObjs,
         finish(net, netRouteObjs, netPins, adjVisited, gCnt, nCnt, nodeMap);
-        connectivityProbe(net, "checker-after-finish", iter, logger_);
         // release lock
       }
     }

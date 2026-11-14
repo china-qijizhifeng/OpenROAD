@@ -3,8 +3,6 @@
 
 #include "dr/FlexDR.h"
 
-#include "br/BrConnectivityProbe.h"
-
 #include <sys/stat.h>
 
 #include <algorithm>
@@ -3039,9 +3037,6 @@ int FlexDR::main()
 
   init();
   incremental_changed_regions_ = router_->getIncrementalChangedRegions();
-  for (const auto& net : getDesign()->getTopBlock()->getNets()) {
-    connectivityProbe(net.get(), "flex-after-init", -1, logger_);
-  }
   frTime t;
   // If the loaded design already carries DRC markers (read from the database in
   // io::Parser::setMarkers), resume from the configured iteration, skipping the
