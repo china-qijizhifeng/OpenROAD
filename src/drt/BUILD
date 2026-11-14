@@ -27,6 +27,7 @@ cc_library(
     hdrs = [
         "src/dr/FlexDRWorkerCancel.h",
         "src/dr/FlexMazeTypes.h",
+        "src/dr/SpacingGeometry.h",
         "src/dr/WatermarkCost.h",
         "src/frBaseTypes.h",
     ],

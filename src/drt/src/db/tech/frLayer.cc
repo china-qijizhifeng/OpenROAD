@@ -111,49 +111,68 @@ void frLayer::printAllConstraints(utl::Logger* logger)
   }
 }
 
+void frLayer::setMinSpacing(frConstraint* in)
+{
+  minSpc_ = in;
+  if (in == nullptr) {
+    min_spacing_type_ = MinSpacingType::NONE;
+    return;
+  }
+  switch (in->typeId()) {
+    case frConstraintTypeEnum::frcSpacingConstraint:
+      min_spacing_type_ = MinSpacingType::SPACING;
+      break;
+    case frConstraintTypeEnum::frcSpacingTablePrlConstraint:
+      min_spacing_type_ = MinSpacingType::PRL_TABLE;
+      break;
+    case frConstraintTypeEnum::frcSpacingTableTwConstraint:
+      min_spacing_type_ = MinSpacingType::TWO_WIDTHS_TABLE;
+      break;
+    default:
+      min_spacing_type_ = MinSpacingType::OTHER;
+      break;
+  }
+}
+
 frCoord frLayer::getMinSpacingValue(frCoord width1,
                                     frCoord width2,
                                     frCoord prl,
                                     bool use_min_spacing)
 {
   frCoord rangeSpc = -1;
-  if (hasSpacingRangeConstraints()) {
-    for (auto con : getSpacingRangeConstraints()) {
-      if (use_min_spacing) {
-        if (rangeSpc == -1) {
-          rangeSpc = con->getMinSpacing();
-        } else {
-          rangeSpc = std::min(rangeSpc, con->getMinSpacing());
-        }
-      } else if (con->inRange(width1) || con->inRange(width2)) {
-        rangeSpc = std::max(rangeSpc, con->getMinSpacing());
+  for (const auto* con : spacingRangeConstraints_) {
+    if (use_min_spacing) {
+      if (rangeSpc == -1) {
+        rangeSpc = con->getMinSpacing();
+      } else {
+        rangeSpc = std::min(rangeSpc, con->getMinSpacing());
       }
+    } else if (con->inRange(width1) || con->inRange(width2)) {
+      rangeSpc = std::max(rangeSpc, con->getMinSpacing());
     }
   }
 
-  auto con = getMinSpacing();
-  if (!con) {
-    return std::max(rangeSpc, 0);
-  }
   frCoord minSpc = 0;
-  if (con->typeId() == frConstraintTypeEnum::frcSpacingConstraint) {
-    minSpc = static_cast<frSpacingConstraint*>(con)->getMinSpacing();
-  } else if (con->typeId()
-             == frConstraintTypeEnum::frcSpacingTablePrlConstraint) {
-    if (use_min_spacing) {
-      minSpc = static_cast<frSpacingTablePrlConstraint*>(con)->findMin();
-    } else {
-      minSpc = static_cast<frSpacingTablePrlConstraint*>(con)->find(
-          std::max(width1, width2), prl);
+  switch (min_spacing_type_) {
+    case MinSpacingType::NONE:
+      return std::max(rangeSpc, 0);
+    case MinSpacingType::SPACING:
+      minSpc = static_cast<frSpacingConstraint*>(minSpc_)->getMinSpacing();
+      break;
+    case MinSpacingType::PRL_TABLE: {
+      const auto* con = static_cast<frSpacingTablePrlConstraint*>(minSpc_);
+      minSpc = use_min_spacing ? con->findMin()
+                               : con->find(std::max(width1, width2), prl);
+      break;
     }
-  } else if (con->typeId()
-             == frConstraintTypeEnum::frcSpacingTableTwConstraint) {
-    if (use_min_spacing) {
-      minSpc = static_cast<frSpacingTableTwConstraint*>(con)->findMin();
-    } else {
-      minSpc = static_cast<frSpacingTableTwConstraint*>(con)->find(
-          width1, width2, prl);
+    case MinSpacingType::TWO_WIDTHS_TABLE: {
+      const auto* con = static_cast<frSpacingTableTwConstraint*>(minSpc_);
+      minSpc
+          = use_min_spacing ? con->findMin() : con->find(width1, width2, prl);
+      break;
     }
+    case MinSpacingType::OTHER:
+      break;
   }
   if (use_min_spacing && rangeSpc != -1) {
     return std::min(rangeSpc, minSpc);
