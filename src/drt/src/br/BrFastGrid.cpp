@@ -864,6 +864,11 @@ void FastGrid::setEdgeQuery(const size_t v,
 
 void FastGrid::bumpHistory(const size_t v)
 {
+  if (AccessFootprint* footprint = AccessFootprint::current()) [[unlikely]] {
+    int z, i, j;
+    graph_->decode(v, z, i, j);
+    recordWiring(*footprint, AccessKind::kFastGridWrite, z, i, j, j);
+  }
   uint16_t& h = history_[v];
   if (h < 0xffff) {
     h++;

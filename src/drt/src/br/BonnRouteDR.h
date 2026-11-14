@@ -10,9 +10,11 @@
 
 #include <array>
 #include <atomic>
+#include <cstddef>
 #include <cstdint>
 #include <fstream>
 #include <memory>
+#include <optional>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
@@ -20,17 +22,17 @@
 #include <vector>
 
 #include "br/BrAccessFootprint.h"
+#include "br/BrBusyThreads.h"
 #include "br/BrCore.h"
 #include "br/BrDistanceRules.h"
 #include "br/BrFastGrid.h"
 #include "br/BrGeometry.h"
+#include "br/BrOrderedBoxSchedule.h"
 #include "br/BrPathCleanup.h"
 #include "br/BrPinAccess.h"
 #include "br/BrPotentialOracle.h"
 #include "br/BrSameNetRules.h"
 #include "br/BrShapeGrid.h"
-#include "br/BrBusyThreads.h"
-#include "br/BrOrderedBoxSchedule.h"
 #include "br/BrTailPipeline.h"
 #include "br/BrWireModel.h"
 #include "frBaseTypes.h"
@@ -414,6 +416,10 @@ struct BonnRouteDRParams
   // percentage (for comparisons at an equal budget, e.g. the budget a
   // default run logged in DRT-9136). 0: final_ripup_effort.
   int64_t final_ripup_budget = 0;
+  // Number of root rip-up searches to precompute in parallel. Decisions,
+  // recursive victims, history and effort budgets keep their serial order.
+  // 0 disables; incremental and spatial rip-up strategies use their own path.
+  int speculative_ripup = 0;
   // Skip that phase when more than this percentage of the nets failed.
   int final_ripup_max_share = 2;
   // Catalogue paths start at the pin's OpenROAD access points (1) or
@@ -858,6 +864,7 @@ class BonnRouteDR
     FootprintStats footprint_stats;
     // Searching in a speculative batch: read-only on shared routing space.
     bool speculative = false;
+    bool defer_history = false;
     // Sec. 5.1: the partition region of the thread (nullptr: the whole
     // chip). A net continues in the dilated area only where that area's tile
     // box lies inside the region; otherwise connect() stops and sets
@@ -942,6 +949,31 @@ class BonnRouteDR
     int64_t held_pops = 0;
     int64_t settled = 0;
   };
+  struct RipupCandidate
+  {
+    std::optional<NetData> net;
+    bool found = false;
+    uint64_t net_version = 0;
+    br::TileBox reads;
+    std::vector<size_t> history;
+    int64_t settled = 0;
+    double seconds = 0;
+  };
+
+  struct RipupBatch
+  {
+    size_t first = 0;
+    std::vector<RipupCandidate> candidates;
+    std::vector<uint64_t> net_versions;
+    br::TileBox previous_writes;
+    int64_t searched = 0;
+    int64_t reused = 0;
+    int64_t invalidated = 0;
+    int64_t searched_settled = 0;
+    int64_t reused_settled = 0;
+    double search_seconds = 0;
+  };
+
   // Saved routing of a net, for restoring a failed rip-up sequence.
   struct SavedRouting
   {
@@ -1287,6 +1319,21 @@ class BonnRouteDR
   // this many vertices in the phase (0: unlimited).
   void routeRipupQueue(const std::vector<int>& failed,
                        int64_t settled_budget = 0);
+  // Ordered root decisions and recursive victim sequences of one pass.
+  void routeSerialRipupPass(std::vector<int>& queue,
+                            int pass,
+                            int64_t settled_budget,
+                            int64_t& serial_settled,
+                            RipupBatch* batch);
+  void searchRipupBatch(const std::vector<int>& queue,
+                        size_t first,
+                        int pass,
+                        RipupBatch& batch);
+  RipupCandidate* reuseRipupCandidate(size_t index, int net, RipupBatch& batch);
+  void completeSerialRipup(int net,
+                           bool routed,
+                           const std::vector<SavedRouting>& journal,
+                           std::vector<int>& unrouted);
   // ripup_partitions: one round of region-parallel rip-up sequences over
   // `queue` (pass `pass`); returns the settled vertices of the round.
   int64_t parallelRipupRound(const std::vector<int>& queue,
@@ -1348,7 +1395,8 @@ class BonnRouteDR
                      bool try_plain,
                      Worker& worker,
                      RipupState& state,
-                     const br::TileBox* resident);
+                     const br::TileBox* resident,
+                     RipupCandidate* candidate = nullptr);
   // region_ripup_effort: rip-up sequence of `net` inside `region` on the
   // region's thread; region_settled_start is the worker's settled count at
   // the region's start. True if the net is routed (and committed).

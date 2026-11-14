@@ -225,6 +225,11 @@ class FastGrid
   // grid, kept sparse beside it. Bumped serially only.
   uint16_t history(const size_t v) const
   {
+    if (AccessFootprint* footprint = AccessFootprint::current()) [[unlikely]] {
+      int z, i, j;
+      graph_->decode(v, z, i, j);
+      recordWiring(*footprint, AccessKind::kFastGridRead, z, i, j, j);
+    }
     const auto it = history_.find(v);
     return it == history_.end() ? 0 : it->second;
   }
