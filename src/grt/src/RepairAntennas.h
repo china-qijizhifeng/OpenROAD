@@ -119,6 +119,9 @@ class RepairAntennas
                        const int& tile_size,
                        const int& max_routing_layer,
                        std::vector<odb::dbNet*>& modified_nets);
+  // Debug group "jumper_rejections" (log only): the violations of the last
+  // check, one line per net, layer and group of gates.
+  void logViolations(const char* phase, int iteration) const;
 
  private:
   using coord_type = int;
@@ -148,7 +151,17 @@ class RepairAntennas
                     const int& num_nodes,
                     const int& violation_layer,
                     SegmentToJumperPos& segments_to_repair,
-                    odb::dbNet* db_net);
+                    odb::dbNet* db_net,
+                    int candidate_layers_below = 0);
+  // Debug group "jumper_rejections" (log only): one candidate segment of
+  // the search with the scan of its positions.
+  void logSegmentSearch(odb::dbNet* db_net,
+                        int seg_id,
+                        const GSegment& seg,
+                        const std::string& scan,
+                        int windows,
+                        int position,
+                        const char* outcome) const;
   bool findPosToJumper(const GRoute& route,
                        LayerToSegmentNodeVector& segment_graph,
                        const SegmentNode& seg_node,
@@ -261,6 +274,10 @@ class RepairAntennas
   int tile_size_;
   int jumper_size_;
   int smaller_seg_size_;
+  // Debug group "jumper_rejections": the top routing layer of the running
+  // jumper insertion and the name of the running search.
+  int max_routing_layer_ = 0;
+  const char* search_phase_ = "search";
   //////////////////////////////////////////
 };
 
