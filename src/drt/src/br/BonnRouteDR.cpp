@@ -156,6 +156,8 @@ bool BonnRouteDRParams::set(const std::string& name, const double value)
     region_ripup_effort = std::max(0, v);
   } else if (name == "keep_partial") {
     keep_partial = v != 0;
+  } else if (name == "connection_path_first") {
+    connection_path_first = std::clamp(v, 0, 2);
   } else if (name == "ripup_partitions") {
     ripup_partitions = std::max(0, v);
   } else if (name == "ripup_boxes") {
@@ -5910,8 +5912,58 @@ bool BonnRouteDR::connectWithoutOwnShapes(NetData& net,
       }
       worker.footprint.widen(box);
     }
+    if (params_.connection_path_first >= 2 && params_.component_regions) {
+      // The options that are legal without rip-up (the rule of the plain
+      // connect above), for the guide-path search of each connection.
+      std::vector<std::vector<char>> plain_valid(num_terms);
+      for (int t = 0; t < num_terms; t++) {
+        const Term& term = net.terms[t];
+        plain_valid[t].assign(term.options.size(), 0);
+        for (size_t o = 0; o < term.options.size(); o++) {
+          if (!valid[t][o]) {
+            continue;
+          }
+          const AccessOption& opt = term.options[o];
+          if (net.partial && net.partial_state.connected[t]) {
+            plain_valid[t][o] = 1;
+            continue;
+          }
+          if (worker.reader.level(opt.vertex, br::kWire, net.wire_type)
+              != br::kLegal) {
+            continue;
+          }
+          bool ok = true;
+          if (opt.offtrack) {
+            ok = optionLegal(opt, net.id, &worker);
+          } else {
+            for (const OutWire& w : opt.wires) {
+              if (shapeConflicts(wireShape(w), net.id, &worker)) {
+                ok = false;
+                break;
+              }
+            }
+            for (const OutVia& v : opt.vias) {
+              if (!ok) {
+                break;
+              }
+              const frVia via(v.def, v.point);
+              ok = !shapeConflicts({v.def->getLayer2Num(),
+                                    via.getLayer2BBox(),
+                                    br::ShapeRole::kViaPad},
+                                   net.id,
+                                   &worker);
+            }
+          }
+          plain_valid[t][o] = ok;
+        }
+      }
+      return connectInRegion(net, retry, true, valid, worker, &plain_valid);
+    }
     return connectInRegion(net, retry, true, valid, worker);
   }
+  // connection_path_first: the dilated retry continues from the connections
+  // the attempt in the guide area closed.
+  bool continues = false;
   if (!net.dilated_area) {
     if (connectInRegion(net, extra_dilation, false, valid, worker)) {
       return true;
@@ -5921,6 +5973,8 @@ bool BonnRouteDR::connectWithoutOwnShapes(NetData& net,
       return false;
     }
     net.dilated_area = true;
+    continues = params_.connection_path_first > 0
+                && progressAdds(net, worker.progress);
   }
   // Sec. 5.1: the dilated area is searched where its tile box lies inside
   // the thread's region. Otherwise the net continues there in a later
@@ -5935,21 +5989,33 @@ bool BonnRouteDR::connectWithoutOwnShapes(NetData& net,
     worker.footprint.widen(box);
   }
   worker.footprint.setStep(kStepRetrySearch);
+  if (continues) {
+    const PartialState first = std::move(worker.progress);
+    worker.progress = PartialState{};
+    return connectInRegion(net, retry, false, valid, worker, nullptr, &first);
+  }
   return connectInRegion(net, retry, false, valid, worker);
 }
 
-bool BonnRouteDR::connectInRegion(NetData& net,
-                                  const int dilation,
-                                  const bool ripup,
-                                  const std::vector<std::vector<char>>& valid,
-                                  Worker& worker)
+bool BonnRouteDR::connectInRegion(
+    NetData& net,
+    const int dilation,
+    const bool ripup,
+    const std::vector<std::vector<char>>& valid,
+    Worker& worker,
+    const std::vector<std::vector<char>>* plain_valid,
+    const PartialState* resume_from)
 {
-  // D1 S2: a partial net resumes from the connections it closed.
-  const bool resume = net.partial;
+  // D1 S2: a partial net resumes from the connections it closed; a dilated
+  // retry from those of its attempt in the guide area (resume_from).
+  const PartialState* const state
+      = resume_from != nullptr ? resume_from
+                               : (net.partial ? &net.partial_state : nullptr);
+  const bool resume = state != nullptr;
   worker.progress.valid = false;
   if (resume) {
-    net.wires = net.partial_state.wires;
-    net.vias = net.partial_state.vias;
+    net.wires = state->wires;
+    net.vias = state->vias;
     worker.partial_resumes++;
   } else {
     net.wires.clear();
@@ -5957,7 +6023,7 @@ bool BonnRouteDR::connectInRegion(NetData& net,
   }
   net.pin_points.clear();
   for (size_t t = 0; t < net.terms.size(); t++) {
-    net.terms[t].chosen = resume ? net.partial_state.chosen[t] : -1;
+    net.terms[t].chosen = resume ? state->chosen[t] : -1;
   }
   // Effort budget of a speculative tail attempt (tail_defer_settled):
   // checked before each search, so an attempt settles at most the budget
@@ -6083,9 +6149,9 @@ bool BonnRouteDR::connectInRegion(NetData& net,
   // Terms whose access path is part of a post-processed connection.
   std::vector<char> consumed(num_terms, 0);
   if (resume) {
-    connected = net.partial_state.connected;
-    consumed = net.partial_state.consumed;
-    for (const size_t v : net.partial_state.tree) {
+    connected = state->connected;
+    consumed = state->consumed;
+    for (const size_t v : state->tree) {
       if (in_tree.insert(v).second) {
         tree.push_back(v);
         sources.emplace_back(v, 0);
@@ -6107,7 +6173,8 @@ bool BonnRouteDR::connectInRegion(NetData& net,
   // Targets inside the current routing area and the future cost pi_H
   // (Sec. 4.1): l1 distance plus via lower bound to the nearest target;
   // per-term boxes keep it cheap for large nets.
-  auto set_targets = [&](const bool restrict) {
+  auto set_targets = [&](const bool restrict,
+                         const std::vector<std::vector<char>>& usable) {
     req.targets.clear();
     req.target_boxes.clear();
     std::vector<std::pair<int, size_t>> chosen;
@@ -6116,7 +6183,7 @@ bool BonnRouteDR::connectInRegion(NetData& net,
         continue;
       }
       for (size_t o = 0; o < net.terms[t].options.size(); o++) {
-        if (valid[t][o]
+        if (usable[t][o]
             && (!restrict || in_region(net.terms[t].options[o].vertex))) {
           chosen.emplace_back(t, o);
         }
@@ -6302,18 +6369,45 @@ bool BonnRouteDR::connectInRegion(NetData& net,
     br::SearchResult res;
     // Sec. 4.4: route the connection inside the GR tiles of a guide path
     // to another component first; fall back to the net's whole area.
-    if (params_.component_regions && dilation == 0 && !ripup
-        && buildPathRegion(net, connected, tree, valid, worker)) {
+    // connection_path_first: also for a net in a dilated area, and in
+    // rip-up mode as a search without rip-up between the options that are
+    // legal without it.
+    const bool path_first
+        = params_.connection_path_first > 0 && (dilation != 0 || ripup);
+    // The path of this connection comes from its guide-path search.
+    bool by_path_first = false;
+    const std::vector<std::vector<char>>* path_valid
+        = !ripup ? &valid : plain_valid;
+    if (params_.component_regions && (dilation == 0 || path_first)
+        && path_valid != nullptr
+        && buildPathRegion(net, connected, tree, *path_valid, worker)) {
       full_region = false;
       req.sources.clear();
-      for (const auto& source : sources) {
-        if (in_region(source.first)) {
-          req.sources.push_back(source);
+      if (ripup && tree.empty()) {
+        // The source options that are legal without rip-up.
+        for (size_t o = 0; o < net.terms[0].options.size(); o++) {
+          const size_t v = net.terms[0].options[o].vertex;
+          if ((*path_valid)[0][o] && in_region(v)) {
+            req.sources.emplace_back(v, net.terms[0].options[o].cost);
+          }
+        }
+      } else {
+        for (const auto& source : sources) {
+          if (in_region(source.first)) {
+            req.sources.push_back(source);
+          }
         }
       }
-      if (!req.sources.empty() && set_targets(true)) {
+      if (!req.sources.empty() && set_targets(true, *path_valid)) {
+        req.ripup = false;
         res = run(true);
+        req.ripup = ripup;
         worker.path_region_searches++;
+        if (path_first) {
+          worker.path_first_searches++;
+          worker.path_first_found += res.found;
+        }
+        by_path_first = res.found;
       }
     }
     if (!res.found) {
@@ -6325,7 +6419,7 @@ bool BonnRouteDR::connectInRegion(NetData& net,
         full_region = true;
       }
       req.sources = sources;
-      if (!set_targets(false)) {
+      if (!set_targets(false, valid)) {
         net.left_step = kLeftNoPath;
         return false;
       }
@@ -6344,9 +6438,12 @@ bool BonnRouteDR::connectInRegion(NetData& net,
     if (net.terms[0].chosen < 0) {
       const size_t s = res.path.back();
       br::Cost best = br::kInfCost;
+      // The options the search of this connection started from.
+      const std::vector<std::vector<char>>& source_valid
+          = by_path_first && ripup ? *path_valid : valid;
       for (size_t k = 0; k < net.terms[0].options.size(); k++) {
         const AccessOption& opt = net.terms[0].options[k];
-        if (valid[0][k] && opt.vertex == s && opt.cost < best) {
+        if (source_valid[0][k] && opt.vertex == s && opt.cost < best) {
           best = opt.cost;
           net.terms[0].chosen = static_cast<int>(k);
         }
@@ -10436,6 +10533,20 @@ void BonnRouteDR::main()
         params_.retry_dilation,
         dilated_routed,
         area_deferrals);
+    if (params_.connection_path_first > 0) {
+      int64_t path_first_searches = 0;
+      int64_t path_first_found = 0;
+      for (const Worker& w : workers_) {
+        path_first_searches += w.path_first_searches;
+        path_first_found += w.path_first_found;
+      }
+      logger_->report(
+          "BonnRoute DR connection areas: {} connections of nets in a "
+          "dilated area or in rip-up mode searched in their guide-path area "
+          "first, {} found a path there.",
+          path_first_searches,
+          path_first_found);
+    }
     const br::ShapeGrid::Statistics sg = shape_grid_.statistics();
     const br::FastGrid::Statistics fg = grid_.statistics();
     logger_->report(

@@ -93,6 +93,15 @@ struct BonnRouteDRParams
   // yet. Nets still partial after the rip-up phase are removed and left to
   // FlexDR whole. 0: a failed net keeps nothing.
   bool keep_partial = true;
+  // D1 (level per connection): in a plain connect, every connection is
+  // searched in its own guide-path area first, also when the net continues
+  // in the dilated area or a later rip-up pass widened it; only a connection
+  // without a path there is searched in the net's whole dilated area.
+  // 2: also in rip-up mode, where a connection is first searched without
+  // rip-up in its guide-path area and with rip-up in the whole dilated area
+  // when that finds no path. 0: a net in a dilated area and a net in rip-up
+  // mode search every remaining connection in the whole dilated area.
+  int connection_path_first = 0;
   // Parallel rip-up (Sec. 4.4 / 5.1): before each pass of the serial rip-up
   // queue, this many rounds of partition regions run the queued nets'
   // rip-up sequences in parallel, victims resident in the region; each
@@ -949,6 +958,10 @@ class BonnRouteDR
     int64_t regenerated_paths = 0;
     int64_t searches = 0;
     int64_t path_region_searches = 0;
+    // connection_path_first: guide-path searches of connections of a net in
+    // a dilated area or in rip-up mode, and those that found a path.
+    int64_t path_first_searches = 0;
+    int64_t path_first_found = 0;
     int64_t heap_pops = 0;
     int64_t held_pops = 0;
     int64_t settled = 0;
@@ -1256,11 +1269,19 @@ class BonnRouteDR
                                bool ripup,
                                Worker& worker,
                                int extra_dilation);
+  // plain_valid (connection_path_first 2, rip-up mode): the access options
+  // that are legal without rip-up; nullptr: none. resume_from
+  // (connection_path_first): the connections an attempt of this connect
+  // closed in the guide area; the call continues from them instead of the
+  // net's committed partial routing.
   bool connectInRegion(NetData& net,
                        int dilation,
                        bool ripup,
                        const std::vector<std::vector<char>>& valid,
-                       Worker& worker);
+                       Worker& worker,
+                       const std::vector<std::vector<char>>* plain_valid
+                       = nullptr,
+                       const PartialState* resume_from = nullptr);
   // Measurement M5 (debug group bonnroute_search): one line per search of
   // connectInRegion; statistics only.
   void logSearchStatistics(const NetData& net,
