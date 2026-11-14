@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <functional>
 #include <optional>
+#include <utility>
 #include <vector>
 
 #include "br/BrGeometry.h"
@@ -19,30 +20,32 @@ namespace drt::br {
 // sign-off keeps IO pin shapes on the pin purpose, so the routed metal of
 // the net that touches the pin must meet the layer's minimum area by itself.
 
-// Indices of the pieces of `metal` that touch `pin` and of every piece
-// connected to them through touching pieces (one polygon without the pin).
-inline std::vector<size_t> piecesOnPin(const std::vector<Box>& metal,
-                                       const Box& pin)
+// Connected metal components that touch the pin. The pin purpose does not
+// join disjoint routed components for minimum-area sign-off.
+inline std::vector<std::vector<size_t>> metalOnPinComponents(
+    const std::vector<Box>& metal,
+    const Box& pin)
 {
-  std::vector<char> in(metal.size(), 0);
-  std::vector<size_t> group;
-  for (size_t k = 0; k < metal.size(); k++) {
-    if (metal[k].touches(pin)) {
-      in[k] = 1;
-      group.push_back(k);
+  std::vector<char> visited(metal.size(), 0);
+  std::vector<std::vector<size_t>> groups;
+  for (size_t seed = 0; seed < metal.size(); seed++) {
+    if (visited[seed] || !metal[seed].touches(pin)) {
+      continue;
     }
-  }
-  for (size_t head = 0; head < group.size(); head++) {
-    const Box& g = metal[group[head]];
-    for (size_t k = 0; k < metal.size(); k++) {
-      if (!in[k] && metal[k].touches(g)) {
-        in[k] = 1;
-        group.push_back(k);
+    std::vector<size_t> group{seed};
+    visited[seed] = 1;
+    for (size_t head = 0; head < group.size(); head++) {
+      for (size_t k = 0; k < metal.size(); k++) {
+        if (!visited[k] && metal[k].touches(metal[group[head]])) {
+          visited[k] = 1;
+          group.push_back(k);
+        }
       }
     }
+    std::sort(group.begin(), group.end());
+    groups.push_back(std::move(group));
   }
-  std::sort(group.begin(), group.end());
-  return group;
+  return groups;
 }
 
 // A wire on the pin layer that adds no metal beyond the pin and the net's
@@ -60,9 +63,25 @@ inline bool coveredByPinAndPads(const Box& wire,
   return unionArea(with) == unionArea(base);
 }
 
+// Space between disjoint same-net metal still has to meet the layer's
+// rule. Other-net legality deliberately ignores this net's own shapes.
+inline bool patchLeavesNarrowGap(const Box& patch,
+                                 const Box& other,
+                                 const GeoCoord spacing)
+{
+  if (patch.touches(other)) {
+    return false;
+  }
+  const int64_t dx = std::max<int64_t>(
+      {other.xlo - int64_t{patch.xhi}, int64_t{patch.xlo} - other.xhi, 0});
+  const int64_t dy = std::max<int64_t>(
+      {other.ylo - int64_t{patch.yhi}, int64_t{patch.ylo} - other.yhi, 0});
+  return dx * dx + dy * dy < int64_t{spacing} * spacing;
+}
+
 struct IoPinPatchRequest
 {
-  std::vector<Box> group;  // the routed metal on the pin (piecesOnPin)
+  std::vector<Box> group;  // one routed metal component touching the pin
   GridPoint anchor;        // a via origin or wire end of the net on the pin
   bool horizontal = true;  // preferred direction of the layer
   GeoCoord half_width = 0;

@@ -9623,116 +9623,132 @@ void BonnRouteDR::fillIoPinArea(
         on_layer.push_back(to_box(r));
       }
     }
-    const std::vector<size_t> group = br::piecesOnPin(on_layer, to_box(box));
-    if (group.empty()) {
-      continue;
-    }
-    io_pin_pieces_++;
-    br::IoPinPatchRequest req;
-    for (const size_t k : group) {
-      req.group.push_back(on_layer[k]);
-    }
-    if (logger_->debugCheck(utl::DRT, "bonnroute_io_pin", 1)) {
-      std::string pieces;
-      for (const br::Box& b : req.group) {
-        pieces += fmt::format(" {},{},{},{}", b.xlo, b.ylo, b.xhi, b.yhi);
+    for (const std::vector<size_t>& group :
+         br::metalOnPinComponents(on_layer, to_box(box))) {
+      io_pin_pieces_++;
+      br::IoPinPatchRequest req;
+      for (const size_t k : group) {
+        req.group.push_back(on_layer[k]);
       }
-      logger_->debug(utl::DRT,
-                     "bonnroute_io_pin",
-                     "io pin piece net {} pin {} {} {} {} area {} pieces{}",
-                     net->getName(),
-                     box.xMin(),
-                     box.yMin(),
-                     box.xMax(),
-                     box.yMax(),
-                     br::unionArea(req.group),
-                     pieces);
-    }
-    if (br::unionArea(req.group) >= same_net_rules_[z].min_area) {
-      continue;
-    }
-    io_pin_below_++;
-    // Anchor: a via origin on this layer inside the pin, else a wire end
-    // there. FlexDR keeps a patch only at a via origin or wire end that
-    // remains; a pin-layer access wire next to the via is removed by its
-    // connectivity check, so via origins come first.
-    const std::pair<frLayerNum, odb::Point>* anchor = nullptr;
-    for (const bool via_origin : {true, false}) {
-      for (size_t k = 0; k < anchors.size() && anchor == nullptr; k++) {
-        const auto& a = anchors[k];
-        if ((k >= via_anchors) == via_origin) {
-          continue;
+      if (logger_->debugCheck(utl::DRT, "bonnroute_io_pin", 1)) {
+        std::string pieces;
+        for (const br::Box& b : req.group) {
+          pieces += fmt::format(" {},{},{},{}", b.xlo, b.ylo, b.xhi, b.yhi);
         }
-        if (a.first == layer && box.intersects(a.second)) {
-          anchor = &a;
+        logger_->debug(utl::DRT,
+                       "bonnroute_io_pin",
+                       "io pin piece net {} pin {} {} {} {} area {} pieces{}",
+                       net->getName(),
+                       box.xMin(),
+                       box.yMin(),
+                       box.xMax(),
+                       box.yMax(),
+                       br::unionArea(req.group),
+                       pieces);
+      }
+      if (br::unionArea(req.group) >= same_net_rules_[z].min_area) {
+        continue;
+      }
+      io_pin_below_++;
+      // Anchor: a via origin on this layer inside the pin, else a wire end
+      // there. FlexDR keeps a patch only at a via origin or wire end that
+      // remains; a pin-layer access wire next to the via is removed by its
+      // connectivity check, so via origins come first.
+      const std::pair<frLayerNum, odb::Point>* anchor = nullptr;
+      for (const bool via_origin : {true, false}) {
+        for (size_t k = 0; k < anchors.size() && anchor == nullptr; k++) {
+          const auto& a = anchors[k];
+          if ((k >= via_anchors) == via_origin) {
+            continue;
+          }
+          if (a.first == layer && box.intersects(a.second)
+              && std::ranges::any_of(group, [&](const size_t piece) {
+                   return on_layer[piece].containsClosed(a.second.x(),
+                                                         a.second.y());
+                 })) {
+            anchor = &a;
+          }
         }
       }
-    }
-    if (anchor == nullptr) {
-      continue;
-    }
-    req.anchor = {anchor->second.x(), anchor->second.y()};
-    req.horizontal = layers_[z].horizontal;
-    req.half_width = layers_[z].width / 2;
-    req.min_area = same_net_rules_[z].min_area;
-    req.grid = grid;
-    req.die = to_box(die_);
-    // Legal against other nets: the routing space and the patches and
-    // fills written for earlier nets.
-    const bool trace = logger_->debugCheck(utl::DRT, "bonnroute_io_pin", 1);
-    req.legal = [&](const br::Box& b) {
-      const odb::Rect ext(b.xlo, b.ylo, b.xhi, b.yhi);
-      const RShape shape{layer, ext, br::ShapeRole::kPreferredWire};
-      if (shapeConflicts(shape, id, nullptr)) {
+      if (anchor == nullptr) {
+        continue;
+      }
+      req.anchor = {anchor->second.x(), anchor->second.y()};
+      req.horizontal = layers_[z].horizontal;
+      req.half_width = layers_[z].width / 2;
+      req.min_area = same_net_rules_[z].min_area;
+      req.grid = grid;
+      req.die = to_box(die_);
+      // Legal against other nets: the routing space and the patches and
+      // fills written for earlier nets.
+      const bool trace = logger_->debugCheck(utl::DRT, "bonnroute_io_pin", 1);
+      req.legal = [&](const br::Box& b) {
+        const odb::Rect ext(b.xlo, b.ylo, b.xhi, b.yhi);
+        const RShape shape{layer, ext, br::ShapeRole::kPreferredWire};
+        if (shapeConflicts(shape, id, nullptr)) {
+          if (trace) {
+            logger_->debug(utl::DRT,
+                           "bonnroute_io_pin",
+                           "io pin patch net {} rect {} {} {} {} blocked kinds "
+                           "{}",
+                           net->getName(),
+                           ext.xMin(),
+                           ext.yMin(),
+                           ext.xMax(),
+                           ext.yMax(),
+                           blockerKinds(shape, id));
+          }
+          return false;
+        }
+        for (const br::Box& other : on_layer) {
+          const frCoord prl = std::max<frCoord>(
+              0,
+              layers_[z].horizontal ? std::min(ext.xMax(), other.xhi)
+                                          - std::max(ext.xMin(), other.xlo)
+                                    : std::min(ext.yMax(), other.yhi)
+                                          - std::max(ext.yMin(), other.ylo));
+          const frCoord space = spacing(
+              z, ext.minDXDY(), std::min(other.width(), other.height()), prl);
+          if (br::patchLeavesNarrowGap(b, other, space)) {
+            return false;
+          }
+        }
+        const frCoord space = spacing(z, ext.minDXDY(), ext.minDXDY(), 0);
+        return std::ranges::none_of(fills, [&](const auto& other) {
+          if (other.first != layer) {
+            return false;
+          }
+          const odb::Rect& o = other.second;
+          const int dx = std::max(o.xMin() - ext.xMax(), ext.xMin() - o.xMax());
+          const int dy = std::max(o.yMin() - ext.yMax(), ext.yMin() - o.yMax());
+          return std::max(dx, dy) < space;
+        });
+      };
+      const std::optional<br::Box> patch = br::ioPinPatch(req);
+      if (!patch) {
         if (trace) {
           logger_->debug(utl::DRT,
                          "bonnroute_io_pin",
-                         "io pin patch net {} rect {} {} {} {} blocked kinds "
-                         "{}",
+                         "io pin left net {} anchor {} {} area {}",
                          net->getName(),
-                         ext.xMin(),
-                         ext.yMin(),
-                         ext.xMax(),
-                         ext.yMax(),
-                         blockerKinds(shape, id));
+                         anchor->second.x(),
+                         anchor->second.y(),
+                         br::unionArea(req.group));
         }
-        return false;
+        continue;
       }
-      const frCoord space = spacing(z, ext.minDXDY(), ext.minDXDY(), 0);
-      return std::ranges::none_of(fills, [&](const auto& other) {
-        if (other.first != layer) {
-          return false;
-        }
-        const odb::Rect& o = other.second;
-        const int dx = std::max(o.xMin() - ext.xMax(), ext.xMin() - o.xMax());
-        const int dy = std::max(o.yMin() - ext.yMax(), ext.yMin() - o.yMax());
-        return std::max(dx, dy) < space;
-      });
-    };
-    const std::optional<br::Box> patch = br::ioPinPatch(req);
-    if (!patch) {
-      if (trace) {
-        logger_->debug(utl::DRT,
-                       "bonnroute_io_pin",
-                       "io pin left net {} anchor {} {} area {}",
-                       net->getName(),
-                       anchor->second.x(),
-                       anchor->second.y(),
-                       br::unionArea(req.group));
-      }
-      continue;
+      const odb::Rect ext(patch->xlo, patch->ylo, patch->xhi, patch->yhi);
+      auto pwire = std::make_unique<frPatchWire>();
+      pwire->setLayerNum(layer);
+      pwire->setOrigin(anchor->second);
+      odb::Rect offset = ext;
+      offset.moveDelta(-anchor->second.x(), -anchor->second.y());
+      pwire->setOffsetBox(offset);
+      net->addPatchWire(std::move(pwire));
+      metal.emplace_back(layer, ext);
+      fills.emplace_back(layer, ext);
+      io_pin_extended_++;
     }
-    const odb::Rect ext(patch->xlo, patch->ylo, patch->xhi, patch->yhi);
-    auto pwire = std::make_unique<frPatchWire>();
-    pwire->setLayerNum(layer);
-    pwire->setOrigin(anchor->second);
-    odb::Rect offset = ext;
-    offset.moveDelta(-anchor->second.x(), -anchor->second.y());
-    pwire->setOffsetBox(offset);
-    net->addPatchWire(std::move(pwire));
-    metal.emplace_back(layer, ext);
-    fills.emplace_back(layer, ext);
-    io_pin_extended_++;
   }
 }
 
