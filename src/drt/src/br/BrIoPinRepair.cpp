@@ -45,13 +45,16 @@ bool patchClean(frDesign* design,
                  utl::Logger* logger,
                  RouterConfiguration* router_cfg,
                  frNet* net,
-                 frPatchWire& patch)
+                 frPatchWire& patch,
+                 std::set<MarkerId>& resolved)
 {
   odb::Rect drc_box;
   odb::Rect ext_box;
   patch.getBBox().bloat(router_cfg->DRCSAFEDIST, drc_box);
   patch.getBBox().bloat(router_cfg->MTSAFEDIST, ext_box);
   std::set<MarkerId> before;
+  std::set<MarkerId> after;
+  resolved.clear();
   for (const bool candidate : {false, true}) {
     FlexGCWorker checker(design->getTech(), logger, router_cfg);
     checker.setDrcBox(drc_box);
@@ -73,7 +76,14 @@ bool patchClean(frDesign* design,
       }
       if (!candidate) {
         before.insert(key);
+      } else {
+        after.insert(key);
       }
+    }
+  }
+  for (const MarkerId& key : before) {
+    if (!after.contains(key)) {
+      resolved.insert(key);
     }
   }
   return true;
@@ -145,7 +155,7 @@ void repairIoPinArea(frDesign* design,
     for (const frRect& pin : pins) {
       const frLayerNum layer_num = pin.getLayerNum();
       frLayer* layer = design->getTech()->getLayer(layer_num);
-      frAreaConstraint* area = layer->getAreaConstraint();
+      const frAreaConstraint* area = layer->getAreaConstraint();
       if (area == nullptr || area->getMinArea() <= 0) {
         continue;
       }
@@ -176,6 +186,7 @@ void repairIoPinArea(frDesign* design,
             continue;
           }
           request.anchor = {anchor.x(), anchor.y()};
+          std::set<MarkerId> resolved;
           request.legal = [&](const Box& candidate) {
             for (const Box& other : metal.pieces) {
               const GeoCoord prl = std::max<GeoCoord>(
@@ -200,7 +211,7 @@ void repairIoPinArea(frDesign* design,
             odb::Rect offset(candidate.xlo, candidate.ylo, candidate.xhi, candidate.yhi);
             offset.moveDelta(-anchor.x(), -anchor.y());
             patch.setOffsetBox(offset);
-            return patchClean(design, logger, router_cfg, net, patch);
+            return patchClean(design, logger, router_cfg, net, patch, resolved);
           };
           const auto candidate = ioPinPatch(request);
           if (!candidate) {
@@ -216,6 +227,22 @@ void repairIoPinArea(frDesign* design,
           net->addPatchWire(std::move(patch));
           design->getRegionQuery()->addDRObj(object);
           net->setModified(true);
+          // A partial route may still have area markers. Keep the public
+          // DRV count consistent with the real checker after an accepted
+          // patch removes one of them.
+          std::vector<frMarker*> remove;
+          for (const auto& marker : design->getTopBlock()->getMarkers()) {
+            if (resolved.contains({marker->getBBox(),
+                                   marker->getLayerNum(),
+                                   marker->getConstraint(),
+                                   marker->getSrcs()})) {
+              remove.push_back(marker.get());
+            }
+          }
+          for (frMarker* marker : remove) {
+            design->getRegionQuery()->removeMarker(marker);
+            design->getTopBlock()->removeMarker(marker);
+          }
           metal.pieces.push_back(*candidate);
           patched++;
           break;
