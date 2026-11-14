@@ -93,6 +93,8 @@ cc_library(
         "src/br/BonnRouteDR.h",
         "src/br/BrDrtRules.cpp",
         "src/br/BrIncremental.cpp",
+        "src/br/BrIoPinRepair.cpp",
+        "src/br/BrIoPinRepair.h",
         "src/TritonRoute.cpp",
         "src/db/drObj/drAccessPattern.cpp",
         "src/db/drObj/drNet.cpp",

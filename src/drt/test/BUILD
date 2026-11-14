@@ -394,6 +394,27 @@ py_library(
 ]
 
 cc_test(
+    name = "bonnroute_io_pin_repair_test",
+    size = "medium",
+    srcs = [
+        "BonnRouteIoPinRepairTest.cpp",
+        "fixture.cpp",
+        "fixture.h",
+    ],
+    includes = [
+        "../src",
+    ],
+    deps = [
+        "//src/drt:base_types",
+        "//src/drt:bonnroute_core",
+        "//src/drt:drt_impl",
+        "//src/odb/src/db",
+        "//src/utl",
+        "@googletest//:gtest",
+        "@googletest//:gtest_main",
+    ],
+)
+cc_test(
     name = "bonnroute_lef58_diff_test",
     size = "medium",
     srcs = [

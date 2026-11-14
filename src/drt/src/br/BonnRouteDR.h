@@ -532,14 +532,9 @@ struct BonnRouteDRParams
   // every other via definition of the access point when it fails. Prints
   // statistics and one line per failing via; the routing is unchanged.
   int start_check = 0;
-  // Top-level pin shapes are pin geometry, not drawn metal, in sign-off
-  // (e.g. the asap7 GDS keeps IO pins on the pin purpose, so a via pad on
-  // an M4 IO pin stands alone for KLayout's M4.W.5 / min area). After
-  // routing, the net's routed metal on the layer of each of its IO pin
-  // shapes that touches the pin gets a patch in the layer's preferred
-  // direction, toward the die inside, until it meets the layer's minimum
-  // area by itself, where the patch is legal against other nets. Summary
-  // DRT-9263. 0: off.
+  // After FlexDR, extend routed metal on IO pins to the layer's minimum
+  // area without counting pin-purpose shapes. Each patch is checked against
+  // the final geometry with FlexGC before it is written. Summary DRT-9263.
   bool io_pin_area = true;
   // C5 step 2 (lead/cleanup/C5-revised.md, rule 3'): the searches place a
   // via whose bottom pad overlaps a pin shape of its own net only at an
@@ -1496,14 +1491,6 @@ class BonnRouteDR
                                      frLayerNum layer,
                                      const odb::Point& p) const;
   // notch_fill for one written net; fills of earlier nets are in `fills`.
-  // io_pin_area: patches for the routed metal on IO pins (see the
-  // parameter); new patches are appended to `fills`.
-  void fillIoPinArea(frNet* net,
-                     int id,
-                     std::vector<std::pair<frLayerNum, odb::Rect>>& fills);
-  int64_t io_pin_pieces_ = 0;     // routed pieces on IO pins checked
-  int64_t io_pin_below_ = 0;      // of them below the minimum area alone
-  int64_t io_pin_extended_ = 0;   // patched to the minimum area
   void fillNotches(frNet* net,
                    int id,
                    std::vector<std::pair<frLayerNum, odb::Rect>>& fills);
