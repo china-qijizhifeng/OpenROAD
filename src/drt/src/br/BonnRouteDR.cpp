@@ -218,6 +218,8 @@ bool BonnRouteDRParams::set(const std::string& name, const double value)
     final_ripup_effort = std::max(0, v);
   } else if (name == "ripup_effort_conflicts_excluded") {
     ripup_effort_conflicts_excluded = v != 0;
+  } else if (name == "speculative_ripup") {
+    speculative_ripup = std::clamp(v, 0, 256);
   } else if (name == "final_ripup_budget") {
     final_ripup_budget = std::max<int64_t>(0, static_cast<int64_t>(value));
   } else if (name == "potential_detour_tiles") {
@@ -6443,7 +6445,7 @@ bool BonnRouteDR::connectInRegion(NetData& net,
   if (ripup) {
     for (const size_t v : in_tree) {
       if (worker.reader.level(v, br::kWire, net.wire_type) != br::kLegal) {
-        if (worker.limit != nullptr) {
+        if (worker.limit != nullptr || worker.defer_history) {
           worker.history_bumps.push_back(v);
         } else {
           grid_.bumpHistory(v);
@@ -8462,7 +8464,8 @@ bool BonnRouteDR::ripupSequence(const int id,
                                 const bool try_plain,
                                 Worker& worker,
                                 RipupState& state,
-                                const br::TileBox* resident)
+                                const br::TileBox* resident,
+                                RipupCandidate* candidate)
 {
   NetData& net = nets_[id];
   Worker* local = resident != nullptr ? &worker : nullptr;
@@ -8484,8 +8487,18 @@ bool BonnRouteDR::ripupSequence(const int id,
     return false;
   }
   const double start = omp_get_wtime();
-  const bool found = connect(net, true, worker, dilation);
-  state.mode_seconds += omp_get_wtime() - start;
+  bool found;
+  if (candidate != nullptr) {
+    net = std::move(*candidate->net);
+    found = candidate->found;
+    for (const size_t vertex : candidate->history) {
+      grid_.bumpHistory(vertex);
+    }
+    state.mode_seconds += candidate->seconds;
+  } else {
+    found = connect(net, true, worker, dilation);
+    state.mode_seconds += omp_get_wtime() - start;
+  }
   state.mode_connects++;
   if (!found) {
     state.outcome = kRipupNoPath;
@@ -8596,10 +8609,16 @@ void BonnRouteDR::routeRipupQueue(const std::vector<int>& failed,
                                   const int64_t settled_budget)
 {
   std::vector<int> queue = failed;
-  std::vector<SavedRouting> journal;
   Worker& worker = workers_.front();
   // Vertices settled by the serial loop's own sequences.
   int64_t serial_settled = 0;
+  std::optional<RipupBatch> batch;
+  if (params_.speculative_ripup > 0 && params_.ripup_depth > 0
+      && !incremental_active_ && !params_.ripup_boxes
+      && params_.ripup_partitions == 0) {
+    batch.emplace();
+    batch->net_versions.resize(nets_.size(), 0);
+  }
   for (int pass = 0; pass < params_.ripup_passes && !queue.empty(); pass++) {
     // Incremental calls prepare victims and move input routing serially.
     if (params_.ripup_boxes && !incremental_active_) {
@@ -8626,47 +8645,23 @@ void BonnRouteDR::routeRipupQueue(const std::vector<int>& failed,
     worker.max_ripup_level
         = pass == 0 ? static_cast<br::RipupLevel>(params_.first_pass_ripup_level)
                     : br::kMaxRemovableLevel;
-    std::vector<int> unrouted;
-    for (const int id : queue) {
-      if (nets_[id].routed) {
-        continue;
-      }
-      if (settled_budget > 0 && serial_settled >= settled_budget) {
-        unrouted.push_back(id);
-        ripup_budget_skipped_++;
-        if (nets_[id].ripup_outcome == kRipupNotStarted) {
-          nets_[id].ripup_outcome = kRipupBudget;
-        }
-        continue;
-      }
-      journal.clear();
-      serial_ripup_.outcome = kRipupNotStarted;
-      serial_ripup_.outcome_depth = 0;
-      const int64_t sequence_start = worker.settled;
-      const bool routed = ripupSequence(
-          id, 0, pass, journal, false, worker, serial_ripup_, nullptr);
-      serial_settled += worker.settled - sequence_start;
-      if (routed) {
-        continue;
-      }
-      // The step the net's own rip-up mode search failed at, before the
-      // rollback restores the routings.
-      const uint8_t step = nets_[id].left_step;
-      const int term = nets_[id].left_term;
-      // Sec. 4.4: a failed sequence restores the original situation.
-      for (auto it = journal.rbegin(); it != journal.rend(); ++it) {
-        restoreRouting(*it);
-      }
-      serial_ripup_.rollbacks++;
-      unrouted.push_back(id);
-      // A failure below the net's own call is a victim's.
-      nets_[id].ripup_outcome = serial_ripup_.outcome_depth > 0
-                                    ? uint8_t{kRipupVictimFailed}
-                                    : serial_ripup_.outcome;
-      nets_[id].left_step = step;
-      nets_[id].left_term = term;
-    }
-    queue.swap(unrouted);
+    routeSerialRipupPass(
+        queue, pass, settled_budget, serial_settled, batch ? &*batch : nullptr);
+  }
+  if (batch && params_.verbose) {
+    logger_->info(
+        utl::DRT,
+        9370,
+        "BonnRoute speculative rip-up: {} root searches, {} reused, {} "
+        "invalidated, {} skipped; {} wasted settled vertices; {:.3f}s parallel "
+        "root search; {} logical settled vertices.",
+        batch->searched,
+        batch->reused,
+        batch->invalidated,
+        batch->searched - batch->reused - batch->invalidated,
+        batch->searched_settled - batch->reused_settled,
+        batch->search_seconds,
+        serial_settled);
   }
   worker.max_ripup_level = br::kMaxRemovableLevel;
   for (const int id : queue) {

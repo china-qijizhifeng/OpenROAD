@@ -344,7 +344,7 @@ void FastGrid::writeVia(const int z,
 
 uint64_t FastGrid::wiringWord(const int z, const int i, const int j) const
 {
-  if (AccessFootprint* footprint = AccessFootprint::current())
+  if (AccessFootprint* footprint = AccessFootprint::currentForRead())
       [[unlikely]] {
     recordWiring(*footprint, AccessKind::kFastGridRead, z, i, j, j);
   }
@@ -361,7 +361,7 @@ uint64_t FastGrid::wiringWord(const int z, const int i, const int j) const
 
 uint64_t FastGrid::viaWord(const int z, const int i, const int c) const
 {
-  if (AccessFootprint* footprint = AccessFootprint::current())
+  if (AccessFootprint* footprint = AccessFootprint::currentForRead())
       [[unlikely]] {
     recordVia(*footprint, AccessKind::kFastGridRead, z, i, c, c);
   }
@@ -520,7 +520,7 @@ uint64_t FastGrid::wiringRun(const int z,
                              int& lo,
                              int& hi) const
 {
-  if (AccessFootprint* footprint = AccessFootprint::current())
+  if (AccessFootprint* footprint = AccessFootprint::currentForRead())
       [[unlikely]] {
     recordWiring(*footprint, AccessKind::kFastGridRead, z, i, j, j);
   }
@@ -554,7 +554,7 @@ uint64_t FastGrid::viaRun(const int z,
                           int& lo,
                           int& hi) const
 {
-  if (AccessFootprint* footprint = AccessFootprint::current())
+  if (AccessFootprint* footprint = AccessFootprint::currentForRead())
       [[unlikely]] {
     recordVia(*footprint, AccessKind::kFastGridRead, z, i, c, c);
   }
@@ -655,7 +655,7 @@ FastGrid::RunsView FastGrid::wiringRuns(const int z,
                                         const int i,
                                         const int j) const
 {
-  if (AccessFootprint* footprint = AccessFootprint::current())
+  if (AccessFootprint* footprint = AccessFootprint::currentForRead())
       [[unlikely]] {
     recordWiring(*footprint, AccessKind::kFastGridRead, z, i, j, j);
   }
@@ -864,6 +864,11 @@ void FastGrid::setEdgeQuery(const size_t v,
 
 void FastGrid::bumpHistory(const size_t v)
 {
+  if (AccessFootprint* footprint = AccessFootprint::current()) [[unlikely]] {
+    int z, i, j;
+    graph_->decode(v, z, i, j);
+    recordWiring(*footprint, AccessKind::kFastGridWrite, z, i, j, j);
+  }
   uint16_t& h = history_[v];
   if (h < 0xffff) {
     h++;

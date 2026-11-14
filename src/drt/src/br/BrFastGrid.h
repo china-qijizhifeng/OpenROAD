@@ -225,6 +225,12 @@ class FastGrid
   // grid, kept sparse beside it. Bumped serially only.
   uint16_t history(const size_t v) const
   {
+    if (AccessFootprint* footprint = AccessFootprint::currentForRead())
+        [[unlikely]] {
+      int z, i, j;
+      graph_->decode(v, z, i, j);
+      recordWiring(*footprint, AccessKind::kFastGridRead, z, i, j, j);
+    }
     const auto it = history_.find(v);
     return it == history_.end() ? 0 : it->second;
   }
@@ -247,6 +253,8 @@ class FastGrid
   void compact();
 
  private:
+  friend class FastGridReader;
+
   // Runs of the tracks of one global routing tile: track t's runs are
   // [track_first[t], track_first[t + 1]); a run holds the word from its
   // start (relative position) to the next start. A track without runs is
@@ -396,6 +404,12 @@ class FastGridReader
   }
   uint64_t wiringWord(const int z, const int i, const int j)
   {
+    // A cursor can outlive a footprint scope; dense rows also span tiles.
+    // Record each query, including cache hits and overlay substitutions.
+    if (AccessFootprint* footprint = AccessFootprint::currentForRead())
+        [[unlikely]] {
+      grid_->recordWiring(*footprint, AccessKind::kFastGridRead, z, i, j, j);
+    }
     Cursor& c = wiring_[slot(z, i)];
     if (c.z == z && c.i == i) {
       if (c.row != nullptr) {
@@ -409,6 +423,10 @@ class FastGridReader
   }
   uint64_t viaWord(const int z, const int i, const int v)
   {
+    if (AccessFootprint* footprint = AccessFootprint::currentForRead())
+        [[unlikely]] {
+      grid_->recordVia(*footprint, AccessKind::kFastGridRead, z, i, v, v);
+    }
     Cursor& c = via_[slot(z, i)];
     if (c.z == z && c.i == i) {
       if (c.row != nullptr) {
