@@ -138,6 +138,53 @@ inline std::optional<Box> ioPinPatch(const IoPinPatchRequest& req)
       need += (req.min_area - total + width - 1) / width;
     }
   }
+  // A narrow component near another net may have enough room only when
+  // the extension is shared between both sides. Try the centred patch
+  // after preserving the existing one-sided choices. Move it along the
+  // preferred direction when needed to stay inside the die.
+  int64_t need = (req.min_area - area + width - 1) / width;
+  for (int attempt = 0; attempt < 4 && need > 0; attempt++) {
+    need = (need + grid - 1) / grid * grid;
+    const int64_t back = need / (2 * grid) * grid;
+    const int64_t position = req.horizontal ? p.x : p.y;
+    int64_t first = position - back - req.half_width;
+    int64_t last = position + need - back + req.half_width;
+    const int64_t die_lo = req.horizontal ? req.die.xlo : req.die.ylo;
+    const int64_t die_hi = req.horizontal ? req.die.xhi : req.die.yhi;
+    if (first < die_lo) {
+      const int64_t shift = (die_lo - first + grid - 1) / grid * grid;
+      first += shift;
+      last += shift;
+    }
+    if (last > die_hi) {
+      const int64_t shift = (last - die_hi + grid - 1) / grid * grid;
+      first -= shift;
+      last -= shift;
+    }
+    const Box ext = req.horizontal ? Box{static_cast<GeoCoord>(first),
+                                         p.y - req.half_width,
+                                         static_cast<GeoCoord>(last),
+                                         p.y + req.half_width}
+                                   : Box{p.x - req.half_width,
+                                         static_cast<GeoCoord>(first),
+                                         p.x + req.half_width,
+                                         static_cast<GeoCoord>(last)};
+    if (ext.xlo < req.die.xlo || ext.ylo < req.die.ylo || ext.xhi > req.die.xhi
+        || ext.yhi > req.die.yhi || first > position || last < position) {
+      break;
+    }
+    std::vector<Box> with = req.group;
+    with.push_back(ext);
+    const int64_t total = unionArea(with);
+    if (total < req.min_area) {
+      need += (req.min_area - total + width - 1) / width;
+      continue;
+    }
+    if (!req.legal || req.legal(ext)) {
+      return ext;
+    }
+    break;
+  }
   return std::nullopt;
 }
 
