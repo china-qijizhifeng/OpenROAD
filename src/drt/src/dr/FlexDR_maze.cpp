@@ -3507,14 +3507,15 @@ MazeSearchStatus FlexDRWorker::routeNet(drNet* net,
     auto nextPin = routeNet_getNextDst(
         ccMazeIdx1, ccMazeIdx2, mazeIdx2unConnPins, pinTaperBoxes);
     path.clear();
-    const MazeSearchStatus search_status = gridGraph_.search(connComps,
-                                                             nextPin,
-                                                             path,
-                                                             ccMazeIdx1,
-                                                             ccMazeIdx2,
-                                                             centerPt,
-                                                             mazeIdx2TaperBox,
-                                                             route_with_jumpers);
+    const MazeSearchStatus search_status
+        = gridGraph_.search(connComps,
+                            nextPin,
+                            path,
+                            ccMazeIdx1,
+                            ccMazeIdx2,
+                            centerPt,
+                            mazeIdx2TaperBox,
+                            route_with_jumpers);
     if (search_status == MazeSearchStatus::kCancelled) {
       return MazeSearchStatus::kCancelled;
     }

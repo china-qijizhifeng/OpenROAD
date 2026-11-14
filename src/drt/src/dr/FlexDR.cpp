@@ -1303,8 +1303,7 @@ int FlexDR::runGridWorkersAhead(std::vector<GridWorkerSlot>& slots,
               continue;
             }
             Slot& ahead = states[other];
-            if ((ahead.state == State::kRunning
-                 || ahead.state == State::kDone)
+            if ((ahead.state == State::kRunning || ahead.state == State::kDone)
                 && ahead.fingerprint
                        != slots[other].worker->getDesignReadFingerprint(
                            getDesign())) {
@@ -1519,18 +1518,18 @@ void FlexDR::reportClusterResults(
       }
       const odb::Rect& box = worker->getRouteBox();
       const double seconds = worker->getWorkStatistics().total_seconds;
-      results += fmt::format("{}{}:{:.3f}:{}:{}:{},{},{},{}:{}",
-                             i == 0 ? "" : " ",
-                             worker->getBestNumMarkers(),
-                             seconds,
-                             worker->getWorkerDRCCost(),
-                             worker->getWorkerMarkerCost(),
-                             box.xMin(),
-                             box.yMin(),
-                             box.xMax(),
-                             box.yMax(),
-                             worker->isStopped() ? 'x'
-                                                 : (seconds > 0 ? 'r' : 's'));
+      results
+          += fmt::format("{}{}:{:.3f}:{}:{}:{},{},{},{}:{}",
+                         i == 0 ? "" : " ",
+                         worker->getBestNumMarkers(),
+                         seconds,
+                         worker->getWorkerDRCCost(),
+                         worker->getWorkerMarkerCost(),
+                         box.xMin(),
+                         box.yMin(),
+                         box.xMax(),
+                         box.yMax(),
+                         worker->isStopped() ? 'x' : (seconds > 0 ? 'r' : 's'));
     }
     logger_->debug(DRT,
                    "bonnroute_cleanup_worker",
@@ -2267,10 +2266,10 @@ void FlexDR::optimizationFlow(const SearchRepairArgs& args,
   // The marker-driven iterations of the clean-up after BonnRoute run few
   // workers per batch, so workers of later batches start ahead on idle
   // threads (runGridWorkersAhead; same results as the batch loop below).
-  const bool start_ahead
-      = initial_routing_cleanup_.start_grid_workers_ahead && markers_only
-        && iter_ >= 2 && !dist_on_ && graphics_ == nullptr
-        && (!skip_unaffected || marker_cleanup);
+  const bool start_ahead = initial_routing_cleanup_.start_grid_workers_ahead
+                           && markers_only && iter_ >= 2 && !dist_on_
+                           && graphics_ == nullptr
+                           && (!skip_unaffected || marker_cleanup);
   if (start_ahead) {
     std::vector<GridWorkerSlot> slots;
     int num_batches = 0;

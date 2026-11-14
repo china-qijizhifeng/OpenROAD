@@ -3352,21 +3352,19 @@ uint64_t FlexDRWorker::getDesignReadFingerprint(const frDesign* design) const
                      static_cast<uint64_t>(path_seg->getLayerNum()));
       mixFingerprint(fingerprint, path_seg->getBeginPoint());
       mixFingerprint(fingerprint, path_seg->getEndPoint());
-      mixFingerprint(
-          fingerprint,
-          static_cast<uint64_t>(static_cast<frEndStyleEnum>(
-              style.getBeginStyle())));
-      mixFingerprint(
-          fingerprint,
-          static_cast<uint64_t>(static_cast<frEndStyleEnum>(
-              style.getEndStyle())));
+      mixFingerprint(fingerprint,
+                     static_cast<uint64_t>(
+                         static_cast<frEndStyleEnum>(style.getBeginStyle())));
+      mixFingerprint(fingerprint,
+                     static_cast<uint64_t>(
+                         static_cast<frEndStyleEnum>(style.getEndStyle())));
       mixFingerprint(fingerprint, static_cast<uint64_t>(style.getBeginExt()));
       mixFingerprint(fingerprint, static_cast<uint64_t>(style.getEndExt()));
       mixFingerprint(fingerprint, static_cast<uint64_t>(style.getWidth()));
-      mixFingerprint(fingerprint,
-                     static_cast<uint64_t>((path_seg->isTapered() ? 2 : 0)
-                                           + (path_seg->isApPathSeg() ? 1
-                                                                      : 0)));
+      mixFingerprint(
+          fingerprint,
+          static_cast<uint64_t>((path_seg->isTapered() ? 2 : 0)
+                                + (path_seg->isApPathSeg() ? 1 : 0)));
       mixFingerprint(fingerprint, path_seg->getApLoc());
     } else if (object->typeId() == frcVia) {
       const auto* via = static_cast<const frVia*>(object);
@@ -3423,10 +3421,9 @@ void FlexDRWorker::init(const frDesign* design)
     skipped_without_nets_ = true;
     return;
   }
-  only_nets_with_initial_routing_
-      = std::ranges::all_of(nets_, [](const auto& net) {
-          return net->getFrNet()->hasInitialRouting();
-        });
+  only_nets_with_initial_routing_ = std::ranges::all_of(
+      nets_,
+      [](const auto& net) { return net->getFrNet()->hasInitialRouting(); });
   // Incremental mode reroutes only nets without initial routing
   // (route_queue_init_queue, canRipup); without such a net the route queue
   // stays empty and the worker's result is its design-rule check.
