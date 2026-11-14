@@ -46,6 +46,18 @@ check_antennas
 | `-net` | Check antennas on the specified net. |
 | `-report_file` | Write the antenna calculations for violating nets to `report_file`; with `-verbose`, for every routed net. |
 
+`ant::antenna_violation_signature` returns an opaque string describing the
+violations from the last `check_antennas` call. It is empty when that call found
+no violations. Within the same design, equal signatures mean the same nets,
+gate pins, layers, ratio kinds and exact actual/required ratios still violate.
+Scripts can compare signatures between repair rounds without parsing the
+rounded report text. A change in the number of clean checks does not change
+the signature.
+
+The example flow in `test/flow.tcl` stops post-routing antenna repair when a
+round leaves this signature unchanged, or after five rounds. Remaining
+violations are still checked and reported.
+
 ## Regression tests
 
 There are a set of regression tests in `./test`. For more information, refer to this [section](../../README.md#regression-tests).

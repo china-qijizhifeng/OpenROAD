@@ -533,6 +533,84 @@ TEST_F(AntennaSyntheticTest, CheckAntennasCountsAndMetrics)
   EXPECT_EQ(metrics.value("antenna__violating__pins"), "2");
 }
 
+TEST_F(AntennaSyntheticTest, CheckAntennasRetainsViolationSignature)
+{
+  tst::applyAntennaRule(m1(), {.par = 1.5});
+  odb::dbNet* net = gateNet("bad");
+  EXPECT_TRUE(checker_.antennaViolationSignature().empty());
+  EXPECT_EQ(checker_.checkAntennas(), 1);
+  const std::string signature = checker_.antennaViolationSignature();
+  EXPECT_FALSE(signature.empty());
+  EXPECT_EQ(signature, checker_.check().violationSignature());
+  EXPECT_EQ(checker_.checkAntennas(nullptr, 2), 1);
+  EXPECT_EQ(signature, checker_.antennaViolationSignature());
+
+  // A reduced ratio is progress even if the net still violates the rule.
+  tst::RoutePath(net).on(m1(), {50, 50}).to({8050, 50});
+  EXPECT_EQ(checker_.checkAntennas(), 1);
+  EXPECT_NE(signature, checker_.antennaViolationSignature());
+  tst::RoutePath(net).on(m1(), {50, 50}).to({550, 50});
+  EXPECT_EQ(checker_.checkAntennas(), 0);
+  EXPECT_TRUE(checker_.antennaViolationSignature().empty());
+}
+
+TEST_F(AntennaSyntheticTest, ViolationSignatureTracksIdentityAndExactRatios)
+{
+  tst::applyAntennaRule(m1(), {.par = 1.5});
+  gateNet("bad1");
+  odb::dbNet* other = gateNet("bad2", 1000);
+  const DesignCheck design = checker_.check();
+  const std::string signature = design.violationSignature();
+  ASSERT_FALSE(signature.empty());
+  ASSERT_FALSE(design.nets.front().pins.front().layers.empty());
+
+  DesignCheck changed = design;
+  changed.nets.front().net = other;
+  EXPECT_NE(signature, changed.violationSignature());
+  changed = design;
+  changed.nets.front().pins.front().gate = design.nets.back().pins.front().gate;
+  EXPECT_NE(signature, changed.violationSignature());
+  changed = design;
+  changed.nets.front().pins.front().layers.front().layer = m2();
+  EXPECT_NE(signature, changed.violationSignature());
+  changed = design;
+  changed.nets.front().pins.front().layers.front().par.actual += 1e-9;
+  EXPECT_NE(signature, changed.violationSignature());
+  changed = design;
+  changed.nets.front().pins.front().layers.front().par.required += 1e-9;
+  EXPECT_NE(signature, changed.violationSignature());
+}
+
+TEST_F(AntennaSyntheticTest, ViolationSignatureIncludesEveryRatioKind)
+{
+  tst::applyAntennaRule(m1(), {.par = 1.5});
+  gateNet("bad");
+  DesignCheck design = checker_.check();
+  LayerCheck& layer = design.nets.front().pins.front().layers.front();
+  layer.par = {};
+  layer.car = {};
+  layer.psr = RatioCheck{};
+  layer.csr = RatioCheck{};
+  EXPECT_TRUE(design.violationSignature().empty());
+  std::vector<std::string> signatures;
+  for (RatioCheck* ratio : {&layer.par, &layer.car, &*layer.psr, &*layer.csr}) {
+    *ratio = {.actual = 2.0, .required = 1.0, .violated = true};
+    signatures.push_back(design.violationSignature());
+    EXPECT_FALSE(signatures.back().empty());
+    ratio->actual += 1e-9;
+    EXPECT_NE(signatures.back(), design.violationSignature());
+    *ratio = {};
+  }
+  // Equal numbers in different ratio kinds are different violations.
+  for (size_t i = 0; i < signatures.size(); ++i) {
+    for (size_t j = i + 1; j < signatures.size(); ++j) {
+      EXPECT_NE(signatures[i], signatures[j]);
+    }
+  }
+  layer.par = {.actual = 0.5, .required = 1.0, .violated = false};
+  EXPECT_TRUE(design.violationSignature().empty());
+}
+
 TEST_F(AntennaSyntheticTest, ReportListsViolatingNetsUnlessAskedForAll)
 {
   tst::applyAntennaRule(m1(), {.par = 1.5});

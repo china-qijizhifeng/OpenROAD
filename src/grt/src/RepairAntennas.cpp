@@ -1037,9 +1037,9 @@ bool RepairAntennas::findPosToJumper(const GRoute& route,
                      scan,
                      free_windows.size(),
                      jumper_position,
-                     jumper_position != -1
-                         ? "found"
-                         : free_windows.empty() ? "no_window" : "capacity");
+                     jumper_position != -1  ? "found"
+                     : free_windows.empty() ? "no_window"
+                                            : "capacity");
   }
   return jumper_position != -1;
 }

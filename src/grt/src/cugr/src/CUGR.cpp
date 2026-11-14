@@ -2822,17 +2822,15 @@ std::shared_ptr<GRTreeNode> CUGR::buildTreeFromRoute(const GRoute& route) const
         const int y = cells[1].low();
         addNode(GRPoint(init_layer, cells[0].low(), y));
         for (int x = cells[0].low(); x < cells[0].high(); x++) {
-          addEdge(GRPoint(init_layer, x, y),
-                  GRPoint(init_layer, x + 1, y),
-                  jumper);
+          addEdge(
+              GRPoint(init_layer, x, y), GRPoint(init_layer, x + 1, y), jumper);
         }
       } else {
         const int x = cells[0].low();
         addNode(GRPoint(init_layer, x, cells[1].low()));
         for (int y = cells[1].low(); y < cells[1].high(); y++) {
-          addEdge(GRPoint(init_layer, x, y),
-                  GRPoint(init_layer, x, y + 1),
-                  jumper);
+          addEdge(
+              GRPoint(init_layer, x, y), GRPoint(init_layer, x, y + 1), jumper);
         }
       }
     }
@@ -3484,8 +3482,8 @@ void CUGR::logOverflowIncrease(const std::vector<double>& before,
   std::set<std::pair<int, int>> bridge_via_cells;
   std::set<std::pair<int, int>> jumper_end_cells;
   for (const GSegment& segment : route) {
-    const BoxT cells = grid_graph_->rangeSearchCells(BoxT(
-        segment.init_x, segment.init_y, segment.final_x, segment.final_y));
+    const BoxT cells = grid_graph_->rangeSearchCells(
+        BoxT(segment.init_x, segment.init_y, segment.final_x, segment.final_y));
     if (segment.is_pin_bridge) {
       for (int x = cells[0].low(); x <= cells[0].high(); x++) {
         for (int y = cells[1].low(); y <= cells[1].high(); y++) {

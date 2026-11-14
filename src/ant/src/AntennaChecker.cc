@@ -72,6 +72,39 @@ int DesignCheck::violatingPins() const
   return count;
 }
 
+std::string DesignCheck::violationSignature() const
+{
+  std::string signature;
+  for (const NetCheck& net : nets) {
+    for (const PinCheck& pin : net.pins) {
+      for (const LayerCheck& layer : pin.layers) {
+        const auto append = [&](const char* kind, const RatioCheck& ratio) {
+          if (ratio.violated) {
+            // Hexadecimal floating point preserves changes smaller than the
+            // rounding in the human-readable antenna report.
+            signature += fmt::format("{}:{}:{}:{}:{:a}:{:a};",
+                                     net.net->getId(),
+                                     pin.gate->getId(),
+                                     layer.layer->getId(),
+                                     kind,
+                                     ratio.actual,
+                                     ratio.required);
+          }
+        };
+        append("PAR", layer.par);
+        append("CAR", layer.car);
+        if (layer.psr) {
+          append("PSR", *layer.psr);
+        }
+        if (layer.csr) {
+          append("CSR", *layer.csr);
+        }
+      }
+    }
+  }
+  return signature;
+}
+
 DesignCheck AntennaChecker::check(odb::dbNet* net, int num_threads)
 {
   return impl_->check(net, num_threads);
@@ -85,6 +118,11 @@ int AntennaChecker::antennaViolationCount() const
 int AntennaChecker::pinViolationCount() const
 {
   return impl_->pinViolationCount();
+}
+
+std::string AntennaChecker::antennaViolationSignature() const
+{
+  return impl_->antennaViolationSignature();
 }
 
 NetCheck AntennaChecker::checkNet(odb::dbNet* net, const float ratio_margin)
@@ -1239,6 +1277,7 @@ int AntennaChecker::Impl::checkAntennas(odb::dbNet* net,
 
   net_violation_count_ = design.violatingNets();
   pin_violation_count_ = design.violatingPins();
+  violation_signature_ = design.violationSignature();
   logger_->info(utl::ANT, 2, "Found {} net violations.", net_violation_count_);
   logger_->metric("antenna__violating__nets", net_violation_count_);
   logger_->info(utl::ANT, 1, "Found {} pin violations.", pin_violation_count_);
@@ -1260,6 +1299,11 @@ int AntennaChecker::Impl::antennaViolationCount() const
 int AntennaChecker::Impl::pinViolationCount() const
 {
   return pin_violation_count_;
+}
+
+std::string AntennaChecker::Impl::antennaViolationSignature() const
+{
+  return violation_signature_;
 }
 
 bool AntennaChecker::Impl::haveRoutedNets()
