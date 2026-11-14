@@ -350,6 +350,62 @@ void fastGridCases(std::mt19937& rng, const int cases)
   }
 }
 
+// A commit journal records writes even when its reads hit warm caches.
+// A nested search still installs a complete read footprint, then restores the
+// journal's mode. History writes participate in the same invalidation box.
+void writeOnlyCase(std::mt19937& rng)
+{
+  Graph g;
+  buildGraph(rng, g, 2);
+  FastGridReader reader;
+  reader.reset(&g.fast, nullptr);
+  const size_t v = g.graph.vertex(0, 0, 0);
+  const TileBox tile = vertexBox(g.graph, 0, 0, 0, 0);
+  const int via_position = g.fast.viaPosition(0, 0);
+  TileBox want = tile;
+  want.add(vertexBox(g.graph, 0, 0, via_position, via_position));
+  reader.level(0, 0, 0, kWire, 0);
+  AccessFootprint journal(AccessFootprint::Mode::kWrites);
+  journal.begin(0, kEverywhere);
+  {
+    const AccessFootprintScope scope(&journal);
+    expect(AccessFootprint::currentForRead() == nullptr,
+           "journal skips read instrumentation",
+           0,
+           0);
+    g.fast.setLevel(v, kWire, 0, RipupLevel{1});
+    g.fast.assignVia(0, 0, 0, 0, 0, uint64_t{7});
+    g.fast.bumpHistory(v);
+    reader.level(0, 0, 0, kWire, 0);
+    g.fast.history(v);
+    g.fast.viaWord(0, 0, 0);
+    expect(journal.writes(0) == want && journal.reads(0).empty(),
+           "journal retains wiring via and history writes",
+           0,
+           1);
+    AccessFootprint search;
+    search.begin(1, kEverywhere);
+    {
+      const AccessFootprintScope nested(&search);
+      reader.level(0, 0, 0, kWire, 0);
+      g.fast.history(v);
+    }
+    expect(
+        search.reads(0) == tile && AccessFootprint::currentForRead() == nullptr,
+        "nested search records warm reads and restores journal mode",
+        0,
+        2);
+    recordAccess(AccessKind::kWideShapeRead, 0, kEverywhere);
+    expect(
+        journal.wideReads().empty(), "journal ignores wide-list reads", 0, 3);
+    recordAccess(AccessKind::kWideShapeWrite, 0, kEverywhere);
+    expect(journal.writes(0) == kEverywhere,
+           "journal retains wide-list writes",
+           0,
+           4);
+  }
+}
+
 void violationCases(std::mt19937& rng)
 {
   ShapeClassTable classes;
@@ -488,6 +544,7 @@ int main()
   shapeGridCases(rng, 60);
   fastGridCases(rng, 60);
   violationCases(rng);
+  writeOnlyCase(rng);
   std::printf("access footprint: %d failures\n", failures);
   return failures != 0;
 }

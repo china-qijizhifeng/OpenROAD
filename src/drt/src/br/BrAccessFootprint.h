@@ -127,8 +127,24 @@ class AccessFootprint
     int step = 0;
   };
 
+  enum class Mode
+  {
+    kAll,
+    kWrites
+  };
+
+  AccessFootprint() = default;
+  explicit AccessFootprint(const Mode mode) : mode_(mode) {}
+
   // The footprint recording the calling thread's accesses, or nullptr.
   static AccessFootprint* current() { return current_; }
+  // Ordered commit invalidation needs writes only. Skip read instrumentation
+  // at query entry, before decoding vertices or fetching their tile indices.
+  static AccessFootprint* currentForRead()
+  {
+    return current_ != nullptr && current_->mode_ == Mode::kWrites ? nullptr
+                                                                   : current_;
+  }
   // Installs `footprint` for the calling thread (nullptr: none).
   static void install(AccessFootprint* footprint) { current_ = footprint; }
 
@@ -179,6 +195,9 @@ class AccessFootprint
 
   void record(const AccessKind kind, const int layer, const TileBox& tiles)
   {
+    if (mode_ == Mode::kWrites && !isWriteAccess(kind)) {
+      return;
+    }
     records_++;
     if (!isCheckedAccess(kind)) {
       wide_reads_.add(tiles);
@@ -237,6 +256,7 @@ class AccessFootprint
   }
 
   static inline thread_local AccessFootprint* current_ = nullptr;
+  Mode mode_ = Mode::kAll;
   int detail_ = 0;
   std::map<DetailKey, TileBox> detail_boxes_;
   std::unordered_set<uint64_t> detail_tiles_;

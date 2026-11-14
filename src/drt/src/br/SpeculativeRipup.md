@@ -30,6 +30,8 @@ reservation updates, history increments and rollback. Spatial boxes deliberately
 combine all layers and all steps, accepting false invalidations. A removed
 obstacle can improve the optimum without making the old path illegal, so path
 legality alone does not establish reuse. Failed searches follow the same rule.
+The serial decision phase records only writes; its reads do not invalidate
+another search and are excluded from footprint instrumentation.
 Any root or victim in a sequence journal increments its revision, including on
 rollback, because metadata such as the rip-up counter can change.
 

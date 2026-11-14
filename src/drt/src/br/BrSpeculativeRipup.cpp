@@ -147,7 +147,9 @@ void BonnRouteDR::routeSerialRipupPass(std::vector<int>& queue,
         searchRipupBatch(queue, index, pass, *batch);
       }
       cached = reuseRipupCandidate(index, id, *batch);
-      writes.emplace();
+      // Only earlier writes invalidate a later snapshot. Serial reads
+      // cannot affect reuse, and recording them would trace every grid query.
+      writes.emplace(br::AccessFootprint::Mode::kWrites);
       writes->begin(id, {0, 0, tiles_x_ - 1, tiles_y_ - 1});
     }
     const br::AccessFootprintScope scope(

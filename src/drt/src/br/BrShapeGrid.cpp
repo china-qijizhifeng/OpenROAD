@@ -965,7 +965,8 @@ void ShapeGrid::collect(const int layer_index,
       = std::max(c0 - kKnownHorizon, layer.chunk_first_cell[k0]);
   const int horizon_hi
       = std::min(c1 + kKnownHorizon, layer.chunk_first_cell[k1 + 1] - 1);
-  if (AccessFootprint* footprint = AccessFootprint::current()) [[unlikely]] {
+  if (AccessFootprint* footprint = AccessFootprint::currentForRead())
+      [[unlikely]] {
     footprint->record(
         AccessKind::kShapeGridRead,
         layer_index,
@@ -1104,7 +1105,8 @@ void ShapeGrid::collectWide(const Layer& layer,
   const int k1 = layer.cell_chunk[cellOf(area.xhi)];
   const int q0 = layer.row_chunk[rowOf(area.ylo - 1)];
   const int q1 = layer.row_chunk[rowOf(area.yhi)];
-  if (AccessFootprint* footprint = AccessFootprint::current()) [[unlikely]] {
+  if (AccessFootprint* footprint = AccessFootprint::currentForRead())
+      [[unlikely]] {
     footprint->record(AccessKind::kWideShapeRead,
                       out.layer,
                       chunkTiles(g.horizontal, k0, k1, q0, q1));

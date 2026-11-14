@@ -225,7 +225,8 @@ class FastGrid
   // grid, kept sparse beside it. Bumped serially only.
   uint16_t history(const size_t v) const
   {
-    if (AccessFootprint* footprint = AccessFootprint::current()) [[unlikely]] {
+    if (AccessFootprint* footprint = AccessFootprint::currentForRead())
+        [[unlikely]] {
       int z, i, j;
       graph_->decode(v, z, i, j);
       recordWiring(*footprint, AccessKind::kFastGridRead, z, i, j, j);
@@ -405,7 +406,8 @@ class FastGridReader
   {
     // A cursor can outlive a footprint scope; dense rows also span tiles.
     // Record each query, including cache hits and overlay substitutions.
-    if (AccessFootprint* footprint = AccessFootprint::current()) [[unlikely]] {
+    if (AccessFootprint* footprint = AccessFootprint::currentForRead())
+        [[unlikely]] {
       grid_->recordWiring(*footprint, AccessKind::kFastGridRead, z, i, j, j);
     }
     Cursor& c = wiring_[slot(z, i)];
@@ -421,7 +423,8 @@ class FastGridReader
   }
   uint64_t viaWord(const int z, const int i, const int v)
   {
-    if (AccessFootprint* footprint = AccessFootprint::current()) [[unlikely]] {
+    if (AccessFootprint* footprint = AccessFootprint::currentForRead())
+        [[unlikely]] {
       grid_->recordVia(*footprint, AccessKind::kFastGridRead, z, i, v, v);
     }
     Cursor& c = via_[slot(z, i)];
