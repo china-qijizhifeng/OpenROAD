@@ -715,6 +715,129 @@ TEST_F(AntennaSyntheticTest, DiodeCountCapped)
   EXPECT_EQ(violations[0].diode_count_per_gate, 11);
 }
 
+// Exact equality of two net checks, ratio by ratio.
+void expectSameNetCheck(const NetCheck& actual, const NetCheck& expected)
+{
+  EXPECT_EQ(actual.net, expected.net);
+  EXPECT_EQ(actual.violated, expected.violated);
+  ASSERT_EQ(actual.pins.size(), expected.pins.size());
+  const auto same_ratio = [](const RatioCheck& a, const RatioCheck& b) {
+    EXPECT_EQ(a.actual, b.actual);
+    EXPECT_EQ(a.required, b.required);
+    EXPECT_EQ(a.violated, b.violated);
+  };
+  for (size_t i = 0; i < expected.pins.size(); ++i) {
+    const PinCheck& a = actual.pins[i];
+    const PinCheck& b = expected.pins[i];
+    EXPECT_EQ(a.gate, b.gate);
+    EXPECT_EQ(a.violated, b.violated);
+    ASSERT_EQ(a.layers.size(), b.layers.size());
+    for (size_t j = 0; j < b.layers.size(); ++j) {
+      EXPECT_EQ(a.layers[j].layer, b.layers[j].layer);
+      EXPECT_EQ(a.layers[j].violated, b.layers[j].violated);
+      same_ratio(a.layers[j].par, b.layers[j].par);
+      same_ratio(a.layers[j].car, b.layers[j].car);
+      ASSERT_EQ(a.layers[j].psr.has_value(), b.layers[j].psr.has_value());
+      if (b.layers[j].psr) {
+        same_ratio(*a.layers[j].psr, *b.layers[j].psr);
+      }
+      ASSERT_EQ(a.layers[j].csr.has_value(), b.layers[j].csr.has_value());
+      if (b.layers[j].csr) {
+        same_ratio(*a.layers[j].csr, *b.layers[j].csr);
+      }
+    }
+  }
+}
+
+void expectSameViolations(const Violations& actual, const Violations& expected)
+{
+  ASSERT_EQ(actual.size(), expected.size());
+  for (size_t i = 0; i < expected.size(); ++i) {
+    EXPECT_EQ(actual[i].routing_level, expected[i].routing_level);
+    EXPECT_EQ(actual[i].gates, expected[i].gates);
+    EXPECT_EQ(actual[i].diode_count_per_gate,
+              expected[i].diode_count_per_gate);
+    EXPECT_EQ(actual[i].excess_ratio, expected[i].excess_ratio);
+  }
+}
+
+// check_antennas checks every net without a diode; repair_antennas then asks
+// for the violations with its diode and ratio margin.  The second call
+// reuses the geometry of the first and gives what a new checker computes.
+TEST_F(AntennaSyntheticTest, RepairReusesGeometryOfCheck)
+{
+  tst::applyAntennaRule(m1(),
+                        {.diff_par = constantPwl(1.5), .gate_plus_diff = 1.0});
+  odb::dbNet* bad = gateNet("bad", 0);
+  odb::dbNet* ok = gateNet("ok", 1000);
+  tst::RoutePath(ok).on(m1(), {50, 1050}).to({550, 1050});
+  odb::dbMTerm* diode = driver(/*diff_area=*/0.25)->findMTerm("X");
+
+  EXPECT_EQ(checker_.checkAntennas(nullptr, 2), 1);
+  EXPECT_EQ(checker_.netGeometryAnalysisCount(), 2);
+
+  for (const float margin : {0.0F, 10.0F}) {
+    for (odb::dbNet* net : {bad, ok}) {
+      const Violations reused
+          = checker_.getAntennaViolations(net, diode, margin);
+      AntennaChecker fresh(getDb(), getLogger());
+      expectSameViolations(reused,
+                           fresh.getAntennaViolations(net, diode, margin));
+      EXPECT_EQ(fresh.netGeometryAnalysisCount(), 1);
+    }
+  }
+  EXPECT_EQ(checker_.netGeometryAnalysisCount(), 2);
+  const Violations bad_violations
+      = checker_.getAntennaViolations(bad, diode, 0);
+  ASSERT_EQ(bad_violations.size(), 1);
+  EXPECT_EQ(bad_violations[0].diode_count_per_gate, 1);
+  EXPECT_TRUE(checker_.getAntennaViolations(ok, diode, 0).empty());
+  EXPECT_EQ(checker_.netGeometryAnalysisCount(), 2);
+}
+
+// A check with a larger margin records a larger excess ratio; a later
+// check with a smaller margin on the same geometry starts afresh.
+TEST_F(AntennaSyntheticTest, ReusedGeometryKeepsExcessRatioPerCheck)
+{
+  tst::applyAntennaRule(m1(), {.par = 1.5});
+  odb::dbNet* net = gateNet("n1");
+
+  const Violations tight = checker_.getAntennaViolations(net, nullptr, 10);
+  ASSERT_EQ(tight.size(), 1);
+  EXPECT_NEAR(tight[0].excess_ratio, kPar / (1.5 * 0.9), 1e-6);
+  const Violations plain = checker_.getAntennaViolations(net, nullptr, 0);
+  ASSERT_EQ(plain.size(), 1);
+  EXPECT_NEAR(plain[0].excess_ratio, kPar / 1.5, 1e-9);
+  EXPECT_EQ(checker_.netGeometryAnalysisCount(), 1);
+
+  AntennaChecker fresh(getDb(), getLogger());
+  expectSameNetCheck(checker_.checkNet(net, 10), fresh.checkNet(net, 10));
+  expectSameNetCheck(checker_.checkNet(net), fresh.checkNet(net));
+  EXPECT_EQ(checker_.netGeometryAnalysisCount(), 1);
+}
+
+// A changed wire or a moved pin is analyzed again; the result is what a new
+// checker computes.
+TEST_F(AntennaSyntheticTest, ChangedNetIsAnalyzedAgain)
+{
+  tst::applyAntennaRule(m1(), {.par = 1.5});
+  odb::dbNet* net = gateNet("n1");
+  EXPECT_EQ(checker_.check().violatingNets(), 1);
+  EXPECT_EQ(checker_.netGeometryAnalysisCount(), 1);
+
+  tst::RoutePath(net).on(m1(), {50, 50}).to({550, 50});
+  EXPECT_EQ(checker_.check().violatingNets(), 0);
+  EXPECT_EQ(checker_.netGeometryAnalysisCount(), 2);
+  AntennaChecker fresh(getDb(), getLogger());
+  expectSameNetCheck(checker_.checkNet(net), fresh.checkNet(net));
+
+  block_->findInst("n1_g")->setLocation(0, 20);
+  const NetCheck moved = checker_.checkNet(net);
+  EXPECT_EQ(checker_.netGeometryAnalysisCount(), 3);
+  AntennaChecker fresh_moved(getDb(), getLogger());
+  expectSameNetCheck(moved, fresh_moved.checkNet(net));
+}
+
 // A pin's gate area holds from the layer LEF gives it on, so a gate
 // checked on M1 uses its M1 area rather than a larger one given for M2.
 TEST_F(AntennaSyntheticTest, GateAreaPerLayer)

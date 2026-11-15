@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <cstdint>
 #include <memory>
 #include <optional>
 #include <string>
@@ -103,6 +104,10 @@ class AntennaChecker
                                   odb::dbMTerm* diode_mterm,
                                   float ratio_margin);
   void setReportFileName(const char* file_name);
+  // Number of nets whose node areas and ratios were computed since the
+  // checker was made.  A net whose wire and pins are unchanged since its last
+  // check reuses them, whatever diode and ratio margin the check uses.
+  int64_t netGeometryAnalysisCount() const;
 
   // Used in repair
   void initAntennaRules();
