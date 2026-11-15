@@ -29,6 +29,7 @@
 #include "frBaseTypes.h"
 #include "frDesign.h"
 #include "odb/db.h"
+#include "odb/dbTransform.h"
 #include "pa/FlexPA_unique.h"
 namespace gtl = boost::polygon;
 
@@ -126,9 +127,59 @@ class FlexPA
   void removeFromInstsSet(frInst* inst);
   void addToInstsSet(frInst* inst);
 
+  // Takes from previous, an earlier pin access of the same design, the
+  // access points, patterns and row patterns this run can reuse: a unique
+  // class whose key and inputs (UniqueClassAccessInputs) are unchanged keeps
+  // its access points and patterns, and a row of instances whose instances,
+  // placements, nets and class results are unchanged keeps its pattern.
+  // Everything else is computed as by a pin access from scratch, with the
+  // same results.  Call before main().
+  void takeReusableResults(FlexPA& previous);
+  struct ReuseCounts
+  {
+    int classes_reused = 0;
+    int classes_computed = 0;
+    int rows_reused = 0;
+    int rows_computed = 0;
+  };
+  const ReuseCounts& getReuseCounts() const { return reuse_counts_; }
+  // The results of the last main() as text, one line per unique class, I/O
+  // term and patterned instance: access points, patterns and the access
+  // point each instance pin uses.  Two runs agree when their texts do.
+  std::vector<std::string> describeResults();
+
   int main();
 
  private:
+  // Results of an earlier run that this run may reuse
+  // (takeReusableResults).
+  struct ReusableClass
+  {
+    UniqueClassAccessInputs inputs;
+    // The pin access of each pin of the master's terms, in term and pin
+    // order.
+    std::vector<std::unique_ptr<frPinAccess>> pin_accesses;
+    std::vector<std::unique_ptr<FlexPinAccessPattern>> patterns;
+    bool has_patterns{false};
+  };
+  // What the pattern of one instance in a row of instances depends on.
+  struct RowInstInputs
+  {
+    frInst* inst{nullptr};
+    odb::dbTransform transform;
+    frMaster* master{nullptr};
+    uint64_t class_generation{0};
+    std::vector<std::pair<frNet*, frNonDefaultRule*>> nets;
+    std::vector<bool> skip_terms;
+    bool operator==(const RowInstInputs&) const = default;
+  };
+  // A row's inputs and the access point chosen for each pin of its
+  // instances' unskipped terms.
+  struct RowResult
+  {
+    std::vector<RowInstInputs> insts;
+    std::vector<frAccessPoint*> access_points;
+  };
   frDesign* design_;
   utl::Logger* logger_;
   dst::Distributed* dist_;
@@ -161,6 +212,12 @@ class FlexPA
   frCollection<odb::dbInst*> target_insts_;
   frInstLocationSet insts_set_;
   frOrderedIdSet<frInst*> dirty_insts_;  // set of dirty instances
+
+  std::map<UniqueClassKey, ReusableClass> reusable_classes_;
+  std::unordered_map<frInst*, RowResult> reusable_rows_;
+  // The rows of the last main(), by first instance.
+  std::unordered_map<frInst*, RowResult> row_results_;
+  ReuseCounts reuse_counts_;
   std::string remote_host_;
   uint16_t remote_port_ = -1;
   std::string shared_vol_;
@@ -190,6 +247,22 @@ class FlexPA
   bool updateSkipInstTerm(frInst* inst);
   // prep
   void prep();
+
+  // reuse of earlier results (takeReusableResults)
+  std::vector<int> accessConfig() const;
+  UniqueClassAccessInputs makeAccessInputs(UniqueClass* unique_class) const;
+  // Records the inputs of a class whose access points were just computed.
+  void recordComputedAccess(UniqueClass* unique_class);
+  // Installs the class's access points from an earlier run when its inputs
+  // are unchanged.
+  bool reuseClassAccess(UniqueClass* unique_class);
+  void reuseClassPatterns(UniqueClass* unique_class);
+  std::vector<RowInstInputs> makeRowInputs(const std::vector<frInst*>& insts);
+  // Applies the pattern an earlier run chose for a row with these inputs.
+  bool reuseRowPattern(const std::vector<frInst*>& insts,
+                       const std::vector<RowInstInputs>& inputs);
+  std::vector<frAccessPoint*> rowAccessPoints(
+      const std::vector<frInst*>& insts);
 
   bool isStdCell(frInst* unique_inst);
   bool isStdCellTerm(frInstTerm* inst_term);

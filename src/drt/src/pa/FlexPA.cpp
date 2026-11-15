@@ -3,11 +3,15 @@
 
 #include "pa/FlexPA.h"
 
+#include <algorithm>
+#include <atomic>
 #include <cstdint>
 #include <fstream>
 #include <memory>
+#include <optional>
 #include <set>
 #include <string>
+#include <tuple>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -174,6 +178,9 @@ void FlexPA::updateDirtyInsts()
       prepPatternInst(candidate_inst);
     }
   }
+  for (auto& unique_class : dirty_unique_classes_vec) {
+    recordComputedAccess(unique_class);
+  }
   for (auto& inst : dirty_insts_) {
     addToInstsSet(inst);
   }
@@ -316,7 +323,11 @@ void FlexPA::prepPattern()
       if (!isStdCell(candidate_inst)) {
         continue;
       }
-      prepPatternInst(candidate_inst);
+      if (unique_class->isAccessReused()) {
+        reuseClassPatterns(unique_class.get());
+      } else {
+        prepPatternInst(candidate_inst);
+      }
 #pragma omp critical
       {
         cnt++;
@@ -353,8 +364,398 @@ void FlexPA::prepPattern()
     }
   }
 
+  // Classes whose access points this run computed keep their inputs for a
+  // later run.
+  for (auto& unique_class : unique) {
+    if (unique_class->getInsts().empty()) {
+      continue;
+    }
+    frInst* candidate_inst = unique_class->getFirstInst();
+    if (!isStdCell(candidate_inst) && !isMacroCell(candidate_inst)) {
+      unique_class->setAccessInputs(std::nullopt);
+    } else if (unique_class->isAccessReused()) {
+      ++reuse_counts_.classes_reused;
+    } else {
+      recordComputedAccess(unique_class.get());
+      ++reuse_counts_.classes_computed;
+    }
+  }
+  reusable_classes_.clear();
+
   std::vector<std::vector<frInst*>> inst_rows = computeInstRows();
   prepPatternInstRows(inst_rows);
+  reusable_rows_.clear();
+}
+
+namespace {
+// Each computation of a class's access points gets its own generation.
+std::atomic<uint64_t> next_access_generation{1};
+}  // namespace
+
+std::vector<int> FlexPA::accessConfig() const
+{
+  return {router_cfg_->BOTTOM_ROUTING_LAYER,
+          router_cfg_->TOP_ROUTING_LAYER,
+          router_cfg_->USENONPREFTRACKS,
+          router_cfg_->USEMINSPACING_OBS,
+          router_cfg_->VIAINPIN_BOTTOMLAYERNUM,
+          router_cfg_->VIAINPIN_TOPLAYERNUM,
+          router_cfg_->VIA_ACCESS_LAYERNUM,
+          router_cfg_->MINNUMACCESSPOINT_MACROCELLPIN,
+          router_cfg_->MINNUMACCESSPOINT_STDCELLPIN,
+          router_cfg_->ACCESS_PATTERN_END_ITERATION_NUM,
+          router_cfg_->AUTO_TAPER_NDR_NETS,
+          static_cast<int>(getTech()->getVias().size())};
+}
+
+UniqueClassAccessInputs FlexPA::makeAccessInputs(
+    UniqueClass* unique_class) const
+{
+  UniqueClassAccessInputs inputs;
+  frInst* candidate = unique_class->getFirstInst();
+  inputs.candidate = candidate;
+  inputs.transform = candidate->getTransform();
+  for (const auto& inst_term : candidate->getInstTerms()) {
+    frNet* net = inst_term->getNet();
+    inputs.nets.emplace_back(net, net ? net->getNondefaultRule() : nullptr);
+  }
+  for (const auto& term : unique_class->getMaster()->getTerms()) {
+    inputs.skip_terms.push_back(unique_class->isSkipTerm(term.get()));
+  }
+  inputs.config = accessConfig();
+  inputs.avoid_via_defs = avoid_via_defs_;
+  return inputs;
+}
+
+void FlexPA::recordComputedAccess(UniqueClass* unique_class)
+{
+  unique_class->setAccessReused(false);
+  // The access vias of an instance on a net whose NDR is not tapered are
+  // checked against the whole design around them, so they depend on more
+  // than the inputs.
+  if (unique_class->getInsts().empty()
+      || unique_class->key().ndr_inst != nullptr) {
+    unique_class->setAccessInputs(std::nullopt);
+    return;
+  }
+  UniqueClassAccessInputs inputs = makeAccessInputs(unique_class);
+  inputs.generation = next_access_generation++;
+  std::tie(inputs.std_cell_generated_aps, inputs.macro_cell_generated_aps)
+      = unique_class->getGeneratedAccessPoints();
+  unique_class->setAccessInputs(std::move(inputs));
+}
+
+bool FlexPA::reuseClassAccess(UniqueClass* unique_class)
+{
+  unique_class->setAccessReused(false);
+  const auto it = reusable_classes_.find(unique_class->key());
+  if (it == reusable_classes_.end()
+      || unique_class->key().ndr_inst != nullptr) {
+    return false;
+  }
+  ReusableClass& reusable = it->second;
+  frInst* candidate = unique_class->getFirstInst();
+  if (isStdCell(candidate) && !reusable.has_patterns) {
+    return false;
+  }
+  if (!makeAccessInputs(unique_class).sameInputs(reusable.inputs)) {
+    return false;
+  }
+  frMaster* master = unique_class->getMaster();
+  size_t num_pins = 0;
+  for (const auto& term : master->getTerms()) {
+    num_pins += term->getPins().size();
+  }
+  if (num_pins != reusable.pin_accesses.size()
+      || std::ranges::any_of(reusable.pin_accesses,
+                             [](const auto& pa) { return pa == nullptr; })) {
+    return false;
+  }
+  const int pin_access_idx = unique_class->getPinAccessIdx();
+  size_t pin_index = 0;
+  for (const auto& term : master->getTerms()) {
+    for (const auto& pin : term->getPins()) {
+      std::unique_ptr<frPinAccess>& pin_access
+          = reusable.pin_accesses[pin_index++];
+      // The writer links the access points to new database access points.
+      for (const auto& ap : pin_access->getAccessPoints()) {
+        ap->setDbAccessPoint(nullptr);
+      }
+      pin->setPinAccess(pin_access_idx, std::move(pin_access));
+    }
+  }
+  unique_class->setAccessInputs(reusable.inputs);
+  unique_class->setAccessReused(true);
+  unique_class->setGeneratedAccessPoints(
+      reusable.inputs.std_cell_generated_aps,
+      reusable.inputs.macro_cell_generated_aps);
+  // The statistics the computation keeps for the access points it makes.
+#pragma omp atomic
+  std_cell_pin_gen_ap_cnt_ += reusable.inputs.std_cell_generated_aps;
+#pragma omp atomic
+  macro_cell_pin_gen_ap_cnt_ += reusable.inputs.macro_cell_generated_aps;
+  for (const auto& inst_term : candidate->getInstTerms()) {
+    if (isSkipInstTerm(inst_term.get())) {
+      continue;
+    }
+    for (const auto& pin : inst_term->getTerm()->getPins()) {
+      updatePinStats(pin->getPinAccess(pin_access_idx)->getAccessPoints(),
+                     inst_term.get());
+    }
+  }
+  return true;
+}
+
+void FlexPA::reuseClassPatterns(UniqueClass* unique_class)
+{
+  unique_inst_patterns_.at(unique_class)
+      = std::move(reusable_classes_.at(unique_class->key()).patterns);
+}
+
+void FlexPA::takeReusableResults(FlexPA& previous)
+{
+  reusable_classes_.clear();
+  for (const auto& unique_class :
+       previous.unique_insts_.getUniqueClasses()) {
+    const std::optional<UniqueClassAccessInputs>& inputs
+        = unique_class->getAccessInputs();
+    if (!inputs || !unique_class->isInitialized()) {
+      continue;
+    }
+    const int pin_access_idx = unique_class->getPinAccessIdx();
+    ReusableClass reusable;
+    reusable.inputs = *inputs;
+    for (const auto& term : unique_class->getMaster()->getTerms()) {
+      for (const auto& pin : term->getPins()) {
+        if (pin_access_idx < pin->getNumPinAccess()) {
+          reusable.pin_accesses.push_back(
+              pin->releasePinAccess(pin_access_idx));
+        } else {
+          reusable.pin_accesses.push_back(nullptr);
+        }
+      }
+    }
+    auto patterns = previous.unique_inst_patterns_.find(unique_class.get());
+    if (patterns != previous.unique_inst_patterns_.end()) {
+      reusable.patterns = std::move(patterns->second);
+      reusable.has_patterns = true;
+    }
+    reusable_classes_.emplace(unique_class->key(), std::move(reusable));
+  }
+  reusable_rows_ = std::move(previous.row_results_);
+  previous.row_results_.clear();
+}
+
+std::vector<FlexPA::RowInstInputs> FlexPA::makeRowInputs(
+    const std::vector<frInst*>& insts)
+{
+  std::vector<RowInstInputs> inputs;
+  inputs.reserve(insts.size());
+  for (frInst* inst : insts) {
+    RowInstInputs& in = inputs.emplace_back();
+    in.inst = inst;
+    in.transform = inst->getTransform();
+    in.master = inst->getMaster();
+    UniqueClass* unique_class = unique_insts_.getUniqueClass(inst);
+    if (unique_class && unique_class->getAccessInputs()) {
+      in.class_generation = unique_class->getAccessInputs()->generation;
+    }
+    for (const auto& inst_term : inst->getInstTerms()) {
+      frNet* net = inst_term->getNet();
+      in.nets.emplace_back(net, net ? net->getNondefaultRule() : nullptr);
+      in.skip_terms.push_back(isSkipInstTerm(inst_term.get()));
+    }
+  }
+  return inputs;
+}
+
+std::vector<frAccessPoint*> FlexPA::rowAccessPoints(
+    const std::vector<frInst*>& insts)
+{
+  std::vector<frAccessPoint*> access_points;
+  for (frInst* inst : insts) {
+    for (const auto& inst_term : inst->getInstTerms()) {
+      if (isSkipInstTerm(inst_term.get())) {
+        continue;
+      }
+      const int num_pins = inst_term->getTerm()->getPins().size();
+      for (int pin_idx = 0; pin_idx < num_pins; pin_idx++) {
+        access_points.push_back(inst_term->getAccessPoints()[pin_idx]);
+      }
+    }
+  }
+  return access_points;
+}
+
+bool FlexPA::reuseRowPattern(const std::vector<frInst*>& insts,
+                             const std::vector<RowInstInputs>& inputs)
+{
+  if (insts.empty()) {
+    return false;
+  }
+  // A class without inputs had its access points computed again, so the
+  // access points an earlier row result names may be gone.
+  for (const RowInstInputs& in : inputs) {
+    if (in.class_generation == 0) {
+      return false;
+    }
+  }
+  const auto it = reusable_rows_.find(insts.front());
+  if (it == reusable_rows_.end() || it->second.insts != inputs) {
+    return false;
+  }
+  const std::vector<frAccessPoint*>& access_points = it->second.access_points;
+  size_t num_pins = 0;
+  for (frInst* inst : insts) {
+    for (const auto& inst_term : inst->getInstTerms()) {
+      if (!isSkipInstTerm(inst_term.get())) {
+        num_pins += inst_term->getTerm()->getPins().size();
+      }
+    }
+  }
+  if (num_pins != access_points.size()) {
+    return false;
+  }
+  size_t ap_index = 0;
+  for (frInst* inst : insts) {
+    for (const auto& inst_term : inst->getInstTerms()) {
+      if (isSkipInstTerm(inst_term.get())) {
+        continue;
+      }
+      const int num_term_pins = inst_term->getTerm()->getPins().size();
+      for (int pin_idx = 0; pin_idx < num_term_pins; pin_idx++) {
+        inst_term->setAccessPoint(pin_idx, access_points[ap_index++]);
+      }
+    }
+    inst->setLatestPATransform();
+    inst->setHasPinAccessUpdate(true);
+  }
+  return true;
+}
+
+namespace {
+
+std::string describeAccessPoint(frAccessPoint* ap)
+{
+  std::string text = fmt::format("({} {} L{} c{}",
+                                 ap->getPoint().x(),
+                                 ap->getPoint().y(),
+                                 ap->getLayerNum(),
+                                 ap->getCost());
+  for (const bool access : ap->getAccess()) {
+    text += access ? '1' : '0';
+  }
+  text += ap->isViaAllowed() ? " v" : " -";
+  for (const auto& via_defs : ap->getAllViaDefs()) {
+    text += " [";
+    for (const frViaDef* via_def : via_defs) {
+      text += via_def->getName() + ",";
+    }
+    text += "]";
+  }
+  for (const frPathSeg& path_seg : ap->getPathSegs()) {
+    text += fmt::format(" ps({} {} {} {} L{})",
+                        path_seg.getBeginPoint().x(),
+                        path_seg.getBeginPoint().y(),
+                        path_seg.getEndPoint().x(),
+                        path_seg.getEndPoint().y(),
+                        path_seg.getLayerNum());
+  }
+  return text + ")";
+}
+
+}  // namespace
+
+std::vector<std::string> FlexPA::describeResults()
+{
+  std::vector<std::string> lines;
+  std::unordered_map<const frAccessPoint*, std::string> ap_names;
+  const auto ap_name = [&ap_names](const frAccessPoint* ap) -> std::string {
+    if (ap == nullptr) {
+      return "-";
+    }
+    const auto it = ap_names.find(ap);
+    return it == ap_names.end() ? "?" : it->second;
+  };
+  for (const auto& unique_class : unique_insts_.getUniqueClasses()) {
+    if (unique_class->getInsts().empty() || !unique_class->isInitialized()) {
+      continue;
+    }
+    const int pin_access_idx = unique_class->getPinAccessIdx();
+    const std::string class_name = fmt::format(
+        "{}#{}", unique_class->getMaster()->getName(), pin_access_idx);
+    std::string line = fmt::format("class {} {} first {} insts {} skip ",
+                                   class_name,
+                                   unique_class->getOrient().getString(),
+                                   unique_class->getFirstInst()->getName(),
+                                   unique_class->getInsts().size());
+    for (const auto& term : unique_class->getMaster()->getTerms()) {
+      line += unique_class->isSkipTerm(term.get()) ? '1' : '0';
+    }
+    for (const auto& term : unique_class->getMaster()->getTerms()) {
+      int pin_index = 0;
+      for (const auto& pin : term->getPins()) {
+        line += fmt::format(" {}.{}:", term->getName(), pin_index);
+        if (pin_access_idx < pin->getNumPinAccess()
+            && pin->getPinAccess(pin_access_idx) != nullptr) {
+          int ap_index = 0;
+          for (const auto& ap :
+               pin->getPinAccess(pin_access_idx)->getAccessPoints()) {
+            ap_names[ap.get()] = fmt::format(
+                "{}/{}.{}/{}", class_name, term->getName(), pin_index, ap_index);
+            line += " " + describeAccessPoint(ap.get());
+            ap_index++;
+          }
+        }
+        pin_index++;
+      }
+    }
+    const auto patterns = unique_inst_patterns_.find(unique_class.get());
+    if (patterns != unique_inst_patterns_.end()) {
+      for (const auto& pattern : patterns->second) {
+        line += fmt::format(" pattern c{} l {} r {}:",
+                            pattern->getCost(),
+                            ap_name(pattern->getBoundaryAP(true)),
+                            ap_name(pattern->getBoundaryAP(false)));
+        for (const frAccessPoint* ap : pattern->getPattern()) {
+          line += " " + ap_name(ap);
+        }
+      }
+    }
+    lines.push_back(std::move(line));
+  }
+  for (const auto& term : design_->getTopBlock()->getTerms()) {
+    std::string line = "term " + term->getName();
+    for (const auto& pin : term->getPins()) {
+      if (pin->getNumPinAccess() == 0 || pin->getPinAccess(0) == nullptr) {
+        continue;
+      }
+      for (const auto& ap : pin->getPinAccess(0)->getAccessPoints()) {
+        line += " " + describeAccessPoint(ap.get());
+      }
+    }
+    lines.push_back(std::move(line));
+  }
+  for (frInst* inst : insts_set_) {
+    std::string line = fmt::format("inst {} #{} ({} {}) {}",
+                                   inst->getName(),
+                                   inst->getPinAccessIdx(),
+                                   inst->getOrigin().x(),
+                                   inst->getOrigin().y(),
+                                   inst->getOrient().getString());
+    for (const auto& inst_term : inst->getInstTerms()) {
+      if (unique_insts_.getUniqueClass(inst) == nullptr
+          || isSkipInstTerm(inst_term.get())) {
+        continue;
+      }
+      line += " " + inst_term->getTerm()->getName() + ":";
+      for (const frAccessPoint* ap : inst_term->getAccessPoints()) {
+        line += " " + ap_name(ap);
+      }
+    }
+    lines.push_back(std::move(line));
+  }
+  return lines;
 }
 
 void FlexPA::setTargetInstances(const frCollection<odb::dbInst*>& insts)

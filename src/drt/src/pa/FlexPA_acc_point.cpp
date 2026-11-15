@@ -38,6 +38,13 @@ using utl::ThreadException;
 
 namespace drt {
 
+namespace {
+// Access points generated, before filtering, by the class whose access points
+// this thread is computing (genInstAccessPoints).
+thread_local int std_cell_generated_aps = 0;
+thread_local int macro_cell_generated_aps = 0;
+}  // namespace
+
 /**
  * @details Some functions only use a subset of the vias to test if access
  * points are appropriate or to determine access coords. This ensures that every
@@ -374,10 +381,12 @@ void FlexPA::createMultipleAccessPoints(
   if (inst_term && isStdCell(inst_term->getInst())) {
 #pragma omp atomic
     std_cell_pin_gen_ap_cnt_ += new_aps_size;
+    std_cell_generated_aps += new_aps_size;
   }
   if (inst_term && isMacroCell(inst_term->getInst())) {
 #pragma omp atomic
     macro_cell_pin_gen_ap_cnt_ += new_aps_size;
+    macro_cell_generated_aps += new_aps_size;
   }
 }
 
@@ -1514,6 +1523,8 @@ int FlexPA::genPinAccess(T* pin, frInstTerm* inst_term)
 void FlexPA::genInstAccessPoints(frInst* unique_inst)
 {
   ProfileTask profile("PA:uniqueInstance");
+  std_cell_generated_aps = 0;
+  macro_cell_generated_aps = 0;
   for (auto& inst_term : unique_inst->getInstTerms()) {
     // only do for normal and clock terms
     if (isSkipInstTerm(inst_term.get())) {
@@ -1531,6 +1542,10 @@ void FlexPA::genInstAccessPoints(frInst* unique_inst)
                      inst_term->getTerm()->getName(),
                      inst_term->getInst()->getMaster()->getName());
     }
+  }
+  if (UniqueClass* unique_class = unique_insts_.getUniqueClass(unique_inst)) {
+    unique_class->setGeneratedAccessPoints(std_cell_generated_aps,
+                                           macro_cell_generated_aps);
   }
 }
 
@@ -1552,7 +1567,9 @@ void FlexPA::genAllAccessPoints()
         continue;
       }
 
-      genInstAccessPoints(candidate_inst);
+      if (!reuseClassAccess(unique_class.get())) {
+        genInstAccessPoints(candidate_inst);
+      }
       if (router_cfg_->VERBOSE <= 0) {
         continue;
       }
@@ -1642,7 +1659,8 @@ void FlexPA::revertAccessPoints()
 {
   const auto& unique = unique_insts_.getUniqueClasses();
   for (const auto& unique_class : unique) {
-    if (unique_class->getInsts().empty()) {
+    // Reused access points are already relative to the instance.
+    if (unique_class->getInsts().empty() || unique_class->isAccessReused()) {
       continue;
     }
     auto inst = unique_class->getFirstInst();

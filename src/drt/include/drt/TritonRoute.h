@@ -266,6 +266,11 @@ class TritonRoute : public PinAccessService
   unsigned int cloud_sz_{0};
   std::optional<boost::asio::thread_pool> dist_pool_;
   std::unique_ptr<FlexPA> pa_{nullptr};
+  // Counts the frDesigns this router has made; pa_ belongs to the one
+  // current when it was made (pa_design_generation_), and a later pin access
+  // of the same design reuses its unchanged results.
+  int design_generation_{0};
+  int pa_design_generation_{-1};
   std::unique_ptr<AbstractGraphicsFactory> graphics_factory_{nullptr};
   bool change_tracking_valid_{false};
   odb::dbBlock* change_tracking_block_{nullptr};
@@ -296,6 +301,10 @@ class TritonRoute : public PinAccessService
   void getDRCMarkers(std::list<std::unique_ptr<frMarker>>& markers,
                      const odb::Rect& requiredDrcBox);
   void repairPDNVias();
+  // DRT_PA_INCREMENTAL_CHECK: compares the pin access just made from an
+  // earlier one's results with a pin access from scratch, keeps the latter
+  // and stops on a difference.
+  void checkIncrementalPinAccess(double incremental_seconds);
   void startChangeTracking();
   std::optional<std::vector<odb::Rect>> collectChangedRegions() const;
   friend class FlexDR;

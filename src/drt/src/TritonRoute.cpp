@@ -67,6 +67,7 @@
 #include "utl/Logger.h"
 #include "utl/ScopedTemporaryFile.h"
 #include "utl/ServiceRegistry.h"
+#include "utl/env.h"
 #include "utl/timer.h"
 
 using odb::dbTechLayerType;
@@ -367,6 +368,7 @@ void TritonRoute::resetDb(const char* file_name)
         DRT, 9954, "odb file {} is invalid: {}", file_name, f.what());
   }
   design_ = std::make_unique<frDesign>(logger_, router_cfg_.get());
+  ++design_generation_;
   initDesign();
   if (!db_->getChip()->getBlock()->getAccessPoints().empty()) {
     initGuide();
@@ -380,6 +382,7 @@ void TritonRoute::clearDesign()
   invalidateChangeTracking();
   bonnroute_dr_.reset();
   design_ = std::make_unique<frDesign>(logger_, router_cfg_.get());
+  ++design_generation_;
 }
 
 static void deserializeUpdate(frDesign* design,
@@ -1330,6 +1333,15 @@ int TritonRoute::main()
                    "be run before detailed routing.");
   }
   if (router_cfg_->DO_PA) {
+    // A pin access of the design the previous one ran on reuses the results
+    // of unchanged unique classes and rows (FlexPA::takeReusableResults);
+    // the results are those of a pin access from scratch.
+    std::unique_ptr<FlexPA> previous_pa;
+    if (pa_ != nullptr && pa_design_generation_ == design_generation_
+        && !distributed_ && !debug_->debugPA
+        && utl::readEnvarBool("DRT_PA_INCREMENTAL", true)) {
+      previous_pa = std::move(pa_);
+    }
     pa_ = std::make_unique<FlexPA>(
         getDesign(), logger_, dist_, router_cfg_.get());
     pa_->setDistributed(dist_ip_, dist_port_, shared_volume_, cloud_sz_);
@@ -1339,7 +1351,31 @@ int TritonRoute::main()
     if (pa_thread) {
       pa_thread->join();
     }
+    const bool reuse_pa = previous_pa != nullptr;
+    utl::Timer pa_timer;
+    if (reuse_pa) {
+      pa_->takeReusableResults(*previous_pa);
+      previous_pa.reset();
+    }
     pa_->main();
+    pa_design_generation_ = design_generation_;
+    if (reuse_pa) {
+      const FlexPA::ReuseCounts& counts = pa_->getReuseCounts();
+      debugPrint(logger_,
+                 DRT,
+                 "pa_incremental",
+                 1,
+                 "Pin access reused {} of {} unique classes and {} of {} rows "
+                 "in {:.3f}s.",
+                 counts.classes_reused,
+                 counts.classes_reused + counts.classes_computed,
+                 counts.rows_reused,
+                 counts.rows_reused + counts.rows_computed,
+                 pa_timer.elapsed());
+      if (utl::readEnvarBool("DRT_PA_INCREMENTAL_CHECK", false)) {
+        checkIncrementalPinAccess(pa_timer.elapsed());
+      }
+    }
     /// bookmark
     if (distributed_ || debug_->debugDR || debug_->debugDumpDR) {
       io::Writer writer(getDesign(), logger_);
@@ -1464,6 +1500,53 @@ int TritonRoute::main()
   }
   logger_->info(DRT, 501, "Runtime: {:.2f}s", timer.elapsed());
   return 0;
+}
+
+void TritonRoute::checkIncrementalPinAccess(const double incremental_seconds)
+{
+  const FlexPA::ReuseCounts counts = pa_->getReuseCounts();
+  const std::vector<std::string> incremental = pa_->describeResults();
+  utl::Timer timer;
+  pa_ = std::make_unique<FlexPA>(
+      getDesign(), logger_, dist_, router_cfg_.get());
+  pa_->main();
+  const double full_seconds = timer.elapsed();
+  const std::vector<std::string> full = pa_->describeResults();
+  const size_t num_lines = std::max(incremental.size(), full.size());
+  int differences = 0;
+  for (size_t i = 0; i < num_lines; i++) {
+    const std::string& a = i < incremental.size() ? incremental[i] : "";
+    const std::string& b = i < full.size() ? full[i] : "";
+    if (a == b) {
+      continue;
+    }
+    if (differences < 5) {
+      constexpr size_t kMaxLength = 2000;
+      logger_->report("  incremental: {}", a.substr(0, kMaxLength));
+      logger_->report("  full:        {}", b.substr(0, kMaxLength));
+    }
+    differences++;
+  }
+  logger_->info(DRT,
+                9440,
+                "Incremental pin access check: reused {} of {} unique classes "
+                "and {} of {} rows; {} of {} result lines differ from a pin "
+                "access from scratch ({:.3f}s incremental, {:.3f}s from "
+                "scratch).",
+                counts.classes_reused,
+                counts.classes_reused + counts.classes_computed,
+                counts.rows_reused,
+                counts.rows_reused + counts.rows_computed,
+                differences,
+                num_lines,
+                incremental_seconds,
+                full_seconds);
+  if (differences > 0) {
+    logger_->error(DRT,
+                   9441,
+                   "Incremental pin access differs from a pin access from "
+                   "scratch.");
+  }
 }
 
 void TritonRoute::pinAccess(const std::vector<odb::dbInst*>& target_insts)
