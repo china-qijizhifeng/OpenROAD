@@ -370,7 +370,8 @@ proc repair_antennas { args } {
       }
     }
 
-    return [grt::repair_antennas $diode_mterm $iterations $ratio_margin $jumper_only $diode_only $local_jumpers]
+    return [grt::repair_antennas $diode_mterm $iterations $ratio_margin \
+      $jumper_only $diode_only $local_jumpers]
   } else {
     utl::error GRT 45 "Run global_route before repair_antennas."
   }

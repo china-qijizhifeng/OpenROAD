@@ -157,8 +157,8 @@ cc_library(
         "src/cugr/src",
     ],
     deps = [
-        ":bonnroute_extra_space",
         ":abstract-cugr",
+        ":bonnroute_extra_space",
         ":groute",
         "//src/dbSta",
         "//src/dbSta:dbNetwork",
