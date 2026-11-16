@@ -1545,8 +1545,8 @@ RepairAntennas::LocalAntennaCheck RepairAntennas::checkLocalAntenna(
 {
   utl::Timer timer;
   const std::vector<odb::dbNet*> nets{db_net};
-  arc_->makeNetWiresFromGuides(nets);
   try {
+    arc_->makeNetWiresFromGuides(nets);
     LocalAntennaCheck result{
         arc_->checkNet(db_net, ratio_margin),
         arc_->getAntennaViolations(db_net, diode_mterm, ratio_margin)};
