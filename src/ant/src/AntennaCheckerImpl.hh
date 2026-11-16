@@ -3,6 +3,8 @@
 
 #pragma once
 
+#include <atomic>
+#include <cstdint>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -96,9 +98,14 @@ class AntennaChecker::Impl
   void setReportFileName(const char* file_name);
   void makeNetWiresFromGuides(const std::vector<odb::dbNet*>& nets);
 
+  // Number of nets whose geometry (node areas and ratios) was computed rather
+  // than taken from the cache.
+  int64_t netGeometryAnalysisCount() const;
+
  private:
-  // Everything the analysis of a routed net reads from the design.  A net
-  // whose wire and connected pins are unchanged reuses its last result.
+  // Everything the geometry of a routed net reads from the design.  A net
+  // whose wire and connected pins are unchanged reuses its node areas and
+  // ratios, whatever diode and ratio margin the check uses.
   struct AnalyzedPin
   {
     odb::dbITerm* iterm{nullptr};
@@ -107,28 +114,35 @@ class AntennaChecker::Impl
     std::string inst_name;
     bool operator==(const AnalyzedPin&) const = default;
   };
-  struct NetAnalysisInput
+  struct NetGeometryInput
   {
     bool global_wire{false};
     std::vector<int> wire_data;
     std::vector<unsigned char> wire_opcodes;
     std::vector<AnalyzedPin> pins;
-    odb::dbMTerm* diode_mterm{nullptr};
-    float ratio_margin{0.0};
-    bool operator==(const NetAnalysisInput&) const = default;
+    bool operator==(const NetGeometryInput&) const = default;
   };
+  // The result of checking a net's geometry with one diode and ratio margin.
   struct NetAnalysis
   {
-    NetAnalysisInput input;
+    odb::dbMTerm* diode_mterm{nullptr};
+    float ratio_margin{0.0};
     int pin_violations{0};
     Violations violations;
     NetCheck net_check;
   };
+  // A net's geometry, as calculateCAR leaves it, and the checks made on it.
+  struct NetGeometry
+  {
+    bool computed{false};
+    NetGeometryInput input;
+    GateToLayerToNodeInfo gate_info;
+    std::vector<NetAnalysis> analyses;
+  };
 
-  static NetAnalysisInput makeNetAnalysisInput(odb::dbNet* net,
-                                               odb::dbWire* wire,
-                                               odb::dbMTerm* diode_mterm,
-                                               float ratio_margin);
+  static NetGeometryInput makeNetGeometryInput(odb::dbNet* net,
+                                               odb::dbWire* wire);
+  void computeGateInfo(odb::dbNet* net, GateToLayerToNodeInfo& gate_info);
   int analyzeNetWire(odb::dbNet* net,
                      odb::dbMTerm* diode_mterm,
                      float ratio_margin,
@@ -192,11 +206,12 @@ class AntennaChecker::Impl
   int pin_violation_count_{0};
   std::string violation_signature_;
   std::string report_file_name_;
-  // Last analyses per net, at most one per (diode, ratio margin).  Nets are
-  // analyzed in parallel, so the map is guarded; each entry is only read or
-  // written by the thread analyzing its net.
-  std::mutex net_analyses_mutex_;
-  std::unordered_map<odb::dbNet*, std::vector<NetAnalysis>> net_analyses_;
+  // Last geometry per net, with at most one check per (diode, ratio margin).
+  // Nets are analyzed in parallel, so the map is guarded; each entry is only
+  // read or written by the thread analyzing its net.
+  std::mutex net_geometries_mutex_;
+  std::unordered_map<odb::dbNet*, NetGeometry> net_geometries_;
+  std::atomic<int64_t> net_geometry_analysis_count_{0};
   // consts
   static constexpr int kMaxDiodeCountPerGate = 10;
 };

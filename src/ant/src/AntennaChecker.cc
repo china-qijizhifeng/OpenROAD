@@ -137,6 +137,11 @@ Violations AntennaChecker::getAntennaViolations(odb::dbNet* net,
   return impl_->getAntennaViolations(net, diode_mterm, ratio_margin);
 }
 
+int64_t AntennaChecker::netGeometryAnalysisCount() const
+{
+  return impl_->netGeometryAnalysisCount();
+}
+
 void AntennaChecker::setReportFileName(const char* file_name)
 {
   impl_->setReportFileName(file_name);
@@ -1004,13 +1009,10 @@ void AntennaChecker::Impl::buildLayerMaps(odb::dbNet* db_net,
   saveGates(db_net, node_by_layer_map, node_count);
 }
 
-AntennaChecker::Impl::NetAnalysisInput
-AntennaChecker::Impl::makeNetAnalysisInput(odb::dbNet* net,
-                                           odb::dbWire* wire,
-                                           odb::dbMTerm* diode_mterm,
-                                           const float ratio_margin)
+AntennaChecker::Impl::NetGeometryInput
+AntennaChecker::Impl::makeNetGeometryInput(odb::dbNet* net, odb::dbWire* wire)
 {
-  NetAnalysisInput input;
+  NetGeometryInput input;
   input.global_wire = wire->isGlobalWire();
   const int wire_length = wire->length();
   input.wire_data.reserve(wire_length);
@@ -1026,8 +1028,6 @@ AntennaChecker::Impl::makeNetAnalysisInput(odb::dbNet* net,
                           .transform = inst->getTransform(),
                           .inst_name = inst->getName()});
   }
-  input.diode_mterm = diode_mterm;
-  input.ratio_margin = ratio_margin;
   return input;
 }
 
@@ -1047,15 +1047,22 @@ int AntennaChecker::Impl::analyzeNet(odb::dbNet* db_net,
     return analyzeNetWire(
         db_net, diode_mterm, ratio_margin, antenna_violations, net_check);
   }
-  NetAnalysisInput input
-      = makeNetAnalysisInput(db_net, wire, diode_mterm, ratio_margin);
-  std::vector<NetAnalysis>* analyses;
+  NetGeometryInput input = makeNetGeometryInput(db_net, wire);
+  NetGeometry* geometry;
   {
-    std::lock_guard<std::mutex> lock(net_analyses_mutex_);
-    analyses = &net_analyses_[db_net];
+    std::lock_guard<std::mutex> lock(net_geometries_mutex_);
+    geometry = &net_geometries_[db_net];
   }
-  for (const NetAnalysis& analysis : *analyses) {
-    if (analysis.input == input) {
+  if (!geometry->computed || geometry->input != input) {
+    geometry->gate_info.clear();
+    geometry->analyses.clear();
+    computeGateInfo(db_net, geometry->gate_info);
+    geometry->input = std::move(input);
+    geometry->computed = true;
+  }
+  for (const NetAnalysis& analysis : geometry->analyses) {
+    if (analysis.diode_mterm == diode_mterm
+        && analysis.ratio_margin == ratio_margin) {
       antenna_violations.insert(antenna_violations.end(),
                                 analysis.violations.begin(),
                                 analysis.violations.end());
@@ -1064,25 +1071,40 @@ int AntennaChecker::Impl::analyzeNet(odb::dbNet* db_net,
     }
   }
 
+  // checkGates records excess ratios in the node infos it is given, so it
+  // works on a copy and the cached geometry stays as calculateCAR left it.
+  GateToLayerToNodeInfo gate_info = geometry->gate_info;
   NetAnalysis analysis;
+  analysis.diode_mterm = diode_mterm;
+  analysis.ratio_margin = ratio_margin;
   analysis.net_check = net_check;
-  analysis.pin_violations = analyzeNetWire(db_net,
-                                           diode_mterm,
-                                           ratio_margin,
-                                           analysis.violations,
-                                           analysis.net_check);
+  analysis.pin_violations = checkGates(db_net,
+                                       diode_mterm,
+                                       ratio_margin,
+                                       gate_info,
+                                       analysis.violations,
+                                       analysis.net_check);
   antenna_violations.insert(antenna_violations.end(),
                             analysis.violations.begin(),
                             analysis.violations.end());
   net_check = analysis.net_check;
   const int pin_violations = analysis.pin_violations;
-  std::erase_if(*analyses, [&input](const NetAnalysis& previous) {
-    return previous.input.diode_mterm == input.diode_mterm
-           && previous.input.ratio_margin == input.ratio_margin;
-  });
-  analysis.input = std::move(input);
-  analyses->push_back(std::move(analysis));
+  geometry->analyses.push_back(std::move(analysis));
   return pin_violations;
+}
+
+void AntennaChecker::Impl::computeGateInfo(odb::dbNet* db_net,
+                                           GateToLayerToNodeInfo& gate_info)
+{
+  LayerToGraphNodes node_by_layer_map;
+  PinAntennas pins;
+  buildLayerMaps(db_net, node_by_layer_map);
+
+  calculateAreas(node_by_layer_map, pins, gate_info);
+
+  calculatePAR(gate_info);
+  calculateCAR(pins, gate_info);
+  net_geometry_analysis_count_.fetch_add(1, std::memory_order_relaxed);
 }
 
 int AntennaChecker::Impl::analyzeNetWire(odb::dbNet* db_net,
@@ -1091,15 +1113,8 @@ int AntennaChecker::Impl::analyzeNetWire(odb::dbNet* db_net,
                                          Violations& antenna_violations,
                                          NetCheck& net_check)
 {
-  LayerToGraphNodes node_by_layer_map;
   GateToLayerToNodeInfo gate_info;
-  PinAntennas pins;
-  buildLayerMaps(db_net, node_by_layer_map);
-
-  calculateAreas(node_by_layer_map, pins, gate_info);
-
-  calculatePAR(gate_info);
-  calculateCAR(pins, gate_info);
+  computeGateInfo(db_net, gate_info);
 
   return checkGates(db_net,
                     diode_mterm,
@@ -1107,6 +1122,11 @@ int AntennaChecker::Impl::analyzeNetWire(odb::dbNet* db_net,
                     gate_info,
                     antenna_violations,
                     net_check);
+}
+
+int64_t AntennaChecker::Impl::netGeometryAnalysisCount() const
+{
+  return net_geometry_analysis_count_.load(std::memory_order_relaxed);
 }
 
 Violations AntennaChecker::Impl::getAntennaViolations(odb::dbNet* net,
