@@ -116,6 +116,15 @@ static gpl::PlaceOptions getOptions(
   return options;
 }
 
+// global_placement -use_smt_threads; read apart from PlaceOptions because the
+// thread count is passed to Replace separately.
+static bool useSmtThreads(const std::map<std::string, std::string>& flags)
+{
+  bool use_smt_threads = false;
+  utl::checkFlag(flags, "-use_smt_threads", use_smt_threads);
+  return use_smt_threads;
+}
+
 using ord::getOpenRoad;
 using ord::getReplace;
 using gpl::Replace;
@@ -151,10 +160,17 @@ replace_reset_cmd()
 // count came out slower than the core count on every design measured
 // (coralnpu 39 s vs 31 s, bp_quad 334 s vs 293 s), at 2.5x the CPU time.
 // A -threads value at or below the core count is honored as given.
-static int placementThreads()
+// global_placement -use_smt_threads skips the cap and runs every requested
+// thread, for machines where the siblings do help (on a 4-core / 8-thread
+// machine, 8 threads placed swerv_wrapper 7.8% faster with identical
+// results). The placement is identical at any thread count.
+static int placementThreads(bool use_smt_threads)
 {
   auto* openroad = ord::OpenRoad::openRoad();
   const int threads = openroad->getThreadCount();
+  if (use_smt_threads) {
+    return threads;
+  }
   const int cores = utl::physicalCoreCount();
   if (threads <= cores) {
     return threads;
@@ -179,7 +195,7 @@ replace_initial_place_cmd(const std::map<std::string, std::string>& keys,
   gpl::PlaceOptions options = getOptions(keys, flags);
 
   Replace* replace = getReplace();
-  int threads = placementThreads();
+  int threads = placementThreads(useSmtThreads(flags));
   replace->doInitialPlace(threads, options);
 }
 
@@ -189,7 +205,7 @@ replace_nesterov_place_cmd(const std::map<std::string, std::string>& keys,
 {
   gpl::PlaceOptions options = getOptions(keys, flags);
   Replace* replace = getReplace();
-  int threads = placementThreads();
+  int threads = placementThreads(useSmtThreads(flags));
   replace->doNesterovPlace(threads, options);
 }
 
@@ -199,7 +215,7 @@ replace_run_mbff_cmd(int max_sz, float alpha, float beta, int num_paths,
                      float clock_power_weight)
 {
   Replace* replace = getReplace();
-  int threads = placementThreads();
+  int threads = placementThreads(false);
   replace->runMBFF(max_sz, alpha, beta, threads, num_paths, clock_power_weight);
 }
 
@@ -210,7 +226,7 @@ replace_incremental_place_cmd(const std::map<std::string, std::string>& keys,
 {
   gpl::PlaceOptions options = getOptions(keys, flags);
   Replace* replace = getReplace();
-  int threads = placementThreads();
+  int threads = placementThreads(useSmtThreads(flags));
   replace->doIncrementalPlace(threads, options);
 }
 
@@ -222,7 +238,7 @@ get_global_placement_uniform_density_cmd(
 {
   gpl::PlaceOptions options = getOptions(keys, flags);
   Replace* replace = getReplace();
-  int threads = placementThreads();
+  int threads = placementThreads(false);
   return replace->getUniformTargetDensity(options, threads);
 }
 

@@ -16,6 +16,7 @@ global_placement
     [-verbose_level verbose_level]
     [-random_seed random_seed]
     [-perturb_dist perturb_dist]
+    [-use_smt_threads]
 ```
 
 ## Flow Control
@@ -39,6 +40,7 @@ raising density or restarting routability.
 * __verbose_level__ [0-10, int] : Set verbose level for RePlAce. Default: 1
 * __random_seed__ [int] : Set random seed for placement perturbation. Perturbation shifts standard cells by random offsets drawn from a 2D circular Gaussian distribution at the start of global placement. Default is 1.
 * __perturb_dist__ [float] : Set the perturbation distance (radius) in nanometers. Under a 2D circular Gaussian distribution, 99.5% of the cell perturbations will fall within this radius. If not provided (or <= 0), it defaults to 0.5 microns or one standard cell height (row height), whichever is smaller.
+* __use_smt_threads__ : Use every thread set by `set_thread_count`, including SMT siblings. Default: off, at most one thread per physical core.
 
 Note that all of the TCL commands are defined in the
 [../src/replace.tcl](https://github.com/The-OpenROAD-Project/OpenROAD/blob/master/src/gpl/src/replace.tcl)
