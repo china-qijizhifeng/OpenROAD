@@ -303,13 +303,14 @@ sta::define_cmd_args "repair_antennas" { diode_cell \
                                          [-ratio_margin ratio_margin] \
                                          [-jumper_only] \
                                          [-diode_only] \
+                                         [-local_jumpers] \
                                          [-allow_congestion] \
                                          [-keep_detailed_wires]}
 
 proc repair_antennas { args } {
   sta::parse_key_args "repair_antennas" args \
     keys {-iterations -ratio_margin} \
-    flags {-jumper_only -diode_only -allow_congestion -keep_detailed_wires}
+    flags {-jumper_only -diode_only -local_jumpers -allow_congestion -keep_detailed_wires}
   if { [ord::get_db_block] == "NULL" } {
     utl::error GRT 104 "No design block found."
   }
@@ -354,6 +355,7 @@ proc repair_antennas { args } {
 
     set jumper_only [info exists flags(-jumper_only)]
     set diode_only [info exists flags(-diode_only)]
+    set local_jumpers [info exists flags(-local_jumpers)]
     grt::set_keep_detailed_wires [info exists flags(-keep_detailed_wires)]
 
     if { $jumper_only && $diode_only } {
@@ -368,7 +370,7 @@ proc repair_antennas { args } {
       }
     }
 
-    return [grt::repair_antennas $diode_mterm $iterations $ratio_margin $jumper_only $diode_only]
+    return [grt::repair_antennas $diode_mterm $iterations $ratio_margin $jumper_only $diode_only $local_jumpers]
   } else {
     utl::error GRT 45 "Run global_route before repair_antennas."
   }

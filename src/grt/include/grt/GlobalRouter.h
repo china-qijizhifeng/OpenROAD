@@ -262,7 +262,8 @@ class GlobalRouter
                      float ratio_margin,
                      bool jumper_only,
                      bool diode_only,
-                     int num_threads = 1);
+                     int num_threads = 1,
+                     bool local_jumpers = false);
   void updateResources(const int& init_x,
                        const int& init_y,
                        const int& final_x,

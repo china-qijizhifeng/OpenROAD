@@ -180,7 +180,6 @@ cc_library(
         "src/Net.cpp",
         "src/Pin.cpp",
         "src/RepairAntennas.cpp",
-        "src/RepairAntennas.h",
         "src/RoutingCongestion.cpp",
         "src/RoutingTracks.h",
         "src/Rudy.cpp",
@@ -192,8 +191,10 @@ cc_library(
         "include/grt/Rudy.h",
         "src/AbstractGrouteRenderer.h",
         "src/AbstractRoutingCongestionDataSource.h",
+        "src/LocalAntennaRepair.h",
         "src/Net.h",
         "src/Pin.h",
+        "src/RepairAntennas.h",
     ],
     copts = [
         "-fopenmp",

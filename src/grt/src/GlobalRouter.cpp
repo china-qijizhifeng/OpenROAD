@@ -120,9 +120,8 @@ GlobalRouter::GlobalRouter(utl::Logger* logger,
 void GlobalRouter::setNumThreads(int num_threads)
 {
   requested_threads_ = std::max(1, num_threads);
-  num_threads_ = thread_limit_ > 0
-                     ? std::min(requested_threads_, thread_limit_)
-                     : requested_threads_;
+  num_threads_ = thread_limit_ > 0 ? std::min(requested_threads_, thread_limit_)
+                                   : requested_threads_;
   fastroute_->setNumThreads(num_threads_);
   cugr_->setNumThreads(num_threads_);
 }
@@ -857,11 +856,16 @@ int GlobalRouter::repairAntennas(odb::dbMTerm* diode_mterm,
                                  float ratio_margin,
                                  bool jumper_only,
                                  bool diode_only,
-                                 const int num_threads)
+                                 const int num_threads,
+                                 const bool local_jumpers)
 {
   if (jumper_only && diode_only) {
     logger_->error(
         GRT, 1254, "jumper_only and diode_only are mutually exclusive.");
+  }
+  if (local_jumpers && diode_only) {
+    logger_->error(
+        GRT, 1255, "local_jumpers and diode_only are mutually exclusive.");
   }
   ensureEngineSelected();
   if (!initialized_ || haveDetailedRoutes()) {
@@ -968,6 +972,33 @@ int GlobalRouter::repairAntennas(odb::dbMTerm* diode_mterm,
                                                      ratio_margin,
                                                      num_threads);
       repair_antennas_->logViolations("after_jumpers", itr + 1);
+      updateDbCongestion();
+    }
+    if (local_jumpers && violations && !haveDetailedRoutes(nets_to_repair)) {
+      repair_antennas_->localJumperInsertion(routes_,
+                                             grid_->getTileSize(),
+                                             getMaxRoutingLayer(),
+                                             diode_mterm,
+                                             ratio_margin);
+      violations = repair_antennas_->hasViolations();
+      // A rejected CUGR adoption may require an engine restore. Recheck all
+      // moved nets if that restore falls back to incremental routing.
+      if (use_cugr_ && !dirty_nets_.empty()) {
+        std::vector<odb::dbNet*> moved;
+        for (Net* net : updateDirtyRoutes(/*save_guides=*/true)) {
+          moved.push_back(net->getDbNet());
+        }
+        add_moved_nets(moved);
+        reportIncrementalCongestion();
+        violations
+            = repair_antennas_->checkAntennaViolations(routes_,
+                                                       nets_to_repair,
+                                                       getMaxRoutingLayer(),
+                                                       diode_mterm,
+                                                       ratio_margin,
+                                                       num_threads);
+      }
+      repair_antennas_->logViolations("after_local", itr + 1);
       updateDbCongestion();
     }
     if (violations && !jumper_only) {

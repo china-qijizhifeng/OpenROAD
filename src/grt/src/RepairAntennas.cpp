@@ -12,6 +12,7 @@
 #include <utility>
 #include <vector>
 
+#include "LocalAntennaRepair.h"
 #include "Net.h"
 #include "Pin.h"
 #include "ant/AntennaChecker.hh"
@@ -25,6 +26,7 @@
 #include "odb/geom.h"
 #include "omp.h"
 #include "utl/Logger.h"
+#include "utl/Timer.h"
 
 namespace grt {
 
@@ -605,7 +607,8 @@ bool RepairAntennas::addJumperToRoute(GRoute& route,
                                       const int jumper_init_pos,
                                       const int jumper_final_pos,
                                       const int layer_level,
-                                      odb::dbNet* db_net)
+                                      odb::dbNet* db_net,
+                                      const bool commit_resources)
 {
   const int route_size_before = route.size();
   const int seg_init_x = route[seg_id].init_x;
@@ -675,6 +678,11 @@ bool RepairAntennas::addJumperToRoute(GRoute& route,
   // old segment is reduced (after jumper)
   route[seg_id].init_x = jumper_final_x;
   route[seg_id].init_y = jumper_final_y;
+  // Local antenna trials validate the complete net before touching either
+  // routing engine's demand or route tree.
+  if (!commit_resources) {
+    return true;
+  }
   // Notify the router only now, after the split, so it sees a route whose
   // lower-layer segments no longer span the jumper window.
   if (!grouter_->updateJumperedRoute(jumper_init_x,
@@ -1120,7 +1128,8 @@ void RepairAntennas::findSegments(const GRoute& route,
                                   const int& violation_layer,
                                   SegmentToJumperPos& segments_to_repair,
                                   odb::dbNet* db_net,
-                                  const int candidate_layers_below)
+                                  const int candidate_layers_below,
+                                  const bool lower_layer_only)
 {
   // Debug group "jumper_rejections": counts of this search.
   int start_nodes = 0;
@@ -1163,12 +1172,11 @@ void RepairAntennas::findSegments(const GRoute& route,
     visited_nodes++;
 
     int layer_level = cur_layer->getRoutingLevel();
-    // The diagnostic search (candidate_layers_below > 0, nothing is inserted
-    // from it) also takes wire segments below the violation layer, and only
-    // segments whose jumper layer is a routing layer in use.
+    // The extended search also takes wire segments below the violation
+    // layer, provided their jumper layer is in use.
     const bool is_candidate
         = cur_node.seg_id != -1
-          && (layer_level == violation_layer
+          && ((layer_level == violation_layer && !lower_layer_only)
               || (layer_level != 0 && layer_level < violation_layer
                   && layer_level >= violation_layer - candidate_layers_below))
           && (candidate_layers_below == 0
@@ -1528,6 +1536,244 @@ void RepairAntennas::jumperInsertion(NetRouteMap& routing,
                 "Inserted {} jumpers for {} nets.",
                 total_jumpers,
                 net_with_jumpers);
+}
+
+RepairAntennas::LocalAntennaCheck RepairAntennas::checkLocalAntenna(
+    odb::dbNet* db_net,
+    odb::dbMTerm* diode_mterm,
+    const float ratio_margin)
+{
+  utl::Timer timer;
+  const std::vector<odb::dbNet*> nets{db_net};
+  arc_->makeNetWiresFromGuides(nets);
+  try {
+    LocalAntennaCheck result{
+        arc_->checkNet(db_net, ratio_margin),
+        arc_->getAntennaViolations(db_net, diode_mterm, ratio_margin)};
+    destroyNetWires(nets);
+    local_check_seconds_ += timer.elapsed();
+    return result;
+  } catch (...) {
+    destroyNetWires(nets);
+    throw;
+  }
+}
+
+SegmentToJumperPos RepairAntennas::findLocalJumperCandidates(
+    const GRoute& route,
+    odb::dbNet* db_net,
+    const ant::Violations& violations)
+{
+  SegmentToJumperPos candidates;
+  int max_layer = 0;
+  for (const auto& violation : violations) {
+    max_layer = std::max(max_layer, violation.routing_level);
+  }
+  LayerToSegmentNodeVector graph;
+  const int nodes = buildSegmentGraph(route, max_layer, graph);
+  for (const auto& violation : violations) {
+    // A cut-layer violation has no lower routing layer to jump on.
+    if (violation.routing_level <= 1) {
+      continue;
+    }
+    for (odb::dbITerm* gate : violation.gates) {
+      SegmentNodeIds connected;
+      getSegmentsConnectedToPin(gate, graph, connected);
+      findSegments(route,
+                   gate,
+                   connected,
+                   graph,
+                   nodes,
+                   violation.routing_level,
+                   candidates,
+                   db_net,
+                   /*candidate_layers_below=*/1,
+                   /*lower_layer_only=*/true);
+    }
+  }
+  return candidates;
+}
+
+RepairAntennas::LocalJumperResult RepairAntennas::tryLocalJumper(
+    GRoute& route,
+    const int seg_id,
+    const int position,
+    odb::dbNet* db_net,
+    odb::dbMTerm* diode_mterm,
+    const float ratio_margin,
+    LocalAntennaCheck& current)
+{
+  const GSegment segment = route[seg_id];
+  const bool horizontal = segment.init_x != segment.final_x;
+  const int lo = horizontal ? segment.init_x : segment.init_y;
+  const int hi = horizontal ? segment.final_x : segment.final_y;
+  // Earlier accepted trials may have shortened this candidate's segment.
+  if (position < lo + tile_size_ || position + jumper_size_ > hi - tile_size_) {
+    return LocalJumperResult::Geometry;
+  }
+  // Recheck wire headroom after earlier accepted trials on the same net.
+  for (int pos = position; pos < position + jumper_size_; pos += tile_size_) {
+    if (!grouter_->hasAvailableResources(horizontal,
+                                         horizontal ? pos : segment.init_x,
+                                         horizontal ? segment.init_y : pos,
+                                         segment.init_layer + 2,
+                                         db_net)) {
+      return LocalJumperResult::Capacity;
+    }
+  }
+  GRoute original = route;
+  if (!addJumperToRoute(route,
+                        seg_id,
+                        position,
+                        position + jumper_size_,
+                        segment.init_layer,
+                        db_net,
+                        /*commit_resources=*/false)) {
+    return LocalJumperResult::Capacity;
+  }
+  const auto restore = [&]() {
+    route = original;
+    grouter_->saveGuides({db_net});
+  };
+  std::string uncovered;
+  if (!grouter_->isConnected(db_net)
+      || !grouter_->netIsCovered(db_net, uncovered)) {
+    restore();
+    return LocalJumperResult::Connectivity;
+  }
+  LocalAntennaCheck trial;
+  try {
+    grouter_->saveGuides({db_net});
+    trial = checkLocalAntenna(db_net, diode_mterm, ratio_margin);
+  } catch (...) {
+    restore();
+    throw;
+  }
+  if (!localAntennaImproves(current.check,
+                            trial.check,
+                            antennaDiodeDemand(current.violations),
+                            antennaDiodeDemand(trial.violations))) {
+    restore();
+    return LocalJumperResult::Antenna;
+  }
+  const int x0 = horizontal ? position : segment.init_x;
+  const int y0 = horizontal ? segment.init_y : position;
+  const int x1 = horizontal ? position + jumper_size_ : segment.init_x;
+  const int y1 = horizontal ? segment.init_y : position + jumper_size_;
+  if (!grouter_->updateJumperedRoute(
+          x0, y0, x1, y1, segment.init_layer, segment.init_layer + 2, db_net)) {
+    restore();
+    grouter_->restoreNetDemand(db_net);
+    return LocalJumperResult::Adoption;
+  }
+  db_net->setJumpers(true);
+  current = std::move(trial);
+  return LocalJumperResult::Accepted;
+}
+
+std::pair<int, int> RepairAntennas::tryLocalJumperCandidates(
+    const SegmentToJumperPos& candidates,
+    GRoute& route,
+    odb::dbNet* db_net,
+    odb::dbMTerm* diode_mterm,
+    const float ratio_margin,
+    LocalAntennaCheck& current)
+{
+  constexpr int kMaxTrialsPerNet = 4;
+  int trials = 0;
+  int accepted = 0;
+  for (const auto& [segment, positions] : candidates) {
+    for (const int position : positions) {
+      if (trials >= kMaxTrialsPerNet || current.violations.empty()) {
+        return {trials, accepted};
+      }
+      trials++;
+      const auto result = tryLocalJumper(
+          route, segment, position, db_net, diode_mterm, ratio_margin, current);
+      accepted += result == LocalJumperResult::Accepted;
+      debugPrint(logger_,
+                 GRT,
+                 "local_jumpers",
+                 1,
+                 "Local jumper net={} segment={} position={} outcome={}",
+                 db_net->getConstName(),
+                 segment,
+                 position,
+                 static_cast<int>(result));
+    }
+  }
+  return {trials, accepted};
+}
+
+void RepairAntennas::localJumperInsertion(NetRouteMap& routing,
+                                          const int tile_size,
+                                          const int max_routing_layer,
+                                          odb::dbMTerm* diode_mterm,
+                                          const float ratio_margin)
+{
+  utl::Timer timer;
+  tile_size_ = tile_size;
+  jumper_size_ = 2 * tile_size;
+  smaller_seg_size_ = 5 * tile_size;
+  max_routing_layer_ = max_routing_layer;
+  search_phase_ = "local_lower";
+  local_check_seconds_ = 0.0;
+  int attempts = 0;
+  int accepted = 0;
+  int candidate_nets = 0;
+  int demand_saved = 0;
+  double search_seconds = 0.0;
+  for (auto it = antenna_violations_.begin();
+       it != antenna_violations_.end();) {
+    auto& [db_net, violations] = *it;
+    auto route_it = routing.find(db_net);
+    if (route_it == routing.end() || route_it->second.empty()) {
+      ++it;
+      continue;
+    }
+    GRoute& route = route_it->second;
+    utl::Timer search_timer;
+    const auto candidates
+        = findLocalJumperCandidates(route, db_net, violations);
+    search_seconds += search_timer.elapsed();
+    if (candidates.empty()) {
+      ++it;
+      continue;
+    }
+    candidate_nets++;
+    LocalAntennaCheck current
+        = checkLocalAntenna(db_net, diode_mterm, ratio_margin);
+    const int demand_before = antennaDiodeDemand(current.violations);
+    const auto [trials, inserted] = tryLocalJumperCandidates(
+        candidates, route, db_net, diode_mterm, ratio_margin, current);
+    attempts += trials;
+    accepted += inserted;
+    demand_saved += demand_before - antennaDiodeDemand(current.violations);
+    violations = std::move(current.violations);
+    if (violations.empty()) {
+      it = antenna_violations_.erase(it);
+    } else {
+      ++it;
+    }
+  }
+  search_phase_ = "search";
+  const double seconds = timer.elapsed();
+  logger_->report(
+      "Local antenna repair: candidate_nets={} trials={} accepted={} "
+      "diode_demand_saved={} search={:.6f}s check={:.6f}s "
+      "apply_restore={:.6f}s total={:.6f}s.",
+      candidate_nets,
+      attempts,
+      accepted,
+      demand_saved,
+      search_seconds,
+      local_check_seconds_,
+      seconds - search_seconds - local_check_seconds_,
+      seconds);
+  logger_->metric("antenna_local_trials", attempts);
+  logger_->metric("antenna_local_jumpers", accepted);
+  logger_->metric("antenna_local_diode_demand_saved", demand_saved);
+  logger_->metric("antenna_local_seconds", seconds);
 }
 
 }  // namespace grt

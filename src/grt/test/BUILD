@@ -197,6 +197,13 @@ filegroup(
 ) for test_name in TESTS]
 
 regression_test(
+    name = "repair_antennas_local_binding",
+    check_log = False,
+    check_passfail = True,
+    data = [":test_resources"],
+)
+
+regression_test(
     name = "snapshot_batched_bus_route",
     check_log = False,
     check_passfail = True,
@@ -353,6 +360,33 @@ cc_test(
         "//src/odb/src/db",
         "//src/stt",
         "//src/tst:db_fixture",
+        "//src/utl",
+        "@googletest//:gtest",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
+    name = "TestLocalAntennaRepair",
+    size = "small",
+    srcs = ["cpp/TestLocalAntennaRepair.cpp"],
+    data = [
+        "remove_buffers1.def",
+        "//test:nangate45_data",
+    ],
+    deps = [
+        "//src/ant",
+        "//src/dbSta",
+        "//src/dpl",
+        "//src/grt",
+        "//src/grt:grt_impl",
+        "//src/grt:groute",
+        "//src/odb/src/db",
+        "//src/odb/src/defin",
+        "//src/stt",
+        "//src/tst",
+        "//src/tst:db_fixture",
+        "//src/tst:physical_builder",
         "//src/utl",
         "@googletest//:gtest",
         "@googletest//:gtest_main",
