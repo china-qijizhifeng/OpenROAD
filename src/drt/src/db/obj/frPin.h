@@ -51,6 +51,11 @@ class frPin : public frBlockObject
     in->setPin(this);
     aps_[idx] = std::move(in);
   }
+  // Takes the pin access at idx out of the pin, leaving the slot empty.
+  std::unique_ptr<frPinAccess> releasePinAccess(int idx)
+  {
+    return std::move(aps_[idx]);
+  }
   void clearPinAccess() { aps_.clear(); }
 
  protected:

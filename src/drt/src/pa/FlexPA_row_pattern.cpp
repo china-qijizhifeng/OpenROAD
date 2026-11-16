@@ -209,11 +209,21 @@ void FlexPA::prepPatternInstRows(std::vector<std::vector<frInst*>> inst_rows)
     }
   } else {
     omp_set_num_threads(router_cfg_->MAX_THREADS);
+    std::vector<RowResult> results(inst_rows.size());
+    std::vector<char> reused(inst_rows.size(), 0);
     // choose access pattern of a row of insts
 #pragma omp parallel for schedule(dynamic)
-    for (auto& inst_row : inst_rows) {  // NOLINT
+    for (int row_index = 0; row_index < (int) inst_rows.size(); row_index++) {
+      auto& inst_row = inst_rows[row_index];
       try {
-        genInstRowPattern(inst_row);
+        std::vector<RowInstInputs> inputs = makeRowInputs(inst_row);
+        if (reuseRowPattern(inst_row, inputs)) {
+          reused[row_index] = 1;
+        } else {
+          genInstRowPattern(inst_row);
+        }
+        results[row_index].insts = std::move(inputs);
+        results[row_index].access_points = rowAccessPoints(inst_row);
 #pragma omp critical
         {
           cnt++;
@@ -226,6 +236,19 @@ void FlexPA::prepPatternInstRows(std::vector<std::vector<frInst*>> inst_rows)
       } catch (...) {
         exception.capture();
       }
+    }
+    row_results_.clear();
+    for (size_t row_index = 0; row_index < inst_rows.size(); row_index++) {
+      if (inst_rows[row_index].empty()) {
+        continue;
+      }
+      if (reused[row_index]) {
+        ++reuse_counts_.rows_reused;
+      } else {
+        ++reuse_counts_.rows_computed;
+      }
+      row_results_.emplace(inst_rows[row_index].front(),
+                           std::move(results[row_index]));
     }
   }
   exception.rethrow();
