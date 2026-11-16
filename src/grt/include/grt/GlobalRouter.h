@@ -742,6 +742,7 @@ class GlobalRouter
   friend class IncrementalGRoute;
   friend class GRouteDbCbk;
   friend class RepairAntennas;
+  friend class LocalAntennaRepairTestPeer;
 };
 
 std::string getITermName(odb::dbITerm* iterm);

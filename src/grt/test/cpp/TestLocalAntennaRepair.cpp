@@ -28,6 +28,11 @@ namespace grt {
 class LocalAntennaRepairTestPeer
 {
  public:
+  static void refreshUsage(GlobalRouter& router)
+  {
+    router.updateDbCongestion();
+  }
+
   static bool rejectedByAntenna(RepairAntennas& repair,
                                 GRoute& route,
                                 int segment,
@@ -72,9 +77,12 @@ class LocalAntennaCostTest : public tst::DbFixture
     before_.pins = {{.gate = gate,
                      .layers = {{.layer = layers.metal(2),
                                  .par = {200.0, 100.0, true},
+                                 .car = {},
+                                 .psr = {},
+                                 .csr = {},
                                  .violated = true}},
                      .violated = true},
-                    {.gate = other_gate}};
+                    {.gate = other_gate, .layers = {}, .violated = false}};
     before_.violated = true;
     upper_ = layers.metal(3);
   }
@@ -94,8 +102,12 @@ TEST_F(LocalAntennaCostTest, RequiresStrictDiodeDemandReduction)
 TEST_F(LocalAntennaCostTest, RejectsNewLayerViolation)
 {
   auto after = before_;
-  after.pins[0].layers.push_back(
-      {.layer = upper_, .par = {101.0, 100.0, true}, .violated = true});
+  after.pins[0].layers.push_back({.layer = upper_,
+                                  .par = {101.0, 100.0, true},
+                                  .car = {},
+                                  .psr = {},
+                                  .csr = {},
+                                  .violated = true});
   EXPECT_FALSE(localAntennaImproves(before_, after, 2, 1));
 }
 
@@ -134,7 +146,8 @@ TEST_F(LocalAntennaCostTest, ZeroDiodeCountIsStillARealViolation)
 {
   EXPECT_EQ(antennaDiodeDemand({{.routing_level = 2,
                                  .gates = {before_.pins[0].gate},
-                                 .diode_count_per_gate = 0}}),
+                                 .diode_count_per_gate = 0,
+                                 .excess_ratio = 2.0}}),
             1);
   EXPECT_EQ(antennaDiodeDemand({}), 0);
 }
@@ -186,7 +199,7 @@ class LocalAntennaRollbackTest : public tst::Fixture,
 
   std::vector<float> usage()
   {
-    router_.updateDbCongestion();
+    LocalAntennaRepairTestPeer::refreshUsage(router_);
     int nx, ny;
     router_.getGridSize(nx, ny);
     std::vector<float> result;
