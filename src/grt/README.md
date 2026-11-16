@@ -346,6 +346,13 @@ layer before and after the jumpers, and every edge whose overflow grows when a
 jumpered route is adopted.
 
 If no `diode_cell` argument is specified the LEF cell with class CORE, ANTENNACELL will be used.
+The optional `-local_jumpers` stage tries at most four additional jumpers per
+residual violating net, on gate-connected segments one layer below a violation.
+Each trial must reduce predicted diode demand without introducing or worsening
+any gate/layer antenna ratio violation. Connectivity and pin coverage are checked
+before committing engine resources. Rejected trials restore the route and guides;
+remaining violations use the ordinary diode repair. This stage is off by default
+and only applies before detailed routing.
 If any repairs are made the filler instances are remove and must be
 placed with the `filler_placement` command.
 
@@ -365,6 +372,7 @@ repair_antennas
     [-ratio_margin margin]
     [-jumper_only]
     [-diode_only]
+    [-local_jumpers]
     [-keep_detailed_wires]
 ```
 
@@ -377,6 +385,7 @@ repair_antennas
 | `-ratio_margin` | Add a margin to the antenna ratios. The default value is `0`, and the allowed values are integers `[0, 100]`. |
 | `-jumper_only` | Fix antenna violations using jumper insertion only, without inserting diodes. Mutually exclusive with `-diode_only`. |
 | `-diode_only` | Fix antenna violations using diode insertion only, without inserting jumpers. Mutually exclusive with `-jumper_only`. |
+| `-local_jumpers` | Try bounded, antenna-checked jumpers one routing layer below residual violations before diode fallback. Off by default; mutually exclusive with `-diode_only`. |
 | `-keep_detailed_wires` | On a detailed routing, the nets that receive diodes keep their detailed wires and guides instead of being routed again; the next `detailed_route` connects the diodes. Off by default (the wires are removed and the nets routed again). Used with `detailed_route -bonnroute` incremental routing (`set_bonnroute_dr_param incremental 1`), which keeps legal pin-to-pin paths and routes the diode connections (Ahrens et al., arXiv:2111.06169, Section 5.2). |
 
 

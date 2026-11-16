@@ -122,6 +122,13 @@ class RepairAntennas
   // Debug group "jumper_rejections" (log only): the violations of the last
   // check, one line per net, layer and group of gates.
   void logViolations(const char* phase, int iteration) const;
+  // Bounded lower-layer trials, after ordinary jumpers and before diodes.
+  void localJumperInsertion(NetRouteMap& routing,
+                            int tile_size,
+                            int max_routing_layer,
+                            odb::dbMTerm* diode_mterm,
+                            float ratio_margin);
+  bool hasViolations() const { return !antenna_violations_.empty(); }
 
  private:
   using coord_type = int;
@@ -143,7 +150,43 @@ class RepairAntennas
                         int jumper_init_pos,
                         int jumper_final_pos,
                         int layer_level,
-                        odb::dbNet* db_net);
+                        odb::dbNet* db_net,
+                        bool commit_resources = true);
+  struct LocalAntennaCheck
+  {
+    ant::NetCheck check;
+    ant::Violations violations;
+  };
+  LocalAntennaCheck checkLocalAntenna(odb::dbNet* db_net,
+                                      odb::dbMTerm* diode_mterm,
+                                      float ratio_margin);
+  enum class LocalJumperResult
+  {
+    Geometry,
+    Capacity,
+    Connectivity,
+    Antenna,
+    Adoption,
+    Accepted
+  };
+  LocalJumperResult tryLocalJumper(GRoute& route,
+                                   int seg_id,
+                                   int position,
+                                   odb::dbNet* db_net,
+                                   odb::dbMTerm* diode_mterm,
+                                   float ratio_margin,
+                                   LocalAntennaCheck& current);
+  SegmentToJumperPos findLocalJumperCandidates(
+      const GRoute& route,
+      odb::dbNet* db_net,
+      const ant::Violations& violations);
+  std::pair<int, int> tryLocalJumperCandidates(
+      const SegmentToJumperPos& candidates,
+      GRoute& route,
+      odb::dbNet* db_net,
+      odb::dbMTerm* diode_mterm,
+      float ratio_margin,
+      LocalAntennaCheck& current);
   void findSegments(const GRoute& route,
                     odb::dbITerm* iterm,
                     const SegmentNodeIds& segment_ids,
@@ -152,7 +195,8 @@ class RepairAntennas
                     const int& violation_layer,
                     SegmentToJumperPos& segments_to_repair,
                     odb::dbNet* db_net,
-                    int candidate_layers_below = 0);
+                    int candidate_layers_below = 0,
+                    bool lower_layer_only = false);
   // Debug group "jumper_rejections" (log only): one candidate segment of
   // the search with the scan of its positions.
   void logSegmentSearch(odb::dbNet* db_net,
@@ -278,6 +322,8 @@ class RepairAntennas
   // jumper insertion and the name of the running search.
   int max_routing_layer_ = 0;
   const char* search_phase_ = "search";
+  double local_check_seconds_ = 0.0;
+  friend class LocalAntennaRepairTestPeer;
   //////////////////////////////////////////
 };
 
