@@ -54,6 +54,7 @@ TESTS = [
     "simple08",
     "simple09",
     "simple10",
+    "smt_threads01",
     "region01",
 ]
 

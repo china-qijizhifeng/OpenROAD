@@ -128,7 +128,8 @@ global_placement
     [-virtual_cts]\
     [-virtual_cts_max_skew_fraction virtual_cts_max_skew_fraction]\
     [-random_seed random_seed]\
-    [-perturb_dist perturb_dist]
+    [-perturb_dist perturb_dist]\
+    [-use_smt_threads]
 ```
 
 #### Options
@@ -161,6 +162,7 @@ global_placement
 | `-virtual_cts_max_skew_fraction` | Set max insertion delay as fraction of clock period. Valid range is [0, 1]; out-of-range values are clamped. Default is 0.10 (10%). |
 | `-random_seed` | Set random seed for placement perturbation. Perturbation shifts standard cells by random offsets drawn from a 2D circular Gaussian distribution at the start of global placement to explore layout variations. Default is `1`. |
 | `-perturb_dist` | Set the perturbation distance (radius) in nanometers. Under a 2D circular Gaussian distribution, 99.5% of the cell perturbations will fall within this radius. If not provided (or <= 0), it defaults to 0.5 microns or one standard cell height (row height), whichever is smaller. |
+| `-use_smt_threads` | Flag to run global placement with every thread requested by `set_thread_count` (or `openroad -threads`). By default, placement uses at most one thread per physical core and leaves SMT siblings idle (message GPL-0190), because its memory-bound parallel loops ran slower with SMT siblings on large machines. On small SMT machines the siblings can help: on a 4-core / 8-thread machine, 8 threads placed `swerv_wrapper` about 8% faster. The placement result is identical at any thread count. `cluster_flops`, `estimate_target_density` and `gpl::get_global_placement_uniform_density` (used by the ORFS placement density estimate) keep the cap, so GPL-0190 can still be reported once in a run that sets this flag. The default value is False. |
 
 #### Initial-Placement Arguments
 
